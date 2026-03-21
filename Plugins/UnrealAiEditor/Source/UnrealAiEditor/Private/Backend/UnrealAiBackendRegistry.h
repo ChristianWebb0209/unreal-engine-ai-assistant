@@ -1,0 +1,49 @@
+#pragma once
+
+#include "CoreMinimal.h"
+
+class IUnrealAiPersistence;
+class IUnrealAiChatService;
+class IUnrealAiModelConnector;
+class IAgentContextService;
+class IToolExecutionHost;
+class IUnrealAiAgentHarness;
+class FUnrealAiAgentHarness;
+class FUnrealAiModelProfileRegistry;
+class FUnrealAiToolCatalog;
+
+class FUnrealAiBackendRegistry : public TSharedFromThis<FUnrealAiBackendRegistry>
+{
+public:
+	FUnrealAiBackendRegistry();
+	virtual ~FUnrealAiBackendRegistry();
+
+	IUnrealAiPersistence* GetPersistence() const { return Persistence.Get(); }
+	IUnrealAiChatService* GetChatService() const { return ChatService.Get(); }
+	IUnrealAiModelConnector* GetModelConnector() const { return ModelConnector.Get(); }
+	IAgentContextService* GetContextService() const { return ContextService.Get(); }
+	IToolExecutionHost* GetToolExecutionHost() const { return ToolExecutionHost.Get(); }
+	IUnrealAiAgentHarness* GetAgentHarness() const { return AgentHarness.Get(); }
+	FUnrealAiModelProfileRegistry* GetModelProfileRegistry() const { return ModelProfiles.Get(); }
+	FUnrealAiToolCatalog* GetToolCatalog() const { return ToolCatalog.Get(); }
+
+	/** Reload `plugin_settings.json` from disk, refresh stub vs HTTP transport, recreate agent harness. Call after API keys / providers change. */
+	void ReloadLlmConfiguration();
+
+private:
+	void RefreshActiveLlmTransport();
+	void RefreshModelConnector();
+	void RebuildAgentHarness();
+	TUniquePtr<IUnrealAiPersistence> Persistence;
+	TUniquePtr<IAgentContextService> ContextService;
+	TUniquePtr<IUnrealAiChatService> ChatService;
+	TUniquePtr<IUnrealAiModelConnector> ModelConnector;
+	TUniquePtr<IToolExecutionHost> ToolExecutionHost;
+
+	TUniquePtr<FUnrealAiModelProfileRegistry> ModelProfiles;
+	TUniquePtr<FUnrealAiToolCatalog> ToolCatalog;
+	TSharedPtr<class FOpenAiCompatibleHttpTransport> HttpTransport;
+	TSharedPtr<class FUnrealAiLlmTransportStub> StubTransport;
+	TSharedPtr<class ILlmTransport> ActiveLlmTransport;
+	TUniquePtr<FUnrealAiAgentHarness> AgentHarness;
+};

@@ -1,0 +1,24 @@
+# Track only: README.md, docs/, Plugins/, and this file (see README for layout).
+# Everything else at repo root (blank project, scripts, PRD, etc.) is untracked.
+/*
+!/.gitignore
+!/README.md
+!/docs/
+!/Plugins/
+
+# Unreal / IDE generated — never commit under the plugin
+Plugins/**/Intermediate/
+Plugins/**/Binaries/
+Plugins/**/Saved/
+Plugins/**/DerivedDataCache/
+Plugins/**/Build/
+Plugins/**/.vs/
+Plugins/**/*.sln
+Plugins/**/*.VC.db
+Plugins/**/*.suo
+Plugins/**/*.opensdf
+Plugins/**/*.sdf
+
+# OS
+.DS_Store
+Thumbs.db

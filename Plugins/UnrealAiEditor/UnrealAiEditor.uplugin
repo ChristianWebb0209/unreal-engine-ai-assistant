@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "Unreal AI Editor",
+	"Description": "Local-first AI assistant shell for Unreal Editor (UI + stubbed backend).",
+	"Category": "Editor",
+	"CreatedBy": "Dungeon Architect",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "UnrealAiEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}

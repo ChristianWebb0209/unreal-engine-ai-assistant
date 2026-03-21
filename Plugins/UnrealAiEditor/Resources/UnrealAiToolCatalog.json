@@ -1,0 +1,3213 @@
+{
+  "meta": {
+    "catalog_version": "1.1.0",
+    "ue_target": "5.5+",
+    "schema_ref": "plugin:UnrealAiEditor/Resources/UnrealAiToolCatalog.json (single embedded catalog, no separate schema file)",
+    "generated_at": "2026-03-20T23:38:27+00:00",
+    "categories": [
+      "animation_sequencer",
+      "assets_content",
+      "audio_metasounds",
+      "banned",
+      "blueprints",
+      "build_packaging",
+      "capture_vision",
+      "console_exec",
+      "diagnostics_logs",
+      "editor_ui_navigation",
+      "landscape_foliage_pcg",
+      "materials_rendering",
+      "orchestration_meta",
+      "physics_collision",
+      "pie_play",
+      "project_files_search",
+      "selection_framing",
+      "viewport_camera",
+      "world_actors"
+    ],
+    "tool_count": 74
+  },
+  "tools": [
+    {
+      "tool_id": "actor_attach_to",
+      "summary": "Attach child actor to parent.",
+      "category": "world_actors",
+      "tags": [
+        "actor"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 50,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "child_path": {
+            "type": "string"
+          },
+          "parent_path": {
+            "type": "string"
+          },
+          "socket": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "child_path",
+          "parent_path"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "AActor::AttachToActor",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "actor_destroy",
+      "summary": "Destroy an actor in the editor world.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "destructive"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 42,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          },
+          "confirm": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_path",
+          "confirm"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "destructive",
+      "ue_entry_points": "UWorld::DestroyActor",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "actor_find_by_label",
+      "summary": "Find actors by label or tag.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "search"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 64,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "TActorIterator; UGameplayStatics",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "actor_get_transform",
+      "summary": "Read actor transform and mobility.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 68,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "AActor::GetActorTransform",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "actor_set_transform",
+      "summary": "Set actor transform.",
+      "category": "world_actors",
+      "tags": [
+        "actor"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 60,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          },
+          "transform": {
+            "type": "object"
+          },
+          "teleport_physics": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "actor_path",
+          "transform"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "AActor::SetActorTransform",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "actor_set_visibility",
+      "summary": "Toggle actor visibility.",
+      "category": "world_actors",
+      "tags": [
+        "actor"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 48,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          },
+          "hidden": {
+            "type": "boolean"
+          },
+          "affect_children": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "actor_path",
+          "hidden"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "AActor visibility APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "actor_spawn_from_class",
+      "summary": "Spawn an actor in the editor world.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "level"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 62,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "class_path": {
+            "type": "string"
+          },
+          "location": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "rotation": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "folder_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "class_path",
+          "location",
+          "rotation"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "UWorld::SpawnActor; FScopedTransaction",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "animation_blueprint_get_graph_summary",
+      "summary": "Summarize AnimBlueprint graphs.",
+      "category": "animation_sequencer",
+      "tags": [
+        "animation"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 22,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "anim_blueprint_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "anim_blueprint_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UAnimBlueprint",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "arbitrary_network_fetch",
+      "summary": "Banned: generic network fetch.",
+      "category": "banned",
+      "tags": [
+        "security",
+        "network"
+      ],
+      "tier": "banned",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 0,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "N/A",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "banned_v1",
+      "ban_reason": "Only user-configured LLM endpoints per PRD."
+    },
+    {
+      "tool_id": "arbitrary_process_spawn",
+      "summary": "Banned: spawn arbitrary OS processes.",
+      "category": "banned",
+      "tags": [
+        "security"
+      ],
+      "tier": "banned",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 0,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "N/A",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "banned_v1",
+      "ban_reason": "Security: no arbitrary process spawn in default product."
+    },
+    {
+      "tool_id": "arbitrary_python_eval",
+      "summary": "Banned: arbitrary Python execution.",
+      "category": "banned",
+      "tags": [
+        "security"
+      ],
+      "tier": "banned",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 0,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "N/A",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "banned_v1",
+      "ban_reason": "Not allowed in default product."
+    },
+    {
+      "tool_id": "asset_delete",
+      "summary": "Delete assets.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "destructive"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 38,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confirm": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_paths"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "destructive",
+      "ue_entry_points": "ObjectTools::DeleteObjects",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "asset_duplicate",
+      "summary": "Duplicate asset to new path.",
+      "category": "assets_content",
+      "tags": [
+        "asset"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 52,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_path": {
+            "type": "string"
+          },
+          "dest_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_path",
+          "dest_path"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "IAssetTools::DuplicateAsset",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "asset_get_metadata",
+      "summary": "Read asset metadata and dependencies summary.",
+      "category": "assets_content",
+      "tags": [
+        "asset"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 76,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IAssetRegistry; FAssetData",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "asset_import",
+      "summary": "Import files via automated import pipeline.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "import"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 22,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "destination_path": {
+            "type": "string"
+          },
+          "import_options": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "source_files",
+          "destination_path"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "FAssetImportTask",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "asset_open_editor",
+      "summary": "Open an asset in its native editor.",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "content",
+        "ui"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 82,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_path"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "UAssetEditorSubsystem::OpenEditorForAsset",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/UAssetEditorSubsystem"
+      ],
+      "status": "research"
+    },
+    {
+      "tool_id": "asset_registry_query",
+      "summary": "Query Asset Registry for assets.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "registry"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 78,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path_filter": {
+            "type": "string"
+          },
+          "class_name": {
+            "type": "string"
+          },
+          "max_results": {
+            "type": "integer"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IAssetRegistry::GetAssets; FARFilter",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "asset_rename",
+      "summary": "Rename/move asset and optionally fix references.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "destructive"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 40,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_path": {
+            "type": "string"
+          },
+          "dest_path": {
+            "type": "string"
+          },
+          "fix_references": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source_path",
+          "dest_path"
+        ]
+      },
+      "side_effects": "refs",
+      "permission": "destructive",
+      "ue_entry_points": "IAssetTools::RenameAssets",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "asset_save_packages",
+      "summary": "Save dirty packages.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "save"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 55,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "all_dirty": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "UEditorLoadingAndSavingUtils::SavePackages",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "audio_component_preview",
+      "summary": "Preview sound in editor.",
+      "category": "audio_metasounds",
+      "tags": [
+        "audio"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 15,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sound_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sound_path"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "Audio preview APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "blueprint_add_variable",
+      "summary": "Add member variable to Blueprint.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 20,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "blueprint_path",
+          "name",
+          "type"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "FBlueprintEditorUtils::AddMemberVariable",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "blueprint_compile",
+      "summary": "Compile a Blueprint and return diagnostics.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 50,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ]
+      },
+      "side_effects": "compile",
+      "permission": "write",
+      "ue_entry_points": "FKismetEditorUtilities::CompileBlueprint",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/blueprints-visual-scripting-in-unreal-engine"
+      ],
+      "status": "research"
+    },
+    {
+      "tool_id": "blueprint_get_graph_summary",
+      "summary": "Export bounded summary of a Blueprint graph.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 70,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string"
+          },
+          "graph_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UBlueprint; FBlueprintEditorUtils",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "blueprint_open_graph_tab",
+      "summary": "Open Blueprint editor focused on a graph.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 56,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string"
+          },
+          "graph_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "blueprint_path",
+          "graph_name"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "UAssetEditorSubsystem; FKismetEditorUtilities",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "collision_trace_editor_world",
+      "summary": "Line/sphere trace in editor world.",
+      "category": "physics_collision",
+      "tags": [
+        "physics"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 20,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "start": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "end": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UWorld::LineTrace",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "console_command",
+      "summary": "Execute allow-listed console command.",
+      "category": "console_exec",
+      "tags": [
+        "console"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 50,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "args": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "GEngine->Exec",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/console-commands-in-unreal-engine"
+      ],
+      "status": "research"
+    },
+    {
+      "tool_id": "content_browser_navigate_folder",
+      "summary": "Navigate Content Browser to a folder.",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "content_browser"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 58,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "folder_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "folder_path"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "FContentBrowserModule",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "content_browser_sync_asset",
+      "summary": "Focus Content Browser on an asset or folder.",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "content_browser"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 81,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "FContentBrowserModule sync APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/content-browser-in-unreal-engine"
+      ],
+      "status": "research"
+    },
+    {
+      "tool_id": "cook_content_for_platform",
+      "summary": "Cook content for a platform (UAT).",
+      "category": "build_packaging",
+      "tags": [
+        "build"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 12,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "platform": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform"
+        ]
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "UAT/UnrealAutomationTool",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "delete_system_files",
+      "summary": "Banned: paths outside project scope.",
+      "category": "banned",
+      "tags": [
+        "security"
+      ],
+      "tier": "banned",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 0,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "disk",
+      "permission": "destructive",
+      "ue_entry_points": "N/A",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "banned_v1",
+      "ban_reason": "All paths must be project-scoped."
+    },
+    {
+      "tool_id": "editor_get_selection",
+      "summary": "List currently selected actors.",
+      "category": "selection_framing",
+      "tags": [
+        "selection",
+        "editor"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 84,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "include_non_actor": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "GEditor->GetSelectedActors(); USelection",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/UEditorEngine"
+      ],
+      "status": "research"
+    },
+    {
+      "tool_id": "editor_set_mode",
+      "summary": "Switch editor mode (Place, Landscape, ... allow-listed).",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "editor",
+        "mode"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 40,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode_id"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "FEditorModeTools / FEdMode",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "editor_set_selection",
+      "summary": "Replace editor selection with specified actors.",
+      "category": "selection_framing",
+      "tags": [
+        "selection"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 83,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "additive": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "actor_paths"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "GEditor->SelectActor; SelectNone",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/UEditorEngine"
+      ],
+      "status": "research"
+    },
+    {
+      "tool_id": "editor_state_snapshot_read",
+      "summary": "Deterministic editor/world snapshot JSON.",
+      "category": "diagnostics_logs",
+      "tags": [
+        "context",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 80,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "include_assets": {
+            "type": "boolean"
+          },
+          "include_viewport": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FUnrealAiContextService patterns",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "engine_message_log_read",
+      "summary": "Read recent Message Log / log tail.",
+      "category": "diagnostics_logs",
+      "tags": [
+        "logs",
+        "diagnostics"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 50,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "max_lines": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_lines"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FMessageLogModule or FFileHelper on project log",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/logging-in-unreal-engine"
+      ],
+      "status": "research"
+    },
+    {
+      "tool_id": "foliage_paint_instances",
+      "summary": "Add foliage instances in radius.",
+      "category": "landscape_foliage_pcg",
+      "tags": [
+        "foliage"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 18,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "foliage_type": {
+            "type": "string"
+          },
+          "radius": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "foliage_type",
+          "radius"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "Foliage edit APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "global_tab_focus",
+      "summary": "Bring a registered dock tab to front.",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "ui",
+        "tabs"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 38,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tab_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tab_id"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "FGlobalTabmanager::TryInvokeTab",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "landscape_import_heightmap",
+      "summary": "Import heightmap to landscape.",
+      "category": "landscape_foliage_pcg",
+      "tags": [
+        "landscape"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 18,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "heightmap_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "heightmap_path"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "ALandscape",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "material_get_usage_summary",
+      "summary": "List referencers for a material.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 58,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IAssetRegistry::GetReferencers",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "material_instance_set_scalar_parameter",
+      "summary": "Set scalar on material instance.",
+      "category": "materials_rendering",
+      "tags": [
+        "material"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 48,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string"
+          },
+          "parameter_name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "material_path",
+          "parameter_name",
+          "value"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "UMaterialInstance editing APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "material_instance_set_vector_parameter",
+      "summary": "Set vector parameter on material instance.",
+      "category": "materials_rendering",
+      "tags": [
+        "material"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 47,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string"
+          },
+          "parameter_name": {
+            "type": "string"
+          },
+          "linear_color": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "material_path",
+          "parameter_name",
+          "linear_color"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "UMaterialInstance editing APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "menu_command_invoke",
+      "summary": "Execute a pre-registered editor command ID.",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "ui",
+        "command"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 35,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id"
+        ]
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "FUICommandList::ExecuteAction",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "metasound_open_editor",
+      "summary": "Open MetaSound source.",
+      "category": "audio_metasounds",
+      "tags": [
+        "audio"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 16,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "asset_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_path"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "MetaSound editor",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "outliner_folder_move",
+      "summary": "Move actors to an outliner folder.",
+      "category": "world_actors",
+      "tags": [
+        "outliner"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 44,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "folder_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_paths",
+          "folder_name"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "FActorFolders / world outliner",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "package_project",
+      "summary": "Full package build.",
+      "category": "build_packaging",
+      "tags": [
+        "build"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 10,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "configuration": {
+            "type": "string"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "UAT package",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "pcg_generate",
+      "summary": "Execute PCG graph in editor.",
+      "category": "landscape_foliage_pcg",
+      "tags": [
+        "pcg"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 18,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_path"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "UPCGComponent",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "physics_impulse_actor",
+      "summary": "Apply impulse (PIE-oriented).",
+      "category": "physics_collision",
+      "tags": [
+        "physics"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 15,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          },
+          "impulse": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "actor_path",
+          "impulse"
+        ]
+      },
+      "side_effects": "play",
+      "permission": "write",
+      "ue_entry_points": "Physics in PIE",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "pie_start",
+      "summary": "Start Play-In-Editor.",
+      "category": "pie_play",
+      "tags": [
+        "pie"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 50,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "viewport",
+              "standalone"
+            ]
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "side_effects": "play",
+      "permission": "exec",
+      "ue_entry_points": "UEditorEngine::PlayInEditor",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/play-in-editor-in-unreal-engine"
+      ],
+      "status": "research"
+    },
+    {
+      "tool_id": "pie_status",
+      "summary": "Return whether PIE is active.",
+      "category": "pie_play",
+      "tags": [
+        "pie",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 62,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "GEditor->PlayWorld",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "pie_stop",
+      "summary": "Stop current PIE session.",
+      "category": "pie_play",
+      "tags": [
+        "pie"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 48,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "play",
+      "permission": "exec",
+      "ue_entry_points": "GEditor->EndPlayMap",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "project_file_read_text",
+      "summary": "Read text file under project (allow-listed paths).",
+      "category": "project_files_search",
+      "tags": [
+        "filesystem",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 66,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "relative_path": {
+            "type": "string"
+          },
+          "max_bytes": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "relative_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FFileHelper::LoadFileToString",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "project_file_write_text",
+      "summary": "Write text file under project.",
+      "category": "project_files_search",
+      "tags": [
+        "filesystem"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 18,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "relative_path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "relative_path",
+          "content",
+          "confirm"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "destructive",
+      "ue_entry_points": "FFileHelper::SaveStringToFile",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "raw_user_exec_string",
+      "summary": "Banned: raw exec/console string.",
+      "category": "banned",
+      "tags": [
+        "security"
+      ],
+      "tier": "banned",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 0,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "N/A",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "banned_v1",
+      "ban_reason": "Use console_command allow-list instead."
+    },
+    {
+      "tool_id": "render_target_readback_editor",
+      "summary": "Capture a UTextureRenderTarget2D to disk.",
+      "category": "capture_vision",
+      "tags": [
+        "vision",
+        "render_target"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 25,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "asset_path": {
+            "type": "string"
+          },
+          "export_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_path",
+          "export_path"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "RenderTarget readback APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "sequencer_open",
+      "summary": "Open Level Sequence in Sequencer.",
+      "category": "animation_sequencer",
+      "tags": [
+        "sequencer",
+        "cinematic"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 24,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sequence_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence_path"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "Sequencer module; UAssetEditorSubsystem",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/cinematics-and-movies-in-unreal-engine"
+      ],
+      "status": "future"
+    },
+    {
+      "tool_id": "shader_compile_wait",
+      "summary": "Wait for shader compile completion.",
+      "category": "build_packaging",
+      "tags": [
+        "rendering"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 10,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "Shader compile",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "source_search_symbol",
+      "summary": "Fuzzy grep project text files under Source/, Config/, and Plugins/*/Source/ (Cursor-style): typo-tolerant; ranks paths and filenames even when the user misspells or only partially remembers a name. Returns path_matches plus optional line_matches inside files. For Content assets under /Game, use asset_index_fuzzy_search (Asset Registry index).",
+      "category": "project_files_search",
+      "tags": [
+        "source",
+        "search",
+        "grep",
+        "fuzzy"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 58,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Approximate text; may be misspelled. Matched against relative paths, filenames, and (optionally) lines."
+          },
+          "glob": {
+            "type": "string",
+            "description": "Semicolon-separated extension globs, e.g. *.cpp;*.h;*.hpp;*.cs. Defaults to common C++ and config extensions."
+          },
+          "max_hits": {
+            "type": "integer",
+            "description": "Max path_matches returned (line_matches budget scales with this)."
+          },
+          "max_files_to_scan": {
+            "type": "integer",
+            "description": "Cap files opened for line-level fuzzy matching (highest path scores first)."
+          },
+          "include_line_matches": {
+            "type": "boolean",
+            "description": "If true, scan text inside top-ranked files for fuzzy line hits."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IFileManager::FindFilesRecursive; FFileHelper",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "scene_fuzzy_search",
+      "summary": "Fuzzy-search actors in the current editor level (like Cursor quick-search): matches actor labels, actor names, class names, object paths, and actor tags even when the query is approximate or slightly wrong. Use to find walls, lights, meshes, etc. without exact names.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "search",
+        "grep",
+        "fuzzy",
+        "scene"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 62,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Approximate text; may be misspelled. Compared against actor label, name, class, path, and tags."
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Max actors returned (sorted by fuzzy score, best first)."
+          },
+          "include_hidden": {
+            "type": "boolean",
+            "description": "If true, include actors hidden in the editor."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "TActorIterator; AActor::GetActorLabel",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_index_fuzzy_search",
+      "summary": "Fuzzy-search the Unreal Asset Registry index (engine-maintained indexed view of content packages). Uses the same asset data the Content Browser uses; supply path_prefix (e.g. /Game or /Game/Textures) to scope. Ranks asset names, object paths, and class paths even when spelling is approximate. Prefer this over source_search_symbol for textures, materials, meshes, and other UAssets.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "search",
+        "grep",
+        "fuzzy",
+        "registry"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 64,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Approximate text; may be misspelled. Compared against asset name, object path, and class path."
+          },
+          "path_prefix": {
+            "type": "string",
+            "description": "Package path prefix to scope the registry query, e.g. /Game or /Game/MyFolder. Defaults to /Game."
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Max assets returned after ranking by fuzzy score."
+          },
+          "max_assets_to_scan": {
+            "type": "integer",
+            "description": "Safety cap on assets pulled from the registry before filtering (large projects)."
+          },
+          "class_name_substring": {
+            "type": "string",
+            "description": "Optional filter: asset class path must contain this substring (e.g. Texture2D)."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IAssetRegistry::GetAssets",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "subagent_spawn",
+      "summary": "Spawn child agent with isolated tool pack.",
+      "category": "orchestration_meta",
+      "tags": [
+        "agent",
+        "orchestration"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 30,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "goal": {
+            "type": "string"
+          },
+          "allowed_tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_steps": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "goal"
+        ]
+      },
+      "side_effects": "orchestration",
+      "permission": "exec",
+      "ue_entry_points": "Plugin harness",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "tool_audit_append",
+      "summary": "Append line to tool audit log file.",
+      "category": "diagnostics_logs",
+      "tags": [
+        "audit"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 75,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tool_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "asset_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_id",
+          "status",
+          "summary"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "Plugin logging (FFileHelper)",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "designed"
+    },
+    {
+      "tool_id": "viewport_camera_dolly",
+      "summary": "Dolly or zoom the editor view.",
+      "category": "viewport_camera",
+      "tags": [
+        "viewport",
+        "camera"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 86,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dolly_units": {
+            "type": "number"
+          },
+          "fov_delta": {
+            "type": "number"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "dolly",
+              "fov"
+            ]
+          }
+        },
+        "required": []
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "FEditorViewportClient::ViewFOV; forward movement",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
+      ],
+      "status": "research"
+    },
+    {
+      "tool_id": "viewport_camera_get_transform",
+      "summary": "Read active level editor camera transform and FOV.",
+      "category": "viewport_camera",
+      "tags": [
+        "viewport",
+        "camera",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 72,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "viewport_index": {
+            "type": "integer"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FEditorViewportClient::GetViewLocation, GetViewRotation, ViewFOV",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "viewport_camera_orbit",
+      "summary": "Orbit the active level editor camera around a pivot.",
+      "category": "viewport_camera",
+      "tags": [
+        "viewport",
+        "camera",
+        "mutating"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 88,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pivot": {
+            "type": "string",
+            "description": "World location or use_selection_center"
+          },
+          "yaw_deg": {
+            "type": "number"
+          },
+          "pitch_deg": {
+            "type": "number"
+          },
+          "radius": {
+            "type": "number"
+          },
+          "relative": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "FEditorViewportClient; FLevelEditorModule::GetFirstActiveViewport; UnrealEd, LevelEditor",
+      "threading": "game_thread",
+      "failure_modes": [
+        "no_active_viewport",
+        "pilot_conflict"
+      ],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
+      ],
+      "status": "research"
+    },
+    {
+      "tool_id": "viewport_camera_pan",
+      "summary": "Pan the active editor camera.",
+      "category": "viewport_camera",
+      "tags": [
+        "viewport",
+        "camera"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 87,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "delta": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "space": {
+            "type": "string",
+            "enum": [
+              "world",
+              "camera"
+            ]
+          }
+        },
+        "required": [
+          "delta",
+          "space"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "FEditorViewportClient; FViewportCameraTransform",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
+      ],
+      "status": "research"
+    },
+    {
+      "tool_id": "viewport_camera_pilot",
+      "summary": "Pilot a CameraActor or exit pilot mode.",
+      "category": "viewport_camera",
+      "tags": [
+        "viewport",
+        "camera",
+        "pilot"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 48,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          },
+          "unpilot": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "FEditorViewportClient pilot APIs; ACameraActor",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "viewport_camera_set_transform",
+      "summary": "Set editor camera location and rotation.",
+      "category": "viewport_camera",
+      "tags": [
+        "viewport",
+        "camera"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 55,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "location": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "rotation": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "b_snap": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "location",
+          "rotation"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "FEditorViewportClient::SetViewLocation, SetViewRotation",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "viewport_capture_delayed",
+      "summary": "Schedule viewport capture after N frames.",
+      "category": "capture_vision",
+      "tags": [
+        "viewport",
+        "vision"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 60,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "filename_slug": {
+            "type": "string"
+          },
+          "delay_frames": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "delay_frames"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "FTSTicker + FScreenshotRequest",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "viewport_capture_png",
+      "summary": "Capture active editor viewport to PNG on disk.",
+      "category": "capture_vision",
+      "tags": [
+        "viewport",
+        "vision",
+        "screenshot"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 90,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "filename_slug": {
+            "type": "string"
+          },
+          "resolution_scale": {
+            "type": "number"
+          },
+          "include_ui": {
+            "type": "boolean"
+          },
+          "delay_frames": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filename_slug"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "FScreenshotRequest; FViewport::ReadPixels; FEditorViewportClient",
+      "threading": "game_thread",
+      "failure_modes": [
+        "no_viewport",
+        "readback_failed",
+        "disk_full"
+      ],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/FScreenshotRequest"
+      ],
+      "status": "research"
+    },
+    {
+      "tool_id": "viewport_frame_actors",
+      "summary": "Frame actors by path using bounds and FOV fit.",
+      "category": "selection_framing",
+      "tags": [
+        "viewport",
+        "frame"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 85,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "margin_scale": {
+            "type": "number"
+          },
+          "pitch_bias": {
+            "type": "number"
+          },
+          "yaw_bias": {
+            "type": "number"
+          },
+          "orthographic": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "actor_paths"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "AActor::GetComponentsBoundingBox; FEditorViewportClient",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/AActor"
+      ],
+      "status": "research"
+    },
+    {
+      "tool_id": "viewport_frame_selection",
+      "summary": "Frame current selection in the viewport.",
+      "category": "selection_framing",
+      "tags": [
+        "viewport",
+        "frame"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 65,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "margin_scale": {
+            "type": "number",
+            "default": 1.15
+          }
+        },
+        "required": []
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "Editor Focus Selected / viewport framing commands",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "viewport_set_view_mode",
+      "summary": "Switch editor viewport rendering mode (Lit, Wireframe, ...).",
+      "category": "viewport_camera",
+      "tags": [
+        "viewport",
+        "rendering"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 45,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "view_mode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "view_mode"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "FEditorViewportClient view mode APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "agent_emit_todo_plan",
+      "summary": "Emit and persist a structured todo plan (unreal_ai.todo_plan).",
+      "category": "orchestration_meta",
+      "tags": [
+        "planning",
+        "todo"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 6,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "title",
+          "steps"
+        ]
+      },
+      "side_effects": "memory",
+      "permission": "write",
+      "ue_entry_points": "IAgentContextService::SetActiveTodoPlan",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "worker_merge_results",
+      "summary": "Merge structured worker outputs.",
+      "category": "orchestration_meta",
+      "tags": [
+        "agent",
+        "orchestration"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true
+      },
+      "context_selector": {
+        "priority": 28,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "parent_run_id": {
+            "type": "string"
+          },
+          "worker_results": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "parent_run_id",
+          "worker_results"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "write",
+      "ue_entry_points": "Plugin merge logic",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    }
+  ]
+}
