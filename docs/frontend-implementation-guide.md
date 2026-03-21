@@ -16,7 +16,6 @@ Registered in [`UnrealAiEditorModule.cpp`](../Plugins/UnrealAiEditor/Source/Unre
 |-----------|--------|----------------|
 | Agent Chat | `UnrealAiEditorTabIds::ChatTab` | [`SUnrealAiEditorChatTab`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tabs/SUnrealAiEditorChatTab.cpp) |
 | AI Settings | `SettingsTab` | [`SUnrealAiEditorSettingsTab`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tabs/SUnrealAiEditorSettingsTab.cpp) |
-| API Keys & Models | `ApiModelsTab` | [`SUnrealAiEditorApiModelsTab`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tabs/SUnrealAiEditorApiModelsTab.cpp) |
 | Quick Start | `QuickStartTab` | [`SUnrealAiEditorQuickStartTab`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tabs/SUnrealAiEditorQuickStartTab.cpp) |
 | Help | `HelpTab` | [`SUnrealAiEditorHelpTab`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tabs/SUnrealAiEditorHelpTab.cpp) |
 
@@ -46,20 +45,16 @@ Registered in [`UnrealAiEditorModule.cpp`](../Plugins/UnrealAiEditor/Source/Unre
 
 **Backend wiring:** Send → [`IUnrealAiAgentHarness::RunTurn`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Harness/IUnrealAiAgentHarness.h) + [`FUnrealAiChatRunSink`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/FUnrealAiChatRunSink.h).
 
-### 1.5 API Keys & Models tab
+### 1.5 AI Settings tab
 
-[`SUnrealAiEditorApiModelsTab`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tabs/SUnrealAiEditorApiModelsTab.cpp) — grid for provider, base URL, API key, mask toggle, model id, **Save** / **Test connection** (stub paths). Must stay aligned with [`FUnrealAiModelProfileRegistry`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Harness/) and `plugin_settings.json` schema.
+[`SUnrealAiEditorSettingsTab`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tabs/SUnrealAiEditorSettingsTab.cpp) — full `plugin_settings.json` editing, **Test connection**, **Save** / reload LLM config. The older separate “API Keys & Models” Nomad tab was removed as redundant with this surface.
 
-### 1.6 AI Settings tab
-
-[`SUnrealAiEditorSettingsTab`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tabs/SUnrealAiEditorSettingsTab.cpp) — large **JSON** editor for full `plugin_settings.json` + Save. This is the **power user** surface; PRD also wants a **form** Settings panel from the **gear** (§8.2).
-
-### 1.7 Quick Start & Help
+### 1.6 Quick Start & Help
 
 - **Quick Start** — minimal steps + button to open chat; copy should be updated as features land (still says “stub” in places).
 - **Help** — placeholder text pointing at repo docs; PRD §8.5 wants **embedded markdown** or external link.
 
-### 1.8 Styling
+### 1.7 Styling
 
 [`FUnrealAiEditorStyle`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Style/UnrealAiEditorStyle.cpp) — panel brushes; chat uses mixed **inline colors** and **FAppStyle** icons for tools. PRD §9 asks for **tokenized** theme — partial.
 
@@ -105,7 +100,7 @@ Registered in [`UnrealAiEditorModule.cpp`](../Plugins/UnrealAiEditor/Source/Unre
 ### Tier C — Settings & onboarding parity
 
 12. **Gear → structured Settings** — either embed [`SUnrealAiEditorSettingsTab`](Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tabs/SUnrealAiEditorSettingsTab.cpp) in a drawer or split **form fields** (provider, key, model) from raw JSON (advanced).
-13. **API Models tab** — live **Test connection** using real HTTP ping (partially stub); **ReloadLlmConfiguration** after save (already in registry paths — verify UI calls it).
+13. **AI Settings** — live **Test connection** using real HTTP ping; **ReloadLlmConfiguration** after save (verify UI calls it).
 14. **Quick Start** — update copy to match real flows (HTTP vs stub, Stop, tools).
 15. **Help tab** — embed `docs/` as `FSlateTextBlock` from packaged content, or open external browser to GitHub/docs URL.
 
@@ -136,7 +131,7 @@ Registered in [`UnrealAiEditorModule.cpp`](../Plugins/UnrealAiEditor/Source/Unre
 | Tabs / spawn | [`UnrealAiEditorModule.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/UnrealAiEditorModule.cpp), [`UnrealAiEditorTabIds.h`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Public/UnrealAiEditorTabIds.h) |
 | Chat layout | [`SUnrealAiEditorChatTab.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tabs/SUnrealAiEditorChatTab.cpp), [`SChatHeader.*`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/), [`SChatComposer.*`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/), [`SChatMessageList.*`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/) |
 | Transcript model | [`UnrealAiChatTranscript.*`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/), [`FUnrealAiChatRunSink.*`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/) |
-| Widget blocks | [`SToolCallCard.*`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/), [`SThinkingBlock.*`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/), [`SAssistantStreamBlock.*`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/), [`STodoPlanPanel.*`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/) |
+| Widget blocks | [`SToolCallCard.*`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/), [`SThinkingSubline.*`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/), [`SAssistantStreamBlock.*`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/), [`STodoPlanPanel.*`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/) |
 | Project settings | [`UnrealAiEditorSettings.h`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Public/UnrealAiEditorSettings.h) |
 | Menus | [`RegisterMenus`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/UnrealAiEditorModule.cpp) |
 
@@ -145,7 +140,7 @@ Registered in [`UnrealAiEditorModule.cpp`](../Plugins/UnrealAiEditor/Source/Unre
 ## 5. Testing the client (manual)
 
 1. **Window → Unreal AI → Agent Chat** — send message; verify user bubble, assistant streaming/typewriter, tool rows after model returns tools, **Stop** cancels.
-2. **API Keys & Models** — save JSON/settings; restart optional; verify harness uses HTTP when key present (see plugin README).
+2. **AI Settings** — save JSON/settings; restart optional; verify harness uses HTTP when key present (see plugin README).
 3. **Project Settings → Unreal AI Editor** — toggle stream/typewriter; relaunch chat behavior.
 4. **New chat** — clears transcript; thread id rotates; context save on old thread (see [`context-service.md`](context-service.md)).
 
@@ -170,7 +165,7 @@ The following backlog items from §3 have been **implemented** in `Plugins/Unrea
 | A | @ mention UX | Asset Registry query + inline suggestion list under the input |
 | A | Attachment chips | Row above composer; remove (×); syncs with `context.json` attachments |
 | A | Tool cards (collapse, copy, monospace JSON) | `SToolCallCard` expandable area + Copy |
-| A | Thinking collapsible; no empty placeholder | `SThinkingBlock` `SExpandableArea`; transcript skips empty thinking |
+| A | Reasoning one-liner under assistant; optional placeholder | `SThinkingSubline`; transcript merges thinking + assistant when adjacent |
 | A | Connect / LLM mode indicator | Header shows HTTP vs stub; chat Connect unchanged |
 | A | Header model combo + complexity badge | `SComboBox` for `models{}` keys; heuristic complexity from `BuildContextWindow`; combo disabled while `IsTurnInProgress()` |
 | B | Complexity surface | `FAgentContextBuildResult::ComplexityLabel` (low/medium/high heuristic) |
@@ -178,7 +173,7 @@ The following backlog items from §3 have been **implemented** in `Plugins/Unrea
 | B | Todo step checkboxes | `STodoPlanPanel` when plan JSON matches persisted `activeTodoPlan` |
 | B | Continuation strip | `OnRunContinuation` emitted at start of LLM round 2+ (`DispatchLlm`) |
 | B | Auto-continue toggle | `UUnrealAiEditorSettings::bAutoContinuePlanSteps` (Project Settings; harness pause wiring may follow) |
-| C | Gear → structured path | AI Settings tab button opens API Keys & Models tab + hint text |
+| C | Gear → structured path | Chat header **Settings** opens AI Settings tab |
 | C | API test + reload | `FUnrealAiModelConnectorHttp` GET `/models`; Save still calls `ReloadLlmConfiguration` |
 | C | Quick Start / Help | Updated copy; Help opens `docs/` and `Saved/Logs` in Explorer |
 | D | Theme tokens | `UnrealAiEditor.UserBubble`, `UnrealAiEditor.AssistantLane` + existing brushes |

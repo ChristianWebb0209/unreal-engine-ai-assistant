@@ -935,7 +935,7 @@ These align with [`PRD.md`](../PRD.md) §6 and are the first implementation wave
 
 | Field | Value |
 |-------|--------|
-| **summary** | Read a text file under project directory (Config, Source, Content `.uasset` excluded). |
+| **summary** | Read a text file under project directory: `Source/`, `Config/`, `Content/`, `Plugins/`, `docs/`, `.github/`, `scripts/`, `tools/`, `build/`, root `README`/`LICENSE`-style files, or root `*.uproject` (path allow-list; no `..`). |
 | **parameters** | `relative_path`, `max_bytes`. |
 | **returns** | `content` or `truncated`. |
 | **side_effects** | none |

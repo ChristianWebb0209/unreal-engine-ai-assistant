@@ -14,6 +14,9 @@
 
   If execution is blocked:
     powershell -ExecutionPolicy Bypass -File .\build-blank-editor.ps1
+
+  If linking fails with LNK1104 on UnrealEditor-UnrealAiEditor.dll, close Unreal Editor (it loads the plugin)
+  and run again. -NoHotReloadFromIDE avoids the Live Coding mutex but cannot override a loaded DLL lock.
 #>
 [CmdletBinding()]
 param(
@@ -51,7 +54,7 @@ if ($GenerateProjectFiles) {
 }
 
 Write-Host "Building BlankEditor (Development | Win64)..." -ForegroundColor Cyan
-& $BuildBat BlankEditor Win64 Development "-project=$UProject" -waitmutex
+& $BuildBat BlankEditor Win64 Development "-project=$UProject" -waitmutex -NoHotReloadFromIDE
 $BuildExit = $LASTEXITCODE
 if ($BuildExit -ne 0) {
     exit $BuildExit
