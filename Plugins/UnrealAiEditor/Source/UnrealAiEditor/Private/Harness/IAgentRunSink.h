@@ -13,6 +13,8 @@ public:
 	virtual ~IAgentRunSink() = default;
 
 	virtual void OnRunStarted(const FUnrealAiRunIds& Ids) = 0;
+	/** Context layer dropped attachments (e.g. images) — show as informational chat lines before model output. */
+	virtual void OnContextUserMessages(const TArray<FString>& Messages) {}
 	virtual void OnAssistantDelta(const FString& Chunk) = 0;
 	/** Provider reasoning / extended thinking stream (optional). */
 	virtual void OnThinkingDelta(const FString& Chunk) = 0;

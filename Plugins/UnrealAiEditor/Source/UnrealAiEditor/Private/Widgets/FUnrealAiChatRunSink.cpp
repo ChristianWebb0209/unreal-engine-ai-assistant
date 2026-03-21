@@ -13,6 +13,23 @@ void FUnrealAiChatRunSink::OnRunStarted(const FUnrealAiRunIds& Ids)
 	if (Transcript.IsValid())
 	{
 		Transcript->BeginRun(Ids.RunId);
+		// Do not open an empty "thinking" row here — it animated forever (dots timer) when the model
+		// goes straight to tools with no reasoning. A thinking block is created on the first reasoning delta.
+	}
+}
+
+void FUnrealAiChatRunSink::OnContextUserMessages(const TArray<FString>& Messages)
+{
+	if (!Transcript.IsValid())
+	{
+		return;
+	}
+	for (const FString& Line : Messages)
+	{
+		if (!Line.IsEmpty())
+		{
+			Transcript->AddInformationalNotice(Line);
+		}
 	}
 }
 

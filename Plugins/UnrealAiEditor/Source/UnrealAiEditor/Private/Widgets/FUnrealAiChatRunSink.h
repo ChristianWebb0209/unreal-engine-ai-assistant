@@ -12,6 +12,7 @@ public:
 	explicit FUnrealAiChatRunSink(TSharedPtr<FUnrealAiChatTranscript> InTranscript);
 
 	virtual void OnRunStarted(const FUnrealAiRunIds& Ids) override;
+	virtual void OnContextUserMessages(const TArray<FString>& Messages) override;
 	virtual void OnAssistantDelta(const FString& Chunk) override;
 	virtual void OnThinkingDelta(const FString& Chunk) override;
 	virtual void OnToolCallStarted(const FString& ToolName, const FString& CallId, const FString& ArgumentsJson) override;
