@@ -8,13 +8,13 @@
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Layout/SBorder.h"
-#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Styling/CoreStyle.h"
+#include "Style/UnrealAiEditorStyle.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
@@ -61,21 +61,19 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 	const FString ThreadId = Session.IsValid()
 		? Session->ThreadId.ToString(EGuidFormats::DigitsWithHyphens)
 		: FString();
-	bool bInteractive = false;
 	TArray<bool> DoneFlags;
 	if (BackendRegistry.IsValid() && Session.IsValid())
 	{
 		if (IAgentContextService* Ctx = BackendRegistry->GetContextService())
 		{
-		Ctx->LoadOrCreate(ProjectId, ThreadId);
-		if (const FAgentContextState* St = Ctx->GetState(ProjectId, ThreadId))
-		{
-			if (!St->ActiveTodoPlanJson.IsEmpty() && St->ActiveTodoPlanJson == PlanJson)
+			Ctx->LoadOrCreate(ProjectId, ThreadId);
+			if (const FAgentContextState* St = Ctx->GetState(ProjectId, ThreadId))
 			{
-				bInteractive = true;
-				DoneFlags = St->TodoStepsDone;
+				if (!St->ActiveTodoPlanJson.IsEmpty() && St->ActiveTodoPlanJson == PlanJson)
+				{
+					DoneFlags = St->TodoStepsDone;
+				}
 			}
-		}
 		}
 	}
 
@@ -93,7 +91,7 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 				SNew(STextBlock)
 					.AutoWrapText(true)
 					.Text(FText::FromString(PlanJson.Left(400)))
-					.ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.72f, 0.76f, 1.f)))
+					.ColorAndOpacity(FSlateColor(FLinearColor(0.74f, 0.72f, 0.68f, 1.f)))
 			];
 	}
 	else
@@ -101,55 +99,30 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 		for (int32 i = 0; i < Steps.Num(); ++i)
 		{
 			const FString Line = FString::Printf(TEXT("%d. %s"), i + 1, *Steps[i]);
-			if (bInteractive && DoneFlags.IsValidIndex(i))
-			{
-				const int32 Idx = i;
-				Box->AddSlot().AutoHeight().Padding(FMargin(8.f, 2.f))
+			const bool bDone = DoneFlags.IsValidIndex(i) && DoneFlags[i];
+			Box->AddSlot().AutoHeight().Padding(FMargin(8.f, 2.f))
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
-						[
-							SNew(SCheckBox)
-								.IsChecked(DoneFlags[Idx] ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
-								.OnCheckStateChanged_Lambda(
-									[this, Idx, ProjectId, ThreadId](ECheckBoxState S)
-									{
-										if (!BackendRegistry.IsValid() || !Session.IsValid())
-										{
-											return;
-										}
-										if (IAgentContextService* Ctx = BackendRegistry->GetContextService())
-										{
-											Ctx->LoadOrCreate(ProjectId, ThreadId);
-											Ctx->SetTodoStepDone(Idx, S == ECheckBoxState::Checked);
-											Ctx->SaveNow(ProjectId, ThreadId);
-										}
-									})
-						]
-						+ SHorizontalBox::Slot().FillWidth(1.f)
-						[
-							SNew(STextBlock)
-								.AutoWrapText(true)
-								.Text(FText::FromString(Line))
-						]
-					];
-			}
-			else
-			{
-				Box->AddSlot().AutoHeight().Padding(FMargin(8.f, 2.f))
+						SNew(SCheckBox)
+							.IsChecked(bDone ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
+							.IsEnabled(false)
+					]
+					+ SHorizontalBox::Slot().FillWidth(1.f)
 					[
 						SNew(STextBlock)
 							.AutoWrapText(true)
 							.Text(FText::FromString(Line))
-					];
-			}
+					]
+				];
 		}
 	}
 
 	ChildSlot
 		[
 			SNew(SBorder)
-				.BorderBackgroundColor(FLinearColor(0.12f, 0.18f, 0.22f, 0.85f))
+				.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.TodoPlanPanel")))
 				.Padding(FMargin(8.f))
 				[
 					Box
