@@ -3,6 +3,8 @@
 #include "Context/AgentContextTypes.h"
 
 class IAgentContextService;
+class AActor;
+struct FAssetData;
 
 namespace UnrealAiEditorContextQueries
 {
@@ -14,4 +16,15 @@ namespace UnrealAiEditorContextQueries
 
 	/** Adds up to MaxContentBrowserSelectedAssets selected assets as attachments (active context session). */
 	void AddContentBrowserSelectionAsAttachments(IAgentContextService* Ctx);
+
+	/** Detailed attachment body for the LLM (beyond raw payload). */
+	FString BuildRichAttachmentPayload(const FContextAttachment& Attachment);
+
+	FContextAttachment AttachmentFromAssetData(const FAssetData& AssetData);
+	FContextAttachment AttachmentFromActor(AActor* Actor);
+	/** PNG written by FScreenshotRequest (editor viewport); payload is absolute path on disk. */
+	FContextAttachment AttachmentFromViewportScreenshotFile(const FString& FullPathPng);
+
+	/** File paths (image extensions, viewport screenshots) and texture-like assets. */
+	bool IsImageLikeAttachment(const FContextAttachment& Attachment);
 }

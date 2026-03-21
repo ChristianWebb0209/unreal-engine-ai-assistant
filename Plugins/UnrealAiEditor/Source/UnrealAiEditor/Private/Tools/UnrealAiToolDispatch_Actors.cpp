@@ -11,10 +11,53 @@
 #include "GameFramework/Actor.h"
 #include "ScopedTransaction.h"
 #include "UnrealEdGlobals.h"
+#include "UObject/SoftObjectPath.h"
 #include "UObject/UObjectGlobals.h"
 
 namespace UnrealAiToolActorsInternal
 {
+	static FString NormalizeClassPathString(const FString& In)
+	{
+		FString P = In;
+		P.TrimStartAndEndInline();
+		// Asset path form: Class'/Script/Module.ClassName' -> /Script/Module.ClassName
+		if (P.StartsWith(TEXT("Class'")))
+		{
+			P = P.Mid(6);
+			if (P.Len() > 0 && P[P.Len() - 1] == TEXT('\''))
+			{
+				P.RemoveAt(P.Len() - 1, 1);
+			}
+		}
+		return P;
+	}
+
+	static UClass* ResolveSpawnClass(const FString& ClassPathStr, FString& OutErr)
+	{
+		const FString P = NormalizeClassPathString(ClassPathStr);
+		if (P.IsEmpty())
+		{
+			OutErr = TEXT("class_path is empty");
+			return nullptr;
+		}
+		if (UClass* C = StaticLoadClass(UObject::StaticClass(), nullptr, *P))
+		{
+			return C;
+		}
+		const FSoftClassPath SoftPath(P);
+		if (SoftPath.IsValid())
+		{
+			if (UClass* C = SoftPath.TryLoadClass<UObject>())
+			{
+				return C;
+			}
+		}
+		OutErr = FString::Printf(
+			TEXT("Could not resolve class_path (got '%s'). Use a path like /Game/MyActor.MyActor_C or /Script/Engine.StaticMeshActor"),
+			*P);
+		return nullptr;
+	}
+
 	static bool ParseVec3FromArray(const TArray<TSharedPtr<FJsonValue>>& Arr, FVector& Out)
 	{
 		if (Arr.Num() < 3)
@@ -339,10 +382,20 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorSpawnFromClass(const TShared
 	{
 		return UnrealAiToolJson::Error(TEXT("No editor world"));
 	}
-	UClass* Class = StaticLoadClass(AActor::StaticClass(), nullptr, *ClassPath);
+	FString ResolveErr;
+	UClass* Class = UnrealAiToolActorsInternal::ResolveSpawnClass(ClassPath, ResolveErr);
 	if (!Class)
 	{
-		return UnrealAiToolJson::Error(TEXT("Could not load UClass (use full path, e.g. /Game/BP_MyActor.BP_MyActor_C)"));
+		return UnrealAiToolJson::Error(ResolveErr.IsEmpty()
+			? TEXT("Could not resolve class_path (use e.g. /Game/BP_MyActor.BP_MyActor_C)")
+			: ResolveErr);
+	}
+	if (!Class->IsChildOf(AActor::StaticClass()))
+	{
+		return UnrealAiToolJson::Error(FString::Printf(
+			TEXT("'%s' is not an Actor class — only AActor subclasses can be spawned in the level (e.g. /Script/Engine.StaticMeshActor, "
+				 "/Script/Engine.PointLight, or a Blueprint actor). SceneComponent and other non-actor types cannot be spawned here."),
+			*Class->GetName()));
 	}
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnSpawn", "Unreal AI: spawn actor"));
 	FActorSpawnParameters Sp;

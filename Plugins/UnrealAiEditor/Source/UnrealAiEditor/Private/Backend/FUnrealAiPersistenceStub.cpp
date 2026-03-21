@@ -50,6 +50,19 @@ bool FUnrealAiPersistenceStub::LoadSettingsJson(FString& OutJson)
 	return FFileHelper::LoadFileToString(OutJson, *Path);
 }
 
+bool FUnrealAiPersistenceStub::SaveUsageStatsJson(const FString& Json)
+{
+	const FString Dir = EnsureSubdir(TEXT("settings"));
+	const FString Path = FPaths::Combine(Dir, TEXT("usage_stats.json"));
+	return FFileHelper::SaveStringToFile(Json, *Path);
+}
+
+bool FUnrealAiPersistenceStub::LoadUsageStatsJson(FString& OutJson)
+{
+	const FString Path = FPaths::Combine(EnsureSubdir(TEXT("settings")), TEXT("usage_stats.json"));
+	return FFileHelper::LoadFileToString(OutJson, *Path);
+}
+
 bool FUnrealAiPersistenceStub::AppendChatMessage(const FString& ProjectId, const FUnrealAiChatMessage& Message)
 {
 	const FString Dir = EnsureSubdir(FPaths::Combine(TEXT("chats"), ProjectId));

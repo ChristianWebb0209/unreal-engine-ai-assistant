@@ -16,6 +16,10 @@ public:
 	virtual FString GetDataRootDirectory() const = 0;
 	virtual bool SaveSettingsJson(const FString& Json) = 0;
 	virtual bool LoadSettingsJson(FString& OutJson) = 0;
+
+	/** Cumulative token usage / rough spend estimates: `settings/usage_stats.json`. */
+	virtual bool SaveUsageStatsJson(const FString& Json) = 0;
+	virtual bool LoadUsageStatsJson(FString& OutJson) = 0;
 	virtual bool AppendChatMessage(const FString& ProjectId, const FUnrealAiChatMessage& Message) = 0;
 	virtual TArray<FString> ListThreads(const FString& ProjectId) = 0;
 

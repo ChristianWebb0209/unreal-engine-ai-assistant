@@ -12,6 +12,8 @@ class IToolExecutionHost;
 class FUnrealAiAgentHarness;
 class FUnrealAiModelProfileRegistry;
 class FUnrealAiToolCatalog;
+class FUnrealAiModelPricingCatalog;
+class FUnrealAiUsageTracker;
 
 class FUnrealAiBackendRegistry : public TSharedFromThis<FUnrealAiBackendRegistry>
 {
@@ -27,6 +29,8 @@ public:
 	IUnrealAiAgentHarness* GetAgentHarness() const { return AgentHarness.Get(); }
 	FUnrealAiModelProfileRegistry* GetModelProfileRegistry() const { return ModelProfiles.Get(); }
 	FUnrealAiToolCatalog* GetToolCatalog() const { return ToolCatalog.Get(); }
+	FUnrealAiModelPricingCatalog* GetPricingCatalog() const { return PricingCatalog.Get(); }
+	FUnrealAiUsageTracker* GetUsageTracker() const { return UsageTracker.Get(); }
 
 	/** Reload `plugin_settings.json` from disk, refresh stub vs HTTP transport, recreate agent harness. Call after API keys / providers change. */
 	void ReloadLlmConfiguration();
@@ -42,6 +46,8 @@ private:
 	TUniquePtr<IToolExecutionHost> ToolExecutionHost;
 
 	TUniquePtr<FUnrealAiModelProfileRegistry> ModelProfiles;
+	TUniquePtr<FUnrealAiModelPricingCatalog> PricingCatalog;
+	TUniquePtr<FUnrealAiUsageTracker> UsageTracker;
 	TUniquePtr<FUnrealAiToolCatalog> ToolCatalog;
 	TSharedPtr<class FOpenAiCompatibleHttpTransport> HttpTransport;
 	TSharedPtr<class FUnrealAiLlmTransportStub> StubTransport;

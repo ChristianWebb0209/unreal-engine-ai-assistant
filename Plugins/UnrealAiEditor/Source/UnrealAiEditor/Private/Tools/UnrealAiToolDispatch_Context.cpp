@@ -10,6 +10,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "ContentBrowserModule.h"
+#include "IContentBrowserSingleton.h"
 #include "Dom/JsonValue.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -89,7 +90,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_EditorStateSnapshotRead(
 	Ctx->RefreshEditorSnapshotFromEngine();
 
 	FAgentContextBuildOptions Opt;
-	Opt.Mode = EUnrealAiAgentMode::Fast;
+	Opt.Mode = EUnrealAiAgentMode::Agent;
 	const FAgentContextBuildResult Built = Ctx->BuildContextWindow(Opt);
 
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();

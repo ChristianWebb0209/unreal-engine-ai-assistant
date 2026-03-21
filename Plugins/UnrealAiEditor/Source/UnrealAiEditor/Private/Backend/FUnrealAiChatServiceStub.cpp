@@ -7,6 +7,7 @@
 
 FUnrealAiChatServiceStub::FUnrealAiChatServiceStub(FUnrealAiBackendRegistry* InRegistry)
 	: Registry(InRegistry)
+	, bConnected(true)
 {
 }
 
@@ -36,8 +37,7 @@ void FUnrealAiChatServiceStub::SendMessage(
 	const FUnrealAiChatSendMeta* Meta)
 {
 	static const FString FakeResponse =
-		TEXT("This is a **stub** streamed response. Connect is active; ")
-		TEXT("real LLM integration will replace this. You asked: ");
+		TEXT("This is a **stub** streamed response; real LLM integration will replace this. You asked: ");
 
 	int32 TokenIndex = 0;
 	const FString Full = FakeResponse + Prompt;

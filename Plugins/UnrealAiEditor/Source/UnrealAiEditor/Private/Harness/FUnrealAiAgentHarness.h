@@ -9,6 +9,7 @@ class FUnrealAiModelProfileRegistry;
 class FUnrealAiToolCatalog;
 class ILlmTransport;
 class IToolExecutionHost;
+class FUnrealAiUsageTracker;
 
 namespace UnrealAiAgentHarnessPriv
 {
@@ -25,7 +26,8 @@ public:
 		FUnrealAiModelProfileRegistry* InProfiles,
 		FUnrealAiToolCatalog* InCatalog,
 		TSharedPtr<ILlmTransport> InTransport,
-		IToolExecutionHost* InToolHost);
+		IToolExecutionHost* InToolHost,
+		FUnrealAiUsageTracker* InUsageTracker);
 	virtual ~FUnrealAiAgentHarness() override;
 
 	virtual void RunTurn(const FUnrealAiAgentTurnRequest& Request, TSharedPtr<IAgentRunSink> Sink) override;
@@ -39,6 +41,7 @@ private:
 	FUnrealAiToolCatalog* Catalog = nullptr;
 	TSharedPtr<ILlmTransport> Transport;
 	IToolExecutionHost* ToolHost = nullptr;
+	FUnrealAiUsageTracker* UsageTracker = nullptr;
 
 	TSharedPtr<UnrealAiAgentHarnessPriv::FAgentTurnRunner> ActiveRunner;
 };

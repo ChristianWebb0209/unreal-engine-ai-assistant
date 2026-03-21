@@ -27,6 +27,18 @@ namespace UnrealAiModelProfileRegistryUtil
 		}
 		O->TryGetBoolField(TEXT("supportsNativeTools"), Out.bSupportsNativeTools);
 		O->TryGetBoolField(TEXT("supportsParallelToolCalls"), Out.bSupportsParallelToolCalls);
+		{
+			bool B = Out.bSupportsImages;
+			if (O->TryGetBoolField(TEXT("supportsImages"), B))
+			{
+				Out.bSupportsImages = B;
+			}
+		}
+		double Mar = 0;
+		if (O->TryGetNumberField(TEXT("maxAgentLlmRounds"), Mar))
+		{
+			Out.MaxAgentLlmRounds = static_cast<int32>(Mar);
+		}
 	}
 
 	static FUnrealAiModelCapabilities DefaultsForId(const FString& ModelId)
@@ -37,6 +49,8 @@ namespace UnrealAiModelProfileRegistryUtil
 		C.MaxOutputTokens = 4096;
 		C.bSupportsNativeTools = true;
 		C.bSupportsParallelToolCalls = true;
+		C.bSupportsImages = true;
+		C.MaxAgentLlmRounds = 16;
 		return C;
 	}
 }
@@ -86,46 +100,101 @@ void FUnrealAiModelProfileRegistry::Reload()
 		(*ApiObj)->TryGetStringField(TEXT("defaultProviderId"), DefaultProviderId);
 	}
 
-	const TArray<TSharedPtr<FJsonValue>>* ProvidersArr = nullptr;
-	if (Root->TryGetArrayField(TEXT("providers"), ProvidersArr) && ProvidersArr)
+	bool bLoadedSections = false;
+	const TArray<TSharedPtr<FJsonValue>>* SectionsArr = nullptr;
+	if (Root->TryGetArrayField(TEXT("sections"), SectionsArr) && SectionsArr && SectionsArr->Num() > 0)
 	{
-		for (const TSharedPtr<FJsonValue>& V : *ProvidersArr)
+		bLoadedSections = true;
+		for (const TSharedPtr<FJsonValue>& Sv : *SectionsArr)
 		{
-			const TSharedPtr<FJsonObject>* Po = nullptr;
-			if (!V.IsValid() || !V->TryGetObject(Po) || !Po || !(*Po).IsValid())
+			const TSharedPtr<FJsonObject>* So = nullptr;
+			if (!Sv.IsValid() || !Sv->TryGetObject(So) || !So->IsValid())
 			{
 				continue;
 			}
 			FUnrealAiProviderEntry E;
-			(*Po)->TryGetStringField(TEXT("id"), E.Id);
-			(*Po)->TryGetStringField(TEXT("baseUrl"), E.BaseUrl);
-			(*Po)->TryGetStringField(TEXT("apiKey"), E.ApiKey);
-			if (!E.Id.IsEmpty())
+			(*So)->TryGetStringField(TEXT("id"), E.Id);
+			(*So)->TryGetStringField(TEXT("baseUrl"), E.BaseUrl);
+			(*So)->TryGetStringField(TEXT("apiKey"), E.ApiKey);
+			if (E.Id.IsEmpty())
 			{
-				ProvidersById.Add(E.Id, MoveTemp(E));
+				continue;
+			}
+			ProvidersById.Add(E.Id, MoveTemp(E));
+
+			const TArray<TSharedPtr<FJsonValue>>* ModelsArr = nullptr;
+			if ((*So)->TryGetArrayField(TEXT("models"), ModelsArr) && ModelsArr)
+			{
+				for (const TSharedPtr<FJsonValue>& Mv : *ModelsArr)
+				{
+					const TSharedPtr<FJsonObject>* Mo = nullptr;
+					if (!Mv.IsValid() || !Mv->TryGetObject(Mo) || !Mo->IsValid())
+					{
+						continue;
+					}
+					FString ProfileKey;
+					(*Mo)->TryGetStringField(TEXT("profileKey"), ProfileKey);
+					if (ProfileKey.IsEmpty())
+					{
+						continue;
+					}
+					FUnrealAiModelCapabilities Cap = UnrealAiModelProfileRegistryUtil::DefaultsForId(ProfileKey);
+					Cap.ModelIdForApi = ProfileKey;
+					UnrealAiModelProfileRegistryUtil::ParseCapabilitiesObject(*Mo, Cap);
+					Cap.ProviderId = E.Id;
+					if (Cap.ModelIdForApi.IsEmpty())
+					{
+						Cap.ModelIdForApi = ProfileKey;
+					}
+					ModelMap.Add(ProfileKey, Cap);
+				}
 			}
 		}
 	}
 
-	const TSharedPtr<FJsonObject>* ModelsObj = nullptr;
-	if (Root->TryGetObjectField(TEXT("models"), ModelsObj) && ModelsObj && (*ModelsObj).IsValid())
+	if (!bLoadedSections)
 	{
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*ModelsObj)->Values)
+		const TArray<TSharedPtr<FJsonValue>>* ProvidersArr = nullptr;
+		if (Root->TryGetArrayField(TEXT("providers"), ProvidersArr) && ProvidersArr)
 		{
-			const FString& ModelKey = Pair.Key;
-			const TSharedPtr<FJsonObject>* CapObj = nullptr;
-			if (!(*ModelsObj)->TryGetObjectField(ModelKey, CapObj) || !CapObj || !(*CapObj).IsValid())
+			for (const TSharedPtr<FJsonValue>& V : *ProvidersArr)
 			{
-				continue;
+				const TSharedPtr<FJsonObject>* Po = nullptr;
+				if (!V.IsValid() || !V->TryGetObject(Po) || !Po || !(*Po).IsValid())
+				{
+					continue;
+				}
+				FUnrealAiProviderEntry E;
+				(*Po)->TryGetStringField(TEXT("id"), E.Id);
+				(*Po)->TryGetStringField(TEXT("baseUrl"), E.BaseUrl);
+				(*Po)->TryGetStringField(TEXT("apiKey"), E.ApiKey);
+				if (!E.Id.IsEmpty())
+				{
+					ProvidersById.Add(E.Id, MoveTemp(E));
+				}
 			}
-			FUnrealAiModelCapabilities Cap = UnrealAiModelProfileRegistryUtil::DefaultsForId(ModelKey);
-			Cap.ModelIdForApi = ModelKey;
-			UnrealAiModelProfileRegistryUtil::ParseCapabilitiesObject(*CapObj, Cap);
-			if (Cap.ModelIdForApi.IsEmpty())
+		}
+
+		const TSharedPtr<FJsonObject>* ModelsObj = nullptr;
+		if (Root->TryGetObjectField(TEXT("models"), ModelsObj) && ModelsObj && (*ModelsObj).IsValid())
+		{
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*ModelsObj)->Values)
 			{
+				const FString& ModelKey = Pair.Key;
+				const TSharedPtr<FJsonObject>* CapObj = nullptr;
+				if (!(*ModelsObj)->TryGetObjectField(ModelKey, CapObj) || !CapObj || !(*CapObj).IsValid())
+				{
+					continue;
+				}
+				FUnrealAiModelCapabilities Cap = UnrealAiModelProfileRegistryUtil::DefaultsForId(ModelKey);
 				Cap.ModelIdForApi = ModelKey;
+				UnrealAiModelProfileRegistryUtil::ParseCapabilitiesObject(*CapObj, Cap);
+				if (Cap.ModelIdForApi.IsEmpty())
+				{
+					Cap.ModelIdForApi = ModelKey;
+				}
+				ModelMap.Add(ModelKey, Cap);
 			}
-			ModelMap.Add(ModelKey, Cap);
 		}
 	}
 

@@ -21,6 +21,13 @@ struct FUnrealAiModelCapabilities
 	int32 MaxOutputTokens = 4096;
 	bool bSupportsNativeTools = true;
 	bool bSupportsParallelToolCalls = true;
+	/** When false, image-like context attachments are omitted from the built context (text-only models). */
+	bool bSupportsImages = true;
+	/**
+	 * Max tool↔LLM iterations per user send (each round = one completion, possibly + tool calls).
+	 * Higher values allow longer agent runs but usually consume more tokens. Clamped at runtime (e.g. 1–256).
+	 */
+	int32 MaxAgentLlmRounds = 16;
 };
 
 /** Single tool invocation produced by the LLM (OpenAI-style). */
@@ -29,6 +36,8 @@ struct FUnrealAiToolCallSpec
 	FString Id;
 	FString Name;
 	FString ArgumentsJson;
+	/** SSE deltas only: merge fragments with the same index into one spec. INDEX_NONE = full spec (non-stream). */
+	int32 StreamMergeIndex = INDEX_NONE;
 };
 
 /** One message in the persisted conversation / API payload. */
@@ -72,7 +81,7 @@ struct FUnrealAiAgentTurnRequest
 {
 	FString ProjectId;
 	FString ThreadId;
-	EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Fast;
+	EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Agent;
 	FString UserText;
 	/** Logical profile id (e.g. settings key); resolved to FUnrealAiModelCapabilities. */
 	FString ModelProfileId;

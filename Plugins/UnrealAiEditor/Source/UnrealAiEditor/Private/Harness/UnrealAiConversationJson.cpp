@@ -20,17 +20,13 @@ namespace UnrealAiConversationJson
 		}
 		if (M.ToolCalls.Num() > 0)
 		{
-			if (!M.Content.IsEmpty())
-			{
-				O->SetStringField(TEXT("content"), M.Content);
-			}
-			else
-			{
-				O->SetField(TEXT("content"), MakeShared<FJsonValueNull>());
-			}
 			TArray<TSharedPtr<FJsonValue>> TcArr;
 			for (const FUnrealAiToolCallSpec& Tc : M.ToolCalls)
 			{
+				if (Tc.Name.TrimStartAndEnd().IsEmpty())
+				{
+					continue;
+				}
 				TSharedPtr<FJsonObject> Tco = MakeShared<FJsonObject>();
 				Tco->SetStringField(TEXT("id"), Tc.Id);
 				Tco->SetStringField(TEXT("type"), TEXT("function"));
@@ -40,7 +36,22 @@ namespace UnrealAiConversationJson
 				Tco->SetObjectField(TEXT("function"), Fn);
 				TcArr.Add(MakeShared<FJsonValueObject>(Tco.ToSharedRef()));
 			}
-			O->SetArrayField(TEXT("tool_calls"), TcArr);
+			if (TcArr.Num() > 0)
+			{
+				if (!M.Content.IsEmpty())
+				{
+					O->SetStringField(TEXT("content"), M.Content);
+				}
+				else
+				{
+					O->SetField(TEXT("content"), MakeShared<FJsonValueNull>());
+				}
+				O->SetArrayField(TEXT("tool_calls"), TcArr);
+			}
+			else
+			{
+				O->SetStringField(TEXT("content"), M.Content);
+			}
 		}
 		else
 		{
@@ -89,6 +100,10 @@ namespace UnrealAiConversationJson
 			{
 				(*Fn)->TryGetStringField(TEXT("name"), Tc.Name);
 				(*Fn)->TryGetStringField(TEXT("arguments"), Tc.ArgumentsJson);
+			}
+			if (Tc.Name.TrimStartAndEnd().IsEmpty())
+			{
+				continue;
 			}
 			Out.Add(MoveTemp(Tc));
 		}

@@ -23,6 +23,14 @@ namespace UnrealAiWorkerOrchestratorPriv
 			(void)Ids;
 		}
 
+		virtual void OnContextUserMessages(const TArray<FString>& Messages) override
+		{
+			if (Parent.IsValid())
+			{
+				Parent->OnContextUserMessages(Messages);
+			}
+		}
+
 		virtual void OnAssistantDelta(const FString& Chunk) override
 		{
 			AccumulatedText += Chunk;

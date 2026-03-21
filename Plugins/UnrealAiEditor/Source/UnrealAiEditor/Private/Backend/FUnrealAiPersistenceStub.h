@@ -10,6 +10,8 @@ public:
 	virtual FString GetDataRootDirectory() const override;
 	virtual bool SaveSettingsJson(const FString& Json) override;
 	virtual bool LoadSettingsJson(FString& OutJson) override;
+	virtual bool SaveUsageStatsJson(const FString& Json) override;
+	virtual bool LoadUsageStatsJson(FString& OutJson) override;
 	virtual bool AppendChatMessage(const FString& ProjectId, const FUnrealAiChatMessage& Message) override;
 	virtual TArray<FString> ListThreads(const FString& ProjectId) override;
 	virtual bool SaveThreadContextJson(const FString& ProjectId, const FString& ThreadId, const FString& JsonBody) override;

@@ -23,7 +23,6 @@ void FUnrealAiEditorCommands::RegisterCommands()
 		EUserInterfaceActionType::Button,
 		FInputChord(EKeys::K, EModifierKey::Control));
 	UI_COMMAND(OpenSettingsTab, "AI Settings", "Open full AI settings.", EUserInterfaceActionType::Button, FInputChord());
-	UI_COMMAND(OpenApiModelsTab, "API Keys & Models", "Configure API keys and default models.", EUserInterfaceActionType::Button, FInputChord());
 	UI_COMMAND(OpenQuickStartTab, "Quick Start", "Open Quick Start guide.", EUserInterfaceActionType::Button, FInputChord());
 	UI_COMMAND(OpenHelpTab, "Help", "Open help.", EUserInterfaceActionType::Button, FInputChord());
 }

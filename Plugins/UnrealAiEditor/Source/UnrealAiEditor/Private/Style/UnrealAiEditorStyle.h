@@ -13,6 +13,8 @@ public:
 	static FName GetStyleSetName();
 
 	static const FSlateBrush* GetBrush(FName PropertyName);
+	/** Re-read bubble colors from project settings (called after edits and during style init). */
+	static void ApplyChatBubbleColorsFromSettings();
 	static FSlateColor ColorBackgroundCanvas();
 	static FSlateColor ColorTextPrimary();
 	static FSlateColor ColorAccent();

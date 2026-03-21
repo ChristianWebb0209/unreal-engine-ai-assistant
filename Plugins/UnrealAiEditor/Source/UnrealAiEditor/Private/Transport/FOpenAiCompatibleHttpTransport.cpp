@@ -211,8 +211,11 @@ namespace OpenAiTransportUtil
 					}
 					FUnrealAiToolCallSpec Tc;
 					(*Tco)->TryGetStringField(TEXT("id"), Tc.Id);
-					double Idx = 0;
-					(*Tco)->TryGetNumberField(TEXT("index"), Idx);
+					double IdxNum = 0;
+					if ((*Tco)->TryGetNumberField(TEXT("index"), IdxNum))
+					{
+						Tc.StreamMergeIndex = static_cast<int32>(IdxNum);
+					}
 					const TSharedPtr<FJsonObject>* Fn = nullptr;
 					if ((*Tco)->TryGetObjectField(TEXT("function"), Fn) && Fn->IsValid())
 					{
@@ -223,7 +226,8 @@ namespace OpenAiTransportUtil
 							Tc.ArgumentsJson += Args;
 						}
 					}
-					if (!Tc.Id.IsEmpty() || !Tc.Name.IsEmpty() || !Tc.ArgumentsJson.IsEmpty())
+					if (Tc.StreamMergeIndex >= 0 || !Tc.Id.IsEmpty() || !Tc.Name.IsEmpty()
+						|| !Tc.ArgumentsJson.IsEmpty())
 					{
 						FUnrealAiLlmStreamEvent TcEv;
 						TcEv.Type = EUnrealAiLlmStreamEventType::ToolCalls;

@@ -39,11 +39,28 @@ namespace UnrealAiContextMentionParser
 		return false;
 	}
 
-	void ApplyMentionsFromPrompt(IAgentContextService* Ctx, const FString& Prompt)
+	void ApplyMentionsFromPrompt(
+		IAgentContextService* Ctx,
+		const FString& ProjectId,
+		const FString& ThreadId,
+		const FString& Prompt)
 	{
 		if (!Ctx || Prompt.IsEmpty())
 		{
 			return;
+		}
+		Ctx->LoadOrCreate(ProjectId, ThreadId);
+		const FAgentContextState* St = Ctx->GetState(ProjectId, ThreadId);
+		TSet<FString> SeenAssetPayloads;
+		if (St)
+		{
+			for (const FContextAttachment& A : St->Attachments)
+			{
+				if (A.Type == EContextAttachmentType::AssetPath && !A.Payload.IsEmpty())
+				{
+					SeenAssetPayloads.Add(FSoftObjectPath(A.Payload).ToString());
+				}
+			}
 		}
 		static const FRegexPattern MentionPattern(TEXT("@([A-Za-z0-9_./]+)"));
 		FRegexMatcher M(MentionPattern, Prompt);
@@ -57,11 +74,17 @@ namespace UnrealAiContextMentionParser
 			FString Resolved;
 			if (ResolveTokenToAssetPath(Token, Resolved))
 			{
+				const FString PayloadNorm = FSoftObjectPath(Resolved).ToString();
+				if (SeenAssetPayloads.Contains(PayloadNorm))
+				{
+					continue;
+				}
 				FContextAttachment A;
 				A.Type = EContextAttachmentType::AssetPath;
-				A.Payload = Resolved;
+				A.Payload = PayloadNorm;
 				A.Label = FString(TEXT("@")) + Token;
 				Ctx->AddAttachment(A);
+				SeenAssetPayloads.Add(PayloadNorm);
 			}
 		}
 	}

@@ -12,7 +12,6 @@ public:
 
 	TSharedPtr<FUICommandInfo> OpenChatTab;
 	TSharedPtr<FUICommandInfo> OpenSettingsTab;
-	TSharedPtr<FUICommandInfo> OpenApiModelsTab;
 	TSharedPtr<FUICommandInfo> OpenQuickStartTab;
 	TSharedPtr<FUICommandInfo> OpenHelpTab;
 };

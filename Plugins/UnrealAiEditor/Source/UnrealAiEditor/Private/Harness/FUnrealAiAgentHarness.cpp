@@ -1,6 +1,7 @@
 #include "Harness/FUnrealAiAgentHarness.h"
 
 #include "Async/Async.h"
+#include "Harness/UnrealAiAgentTypes.h"
 #include "Templates/SharedPointer.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Harness/FUnrealAiConversationStore.h"
@@ -11,6 +12,7 @@
 #include "Harness/IToolExecutionHost.h"
 #include "Context/IAgentContextService.h"
 #include "Context/AgentContextTypes.h"
+#include "Backend/FUnrealAiUsageTracker.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Harness/UnrealAiLlmInvocationService.h"
 #include "Dom/JsonObject.h"
@@ -21,6 +23,34 @@
 
 namespace UnrealAiAgentHarnessPriv
 {
+	static void MergeToolCallDeltas(TArray<FUnrealAiToolCallSpec>& Acc, const TArray<FUnrealAiToolCallSpec>& Delta)
+	{
+		for (const FUnrealAiToolCallSpec& D : Delta)
+		{
+			if (D.StreamMergeIndex >= 0)
+			{
+				while (Acc.Num() <= D.StreamMergeIndex)
+				{
+					Acc.AddDefaulted();
+				}
+				FUnrealAiToolCallSpec& Slot = Acc[D.StreamMergeIndex];
+				if (!D.Id.IsEmpty())
+				{
+					Slot.Id = D.Id;
+				}
+				if (!D.Name.IsEmpty())
+				{
+					Slot.Name = D.Name;
+				}
+				Slot.ArgumentsJson += D.ArgumentsJson;
+			}
+			else
+			{
+				Acc.Add(D);
+			}
+		}
+	}
+
 	struct FAgentTurnRunner : public TSharedFromThis<FAgentTurnRunner>
 	{
 		FUnrealAiAgentTurnRequest Request;
@@ -31,11 +61,16 @@ namespace UnrealAiAgentHarnessPriv
 		FUnrealAiToolCatalog* Catalog = nullptr;
 		TSharedPtr<ILlmTransport> Transport;
 		IToolExecutionHost* Tools = nullptr;
+		FUnrealAiUsageTracker* UsageTracker = nullptr;
 		TUniquePtr<FUnrealAiConversationStore> Conv;
+
+		FUnrealAiTokenUsage UsageThisRound;
+		FUnrealAiTokenUsage AccumulatedUsage;
 
 		FGuid RunId;
 		int32 LlmRound = 0;
-		static constexpr int32 MaxLlmRounds = 16;
+		/** From model profile `maxAgentLlmRounds` (default 16), set each DispatchLlm. */
+		int32 EffectiveMaxLlmRounds = 16;
 
 		FString AssistantBuffer;
 		TArray<FUnrealAiToolCallSpec> PendingToolCalls;
@@ -49,6 +84,7 @@ namespace UnrealAiAgentHarnessPriv
 		void CompleteAssistantOnly();
 		void Fail(const FString& Msg);
 		void Succeed();
+		void AccumulateRoundUsage();
 
 		static constexpr int32 CharPerTokenApprox = 4;
 	};
@@ -77,6 +113,11 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			Conv->SaveNow();
 		}
+		if (UsageTracker && Profiles && !Request.ModelProfileId.IsEmpty()
+			&& (AccumulatedUsage.PromptTokens > 0 || AccumulatedUsage.CompletionTokens > 0))
+		{
+			UsageTracker->RecordUsage(Request.ModelProfileId, AccumulatedUsage, *Profiles);
+		}
 		if (Request.bRecordAssistantAsStubToolResult && ContextService && Conv.IsValid())
 		{
 			FString LastAssistant;
@@ -102,6 +143,20 @@ namespace UnrealAiAgentHarnessPriv
 		}
 	}
 
+	void FAgentTurnRunner::AccumulateRoundUsage()
+	{
+		int32 P = UsageThisRound.PromptTokens;
+		int32 C = UsageThisRound.CompletionTokens;
+		if (P == 0 && C == 0 && UsageThisRound.TotalTokens > 0)
+		{
+			P = UsageThisRound.TotalTokens / 2;
+			C = UsageThisRound.TotalTokens - P;
+		}
+		AccumulatedUsage.PromptTokens += P;
+		AccumulatedUsage.CompletionTokens += C;
+		UsageThisRound = FUnrealAiTokenUsage();
+	}
+
 	void FAgentTurnRunner::DispatchLlm()
 	{
 		if (!Transport.IsValid() || !Profiles || !Catalog || !ContextService || !Conv.IsValid() || !Tools)
@@ -114,7 +169,12 @@ namespace UnrealAiAgentHarnessPriv
 			Fail(TEXT("Cancelled"));
 			return;
 		}
-		if (LlmRound >= MaxLlmRounds)
+		FUnrealAiModelCapabilities CapLimits;
+		Profiles->GetEffectiveCapabilities(Request.ModelProfileId, CapLimits);
+		const int32 ParsedMax = CapLimits.MaxAgentLlmRounds > 0 ? CapLimits.MaxAgentLlmRounds : 16;
+		EffectiveMaxLlmRounds = FMath::Clamp(ParsedMax, 1, 256);
+
+		if (LlmRound >= EffectiveMaxLlmRounds)
 		{
 			Fail(TEXT("Max tool/LLM rounds exceeded"));
 			return;
@@ -122,28 +182,35 @@ namespace UnrealAiAgentHarnessPriv
 		++LlmRound;
 		if (LlmRound > 1 && Sink.IsValid())
 		{
-			Sink->OnRunContinuation(LlmRound - 1, MaxLlmRounds);
+			Sink->OnRunContinuation(LlmRound - 1, EffectiveMaxLlmRounds);
 		}
+		UsageThisRound = FUnrealAiTokenUsage();
 		AssistantBuffer.Reset();
 		PendingToolCalls.Reset();
 		bFinishSeen = false;
 
 		FUnrealAiLlmRequest LlmReq;
 		FString BuildErr;
+		TArray<FString> ContextUserMsgs;
 		if (!UnrealAiTurnLlmRequestBuilder::Build(
 				Request,
 				LlmRound,
-				MaxLlmRounds,
+				EffectiveMaxLlmRounds,
 				ContextService,
 				Profiles,
 				Catalog,
 				Conv.Get(),
 				CharPerTokenApprox,
 				LlmReq,
+				ContextUserMsgs,
 				BuildErr))
 		{
 			Fail(BuildErr);
 			return;
+		}
+		if (Sink.IsValid() && ContextUserMsgs.Num() > 0)
+		{
+			Sink->OnContextUserMessages(ContextUserMsgs);
 		}
 
 		const TSharedPtr<FAgentTurnRunner> Self = AsShared();
@@ -181,9 +248,12 @@ namespace UnrealAiAgentHarnessPriv
 			Sink->OnThinkingDelta(Ev.DeltaText);
 			break;
 		case EUnrealAiLlmStreamEventType::ToolCalls:
-			PendingToolCalls.Append(Ev.ToolCalls);
+			MergeToolCallDeltas(PendingToolCalls, Ev.ToolCalls);
 			break;
 		case EUnrealAiLlmStreamEventType::Finish:
+			UsageThisRound.PromptTokens = FMath::Max(UsageThisRound.PromptTokens, Ev.Usage.PromptTokens);
+			UsageThisRound.CompletionTokens = FMath::Max(UsageThisRound.CompletionTokens, Ev.Usage.CompletionTokens);
+			UsageThisRound.TotalTokens = FMath::Max(UsageThisRound.TotalTokens, Ev.Usage.TotalTokens);
 			bFinishSeen = true;
 			if (Ev.FinishReason == TEXT("tool_calls") && PendingToolCalls.Num() == 0)
 			{
@@ -214,6 +284,19 @@ namespace UnrealAiAgentHarnessPriv
 			Fail(TEXT("Tool host missing"));
 			return;
 		}
+		PendingToolCalls.RemoveAll([](const FUnrealAiToolCallSpec& T)
+		{
+			return T.Name.TrimStartAndEnd().IsEmpty();
+		});
+		if (PendingToolCalls.Num() == 0)
+		{
+			Fail(TEXT("Model completed tool_calls but no valid tool name (empty function.name)"));
+			return;
+		}
+		const bool bTodoPlanOnly = PendingToolCalls.Num() == 1
+			&& PendingToolCalls[0].Name == TEXT("agent_emit_todo_plan");
+		int32 ToolSuccessCount = 0;
+		int32 ToolFailCount = 0;
 		FUnrealAiConversationMessage Am;
 		Am.Role = TEXT("assistant");
 		Am.Content = AssistantBuffer;
@@ -227,6 +310,14 @@ namespace UnrealAiAgentHarnessPriv
 				Sink->OnToolCallStarted(Tc.Name, Tc.Id, Tc.ArgumentsJson);
 			}
 			const FUnrealAiToolInvocationResult Inv = Tools->InvokeTool(Tc.Name, Tc.ArgumentsJson, Tc.Id);
+			if (Inv.bOk)
+			{
+				++ToolSuccessCount;
+			}
+			else
+			{
+				++ToolFailCount;
+			}
 			if (Sink.IsValid())
 			{
 				const FString Preview = Inv.bOk ? Inv.ContentForModel : Inv.ErrorMessage;
@@ -252,8 +343,33 @@ namespace UnrealAiAgentHarnessPriv
 			Tm.Content = Inv.bOk ? Inv.ContentForModel : Inv.ErrorMessage;
 			Conv->GetMessagesMutable().Add(Tm);
 		}
+		// The next round still runs (DispatchLlm below), but models often reply with text-only and end
+		// the run. A synthetic user line nudges execution when the only tool was the todo plan.
+		if (bTodoPlanOnly && Request.Mode != EUnrealAiAgentMode::Ask)
+		{
+			FUnrealAiConversationMessage Nudge;
+			Nudge.Role = TEXT("user");
+			Nudge.Content = TEXT(
+				"[Harness] Plan recorded. Continue immediately: execute the first pending plan step using "
+				"Unreal Editor tools. Do not finish with narration only—invoke tools this turn unless truly blocked.");
+			Conv->GetMessagesMutable().Add(Nudge);
+		}
+		else if (Request.Mode == EUnrealAiAgentMode::Agent)
+		{
+			// Agent mode should keep iterating after tool execution. This avoids frequent one-tool stalls where
+			// the next model turn summarizes and ends instead of taking the next concrete action.
+			FUnrealAiConversationMessage Nudge;
+			Nudge.Role = TEXT("user");
+			Nudge.Content = FString::Printf(
+				TEXT("[Harness] Tool round complete (ok=%d, failed=%d). Continue executing the user's request. ")
+				TEXT("If the task is not complete, call the next tool now. Only finish when the requested scene/work is actually done or you are truly blocked."),
+				ToolSuccessCount,
+				ToolFailCount);
+			Conv->GetMessagesMutable().Add(Nudge);
+		}
 		PendingToolCalls.Reset();
 		AssistantBuffer.Reset();
+		AccumulateRoundUsage();
 		DispatchLlm();
 	}
 
@@ -264,6 +380,7 @@ namespace UnrealAiAgentHarnessPriv
 			Fail(TEXT("Conversation missing"));
 			return;
 		}
+		AccumulateRoundUsage();
 		FUnrealAiConversationMessage Am;
 		Am.Role = TEXT("assistant");
 		Am.Content = AssistantBuffer;
@@ -278,13 +395,15 @@ FUnrealAiAgentHarness::FUnrealAiAgentHarness(
 	FUnrealAiModelProfileRegistry* InProfiles,
 	FUnrealAiToolCatalog* InCatalog,
 	TSharedPtr<ILlmTransport> InTransport,
-	IToolExecutionHost* InToolHost)
+	IToolExecutionHost* InToolHost,
+	FUnrealAiUsageTracker* InUsageTracker)
 	: Persistence(InPersistence)
 	, Context(InContext)
 	, Profiles(InProfiles)
 	, Catalog(InCatalog)
 	, Transport(MoveTemp(InTransport))
 	, ToolHost(InToolHost)
+	, UsageTracker(InUsageTracker)
 {
 }
 
@@ -334,6 +453,8 @@ void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TS
 	Runner->Catalog = Catalog;
 	Runner->Transport = Transport;
 	Runner->Tools = ToolHost;
+	Runner->UsageTracker = UsageTracker;
+	Runner->AccumulatedUsage = FUnrealAiTokenUsage();
 	Runner->Conv = MakeUnique<FUnrealAiConversationStore>(Persistence);
 	Runner->Conv->LoadOrCreate(Request.ProjectId, Request.ThreadId);
 
