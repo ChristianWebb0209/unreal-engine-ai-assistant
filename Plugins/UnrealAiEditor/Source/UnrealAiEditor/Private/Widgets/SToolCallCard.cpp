@@ -6,6 +6,8 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Layout/SExpandableArea.h"
+#include "Widgets/Layout/SSpacer.h"
+#include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "HAL/PlatformTime.h"
@@ -58,9 +60,6 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 	CategoryTint = UnrealAiToolCategoryTint(Cat);
 	const FLinearColor DotColor = CategoryTint;
 
-	const FString ArgsUi = UnrealAiTruncateForUi(ArgsPreview);
-	const FString ResUi = UnrealAiTruncateForUi(ResultPreview);
-
 	ChildSlot
 		[SNew(SBorder)
 				.BorderBackgroundColor_Lambda([this, BaseTint = CategoryTint]() -> FSlateColor
@@ -74,97 +73,119 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 					const FLinearColor Bright = BaseTint * FLinearColor(0.95f, 0.95f, 0.95f, 0.95f);
 					return FSlateColor(FLinearColor::LerpUsingHSV(Dim, Bright, T));
 				})
-				.Padding(FMargin(6.f))
+				.Padding(FMargin(4.f))
 				[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot().AutoHeight()
-					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 4.f, 0.f))
+					SNew(SExpandableArea)
+						.InitiallyCollapsed(true)
+						.AreaTitle(FText::GetEmpty())
+						.BorderBackgroundColor(FLinearColor(0.09f, 0.09f, 0.1f, 0.98f))
+						.HeaderContent()
 						[
-							SNew(STextBlock)
-								.Text(FText::FromString(TEXT("\u2022")))
-								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
-								.ColorAndOpacity(FSlateColor(DotColor))
-						]
-						+ SHorizontalBox::Slot().FillWidth(1.f)
-						[
-							SNew(STextBlock)
-								.Text(FText::FromString(FString::Printf(TEXT("Tool: %s"), *ToolName)))
-								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-								.ColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.95f, 0.95f, 1.f)))
-						]
-						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))
-						[
-							SNew(SButton)
-								.Text(LOCTEXT("CopyTool", "Copy"))
-								.OnClicked(this, &SToolCallCard::OnCopyClicked)
-						]
-						+ SHorizontalBox::Slot().AutoWidth()
-						[
-							SNew(STextBlock)
-								.Text_Lambda([this]()
-								{
-									if (bRunning)
-									{
-										return LOCTEXT("ToolRunning", "Running…");
-									}
-									return bSuccess ? LOCTEXT("ToolOk", "Done") : LOCTEXT("ToolFail", "Failed");
-								})
-								.ColorAndOpacity_Lambda([this]()
-								{
-									if (bRunning)
-									{
-										return FSlateColor(FLinearColor(0.9f, 0.85f, 0.4f, 1.f));
-									}
-									return bSuccess
-										? FSlateColor(FLinearColor(0.45f, 0.9f, 0.5f, 1.f))
-										: FSlateColor(FLinearColor(0.95f, 0.4f, 0.4f, 1.f));
-								})
-						]
-					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 2.f))
-					[
-						SNew(SExpandableArea)
-							.InitiallyCollapsed(true)
-							.BorderBackgroundColor(FLinearColor(0.118f, 0.118f, 0.118f, 1.f))
-							.HeaderContent()
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 6.f, 0.f))
 							[
-								SNew(STextBlock).Text(LOCTEXT("ToolDetails", "Arguments & result"))
+								SNew(SBox)
+									.WidthOverride(3.f)
+									.HeightOverride(18.f)
+									[
+										SNew(SBorder)
+											.BorderBackgroundColor(DotColor)
+											[
+												SNew(SSpacer)
+											]
+									]
 							]
-							.BodyContent()
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 4.f, 0.f))
 							[
-								SNew(SVerticalBox)
-								+ SVerticalBox::Slot().AutoHeight().Padding(4.f)
-								[
-									SNew(STextBlock)
-										.Text(LOCTEXT("ArgsHdr", "Arguments (JSON)"))
-										.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-								]
-								+ SVerticalBox::Slot().AutoHeight()
-								[
-									SNew(STextBlock)
-										.AutoWrapText(true)
-										.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
-										.Text(FText::FromString(ArgsUi))
-										.ColorAndOpacity(FSlateColor(FLinearColor(0.78f, 0.8f, 0.85f, 1.f)))
-								]
-								+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 6.f, 0.f, 0.f))
-								[
-									SNew(STextBlock)
-										.Text(LOCTEXT("ResHdr", "Result"))
-										.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-								]
-								+ SVerticalBox::Slot().AutoHeight()
-								[
-									SNew(STextBlock)
-										.AutoWrapText(true)
-										.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
-										.Text(FText::FromString(ResUi.IsEmpty() && bRunning ? FString(TEXT("…")) : ResUi))
-										.ColorAndOpacity(FSlateColor(FLinearColor(0.72f, 0.76f, 0.82f, 1.f)))
-								]
+								SNew(STextBlock)
+									.Text(FText::FromString(TEXT("\u2022")))
+									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+									.ColorAndOpacity(FSlateColor(DotColor))
 							]
-					]
+							+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+							[
+								SNew(STextBlock)
+									.Text(FText::FromString(ToolName))
+									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+									.ColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.95f, 0.95f, 1.f)))
+							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(4.f, 0.f, 6.f, 0.f))
+							[
+								SNew(SButton)
+									.ButtonStyle(FCoreStyle::Get(), "NoBorder")
+									.ContentPadding(FMargin(4.f, 2.f))
+									.Text(LOCTEXT("CopyTool", "Copy"))
+									.OnClicked(this, &SToolCallCard::OnCopyClicked)
+							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[
+								SNew(STextBlock)
+									.Text_Lambda([this]()
+									{
+										if (bRunning)
+										{
+											return LOCTEXT("ToolRunning", "Running…");
+										}
+										return bSuccess ? LOCTEXT("ToolOk", "Done") : LOCTEXT("ToolFail", "Failed");
+									})
+									.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+									.ColorAndOpacity_Lambda([this]()
+									{
+										if (bRunning)
+										{
+											return FSlateColor(FLinearColor(0.9f, 0.85f, 0.4f, 1.f));
+										}
+										return bSuccess
+											? FSlateColor(FLinearColor(0.45f, 0.9f, 0.5f, 1.f))
+											: FSlateColor(FLinearColor(0.95f, 0.4f, 0.4f, 1.f));
+									})
+							]
+						]
+						.BodyContent()
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 2.f, 4.f, 2.f))
+							[
+								SNew(STextBlock)
+									.Text(LOCTEXT("ArgsHdr", "Arguments (JSON)"))
+									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+									.ColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.7f, 0.78f, 1.f)))
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 0.f, 4.f, 4.f))
+							[
+								SNew(SBox)
+									.MinDesiredWidth(200.f)
+									.MaxDesiredHeight(160.f)
+									[
+										SNew(SMultiLineEditableText)
+											.IsReadOnly(true)
+											.AutoWrapText(true)
+											.Font(FCoreStyle::GetDefaultFontStyle("Mono", 8))
+											.Text(FText::FromString(ArgsPreview.IsEmpty() ? TEXT("(empty)") : ArgsPreview))
+									]
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 0.f, 4.f, 2.f))
+							[
+								SNew(STextBlock)
+									.Text(LOCTEXT("ResHdr", "Result"))
+									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+									.ColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.7f, 0.78f, 1.f)))
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 0.f, 4.f, 2.f))
+							[
+								SNew(SBox)
+									.MinDesiredWidth(200.f)
+									.MaxDesiredHeight(200.f)
+									[
+										SNew(SMultiLineEditableText)
+											.IsReadOnly(true)
+											.AutoWrapText(true)
+											.Font(FCoreStyle::GetDefaultFontStyle("Mono", 8))
+											.Text(FText::FromString(
+												ResultPreview.IsEmpty() && bRunning ? FString(TEXT("…")) : ResultPreview))
+									]
+							]
+						]
 				]];
 
 	RegisterPulseTimerIfNeeded();

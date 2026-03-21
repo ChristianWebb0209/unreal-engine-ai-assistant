@@ -10,14 +10,74 @@ void FUnrealAiChatTranscript::Clear()
 	OnStructuralChange.Broadcast();
 }
 
-void FUnrealAiChatTranscript::AddUserMessage(const FString& Text)
+FString FUnrealAiChatTranscript::FormatPlainText() const
+{
+	FString Out;
+	for (const FUnrealAiChatBlock& B : Blocks)
+	{
+		switch (B.Kind)
+		{
+		case EUnrealAiChatBlockKind::User:
+			Out += FString::Printf(TEXT("--- User ---\n%s"), *B.UserText);
+			if (!B.UserComplexityLabel.IsEmpty())
+			{
+				Out += FString::Printf(TEXT("\n(Complexity: %s)"), *B.UserComplexityLabel);
+			}
+			Out += TEXT("\n\n");
+			break;
+		case EUnrealAiChatBlockKind::Thinking:
+			Out += FString::Printf(TEXT("--- Thinking ---\n%s\n\n"), *B.ThinkingText);
+			break;
+		case EUnrealAiChatBlockKind::Assistant:
+			Out += FString::Printf(TEXT("--- Assistant ---\n%s\n\n"), *B.AssistantText);
+			break;
+		case EUnrealAiChatBlockKind::ToolCall:
+			Out += FString::Printf(
+				TEXT("--- Tool: %s ---\nArgs: %s\nResult: %s\nStatus: %s\n\n"),
+				*B.ToolName,
+				*B.ToolArgsPreview,
+				*B.ToolResultPreview,
+				B.bToolRunning ? TEXT("running") : (B.bToolOk ? TEXT("ok") : TEXT("failed")));
+			break;
+		case EUnrealAiChatBlockKind::TodoPlan:
+			Out += FString::Printf(TEXT("--- Todo plan: %s ---\n%s\n\n"), *B.TodoTitle, *B.TodoJson);
+			break;
+		case EUnrealAiChatBlockKind::RunProgress:
+			Out += FString::Printf(TEXT("--- Progress ---\n%s\n\n"), *B.ProgressLabel);
+			break;
+		case EUnrealAiChatBlockKind::Notice:
+			Out += FString::Printf(TEXT("--- Notice ---\n%s\n\n"), *B.NoticeText);
+			break;
+		default:
+			break;
+		}
+	}
+	return Out;
+}
+
+FGuid FUnrealAiChatTranscript::AddUserMessage(const FString& Text, FGuid DesiredId)
 {
 	FUnrealAiChatBlock B;
-	B.Id = FGuid::NewGuid();
+	const FGuid NewId = DesiredId.IsValid() ? DesiredId : FGuid::NewGuid();
+	B.Id = NewId;
 	B.Kind = EUnrealAiChatBlockKind::User;
 	B.UserText = Text;
 	Blocks.Add(MoveTemp(B));
 	OnStructuralChange.Broadcast();
+	return NewId;
+}
+
+void FUnrealAiChatTranscript::SetUserComplexity(const FGuid& UserBlockId, const FString& ComplexityLabel)
+{
+	for (FUnrealAiChatBlock& B : Blocks)
+	{
+		if (B.Id == UserBlockId && B.Kind == EUnrealAiChatBlockKind::User)
+		{
+			B.UserComplexityLabel = ComplexityLabel;
+			OnStructuralChange.Broadcast();
+			return;
+		}
+	}
 }
 
 void FUnrealAiChatTranscript::BeginRun(const FGuid& RunId)
@@ -30,10 +90,6 @@ void FUnrealAiChatTranscript::BeginRun(const FGuid& RunId)
 
 void FUnrealAiChatTranscript::AppendThinkingDelta(const FString& Chunk)
 {
-	if (Chunk.IsEmpty())
-	{
-		return;
-	}
 	const bool bFirst = !bThinkingOpen;
 	if (!bThinkingOpen)
 	{
@@ -46,7 +102,7 @@ void FUnrealAiChatTranscript::AppendThinkingDelta(const FString& Chunk)
 		bThinkingOpen = true;
 		OnStructuralChange.Broadcast();
 	}
-	else
+	else if (!Chunk.IsEmpty())
 	{
 		for (int32 i = Blocks.Num() - 1; i >= 0; --i)
 		{
@@ -82,6 +138,16 @@ void FUnrealAiChatTranscript::AppendAssistantDelta(const FString& Chunk)
 	if (Chunk.IsEmpty())
 	{
 		return;
+	}
+	// If we only opened an empty thinking placeholder and the model answers without reasoning, drop it.
+	if (bThinkingOpen && Blocks.Num() > 0)
+	{
+		const int32 LastIdx = Blocks.Num() - 1;
+		if (Blocks[LastIdx].Kind == EUnrealAiChatBlockKind::Thinking && Blocks[LastIdx].ThinkingText.IsEmpty())
+		{
+			Blocks.RemoveAt(LastIdx);
+			bThinkingOpen = false;
+		}
 	}
 	if (!bAssistantSegmentOpen || Blocks.Num() == 0 || Blocks.Last().Kind != EUnrealAiChatBlockKind::Assistant)
 	{
@@ -180,10 +246,26 @@ void FUnrealAiChatTranscript::EndRun(bool bSuccess, const FString& ErrorMessage)
 
 void FUnrealAiChatTranscript::OnContinuation(int32 PhaseIndex, int32 TotalPhasesHint)
 {
-	const FString Label = TotalPhasesHint > 0
-		? FString::Printf(TEXT("Continuing — round %d / %d"), PhaseIndex + 1, TotalPhasesHint)
-		: FString::Printf(TEXT("Continuing — round %d"), PhaseIndex + 1);
-	SetRunProgress(Label);
+	(void)PhaseIndex;
+	(void)TotalPhasesHint;
+	// Internal harness round counter only — do not surface to chat UI.
+}
+
+void FUnrealAiChatTranscript::AddInformationalNotice(const FString& Text)
+{
+	if (Text.IsEmpty())
+	{
+		return;
+	}
+	FUnrealAiChatBlock B;
+	B.Id = FGuid::NewGuid();
+	B.RunId = ActiveRunId;
+	B.Kind = EUnrealAiChatBlockKind::Notice;
+	B.NoticeText = Text;
+	B.bNoticeError = false;
+	B.bRunCancelled = false;
+	Blocks.Add(MoveTemp(B));
+	OnStructuralChange.Broadcast();
 }
 
 void UnrealAiCollectToolsAfterAssistant(
@@ -203,6 +285,38 @@ void UnrealAiCollectToolsAfterAssistant(
 		if (K == EUnrealAiChatBlockKind::ToolCall)
 		{
 			OutOrderedToolNames.Add(Blocks[i].ToolName);
+		}
+		else if (K == EUnrealAiChatBlockKind::Assistant || K == EUnrealAiChatBlockKind::User)
+		{
+			break;
+		}
+	}
+}
+
+void UnrealAiCollectToolDetailsAfterAssistant(
+	const TArray<FUnrealAiChatBlock>& Blocks,
+	int32 AssistantIndex,
+	TArray<FUnrealAiAssistantSegmentToolInfo>& OutDetails)
+{
+	OutDetails.Reset();
+	if (!Blocks.IsValidIndex(AssistantIndex)
+		|| Blocks[AssistantIndex].Kind != EUnrealAiChatBlockKind::Assistant)
+	{
+		return;
+	}
+	for (int32 i = AssistantIndex + 1; i < Blocks.Num(); ++i)
+	{
+		const EUnrealAiChatBlockKind K = Blocks[i].Kind;
+		if (K == EUnrealAiChatBlockKind::ToolCall)
+		{
+			FUnrealAiAssistantSegmentToolInfo Row;
+			Row.ToolName = Blocks[i].ToolName;
+			Row.ToolCallId = Blocks[i].ToolCallId;
+			Row.ArgsPreview = Blocks[i].ToolArgsPreview;
+			Row.ResultPreview = Blocks[i].ToolResultPreview;
+			Row.bRunning = Blocks[i].bToolRunning;
+			Row.bOk = Blocks[i].bToolOk;
+			OutDetails.Add(MoveTemp(Row));
 		}
 		else if (K == EUnrealAiChatBlockKind::Assistant || K == EUnrealAiChatBlockKind::User)
 		{
