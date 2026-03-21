@@ -44,7 +44,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AudioComponentPreview(const TShar
 	{
 		return UnrealAiToolJson::Error(TEXT("No editor world"));
 	}
-	UGameplayStatics::PlaySound2D(W, Sound, 1.f, 1.f, 0.f, nullptr, false, nullptr);
+	UGameplayStatics::PlaySound2D(W, Sound, 1.f, 1.f, 0.f, nullptr, nullptr, false);
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	return UnrealAiToolJson::Ok(O);
@@ -78,7 +78,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_RenderTargetReadbackEditor(const 
 	{
 		Abs = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir(), Abs);
 	}
-	const bool bOk = UKismetRenderingLibrary::ExportRenderTarget(W, RT, Abs);
+	const FString ExportDir = FPaths::GetPath(Abs);
+	const FString ExportFile = FPaths::GetCleanFilename(Abs);
+	UKismetRenderingLibrary::ExportRenderTarget(W, RT, ExportDir, ExportFile);
+	const bool bOk = true;
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), bOk);
 	O->SetStringField(TEXT("export_path"), Abs);

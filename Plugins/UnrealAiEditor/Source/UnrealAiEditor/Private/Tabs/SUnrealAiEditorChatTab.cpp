@@ -13,9 +13,9 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/Layout/SVerticalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
-#include "Widgets/Layout/SHorizontalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Styling/CoreStyle.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
@@ -67,13 +67,13 @@ void SUnrealAiEditorChatTab::Construct(const FArguments& InArgs)
 								.Font(FCoreStyle::GetDefaultFontStyle("Italic", 9))
 								.ColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.62f, 0.55f, 1.f)))
 						]
-						+ SHorizontalBox::Slot().AutoWidth().Padding(4.f, 0.f)
+						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))
 						[
 							SNew(SButton)
 								.IsEnabled(false)
 								.Text(LOCTEXT("AllowOnce", "Allow once"))
 						]
-						+ SHorizontalBox::Slot().AutoWidth().Padding(4.f, 0.f)
+						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))
 						[
 							SNew(SButton)
 								.IsEnabled(false)

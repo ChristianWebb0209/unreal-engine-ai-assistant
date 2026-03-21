@@ -11,7 +11,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Layout/SBorder.h"
-#include "Widgets/Layout/SHorizontalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
@@ -76,11 +76,11 @@ void SChatHeader::Construct(const FArguments& InArgs)
 				.Padding(FMargin(8.f))
 				[
 					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.f, 0.f)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(4.f, 0.f))
 					[
 						SNew(STextBlock).Text(LOCTEXT("ModelHdr", "Model"))
 					]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.f, 0.f)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(4.f, 0.f))
 					[
 						SAssignNew(ModelCombo, SComboBox<TSharedPtr<FString>>)
 							.OptionsSource(&ModelOptions)
@@ -98,27 +98,27 @@ void SChatHeader::Construct(const FArguments& InArgs)
 									.Text(this, &SChatHeader::GetSelectedModelText)
 							]
 					]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(12.f, 0.f)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(12.f, 0.f))
 					[
 						SNew(STextBlock)
 							.Text(this, &SChatHeader::GetConnectionStatusText)
 							.ColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.75f, 0.85f, 1.f)))
 					]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(12.f, 0.f)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(12.f, 0.f))
 					[
 						SNew(STextBlock)
 							.Text(this, &SChatHeader::GetComplexityText)
 							.ColorAndOpacity(FSlateColor(FLinearColor(0.72f, 0.72f, 0.55f, 1.f)))
 					]
 					+ SHorizontalBox::Slot().FillWidth(1.f)
-					+ SHorizontalBox::Slot().AutoWidth().Padding(4.f, 0.f)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))
 					[
 						SNew(SButton)
 							.Text(LOCTEXT("StopBtn", "Stop"))
 							.ToolTipText(LOCTEXT("StopTip", "Cancel the in-flight model / tool run"))
 							.OnClicked(this, &SChatHeader::OnStopPressed)
 					]
-					+ SHorizontalBox::Slot().AutoWidth().Padding(4.f, 0.f)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))
 					[
 						SNew(SButton)
 							.Text(LOCTEXT("SettingsBtn", "Settings"))
@@ -132,13 +132,13 @@ void SChatHeader::Construct(const FArguments& InArgs)
 									return FReply::Handled();
 								})
 					]
-					+ SHorizontalBox::Slot().AutoWidth().Padding(4.f, 0.f)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))
 					[
 						SNew(SButton)
 							.Text(LOCTEXT("NewChatBtn", "New Chat"))
 							.OnClicked(this, &SChatHeader::OnNewChatPressed)
 					]
-					+ SHorizontalBox::Slot().AutoWidth().Padding(4.f, 0.f)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))
 					[
 						SNew(SButton)
 							.Text_Lambda([this]() { return GetConnectButtonText(); })

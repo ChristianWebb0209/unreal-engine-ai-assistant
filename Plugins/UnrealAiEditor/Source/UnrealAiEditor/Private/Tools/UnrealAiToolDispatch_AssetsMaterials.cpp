@@ -2,13 +2,14 @@
 
 #include "Tools/UnrealAiToolJson.h"
 
+#include "AssetRegistry/AssetIdentifier.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
-#include "EditorLoadingAndSavingUtils.h"
+#include "FileHelpers.h"
 #include "IAssetTools.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/PackageName.h"
-#include "Misc/ScopedTransaction.h"
+#include "ScopedTransaction.h"
 #include "UObject/SavePackage.h"
 #include "UObject/SoftObjectPath.h"
 
@@ -72,10 +73,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRename(const TSharedPtr<FJso
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnRename", "Unreal AI: rename asset"));
 	TArray<FAssetRenameData> Batch;
 	Batch.Add(RD);
-	const TArray<UObject*> Renamed = IAssetTools::Get().RenameAssets(Batch);
+	const bool bRenamed = IAssetTools::Get().RenameAssets(Batch);
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
-	O->SetBoolField(TEXT("ok"), Renamed.Num() > 0);
-	O->SetNumberField(TEXT("renamed_count"), static_cast<double>(Renamed.Num()));
+	O->SetBoolField(TEXT("ok"), bRenamed);
+	O->SetNumberField(TEXT("renamed_count"), bRenamed ? 1.0 : 0.0);
 	return UnrealAiToolJson::Ok(O);
 }
 
@@ -120,7 +121,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialGetUsageSummary(const TSh
 	{
 		return UnrealAiToolJson::Error(TEXT("Material not found in Asset Registry"));
 	}
-	const FAssetIdentifier Id = AD.GetAssetIdentifier();
+	const FAssetIdentifier Id(AD.PackageName, AD.AssetName);
 	TArray<FAssetIdentifier> Referencers;
 	AR.GetReferencers(Id, Referencers);
 	TArray<TSharedPtr<FJsonValue>> Arr;

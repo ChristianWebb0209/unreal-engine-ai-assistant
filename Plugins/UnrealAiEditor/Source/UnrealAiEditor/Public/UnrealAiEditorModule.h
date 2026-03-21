@@ -16,7 +16,7 @@ public:
 
 private:
 	void RegisterMenus();
-	void RegisterTabs();
+	void RegisterTabs(const TSharedPtr<FUnrealAiBackendRegistry>& Reg);
 	void RegisterSettings();
 	void UnregisterMenus();
 	void UnregisterTabs();

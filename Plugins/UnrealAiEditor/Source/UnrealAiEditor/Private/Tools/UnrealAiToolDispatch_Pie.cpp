@@ -13,7 +13,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_PieStart(const TSharedPtr<FJsonOb
 	{
 		return UnrealAiToolJson::Error(TEXT("GEditor not available"));
 	}
-	if (GEditor->IsPlayingInEditor())
+	if (GEditor->IsPlayingSessionInEditor())
 	{
 		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 		O->SetBoolField(TEXT("ok"), true);
@@ -34,14 +34,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_PieStop(const TSharedPtr<FJsonObj
 	{
 		return UnrealAiToolJson::Error(TEXT("GEditor not available"));
 	}
-	if (!GEditor->IsPlayingInEditor())
+	if (!GEditor->IsPlayingSessionInEditor())
 	{
 		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 		O->SetBoolField(TEXT("ok"), true);
 		O->SetStringField(TEXT("note"), TEXT("PIE not running"));
 		return UnrealAiToolJson::Ok(O);
 	}
-	GEditor->RequestEndPlaySession();
+	GEditor->RequestEndPlayMap();
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	return UnrealAiToolJson::Ok(O);
@@ -50,7 +50,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_PieStop(const TSharedPtr<FJsonObj
 FUnrealAiToolInvocationResult UnrealAiDispatch_PieStatus(const TSharedPtr<FJsonObject>& Args)
 {
 	(void)Args;
-	const bool bPlaying = GEditor && GEditor->IsPlayingInEditor();
+	const bool bPlaying = GEditor && GEditor->IsPlayingSessionInEditor();
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetBoolField(TEXT("playing_in_editor"), bPlaying);

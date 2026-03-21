@@ -27,6 +27,7 @@ public class UnrealAiEditor : ModuleRules
 				"EditorWidgets",
 				"DeveloperSettings",
 				"WorkspaceMenuStructure",
+				"EditorFramework",
 				"LevelEditor",
 				"ApplicationCore",
 				"Settings",

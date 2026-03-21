@@ -358,7 +358,7 @@ void FUnrealAiContextService::ScheduleSave(const FString& ProjectId, const FStri
 							FlushSave(Pid, Tid);
 						}
 					}
-					SaveTickerHandle = FDelegateHandle();
+					SaveTickerHandle = FTSTicker::FDelegateHandle();
 					return false;
 				}),
 			0.25f);

@@ -3,8 +3,8 @@
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "Misc/PlatformMisc.h"
-#include "Misc/PlatformProcess.h"
+#include "HAL/PlatformMisc.h"
+#include "HAL/PlatformProcess.h"
 
 namespace UnrealAiPersistenceUtil
 {

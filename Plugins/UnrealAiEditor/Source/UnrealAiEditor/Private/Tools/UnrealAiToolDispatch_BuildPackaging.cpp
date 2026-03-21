@@ -66,7 +66,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ShaderCompileWait(const TSharedPt
 {
 	(void)Args;
 #if WITH_EDITOR
-	FShaderCompilingManager::Get().FinishCompilation();
+	if (GShaderCompilingManager)
+	{
+		GShaderCompilingManager->FinishAllCompilation();
+	}
 #endif
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);

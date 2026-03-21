@@ -13,7 +13,7 @@
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Selection.h"
-#include "Misc/ScreenshotRequest.h"
+#include "UnrealClient.h"
 #include "UnrealEdGlobals.h"
 
 static FEditorViewportClient* GetVc()
@@ -202,7 +202,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameActors(const TShared
 	{
 		return UnrealAiToolJson::Error(TEXT("No valid actor bounds"));
 	}
-	VC->FocusViewportOnBounds(FBoxSphereBounds(Bounds), true);
+	VC->FocusViewportOnBox(Bounds, true);
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	return UnrealAiToolJson::Ok(O);
@@ -233,7 +233,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameSelection(const TSha
 	{
 		return UnrealAiToolJson::Error(TEXT("Empty selection or invalid bounds"));
 	}
-	VC->FocusViewportOnBounds(FBoxSphereBounds(Bounds), true);
+	VC->FocusViewportOnBox(Bounds, true);
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	return UnrealAiToolJson::Ok(O);
@@ -251,7 +251,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportCapturePng(const TSharedP
 		return UnrealAiToolJson::Error(TEXT("relative_path is required"));
 	}
 	const FString ProjectDir = FPaths::ProjectDir();
-	const FString Full = FPaths::ConvertRelativeToPath(FPaths::Combine(ProjectDir, RelativePath));
+	const FString Full = FPaths::ConvertRelativePathToFull(FPaths::Combine(ProjectDir, RelativePath));
 	const FString Dir = FPaths::GetPath(Full);
 	IFileManager::Get().MakeDirectory(*Dir, true);
 	FScreenshotRequest::RequestScreenshot(Full, false, false);
@@ -295,7 +295,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportSetViewMode(const TShared
 	}
 	else if (M.Contains(TEXT("normal")))
 	{
-		Idx = VMI_Normal;
+		Idx = VMI_VisualizeBuffer;
 	}
 	else if (M.Contains(TEXT("light")))
 	{

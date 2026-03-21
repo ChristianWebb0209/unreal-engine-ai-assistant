@@ -139,11 +139,12 @@ namespace UnrealAiAgentContextJson
 		{
 			for (const TSharedPtr<FJsonValue>& V : *AttArr)
 			{
-				TSharedPtr<FJsonObject> O;
-				if (!V.IsValid() || !V->TryGetObject(O) || !O.IsValid())
+				const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+				if (!V.IsValid() || !V->TryGetObject(ObjPtr) || !ObjPtr || !ObjPtr->IsValid())
 				{
 					continue;
 				}
+				const TSharedPtr<FJsonObject>& O = *ObjPtr;
 				FContextAttachment A;
 				FString TStr;
 				O->TryGetStringField(TEXT("type"), TStr);
@@ -159,11 +160,12 @@ namespace UnrealAiAgentContextJson
 		{
 			for (const TSharedPtr<FJsonValue>& V : *ToolArr)
 			{
-				TSharedPtr<FJsonObject> O;
-				if (!V.IsValid() || !V->TryGetObject(O) || !O.IsValid())
+				const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+				if (!V.IsValid() || !V->TryGetObject(ObjPtr) || !ObjPtr || !ObjPtr->IsValid())
 				{
 					continue;
 				}
+				const TSharedPtr<FJsonObject>& O = *ObjPtr;
 				FToolContextEntry E;
 				O->TryGetStringField(TEXT("toolName"), E.ToolName);
 				O->TryGetStringField(TEXT("truncatedResult"), E.TruncatedResult);
@@ -176,9 +178,10 @@ namespace UnrealAiAgentContextJson
 			}
 		}
 
-		TSharedPtr<FJsonObject> Es;
-		if (Root->TryGetObjectField(TEXT("editorSnapshot"), Es) && Es.IsValid())
+		const TSharedPtr<FJsonObject>* EsPtr = nullptr;
+		if (Root->TryGetObjectField(TEXT("editorSnapshot"), EsPtr) && EsPtr && EsPtr->IsValid())
 		{
+			const TSharedPtr<FJsonObject>& Es = *EsPtr;
 			FEditorContextSnapshot S;
 			Es->TryGetStringField(TEXT("selectedActorsSummary"), S.SelectedActorsSummary);
 			Es->TryGetStringField(TEXT("activeAssetPath"), S.ActiveAssetPath);

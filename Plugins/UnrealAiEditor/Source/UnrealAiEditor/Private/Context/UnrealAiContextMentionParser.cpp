@@ -25,13 +25,16 @@ namespace UnrealAiContextMentionParser
 		Filter.PackagePaths.Add(FName(TEXT("/Game")));
 		Filter.bRecursivePaths = true;
 		Filter.bRecursiveClasses = true;
-		Filter.AssetName = FName(*Token);
 		TArray<FAssetData> Found;
 		AR.GetAssets(Filter, Found);
-		if (Found.Num() >= 1)
+		const FName WantName(*Token);
+		for (const FAssetData& AD : Found)
 		{
-			OutPath = Found[0].GetObjectPathString();
-			return true;
+			if (AD.AssetName == WantName)
+			{
+				OutPath = AD.GetObjectPathString();
+				return true;
+			}
 		}
 		return false;
 	}

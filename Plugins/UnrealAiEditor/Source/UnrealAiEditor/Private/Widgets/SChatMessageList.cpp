@@ -10,7 +10,7 @@
 #include "UnrealAiEditorSettings.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/Layout/SHorizontalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Templates/SharedPointer.h"
 #include "Widgets/SNullWidget.h"
 #include "Widgets/Text/STextBlock.h"
@@ -75,7 +75,7 @@ void SChatMessageList::RebuildTranscript()
 	{
 		return;
 	}
-	static_cast<SPanel*>(MessageBox.Get())->ClearChildren();
+	MessageBox->ClearChildren();
 	ActiveAssistantWidget.Reset();
 	ActiveThinkingWidget.Reset();
 
@@ -134,7 +134,7 @@ void SChatMessageList::RebuildTranscript()
 				MessageBox->AddSlot().AutoHeight().Padding(4.f)
 					[
 						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Top).Padding(0.f, 0.f, 4.f, 0.f)
+						+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Top).Padding(FMargin(0.f, 0.f, 4.f, 0.f))
 						[
 							SAssignNew(As, SAssistantStreamBlock)
 								.bEnableTypewriter(bTw)
@@ -143,7 +143,7 @@ void SChatMessageList::RebuildTranscript()
 						+ SHorizontalBox::Slot()
 							.AutoWidth()
 							.VAlign(VAlign_Top)
-							.Padding(0.f, 2.f, 0.f, 0.f)
+							.Padding(FMargin(0.f, 2.f, 0.f, 0.f))
 							[
 								ToolsSlot
 							]

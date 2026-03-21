@@ -7,7 +7,7 @@
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FUnrealAiMergeDeterministicTest,
 	"UnrealAiEditor.Harness.MergeDeterministic",
-	EAutomationTestFlags::ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FUnrealAiMergeDeterministicTest::RunTest(const FString& Parameters)
 {

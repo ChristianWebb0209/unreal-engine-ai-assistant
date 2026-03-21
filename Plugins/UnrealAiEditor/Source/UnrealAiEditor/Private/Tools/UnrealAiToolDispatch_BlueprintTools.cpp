@@ -12,8 +12,8 @@
 #include "Kismet2/KismetEditorUtilities.h"
 #include "EdGraphSchema_K2.h"
 #include "Editor.h"
-#include "Misc/ScopedTransaction.h"
-#include "StructUtils/TBaseStructure.h"
+#include "ScopedTransaction.h"
+#include "UObject/Class.h"
 
 namespace UnrealAiBlueprintToolsPriv
 {
@@ -29,7 +29,7 @@ namespace UnrealAiBlueprintToolsPriv
 			return nullptr;
 		}
 		const FName GN(*GraphName);
-		auto TryList = [&GN](const TArray<UEdGraph*>& List) -> UEdGraph*
+		auto TryList = [&GN, &GraphName](const TArray<UEdGraph*>& List) -> UEdGraph*
 		{
 			for (UEdGraph* G : List)
 			{
@@ -194,7 +194,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintOpenGraphTab(const TShar
 	{
 		return OpenRes;
 	}
-	FKismetEditorUtilities::BringKismetToFocusAttention(G);
+	FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(G);
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("graph"), GraphName);

@@ -7,11 +7,11 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
-#include "Widgets/Layout/SVerticalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "UnrealAiEditorTabIds.h"
 #include "Framework/Docking/TabManager.h"
 #include "Widgets/Input/SButton.h"
-#include "Widgets/Layout/SHorizontalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Styling/CoreStyle.h"
 
@@ -57,16 +57,16 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 				.Padding(FMargin(12.f))
 				[
 					SNew(SVerticalBox)
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 8.f)
+					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
 					[
 						SNew(STextBlock)
 							.Text(LOCTEXT("SettingsTitle", "AI Settings — API & models (JSON)"))
 							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
 					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 8.f)
+					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
 					[
 						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 8.f, 0.f)
+						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 						[
 							SNew(SButton)
 								.Text(LOCTEXT("OpenApiStructured", "Open API Keys & Models (structured)"))
@@ -81,7 +81,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 									"Use the structured tab for provider, URL, and key; edit raw JSON below for advanced fields (MCP, env, profiles)."))
 						]
 					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 8.f)
+					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
 					[
 						SNew(STextBlock)
 							.AutoWrapText(true)
@@ -92,7 +92,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 								"Per-model \"providerId\" selects which provider to use. Save applies immediately "
 								"and reloads the LLM stack (stub vs HTTP)."))
 					]
-					+ SVerticalBox::Slot().FillHeight(1.f).Padding(0.f, 4.f)
+					+ SVerticalBox::Slot().FillHeight(1.f).Padding(FMargin(0.f, 4.f))
 					[
 						SNew(SBox)
 							.MinDesiredHeight(280.f)
@@ -104,7 +104,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 								]
 							]
 					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 8.f, 0.f, 0.f)
+					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 8.f, 0.f, 0.f))
 					[
 						SNew(SButton)
 							.Text(LOCTEXT("SaveSettings", "Save and apply"))

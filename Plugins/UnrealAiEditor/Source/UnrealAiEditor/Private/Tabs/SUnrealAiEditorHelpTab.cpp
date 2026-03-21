@@ -2,8 +2,8 @@
 
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Input/SButton.h"
-#include "Widgets/Layout/SHorizontalBox.h"
-#include "Widgets/Layout/SVerticalBox.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformProcess.h"
@@ -19,7 +19,7 @@ void SUnrealAiEditorHelpTab::Construct(const FArguments& InArgs)
 				.Padding(FMargin(12.f))
 				[
 					SNew(SVerticalBox)
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 8.f)
+					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
 					[
 						SNew(STextBlock)
 							.Text(LOCTEXT("HelpTitle", "Help"))
@@ -37,13 +37,13 @@ void SUnrealAiEditorHelpTab::Construct(const FArguments& InArgs)
 					+ SVerticalBox::Slot().AutoHeight().Padding(4.f)
 					[
 						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 8.f, 0.f)
+						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 						[
 							SNew(SButton)
 								.Text(LOCTEXT("OpenDocs", "Open docs folder"))
 								.OnClicked(this, &SUnrealAiEditorHelpTab::OnOpenDocsFolder)
 						]
-						+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 8.f, 0.f)
+						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 						[
 							SNew(SButton)
 								.Text(LOCTEXT("OpenLogs", "Open Saved/Logs"))

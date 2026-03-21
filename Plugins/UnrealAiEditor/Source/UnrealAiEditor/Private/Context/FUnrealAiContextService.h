@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Context/IAgentContextService.h"
+#include "Containers/Ticker.h"
 
 class IUnrealAiPersistence;
 
@@ -47,5 +48,5 @@ private:
 	FString ActiveProjectId;
 	FString ActiveThreadId;
 	TSet<FString> PendingSaveKeys;
-	FDelegateHandle SaveTickerHandle;
+	FTSTicker::FDelegateHandle SaveTickerHandle;
 };

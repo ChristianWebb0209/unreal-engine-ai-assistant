@@ -1,13 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Harness/IUnrealAiAgentHarness.h"
+#include "Harness/FUnrealAiAgentHarness.h"
 
 class IUnrealAiPersistence;
 class IUnrealAiChatService;
 class IUnrealAiModelConnector;
 class IAgentContextService;
 class IToolExecutionHost;
-class IUnrealAiAgentHarness;
 class FUnrealAiAgentHarness;
 class FUnrealAiModelProfileRegistry;
 class FUnrealAiToolCatalog;

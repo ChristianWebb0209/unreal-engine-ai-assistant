@@ -5,7 +5,7 @@
 	"FriendlyName": "Unreal AI Editor",
 	"Description": "Local-first AI assistant shell for Unreal Editor (UI + stubbed backend).",
 	"Category": "Editor",
-	"CreatedBy": "Dungeon Architect",
+	"CreatedBy": "Christian Webb",
 	"CreatedByURL": "",
 	"DocsURL": "",
 	"MarketplaceURL": "",
@@ -19,6 +19,12 @@
 			"Name": "UnrealAiEditor",
 			"Type": "Editor",
 			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "StructUtils",
+			"Enabled": true
 		}
 	]
 }

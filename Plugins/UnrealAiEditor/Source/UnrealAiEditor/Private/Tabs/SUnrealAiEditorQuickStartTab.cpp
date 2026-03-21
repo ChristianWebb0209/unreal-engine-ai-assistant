@@ -4,7 +4,7 @@
 #include "Framework/Docking/TabManager.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
-#include "Widgets/Layout/SVerticalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Styling/CoreStyle.h"
 
@@ -18,7 +18,7 @@ void SUnrealAiEditorQuickStartTab::Construct(const FArguments& InArgs)
 				.Padding(FMargin(12.f))
 				[
 					SNew(SVerticalBox)
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 8.f)
+					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
 					[
 						SNew(STextBlock)
 							.Text(LOCTEXT("QsTitle", "Quick Start"))

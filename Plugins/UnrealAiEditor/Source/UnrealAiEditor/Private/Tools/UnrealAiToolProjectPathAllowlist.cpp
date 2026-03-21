@@ -60,8 +60,8 @@ bool UnrealAiResolveProjectFilePath(const FString& RelativePath, FString& OutAbs
 	}
 	FString N = RelativePath;
 	NormalizeSlashes(N);
-	const FString ProjectDir = FPaths::ConvertRelativeToPath(FPaths::ProjectDir());
-	OutAbsolute = FPaths::ConvertRelativeToPath(FPaths::Combine(ProjectDir, N));
+	const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+	OutAbsolute = FPaths::ConvertRelativePathToFull(FPaths::Combine(ProjectDir, N));
 	const FString ProjectDirNorm = ProjectDir.Replace(TEXT("\\"), TEXT("/"));
 	const FString AbsNorm = OutAbsolute.Replace(TEXT("\\"), TEXT("/"));
 	if (!AbsNorm.StartsWith(ProjectDirNorm))

@@ -6,14 +6,14 @@
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
-#include "Widgets/Layout/SHorizontalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SGridPanel.h"
-#include "Widgets/Layout/SVerticalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Styling/CoreStyle.h"
 
@@ -30,7 +30,7 @@ void SUnrealAiEditorApiModelsTab::Construct(const FArguments& InArgs)
 				.Padding(FMargin(12.f))
 				[
 					SNew(SVerticalBox)
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 8.f)
+					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
 					[
 						SNew(STextBlock)
 							.Text(LOCTEXT("ApiTitle", "API Keys & Models (BYOK)"))
@@ -68,7 +68,7 @@ void SUnrealAiEditorApiModelsTab::Construct(const FArguments& InArgs)
 									.Text(FText::FromString(TEXT("sk-or-stub")))
 									.IsReadOnly_Lambda([this]() { return bMaskKey; })
 							]
-							+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 4.f)
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 4.f))
 							[
 								SNew(SCheckBox)
 									.IsChecked_Lambda([this]() { return bMaskKey ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
@@ -87,7 +87,7 @@ void SUnrealAiEditorApiModelsTab::Construct(const FArguments& InArgs)
 							SAssignNew(ModelBox, SEditableTextBox).Text(FText::FromString(TEXT("anthropic/claude-3.5-sonnet")))
 						]
 					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 8.f)
+					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 8.f))
 					[
 						SNew(SHorizontalBox)
 						+ SHorizontalBox::Slot().AutoWidth().Padding(4.f)
@@ -103,7 +103,7 @@ void SUnrealAiEditorApiModelsTab::Construct(const FArguments& InArgs)
 								.OnClicked(this, &SUnrealAiEditorApiModelsTab::OnSave)
 						]
 					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 8.f)
+					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 8.f))
 					[
 						SNew(STextBlock)
 							.Text_Lambda([this]() { return StatusText; })

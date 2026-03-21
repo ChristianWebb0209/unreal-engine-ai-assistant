@@ -108,12 +108,13 @@ void FUnrealAiModelProfileRegistry::Reload()
 	}
 
 	const TSharedPtr<FJsonObject>* ModelsObj = nullptr;
-	if (Root->TryGetObjectField(TEXT("models"), ModelsObj) && ModelsObj && ModelsObj->IsValid())
+	if (Root->TryGetObjectField(TEXT("models"), ModelsObj) && ModelsObj && (*ModelsObj).IsValid())
 	{
-		for (const FString& ModelKey : (*ModelsObj)->GetFieldNames())
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*ModelsObj)->Values)
 		{
+			const FString& ModelKey = Pair.Key;
 			const TSharedPtr<FJsonObject>* CapObj = nullptr;
-			if (!(*ModelsObj)->TryGetObjectField(ModelKey, CapObj) || !CapObj || !CapObj->IsValid())
+			if (!(*ModelsObj)->TryGetObjectField(ModelKey, CapObj) || !CapObj || !(*CapObj).IsValid())
 			{
 				continue;
 			}

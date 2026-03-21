@@ -5,8 +5,8 @@
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/Layout/SHorizontalBox.h"
-#include "Widgets/Layout/SVerticalBox.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Styling/CoreStyle.h"
 
@@ -35,10 +35,10 @@ void SAssistantToolsDropdown::Construct(const FArguments& InArgs)
 					{
 						const EUnrealAiToolVisualCategory Cat = UnrealAiClassifyToolVisuals(Name);
 						const FLinearColor DotColor = UnrealAiToolCategoryTint(Cat);
-						Box->AddSlot().AutoHeight().Padding(2.f, 1.f)
+						Box->AddSlot().AutoHeight().Padding(FMargin(2.f, 1.f))
 							[
 								SNew(SHorizontalBox)
-								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 6.f, 0.f)
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 6.f, 0.f))
 								[
 									SNew(STextBlock)
 										.Text(FText::FromString(TEXT("\u2022")))

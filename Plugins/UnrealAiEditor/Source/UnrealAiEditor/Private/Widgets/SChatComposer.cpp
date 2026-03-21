@@ -17,8 +17,7 @@
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/Layout/SHorizontalBox.h"
-#include "Widgets/Layout/SVerticalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Misc/EngineVersion.h"
 #include "Styling/CoreStyle.h"
@@ -32,6 +31,9 @@
 
 void SChatComposer::Construct(const FArguments& InArgs)
 {
+	static const FMargin PadChipsSlot(4.f, 2.f);
+	static const FMargin PadMentionSlot(4.f, 0.f);
+	static const FMargin PadFooterSlot(6.f, 4.f);
 	BackendRegistry = InArgs._BackendRegistry;
 	MessageList = InArgs._MessageList;
 	Session = InArgs._Session;
@@ -52,13 +54,13 @@ void SChatComposer::Construct(const FArguments& InArgs)
 						"ComposerHint",
 						"Enter sends, Shift+Enter newline. Type @ for asset suggestions; Attach adds Content Browser selection."))
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(4.f, 2.f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(PadChipsSlot)
 			[
 				SAssignNew(ChipsRow, SVerticalBox)
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(4.f, 0.f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(PadMentionSlot)
 			[
-				SAssignNew(MentionPanel, SBorder)
+				SAssignNew(MentionBorder, SBorder)
 					.Visibility(EVisibility::Collapsed)
 					.BorderBackgroundColor(FLinearColor(0.16f, 0.16f, 0.18f, 0.95f))
 					.Padding(FMargin(6.f))
@@ -115,7 +117,7 @@ void SChatComposer::Construct(const FArguments& InArgs)
 							})
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(6.f, 4.f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(PadFooterSlot)
 			[
 				SNew(STextBlock)
 					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
@@ -182,9 +184,20 @@ void SChatComposer::UpdateMentionSuggestions(const FString& FullText)
 	Filter.PackagePaths.Add(FName(TEXT("/Game")));
 	Filter.bRecursivePaths = true;
 	Filter.bRecursiveClasses = true;
-	Filter.AssetName = FName(*Token);
 	TArray<FAssetData> Found;
 	AR.GetAssets(Filter, Found);
+	{
+		const FName WantName(*Token);
+		TArray<FAssetData> Filtered;
+		for (const FAssetData& AD : Found)
+		{
+			if (AD.AssetName == WantName)
+			{
+				Filtered.Add(AD);
+			}
+		}
+		Found = MoveTemp(Filtered);
+	}
 	if (Found.Num() > 15)
 	{
 		Found.SetNum(15);
@@ -203,7 +216,7 @@ void SChatComposer::UpdateMentionSuggestions(const FString& FullText)
 	for (const FAssetData& AD : Found)
 	{
 		const FString Path = AD.GetObjectPathString();
-		MentionListBox->AddSlot().AutoHeight().Padding(0.f, 1.f)
+		MentionListBox->AddSlot().AutoHeight().Padding(FMargin(0.f, 1.f))
 			[
 				SNew(SButton)
 					.ButtonStyle(FCoreStyle::Get(), "NoBorder")
@@ -273,7 +286,7 @@ void SChatComposer::RefreshAttachmentChips()
 		const FContextAttachment& A = St->Attachments[i];
 		const FString Label = A.Label.IsEmpty() ? A.Payload : A.Label;
 		const int32 Idx = i;
-		ChipsRow->AddSlot().AutoHeight().Padding(0.f, 2.f)
+		ChipsRow->AddSlot().AutoHeight().Padding(FMargin(0.f, 2.f))
 			[
 				SNew(SBorder)
 					.BorderBackgroundColor(FLinearColor(0.2f, 0.24f, 0.3f, 0.85f))

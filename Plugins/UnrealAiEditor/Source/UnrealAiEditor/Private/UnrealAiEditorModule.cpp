@@ -19,6 +19,7 @@
 #include "ToolMenus.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "WorkspaceMenuStructure.h"
+#include "WorkspaceMenuStructureModule.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
@@ -178,31 +179,31 @@ void FUnrealAiEditorModule::RegisterTabs(const TSharedPtr<FUnrealAiBackendRegist
 							 UnrealAiEditorTabIds::ChatTab,
 							 FOnSpawnTab::CreateLambda(SpawnChat))
 		.SetDisplayName(LOCTEXT("ChatTab", "Agent Chat"))
-		.SetMenuType(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 							 UnrealAiEditorTabIds::SettingsTab,
 							 FOnSpawnTab::CreateLambda(SpawnSettings))
 		.SetDisplayName(LOCTEXT("SettingsTab", "AI Settings"))
-		.SetMenuType(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 							 UnrealAiEditorTabIds::ApiModelsTab,
 							 FOnSpawnTab::CreateLambda(SpawnApi))
 		.SetDisplayName(LOCTEXT("ApiModelsTab", "API Keys & Models"))
-		.SetMenuType(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 							 UnrealAiEditorTabIds::QuickStartTab,
 							 FOnSpawnTab::CreateLambda(SpawnQuick))
 		.SetDisplayName(LOCTEXT("QuickStartTab", "Quick Start"))
-		.SetMenuType(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 							 UnrealAiEditorTabIds::HelpTab,
 							 FOnSpawnTab::CreateLambda(SpawnHelp))
 		.SetDisplayName(LOCTEXT("HelpTab", "Help"))
-		.SetMenuType(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 }
 
 void FUnrealAiEditorModule::UnregisterTabs()

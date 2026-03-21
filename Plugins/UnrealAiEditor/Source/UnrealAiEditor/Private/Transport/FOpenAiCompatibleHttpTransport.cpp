@@ -10,7 +10,7 @@
 
 namespace OpenAiTransportUtil
 {
-	static void EmitError(FUnrealAiLlmStreamCallback& OnEvent, const FString& Msg)
+	static void EmitError(const FUnrealAiLlmStreamCallback& OnEvent, const FString& Msg)
 	{
 		FUnrealAiLlmStreamEvent Ev;
 		Ev.Type = EUnrealAiLlmStreamEventType::Error;
@@ -39,7 +39,7 @@ namespace OpenAiTransportUtil
 		}
 	}
 
-	static void ParseNonStreamBody(const FString& Body, FUnrealAiLlmStreamCallback& OnEvent)
+	static void ParseNonStreamBody(const FString& Body, const FUnrealAiLlmStreamCallback& OnEvent)
 	{
 		TSharedPtr<FJsonObject> Root;
 		TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(Body);
@@ -134,7 +134,7 @@ namespace OpenAiTransportUtil
 		OnEvent.ExecuteIfBound(Fin);
 	}
 
-	static void ParseSseBody(const FString& Body, FUnrealAiLlmStreamCallback& OnEvent)
+	static void ParseSseBody(const FString& Body, const FUnrealAiLlmStreamCallback& OnEvent)
 	{
 		TArray<FString> Lines;
 		Body.ParseIntoArrayLines(Lines, false);

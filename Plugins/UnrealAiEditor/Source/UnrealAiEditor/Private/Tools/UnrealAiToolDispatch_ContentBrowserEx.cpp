@@ -17,7 +17,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ContentBrowserNavigateFolder(cons
 		return UnrealAiToolJson::Error(TEXT("folder_path is required"));
 	}
 	FContentBrowserModule& CBM = FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser"));
-	CBM.Get().SyncBrowserToFolder(FName(*FolderPath));
+	CBM.Get().SyncBrowserToFolders({FolderPath});
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("folder_path"), FolderPath);

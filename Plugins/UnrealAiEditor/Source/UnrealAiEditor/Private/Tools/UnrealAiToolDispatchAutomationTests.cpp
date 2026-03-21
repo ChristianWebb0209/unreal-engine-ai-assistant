@@ -13,7 +13,7 @@
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FUnrealAiToolJsonHelpersTest,
 	"UnrealAiEditor.Tools.JsonHelpers",
-	EAutomationTestFlags::ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FUnrealAiToolJsonHelpersTest::RunTest(const FString& Parameters)
 {
@@ -57,7 +57,7 @@ bool FUnrealAiToolJsonHelpersTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FUnrealAiToolDispatchEditorSmokeTest,
 	"UnrealAiEditor.Tools.DispatchEditorSmoke",
-	EAutomationTestFlags::ApplicationContextMask | EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
 bool FUnrealAiToolDispatchEditorSmokeTest::RunTest(const FString& Parameters)
 {

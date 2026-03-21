@@ -2,9 +2,23 @@
 
 Unreal Engine **editor AI assistant** (see **`PRD.md`**).
 
+## Build and run (Windows, UE 5.7)
+
+1. **Prerequisites:** Visual Studio 2022 **Desktop development with C++** (or Build Tools + MSVC), and the [.NET Framework 4.8 Developer Pack](https://learn.microsoft.com/en-us/dotnet/framework/install/guide-for-developers) (needed for Unreal Build Tool / Swarm on some machines).
+2. **Generate project files** (after cloning or changing targets):  
+   `"C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" -projectfiles -project="%CD%\blank.uproject" -game -rocket -progress`
+3. **Compile the Editor** (builds the `Blank` game module and the **UnrealAiEditor** plugin):  
+   `"C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" BlankEditor Win64 Development -project="%CD%\blank.uproject" -waitmutex`
+4. **Launch Unreal Editor** (adjust the engine path if your install differs):  
+   `"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe" "%CD%\blank.uproject"`
+
+From **Cursor**, use the integrated terminal for steps 2–4, or define a [task](https://code.visualstudio.com/docs/editor/tasks) that runs the same commands.
+
+The repo includes a minimal **`Source/Blank`** runtime module so Unreal Build Tool can compile the C++ plugin (the project previously had only plugin sources and no `Source/` folder).
+
 ## Repository layout
 
-- **Unreal project (blank) at repo root:** `blank.uproject`, `Config/`, `Content/`, and **`Plugins/UnrealAiEditor/`** — open `blank.uproject` to develop and test the plugin.
+- **Unreal project (blank) at repo root:** `blank.uproject`, `Config/`, `Content/`, **`Source/Blank/`**, and **`Plugins/UnrealAiEditor/`** — open `blank.uproject` to develop and test the plugin.
 - **Rename folder to `ue-plugin`:** close Cursor/IDE, then run `scripts/Rename-Root-To-UePlugin.ps1` (or manually rename `dungeon-architect` → `ue-plugin` under `C:\Github`).
 
 ## MVP architecture (summary)

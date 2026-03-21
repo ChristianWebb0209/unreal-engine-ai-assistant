@@ -34,7 +34,7 @@ namespace UnrealAiToolDispatchSearchInternal
 			return;
 		}
 		TArray<FString> PluginNames;
-		IFileManager::Get().FindFiles(PluginNames, *PPlugins, TEXT(""), false, true);
+		IFileManager::Get().FindFiles(PluginNames, *PPlugins, false, true);
 		for (const FString& PluginName : PluginNames)
 		{
 			const FString Src = FPaths::Combine(PPlugins, PluginName, TEXT("Source"));
@@ -382,7 +382,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SourceSearchFuzzy(const TSharedPt
 	TArray<FString> ExtAllow;
 	ParseGlobList(Glob, ExtAllow);
 
-	const FString ProjectDir = FPaths::ConvertRelativeToPath(FPaths::ProjectDir());
+	const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 	TArray<FString> Roots;
 	CollectProjectSourceRoots(ProjectDir, Roots);
 	TArray<FString> AllFiles;
@@ -400,8 +400,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SourceSearchFuzzy(const TSharedPt
 		{
 			continue;
 		}
-		const FString FullNorm = FPaths::ConvertRelativeToPath(Full);
-		const FString PDNorm = FPaths::ConvertRelativeToPath(ProjectDir);
+		const FString FullNorm = FPaths::ConvertRelativePathToFull(Full);
+		const FString PDNorm = FPaths::ConvertRelativePathToFull(ProjectDir);
 		FString CleanRel = FullNorm;
 		if (CleanRel.StartsWith(PDNorm))
 		{

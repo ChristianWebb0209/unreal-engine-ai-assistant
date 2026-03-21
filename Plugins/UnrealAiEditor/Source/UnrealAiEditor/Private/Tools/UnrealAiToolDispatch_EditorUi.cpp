@@ -7,7 +7,6 @@
 #include "Editor.h"
 #include "EditorModeManager.h"
 #include "EditorModes.h"
-#include "LevelEditorModeTools.h"
 #include "Selection.h"
 #include "UnrealEdGlobals.h"
 

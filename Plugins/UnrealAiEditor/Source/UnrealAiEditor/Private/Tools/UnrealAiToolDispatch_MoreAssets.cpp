@@ -10,9 +10,10 @@
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
-#include "Misc/ScopedTransaction.h"
+#include "ScopedTransaction.h"
 #include "UObject/Object.h"
 #include "UObject/SavePackage.h"
+#include "UObject/UObjectGlobals.h"
 
 static bool SplitDestPath(const FString& DestPath, FString& OutPackagePath, FString& OutAssetName)
 {
@@ -113,7 +114,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetImport(const TSharedPtr<FJso
 	{
 		return UnrealAiToolJson::Error(TEXT("source_files and destination_path are required"));
 	}
-	TArray<FAssetImportTask> Tasks;
+	TArray<UAssetImportTask*> Tasks;
 	for (const TSharedPtr<FJsonValue>& V : *Files)
 	{
 		FString Full;
@@ -130,12 +131,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetImport(const TSharedPtr<FJso
 		{
 			continue;
 		}
-		FAssetImportTask& T = Tasks.AddDefaulted_GetRef();
-		T.Filename = Abs;
-		T.DestinationPath = DestPath;
-		T.bReplaceExisting = true;
-		T.bAutomated = true;
-		T.bSave = true;
+		UAssetImportTask* T = NewObject<UAssetImportTask>();
+		T->Filename = Abs;
+		T->DestinationPath = DestPath;
+		T->bReplaceExisting = true;
+		T->bAutomated = true;
+		T->bSave = true;
+		Tasks.Add(T);
 	}
 	if (Tasks.Num() == 0)
 	{

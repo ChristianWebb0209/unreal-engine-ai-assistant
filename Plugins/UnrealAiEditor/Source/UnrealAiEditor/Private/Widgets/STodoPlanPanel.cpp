@@ -6,9 +6,9 @@
 #include "Context/UnrealAiProjectId.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Widgets/Input/SCheckBox.h"
-#include "Widgets/Layout/SHorizontalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Layout/SBorder.h"
-#include "Widgets/Layout/SVerticalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -63,8 +63,10 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 		: FString();
 	bool bInteractive = false;
 	TArray<bool> DoneFlags;
-	if (BackendRegistry.IsValid() && Session.IsValid() && IAgentContextService* Ctx = BackendRegistry->GetContextService())
+	if (BackendRegistry.IsValid() && Session.IsValid())
 	{
+		if (IAgentContextService* Ctx = BackendRegistry->GetContextService())
+		{
 		Ctx->LoadOrCreate(ProjectId, ThreadId);
 		if (const FAgentContextState* St = Ctx->GetState(ProjectId, ThreadId))
 		{
@@ -73,6 +75,7 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 				bInteractive = true;
 				DoneFlags = St->TodoStepsDone;
 			}
+		}
 		}
 	}
 
@@ -85,7 +88,7 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 		];
 	if (Steps.Num() == 0)
 	{
-		Box->AddSlot().AutoHeight().Padding(4.f, 0.f)
+		Box->AddSlot().AutoHeight().Padding(FMargin(4.f, 0.f))
 			[
 				SNew(STextBlock)
 					.AutoWrapText(true)
@@ -101,10 +104,10 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 			if (bInteractive && DoneFlags.IsValidIndex(i))
 			{
 				const int32 Idx = i;
-				Box->AddSlot().AutoHeight().Padding(8.f, 2.f)
+				Box->AddSlot().AutoHeight().Padding(FMargin(8.f, 2.f))
 					[
 						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 8.f, 0.f)
+						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 						[
 							SNew(SCheckBox)
 								.IsChecked(DoneFlags[Idx] ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
@@ -133,7 +136,7 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 			}
 			else
 			{
-				Box->AddSlot().AutoHeight().Padding(8.f, 2.f)
+				Box->AddSlot().AutoHeight().Padding(FMargin(8.f, 2.f))
 					[
 						SNew(STextBlock)
 							.AutoWrapText(true)

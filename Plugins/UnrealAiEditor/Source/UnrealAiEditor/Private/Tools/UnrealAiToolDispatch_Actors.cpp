@@ -9,7 +9,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
-#include "Misc/ScopedTransaction.h"
+#include "ScopedTransaction.h"
 #include "UnrealEdGlobals.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -346,7 +346,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorSpawnFromClass(const TShared
 	}
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnSpawn", "Unreal AI: spawn actor"));
 	FActorSpawnParameters Sp;
-	AActor* A = World->SpawnActor(Class, FTransform(Rot, Loc), Sp);
+	const FTransform Xform(Rot, Loc);
+	AActor* A = World->SpawnActor(Class, &Xform, Sp);
 	if (!A)
 	{
 		return UnrealAiToolJson::Error(TEXT("SpawnActor failed"));

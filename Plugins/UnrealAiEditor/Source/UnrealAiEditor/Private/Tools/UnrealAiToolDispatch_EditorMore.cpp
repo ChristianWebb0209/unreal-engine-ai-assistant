@@ -11,7 +11,7 @@
 #include "Widgets/Docking/SDockTab.h"
 #include "GameFramework/Actor.h"
 #include "Misc/OutputDeviceNull.h"
-#include "Misc/ScopedTransaction.h"
+#include "ScopedTransaction.h"
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_GlobalTabFocus(const TSharedPtr<FJsonObject>& Args)
 {
