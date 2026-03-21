@@ -21,6 +21,9 @@ public:
 
 	virtual void SetActiveTodoPlan(const FString& PlanJson) override;
 	virtual void SetTodoStepDone(int32 StepIndex, bool bDone) override;
+	virtual void SetActiveOrchestrateDag(const FString& DagJson) override;
+	virtual void SetOrchestrateNodeStatus(const FString& NodeId, const FString& Status, const FString& Summary = FString()) override;
+	virtual void ClearActiveOrchestrateDag() override;
 
 	virtual void SetEditorSnapshot(const FEditorContextSnapshot& Snapshot) override;
 	virtual void ClearEditorSnapshot() override;

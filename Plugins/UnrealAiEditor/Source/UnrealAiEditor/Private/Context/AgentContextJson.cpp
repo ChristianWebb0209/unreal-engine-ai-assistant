@@ -16,6 +16,8 @@ namespace UnrealAiAgentContextJson
 		case EContextAttachmentType::FilePath: return TEXT("file");
 		case EContextAttachmentType::FreeText: return TEXT("text");
 		case EContextAttachmentType::BlueprintNodeRef: return TEXT("bp_node");
+		case EContextAttachmentType::ActorReference: return TEXT("actor");
+		case EContextAttachmentType::ContentFolder: return TEXT("folder");
 		default: return TEXT("asset");
 		}
 	}
@@ -37,6 +39,16 @@ namespace UnrealAiAgentContextJson
 			Out = EContextAttachmentType::BlueprintNodeRef;
 			return true;
 		}
+		if (S == TEXT("actor"))
+		{
+			Out = EContextAttachmentType::ActorReference;
+			return true;
+		}
+		if (S == TEXT("folder"))
+		{
+			Out = EContextAttachmentType::ContentFolder;
+			return true;
+		}
 		Out = EContextAttachmentType::AssetPath;
 		return true;
 	}
@@ -53,6 +65,10 @@ namespace UnrealAiAgentContextJson
 			O->SetStringField(TEXT("type"), TypeToStr(A.Type));
 			O->SetStringField(TEXT("payload"), A.Payload);
 			O->SetStringField(TEXT("label"), A.Label);
+			if (!A.IconClassPath.IsEmpty())
+			{
+				O->SetStringField(TEXT("iconClass"), A.IconClassPath);
+			}
 			AttArr.Add(MakeShared<FJsonValueObject>(O.ToSharedRef()));
 		}
 		Root->SetArrayField(TEXT("attachments"), AttArr);
@@ -103,6 +119,23 @@ namespace UnrealAiAgentContextJson
 			DoneArr.Add(MakeShared<FJsonValueBoolean>(b));
 		}
 		Root->SetArrayField(TEXT("todoStepsDone"), DoneArr);
+		if (!State.ActiveOrchestrateDagJson.IsEmpty())
+		{
+			Root->SetStringField(TEXT("activeOrchestrateDag"), State.ActiveOrchestrateDagJson);
+		}
+		TArray<TSharedPtr<FJsonValue>> OrchStatusArr;
+		for (const TPair<FString, FString>& Pair : State.OrchestrateNodeStatusById)
+		{
+			TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+			O->SetStringField(TEXT("nodeId"), Pair.Key);
+			O->SetStringField(TEXT("status"), Pair.Value);
+			if (const FString* Summary = State.OrchestrateNodeSummaryById.Find(Pair.Key))
+			{
+				O->SetStringField(TEXT("summary"), *Summary);
+			}
+			OrchStatusArr.Add(MakeShared<FJsonValueObject>(O.ToSharedRef()));
+		}
+		Root->SetArrayField(TEXT("orchestrateNodeStatus"), OrchStatusArr);
 
 		FString Out;
 		const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
@@ -151,6 +184,7 @@ namespace UnrealAiAgentContextJson
 				StrToType(TStr, A.Type);
 				O->TryGetStringField(TEXT("payload"), A.Payload);
 				O->TryGetStringField(TEXT("label"), A.Label);
+				O->TryGetStringField(TEXT("iconClass"), A.IconClassPath);
 				OutState.Attachments.Add(A);
 			}
 		}
@@ -232,6 +266,32 @@ namespace UnrealAiAgentContextJson
 				if (V.IsValid() && V->Type == EJson::Boolean)
 				{
 					OutState.TodoStepsDone.Add(V->AsBool());
+				}
+			}
+		}
+		Root->TryGetStringField(TEXT("activeOrchestrateDag"), OutState.ActiveOrchestrateDagJson);
+		const TArray<TSharedPtr<FJsonValue>>* OrchStatusArr = nullptr;
+		if (Root->TryGetArrayField(TEXT("orchestrateNodeStatus"), OrchStatusArr) && OrchStatusArr)
+		{
+			for (const TSharedPtr<FJsonValue>& V : *OrchStatusArr)
+			{
+				const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+				if (!V.IsValid() || !V->TryGetObject(ObjPtr) || !ObjPtr || !ObjPtr->IsValid())
+				{
+					continue;
+				}
+				FString NodeId;
+				FString Status;
+				if (!(*ObjPtr)->TryGetStringField(TEXT("nodeId"), NodeId) || NodeId.IsEmpty())
+				{
+					continue;
+				}
+				(*ObjPtr)->TryGetStringField(TEXT("status"), Status);
+				OutState.OrchestrateNodeStatusById.Add(NodeId, Status);
+				FString Summary;
+				if ((*ObjPtr)->TryGetStringField(TEXT("summary"), Summary) && !Summary.IsEmpty())
+				{
+					OutState.OrchestrateNodeSummaryById.Add(NodeId, Summary);
 				}
 			}
 		}

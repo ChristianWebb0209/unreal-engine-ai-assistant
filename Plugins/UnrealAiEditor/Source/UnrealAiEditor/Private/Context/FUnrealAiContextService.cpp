@@ -129,6 +129,14 @@ bool FUnrealAiContextService::ValidateAttachment(const FContextAttachment& Attac
 			return false;
 		}
 	}
+	if (Attachment.Type == EContextAttachmentType::ContentFolder && Attachment.Payload.IsEmpty())
+	{
+		if (OutWarning)
+		{
+			*OutWarning = TEXT("Empty folder path.");
+		}
+		return false;
+	}
 #endif
 	return true;
 }
@@ -208,6 +216,47 @@ void FUnrealAiContextService::SetTodoStepDone(int32 StepIndex, bool bDone)
 	ScheduleSave(ActiveProjectId, ActiveThreadId);
 }
 
+void FUnrealAiContextService::SetActiveOrchestrateDag(const FString& DagJson)
+{
+	if (ActiveProjectId.IsEmpty() || ActiveThreadId.IsEmpty())
+	{
+		return;
+	}
+	FAgentContextState* S = FindOrAddState(ActiveProjectId, ActiveThreadId);
+	S->ActiveOrchestrateDagJson = DagJson;
+	S->OrchestrateNodeStatusById.Reset();
+	S->OrchestrateNodeSummaryById.Reset();
+	ScheduleSave(ActiveProjectId, ActiveThreadId);
+}
+
+void FUnrealAiContextService::SetOrchestrateNodeStatus(const FString& NodeId, const FString& Status, const FString& Summary)
+{
+	if (ActiveProjectId.IsEmpty() || ActiveThreadId.IsEmpty() || NodeId.IsEmpty())
+	{
+		return;
+	}
+	FAgentContextState* S = FindOrAddState(ActiveProjectId, ActiveThreadId);
+	S->OrchestrateNodeStatusById.Add(NodeId, Status);
+	if (!Summary.IsEmpty())
+	{
+		S->OrchestrateNodeSummaryById.Add(NodeId, Summary);
+	}
+	ScheduleSave(ActiveProjectId, ActiveThreadId);
+}
+
+void FUnrealAiContextService::ClearActiveOrchestrateDag()
+{
+	if (ActiveProjectId.IsEmpty() || ActiveThreadId.IsEmpty())
+	{
+		return;
+	}
+	FAgentContextState* S = FindOrAddState(ActiveProjectId, ActiveThreadId);
+	S->ActiveOrchestrateDagJson.Empty();
+	S->OrchestrateNodeStatusById.Reset();
+	S->OrchestrateNodeSummaryById.Reset();
+	ScheduleSave(ActiveProjectId, ActiveThreadId);
+}
+
 void FUnrealAiContextService::SetEditorSnapshot(const FEditorContextSnapshot& Snapshot)
 {
 	if (ActiveProjectId.IsEmpty() || ActiveThreadId.IsEmpty())
@@ -276,6 +325,25 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 	FAgentContextState Working = *Found;
 	UnrealAiAgentContextFormat::ApplyModeToStateForBuild(Working, Options);
 
+	if (Options.bIncludeAttachments && !Options.bModelSupportsImages)
+	{
+		TArray<FContextAttachment> Kept;
+		Kept.Reserve(Working.Attachments.Num());
+		for (const FContextAttachment& A : Working.Attachments)
+		{
+			if (UnrealAiEditorContextQueries::IsImageLikeAttachment(A))
+			{
+				const FString Display = !A.Label.IsEmpty() ? A.Label : A.Payload;
+				Result.UserVisibleMessages.Add(FString::Printf(
+					TEXT("Image attachment was not sent to the model (this model profile has \"Support images\" disabled): %s"),
+					*Display));
+				continue;
+			}
+			Kept.Add(A);
+		}
+		Working.Attachments = MoveTemp(Kept);
+	}
+
 	int32 Budget = Options.MaxContextChars;
 	if (Working.MaxContextChars > 0)
 	{
@@ -298,7 +366,7 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 
 	FUnrealAiComplexityAssessorInputs Cin;
 	Cin.UserMessage = Options.UserMessageForComplexity;
-	Cin.AttachmentCount = Found->Attachments.Num();
+	Cin.AttachmentCount = Working.Attachments.Num();
 	Cin.ToolResultCount = Found->ToolResults.Num();
 	Cin.ContextBlockCharCount = Result.ContextBlock.Len();
 	Cin.Mode = Options.Mode;
