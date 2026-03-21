@@ -43,3 +43,10 @@ Plugins/**/*.VC.db
 # OS
 .DS_Store
 Thumbs.db
+
+# Cursor / local dev artifacts
+/.cursor/
+
+# Unreal/automation local output folders
+/BuildOut/
+/tests-failed.txt
