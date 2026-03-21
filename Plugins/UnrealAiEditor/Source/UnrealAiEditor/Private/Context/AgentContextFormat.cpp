@@ -1,7 +1,16 @@
 #include "Context/AgentContextFormat.h"
 
+#include "Context/UnrealAiEditorContextQueries.h"
+#include "Misc/EngineVersion.h"
+
 namespace UnrealAiAgentContextFormat
 {
+	FString GetProjectEngineVersionLabel()
+	{
+		const FEngineVersion& E = FEngineVersion::Current();
+		return FString::Printf(TEXT("Unreal Engine %d.%d"), E.GetMajor(), E.GetMinor());
+	}
+
 	static FString TypeToString(EContextAttachmentType T)
 	{
 		switch (T)
@@ -10,6 +19,8 @@ namespace UnrealAiAgentContextFormat
 		case EContextAttachmentType::FilePath: return TEXT("file");
 		case EContextAttachmentType::FreeText: return TEXT("text");
 		case EContextAttachmentType::BlueprintNodeRef: return TEXT("bp_node");
+		case EContextAttachmentType::ActorReference: return TEXT("actor");
+		case EContextAttachmentType::ContentFolder: return TEXT("folder");
 		default: return TEXT("unknown");
 		}
 	}
@@ -17,15 +28,17 @@ namespace UnrealAiAgentContextFormat
 	FString FormatContextBlock(const FAgentContextState& State, const FAgentContextBuildOptions& Options)
 	{
 		FString Out;
+		// First block: double-paren engine version only (authoritative editor runtime).
+		Out += FString::Printf(TEXT("### ((%s))\n\n"), *GetProjectEngineVersionLabel());
 		if (Options.bIncludeAttachments)
 		{
 			for (const FContextAttachment& A : State.Attachments)
 			{
-				const FString Label = A.Label.IsEmpty() ? A.Payload : A.Label;
+				const FString Body = UnrealAiEditorContextQueries::BuildRichAttachmentPayload(A);
 				Out += FString::Printf(
 					TEXT("### Attachment (%s)\n%s\n\n"),
 					*TypeToString(A.Type),
-					*A.Payload);
+					*Body);
 			}
 		}
 		if (Options.bIncludeToolResults && Options.Mode != EUnrealAiAgentMode::Ask)

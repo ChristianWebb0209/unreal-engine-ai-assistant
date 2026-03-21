@@ -4,6 +4,9 @@
 
 namespace UnrealAiAgentContextFormat
 {
+	/** e.g. "Unreal Engine 5.7" from the running editor (major.minor). */
+	FString GetProjectEngineVersionLabel();
+
 	/** Single formatted block from state (before global budget trim). */
 	FString FormatContextBlock(const FAgentContextState& State, const FAgentContextBuildOptions& Options);
 

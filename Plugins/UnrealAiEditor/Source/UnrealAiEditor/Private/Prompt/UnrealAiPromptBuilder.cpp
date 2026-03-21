@@ -1,5 +1,6 @@
 #include "Prompt/UnrealAiPromptBuilder.h"
 
+#include "Context/AgentContextFormat.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -27,11 +28,12 @@ namespace UnrealAiPromptBuilderPriv
 		{
 		case EUnrealAiAgentMode::Ask:
 			return TEXT("ask");
-		case EUnrealAiAgentMode::Fast:
-			return TEXT("fast");
 		case EUnrealAiAgentMode::Agent:
-		default:
 			return TEXT("agent");
+		case EUnrealAiAgentMode::Orchestrate:
+			return TEXT("orchestrate");
+		default:
+			return TEXT("ask");
 		}
 	}
 
@@ -43,15 +45,18 @@ namespace UnrealAiPromptBuilderPriv
 		{
 		case EUnrealAiAgentMode::Ask:
 			Start = TEXT("## Mode: Ask (`ask`)");
-			End = TEXT("## Mode: Fast (`fast`)");
-			break;
-		case EUnrealAiAgentMode::Fast:
-			Start = TEXT("## Mode: Fast (`fast`)");
 			End = TEXT("## Mode: Agent (`agent`)");
 			break;
 		case EUnrealAiAgentMode::Agent:
-		default:
 			Start = TEXT("## Mode: Agent (`agent`)");
+			End = TEXT("## Mode: Orchestrate (`orchestrate`)");
+			break;
+		case EUnrealAiAgentMode::Orchestrate:
+			Start = TEXT("## Mode: Orchestrate (`orchestrate`)");
+			End = nullptr;
+			break;
+		default:
+			Start = TEXT("## Mode: Ask (`ask`)");
 			End = nullptr;
 			break;
 		}
@@ -113,6 +118,7 @@ namespace UnrealAiPromptBuilderPriv
 			TEXT("threadId=%s; storage=context.json activeTodoPlan + todoStepsDone"),
 			P.ThreadId.IsEmpty() ? TEXT("(unknown)") : *P.ThreadId);
 		ReplaceAll(Doc, TEXT("{{PLAN_POINTER}}"), Pointer);
+		ReplaceAll(Doc, TEXT("((project version))"), UnrealAiAgentContextFormat::GetProjectEngineVersionLabel());
 	}
 }
 

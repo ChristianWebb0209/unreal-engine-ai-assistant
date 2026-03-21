@@ -7,7 +7,7 @@
 struct FUnrealAiPromptAssembleParams
 {
 	const FAgentContextBuildResult* Built = nullptr;
-	EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Fast;
+	EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Agent;
 	int32 LlmRound = 1;
 	int32 MaxLlmRounds = 16;
 	FString ThreadId;

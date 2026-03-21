@@ -25,5 +25,6 @@ namespace UnrealAiTurnLlmRequestBuilder
 		FUnrealAiConversationStore* Conv,
 		int32 CharPerTokenApprox,
 		FUnrealAiLlmRequest& OutRequest,
+		TArray<FString>& OutContextUserMessages,
 		FString& OutError);
 }

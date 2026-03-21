@@ -39,7 +39,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 50,
@@ -85,7 +86,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 42,
@@ -128,7 +130,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 64,
@@ -168,7 +171,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 68,
@@ -206,7 +210,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 60,
@@ -251,7 +256,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 48,
@@ -297,7 +303,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 62,
@@ -309,7 +316,8 @@
         "additionalProperties": false,
         "properties": {
           "class_path": {
-            "type": "string"
+            "type": "string",
+            "description": "Must be a subclass of AActor (e.g. /Game/MyActor.MyActor_C or /Script/Engine.StaticMeshActor). Components (USceneComponent, etc.) cannot be spawned as actors."
           },
           "location": {
             "type": "array",
@@ -352,7 +360,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 22,
@@ -391,7 +400,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 0,
@@ -424,7 +434,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 0,
@@ -457,7 +468,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 0,
@@ -491,7 +503,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 38,
@@ -535,7 +548,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 52,
@@ -577,7 +591,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 76,
@@ -616,7 +631,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 22,
@@ -665,7 +681,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 82,
@@ -706,7 +723,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 78,
@@ -749,7 +767,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 40,
@@ -795,7 +814,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 55,
@@ -837,7 +857,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 15,
@@ -875,7 +896,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 20,
@@ -924,7 +946,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 50,
@@ -965,7 +988,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 70,
@@ -1006,7 +1030,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 56,
@@ -1048,7 +1073,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 20,
@@ -1096,7 +1122,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 50,
@@ -1139,7 +1166,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 58,
@@ -1177,7 +1205,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 81,
@@ -1217,7 +1246,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 12,
@@ -1255,7 +1285,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 0,
@@ -1289,7 +1320,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 84,
@@ -1328,7 +1360,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 40,
@@ -1366,7 +1399,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 83,
@@ -1413,7 +1447,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 80,
@@ -1453,7 +1488,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 50,
@@ -1496,7 +1532,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 18,
@@ -1539,7 +1576,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 38,
@@ -1577,7 +1615,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 18,
@@ -1616,7 +1655,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 58,
@@ -1654,7 +1694,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 48,
@@ -1700,7 +1741,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 47,
@@ -1750,7 +1792,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 35,
@@ -1788,7 +1831,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 16,
@@ -1826,7 +1870,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 44,
@@ -1871,7 +1916,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 10,
@@ -1907,7 +1953,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 18,
@@ -1945,7 +1992,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 15,
@@ -1990,7 +2038,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 50,
@@ -2035,7 +2084,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 62,
@@ -2067,7 +2117,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 48,
@@ -2090,7 +2141,7 @@
     },
     {
       "tool_id": "project_file_read_text",
-      "summary": "Read text file under project (allow-listed paths).",
+      "summary": "Read text file under project (Source/Config/Content/Plugins, docs/, .github/, scripts/, tools/, build/, root README/LICENSE-style files, *.uproject).",
       "category": "project_files_search",
       "tags": [
         "filesystem",
@@ -2100,7 +2151,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 66,
@@ -2141,7 +2193,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 18,
@@ -2187,7 +2240,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 0,
@@ -2221,7 +2275,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 25,
@@ -2264,7 +2319,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 24,
@@ -2304,7 +2360,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 10,
@@ -2339,7 +2396,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 58,
@@ -2398,7 +2456,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 62,
@@ -2449,7 +2508,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 64,
@@ -2505,7 +2565,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 30,
@@ -2552,7 +2613,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 75,
@@ -2602,7 +2664,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 86,
@@ -2652,7 +2715,8 @@
       "modes": {
         "ask": true,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 72,
@@ -2690,7 +2754,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 88,
@@ -2745,7 +2810,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 87,
@@ -2800,7 +2866,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 48,
@@ -2840,7 +2907,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 55,
@@ -2896,7 +2964,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 60,
@@ -2939,7 +3008,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 90,
@@ -2993,7 +3063,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 85,
@@ -3049,7 +3120,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 65,
@@ -3087,7 +3159,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 45,
@@ -3126,7 +3199,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 6,
@@ -3178,7 +3252,8 @@
       "modes": {
         "ask": false,
         "fast": true,
-        "agent": true
+        "agent": true,
+        "orchestrate": true
       },
       "context_selector": {
         "priority": 28,
@@ -3193,7 +3268,37 @@
             "type": "string"
           },
           "worker_results": {
-            "type": "array"
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "status": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "errors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "artifacts": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "follow_up_questions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           }
         },
         "required": [

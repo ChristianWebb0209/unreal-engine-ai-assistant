@@ -36,8 +36,10 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	FUnrealAiConversationStore* Conv,
 	int32 CharPerTokenApprox,
 	FUnrealAiLlmRequest& OutRequest,
+	TArray<FString>& OutContextUserMessages,
 	FString& OutError)
 {
+	OutContextUserMessages.Reset();
 	if (!ContextService || !Profiles || !Catalog || !Conv)
 	{
 		OutError = TEXT("Turn builder: missing dependency.");
@@ -50,7 +52,9 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	FAgentContextBuildOptions Opt;
 	Opt.Mode = Request.Mode;
 	Opt.UserMessageForComplexity = Request.UserText;
+	Opt.bModelSupportsImages = Caps.bSupportsImages;
 	const FAgentContextBuildResult Built = ContextService->BuildContextWindow(Opt);
+	OutContextUserMessages = Built.UserVisibleMessages;
 
 	FUnrealAiPromptAssembleParams P;
 	P.Built = &Built;
@@ -66,7 +70,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 			P.bIncludeExecutionSubturnChunk = !St->ActiveTodoPlanJson.IsEmpty();
 		}
 	}
-	P.bIncludeOrchestrationChunk = (Request.Mode == EUnrealAiAgentMode::Agent);
+	P.bIncludeOrchestrationChunk = (Request.Mode == EUnrealAiAgentMode::Orchestrate);
 
 	const FString SystemContent = UnrealAiPromptBuilder::BuildSystemDeveloperContent(P);
 
@@ -89,6 +93,11 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	}
 	FString ToolsJson;
 	Catalog->BuildOpenAiToolsJsonForMode(Request.Mode, Caps, ToolsJson);
+	if (Request.Mode == EUnrealAiAgentMode::Orchestrate)
+	{
+		// Planner pass must be DAG-only in v1; executor child turns run in Agent mode.
+		ToolsJson = TEXT("[]");
+	}
 
 	OutRequest = FUnrealAiLlmRequest();
 	OutRequest.ApiModelName = Caps.ModelIdForApi;

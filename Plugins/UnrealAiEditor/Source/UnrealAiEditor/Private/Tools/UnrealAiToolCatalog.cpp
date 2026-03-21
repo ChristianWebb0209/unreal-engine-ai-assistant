@@ -97,11 +97,21 @@ void FUnrealAiToolCatalog::BuildOpenAiToolsJsonForMode(
 			case EUnrealAiAgentMode::Ask:
 				(*Modes)->TryGetBoolField(TEXT("ask"), bInclude);
 				break;
-			case EUnrealAiAgentMode::Fast:
-				(*Modes)->TryGetBoolField(TEXT("fast"), bInclude);
-				break;
 			case EUnrealAiAgentMode::Agent:
 				(*Modes)->TryGetBoolField(TEXT("agent"), bInclude);
+				if (!bInclude)
+				{
+					// Back-compat with catalogs that only define fast during migration.
+					(*Modes)->TryGetBoolField(TEXT("fast"), bInclude);
+				}
+				break;
+			case EUnrealAiAgentMode::Orchestrate:
+				(*Modes)->TryGetBoolField(TEXT("orchestrate"), bInclude);
+				if (!bInclude)
+				{
+					// Default to agent tool surface unless orchestrate is explicitly split.
+					(*Modes)->TryGetBoolField(TEXT("agent"), bInclude);
+				}
 				break;
 			default:
 				break;

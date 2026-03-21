@@ -3,6 +3,8 @@
 **Summary:** `{{ACTIVE_TODO_SUMMARY}}`  
 **Pointer:** `{{PLAN_POINTER}}` (canonical plan on disk, cursor step, completed ids)
 
+After **`agent_emit_todo_plan`** alone, the harness appends a short **user** nudge so the next model turn is pushed to **call tools** for step 1 (models often stopped with text-only before this).
+
 - Execute the **current step** unless the harness asks to replan.
 - Do **not** dump the full plan; briefly acknowledge the step and outcomes.
 - Blockers: update plan fields per schema or ask **one** focused question.

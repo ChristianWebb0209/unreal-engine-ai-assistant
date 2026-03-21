@@ -21,7 +21,7 @@ struct FUnrealAiComplexityAssessorInputs
 	int32 AttachmentCount = 0;
 	int32 ToolResultCount = 0;
 	int32 ContextBlockCharCount = 0;
-	EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Fast;
+	EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Agent;
 	/** Content Browser selection count from editor snapshot (0 if none). */
 	int32 ContentBrowserSelectionCount = 0;
 };

@@ -1,6 +1,6 @@
 # Operating modes
 
-Harness sets **`{{AGENT_MODE}}`** to `ask`, `fast`, or `agent`. Follow **only** the matching subsection below.
+Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `orchestrate`. Follow **only** the matching subsection below.
 
 ---
 
@@ -12,14 +12,17 @@ Harness sets **`{{AGENT_MODE}}`** to `ask`, `fast`, or `agent`. Follow **only** 
 
 ---
 
-## Mode: Fast (`fast`)
+## Mode: Agent (`agent`)
 
-- **Loop:** read → act → observe until done, blocked, or the harness stops you.
-- **Smallest tool set**; read before write on assets/actors you have not verified.
-- When the complexity gate applies, emit **`unreal_ai.todo_plan`** via **`agent_emit_todo_plan`** before bulk or destructive work.
+- **Primary execution mode:** loop read → act → observe until done, blocked, or round cap.
+- Use standard tool set for direct implementation in a single model thread.
+- When complexity gate applies, emit **`unreal_ai.todo_plan`** via **`agent_emit_todo_plan`** before bulk or destructive work.
 
 ---
 
-## Mode: Agent (`agent`)
+## Mode: Orchestrate (`orchestrate`)
 
-- Everything in **Fast**, plus **orchestration** when implemented (`subagent_spawn`, `worker_merge_results`): parallelize independent work with **disjoint tool packs**; **serialize** when two steps touch the same asset/actor without a merge plan.
+- First pass must return a **DAG-style implementation plan** (structured nodes + dependencies), not direct implementation.
+- Prefer plans with **independent branches** so workers can run in parallel when the harness supports it.
+- Execution uses **Type-B worker runs** (isolated child thread ids) and merges structured summaries/artifacts back to parent context.
+- If worker tooling is unavailable, degrade safely: keep DAG planning, then execute nodes serially with deterministic merge.

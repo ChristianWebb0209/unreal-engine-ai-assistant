@@ -2,12 +2,12 @@
 
 #include "CoreMinimal.h"
 
-/** Ask / Fast / Agent — controls what enters the built context block. */
+/** Ask / Agent / Orchestrate — controls what enters the built context block. */
 enum class EUnrealAiAgentMode : uint8
 {
 	Ask,
-	Fast,
 	Agent,
+	Orchestrate,
 };
 
 enum class EContextAttachmentType : uint8
@@ -16,6 +16,10 @@ enum class EContextAttachmentType : uint8
 	FilePath,
 	FreeText,
 	BlueprintNodeRef,
+	/** Level/world actor (GetPathName() payload). */
+	ActorReference,
+	/** Content Browser folder virtual path (e.g. /Game/Foo). */
+	ContentFolder,
 };
 
 struct FContextAttachment
@@ -24,6 +28,8 @@ struct FContextAttachment
 	FString Payload;
 	/** Optional display label (e.g. @BP_Foo). */
 	FString Label;
+	/** Optional class path for Slate icon (e.g. /Script/Engine.Material). */
+	FString IconClassPath;
 };
 
 struct FToolContextEntry
@@ -50,7 +56,7 @@ struct FEditorContextSnapshot
 
 struct FAgentContextState
 {
-	static const int32 SchemaVersion = 3;
+	static const int32 SchemaVersion = 4;
 
 	int32 SchemaVersionField = SchemaVersion;
 	TArray<FContextAttachment> Attachments;
@@ -62,6 +68,12 @@ struct FAgentContextState
 	FString ActiveTodoPlanJson;
 	/** Parallel to `steps` in ActiveTodoPlanJson (best-effort). */
 	TArray<bool> TodoStepsDone;
+	/** Canonical orchestrate DAG JSON produced by planner pass (schema: unreal_ai.orchestrate_dag). */
+	FString ActiveOrchestrateDagJson;
+	/** Node-level execution status for the active DAG. */
+	TMap<FString, FString> OrchestrateNodeStatusById;
+	/** Optional one-line summary per completed/failed node for parent context carry-forward. */
+	TMap<FString, FString> OrchestrateNodeSummaryById;
 };
 
 struct FContextRecordPolicy
@@ -72,7 +84,7 @@ struct FContextRecordPolicy
 
 struct FAgentContextBuildOptions
 {
-	EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Fast;
+	EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Agent;
 	/** Hard cap on formatted context string; trims oldest tool results first, then attachments. */
 	int32 MaxContextChars = 32000;
 	bool bIncludeToolResults = true;
@@ -82,6 +94,8 @@ struct FAgentContextBuildOptions
 	FString StaticSystemPrefix;
 	/** Latest user message for this turn — feeds `FUnrealAiComplexityAssessor`. */
 	FString UserMessageForComplexity;
+	/** From model profile: if false, image-like attachments are stripped when building context. */
+	bool bModelSupportsImages = true;
 };
 
 struct FAgentContextBuildResult
@@ -99,4 +113,6 @@ struct FAgentContextBuildResult
 	/** Short line for {{ACTIVE_TODO_SUMMARY}} when a plan exists. */
 	FString ActiveTodoSummaryText;
 	bool bTruncated = false;
+	/** Shown in chat by the UI when attachments are dropped (e.g. model does not support images). */
+	TArray<FString> UserVisibleMessages;
 };
