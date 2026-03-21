@@ -1,24 +1,42 @@
 #include "UnrealAiEditorModule.h"
 
 #include "Modules/ModuleManager.h"
+#include "Async/Async.h"
 #include "App/UnrealAiEditorCommands.h"
 #include "Backend/UnrealAiBackendRegistry.h"
+#include "Context/AgentContextTypes.h"
 #include "Context/IAgentContextService.h"
+#include "Context/UnrealAiContextDragDrop.h"
+#include "Context/UnrealAiEditorContextQueries.h"
 #include "Style/UnrealAiEditorStyle.h"
-#include "Tabs/SUnrealAiEditorApiModelsTab.h"
 #include "Tabs/SUnrealAiEditorChatTab.h"
 #include "Tabs/SUnrealAiEditorHelpTab.h"
 #include "Tabs/SUnrealAiEditorQuickStartTab.h"
 #include "Tabs/SUnrealAiEditorSettingsTab.h"
 #include "UnrealAiEditorSettings.h"
 #include "UnrealAiEditorTabIds.h"
+#include "Widgets/UnrealAiChatUiSession.h"
+#include "AssetRegistry/AssetData.h"
+#include "ContentBrowserModule.h"
+#include "Editor.h"
+#include "Framework/Commands/UIAction.h"
 #include "Framework/Commands/UICommandList.h"
 #include "Framework/Docking/TabManager.h"
+#include "Framework/Docking/SDockingTabStack.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "GameFramework/Actor.h"
+#include "IContentBrowserSingleton.h"
 #include "LevelEditor.h"
+#include "Selection.h"
+#include "Styling/AppStyle.h"
+#include "ToolMenuEntry.h"
+#include "ToolMenu.h"
 #include "ISettingsModule.h"
 #include "ToolMenus.h"
 #include "Widgets/Docking/SDockTab.h"
+#include "Widgets/SWidget.h"
 #include "WorkspaceMenuStructure.h"
+#include "Misc/Guid.h"
 #include "WorkspaceMenuStructureModule.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
@@ -52,12 +70,6 @@ static void RegisterUnrealAiEditorKeyBindings()
 			FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::SettingsTab);
 		}));
 	Cmd->MapAction(
-		C.OpenApiModelsTab,
-		FExecuteAction::CreateLambda([]()
-		{
-			FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::ApiModelsTab);
-		}));
-	Cmd->MapAction(
 		C.OpenQuickStartTab,
 		FExecuteAction::CreateLambda([]()
 		{
@@ -87,6 +99,7 @@ void FUnrealAiEditorModule::StartupModule()
 	RegisterTabs(Reg);
 	RegisterMenus();
 	RegisterSettings();
+	RegisterOpenChatOnStartup();
 }
 
 void FUnrealAiEditorModule::ShutdownModule()
@@ -100,6 +113,7 @@ void FUnrealAiEditorModule::ShutdownModule()
 	}
 
 	UnregisterSettings();
+	UnregisterOpenChatOnStartup();
 	UnregisterMenus();
 	UnregisterTabs();
 
@@ -123,16 +137,246 @@ TSharedPtr<FUnrealAiBackendRegistry> FUnrealAiEditorModule::GetBackendRegistry()
 	return GUnrealAiModule ? GUnrealAiModule->BackendRegistry : nullptr;
 }
 
+void FUnrealAiEditorModule::SetActiveChatSession(TSharedPtr<FUnrealAiChatUiSession> Session)
+{
+	if (GUnrealAiModule)
+	{
+		GUnrealAiModule->ActiveChatSession = Session;
+	}
+}
+
+TSharedPtr<FUnrealAiChatUiSession> FUnrealAiEditorModule::GetActiveChatSession()
+{
+	return GUnrealAiModule ? GUnrealAiModule->ActiveChatSession.Pin() : nullptr;
+}
+
+void FUnrealAiEditorModule::NotifyContextAttachmentsChanged()
+{
+	OnContextAttachmentsChanged().Broadcast();
+}
+
+FSimpleMulticastDelegate& FUnrealAiEditorModule::OnContextAttachmentsChanged()
+{
+	static FSimpleMulticastDelegate Delegate;
+	return Delegate;
+}
+
+#if WITH_EDITOR
+static void UnrealAi_RegisterContextMenu_AddToChat(const FName MenuName)
+{
+	UToolMenu* Menu = UToolMenus::Get()->ExtendMenu(MenuName);
+	if (!Menu)
+	{
+		return;
+	}
+	FToolMenuSection& Section = Menu->AddSection(
+		"UnrealAiContext",
+		LOCTEXT("UnrealAiHeading", "Unreal AI"),
+		FToolMenuInsert(NAME_None, EToolMenuInsertType::First));
+	Section.AddMenuEntry(
+		FName(*FString::Printf(TEXT("UnrealAiAddToContext_%s"), *MenuName.ToString().Replace(TEXT("."), TEXT("_")))),
+		LOCTEXT("AddToContext", "Add to context"),
+		LOCTEXT(
+			"AddToContextTip",
+			"Add the current selection to the active Agent Chat thread (same as dragging into the chat)"),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Plus"),
+		FUIAction(FExecuteAction::CreateLambda(
+			[MenuName]()
+			{
+				const TSharedPtr<FUnrealAiBackendRegistry> Reg = FUnrealAiEditorModule::GetBackendRegistry();
+				const TSharedPtr<FUnrealAiChatUiSession> Session = FUnrealAiEditorModule::GetActiveChatSession();
+				if (!Reg.IsValid() || !Session.IsValid())
+				{
+					return;
+				}
+				TArray<FContextAttachment> Atts;
+				if (MenuName == FName(TEXT("ContentBrowser.AssetContextMenu")))
+				{
+					if (FModuleManager::Get().IsModuleLoaded(TEXT("ContentBrowser")))
+					{
+						FContentBrowserModule& CBM = FModuleManager::GetModuleChecked<FContentBrowserModule>(
+							TEXT("ContentBrowser"));
+						TArray<FAssetData> Selected;
+						CBM.Get().GetSelectedAssets(Selected);
+						for (const FAssetData& AD : Selected)
+						{
+							if (AD.IsValid())
+							{
+								Atts.Add(UnrealAiEditorContextQueries::AttachmentFromAssetData(AD));
+							}
+						}
+					}
+				}
+				else if (
+					MenuName == FName(TEXT("LevelEditor.ActorContextMenu"))
+					|| MenuName == FName(TEXT("LevelEditor.SceneOutlinerContextMenu")))
+				{
+					if (GEditor)
+					{
+						if (USelection* ActorSelection = GEditor->GetSelectedActors())
+						{
+							for (FSelectionIterator It(*ActorSelection); It; ++It)
+							{
+								if (AActor* A = Cast<AActor>(*It))
+								{
+									Atts.Add(UnrealAiEditorContextQueries::AttachmentFromActor(A));
+								}
+							}
+						}
+					}
+				}
+				if (Atts.Num() == 0)
+				{
+					return;
+				}
+				UnrealAiContextDragDrop::AddAttachmentsToActiveChat(Reg, Session, Atts);
+				FUnrealAiEditorModule::NotifyContextAttachmentsChanged();
+			})));
+}
+#endif
+
+namespace UnrealAiAgentChatTabSpawn
+{
+	struct FContentBox
+	{
+		TSharedPtr<SUnrealAiEditorChatTab> ChatTab;
+	};
+}
+
+static TSharedPtr<SDockTab> FindParentDockTabForWidget(const TSharedRef<const SWidget>& Widget)
+{
+	TSharedPtr<SWidget> Current = Widget->GetParentWidget();
+	while (Current.IsValid())
+	{
+		if (Current->GetType() == FName(TEXT("SDockTab")))
+		{
+			return StaticCastSharedPtr<SDockTab>(Current);
+		}
+		Current = Current->GetParentWidget();
+	}
+	return nullptr;
+}
+
+static TSharedRef<SDockTab> SpawnAgentChatDockTab(
+	const TSharedPtr<FUnrealAiBackendRegistry>& Reg,
+	const FSpawnTabArgs& Args)
+{
+	(void)Args;
+	TSharedPtr<UnrealAiAgentChatTabSpawn::FContentBox> Box = MakeShared<UnrealAiAgentChatTabSpawn::FContentBox>();
+	TSharedPtr<SUnrealAiEditorChatTab> ChatTab;
+	TSharedRef<SDockTab> Tab = SNew(SDockTab)
+		.TabRole(ETabRole::NomadTab)
+		.Label(LOCTEXT("ChatTabLabel", "Agent Chat"))
+		.OnExtendContextMenu(SDockTab::FExtendContextMenu::CreateLambda(
+			[Box](FMenuBuilder& MenuBuilder)
+			{
+				const TSharedPtr<SUnrealAiEditorChatTab> Chat = Box->ChatTab;
+				if (!Chat.IsValid())
+				{
+					return;
+				}
+				MenuBuilder.BeginSection("UnrealAiChat", LOCTEXT("UnrealAiChatCtxSection", "Agent Chat"));
+				MenuBuilder.AddMenuEntry(
+					LOCTEXT("CtxNewChat", "New chat"),
+					LOCTEXT("CtxNewChatTip", "Open a new Agent Chat tab to the right of this one."),
+					FSlateIcon(),
+					FUIAction(FExecuteAction::CreateLambda([Chat]()
+					{
+						Chat->MenuNewChat();
+					})));
+				MenuBuilder.AddMenuEntry(
+					LOCTEXT("CtxExportChat", "Export chat…"),
+					LOCTEXT("CtxExportChatTip", "Save the transcript as a text file."),
+					FSlateIcon(),
+					FUIAction(FExecuteAction::CreateLambda([Chat]()
+					{
+						Chat->MenuExportChat();
+					})));
+				MenuBuilder.AddMenuEntry(
+					LOCTEXT("CtxCopyChat", "Copy chat to clipboard"),
+					LOCTEXT("CtxCopyChatTip", "Copy the transcript as plain text."),
+					FSlateIcon(),
+					FUIAction(FExecuteAction::CreateLambda([Chat]()
+					{
+						Chat->MenuCopyChatToClipboard();
+					})));
+				MenuBuilder.AddMenuEntry(
+					LOCTEXT("CtxDeleteChat", "Delete chat"),
+					LOCTEXT(
+						"CtxDeleteChatTip",
+						"Remove this conversation from memory and delete persisted thread data on disk."),
+					FSlateIcon(),
+					FUIAction(FExecuteAction::CreateLambda([Chat]()
+					{
+						Chat->MenuDeleteChat();
+					})));
+				MenuBuilder.EndSection();
+			}))
+		[
+			SAssignNew(ChatTab, SUnrealAiEditorChatTab).BackendRegistry(Reg)
+		];
+	Box->ChatTab = ChatTab;
+	return Tab;
+}
+
+void FUnrealAiEditorModule::OpenNewAgentChatTabBeside(const TSharedPtr<SWidget>& FromWidget)
+{
+	if (!FromWidget.IsValid())
+	{
+		return;
+	}
+	const TSharedPtr<FUnrealAiBackendRegistry> Reg = GetBackendRegistry();
+	if (!Reg.IsValid())
+	{
+		return;
+	}
+	TSharedPtr<SDockTab> ParentDock = FindParentDockTabForWidget(FromWidget.ToSharedRef());
+	TSharedPtr<SWindow> OwnerWindow;
+	if (ParentDock.IsValid())
+	{
+		OwnerWindow = ParentDock->GetParentWindow();
+	}
+	if (!OwnerWindow.IsValid())
+	{
+		OwnerWindow = FGlobalTabmanager::Get()->GetRootWindow();
+	}
+	const FSpawnTabArgs Args(OwnerWindow, FTabId(UnrealAiEditorTabIds::ChatTab, INDEX_NONE));
+	TSharedRef<SDockTab> NewTab = SpawnAgentChatDockTab(Reg, Args);
+	// Note: SDockTab::SetLayoutIdentifier is protected (friend FTabManager only). Extra Agent Chat tabs
+	// are spawned manually so FTabManager::SpawnTab is not used (nomad spawner tracks a single SpawnedTabPtr).
+
+	if (TSharedPtr<SDockingTabStack> Stack = ParentDock.IsValid() ? ParentDock->GetParentDockTabStack() : nullptr)
+	{
+		int32 InsertIdx = INDEX_NONE;
+		const TSlotlessChildren<SDockTab>& Tabs = Stack->GetTabs();
+		if (ParentDock.IsValid())
+		{
+			const FTabId CurrentId = ParentDock->GetLayoutIdentifier();
+			for (int32 i = 0; i < Tabs.Num(); ++i)
+			{
+				if (Tabs[i]->GetLayoutIdentifier() == CurrentId)
+				{
+					InsertIdx = i + 1;
+					break;
+				}
+			}
+		}
+		Stack->OpenTab(NewTab, InsertIdx, false);
+	}
+	else
+	{
+		FGlobalTabmanager::Get()->InsertNewDocumentTab(
+			UnrealAiEditorTabIds::ChatTab,
+			FTabManager::ESearchPreference::PreferLiveTab,
+			NewTab);
+	}
+}
+
 void FUnrealAiEditorModule::RegisterTabs(const TSharedPtr<FUnrealAiBackendRegistry>& Reg)
 {
-	const auto SpawnChat = [Reg](const FSpawnTabArgs& Args)
+	const auto SpawnChat = [Reg](const FSpawnTabArgs& Args) -> TSharedRef<SDockTab>
 	{
-		return SNew(SDockTab)
-			.TabRole(ETabRole::NomadTab)
-			.Label(LOCTEXT("ChatTabLabel", "Agent Chat"))
-			[
-				SNew(SUnrealAiEditorChatTab).BackendRegistry(Reg)
-			];
+		return SpawnAgentChatDockTab(Reg, Args);
 	};
 
 	const auto SpawnSettings = [Reg](const FSpawnTabArgs& Args)
@@ -142,16 +386,6 @@ void FUnrealAiEditorModule::RegisterTabs(const TSharedPtr<FUnrealAiBackendRegist
 			.Label(LOCTEXT("SettingsTabLabel", "AI Settings"))
 			[
 				SNew(SUnrealAiEditorSettingsTab).BackendRegistry(Reg)
-			];
-	};
-
-	const auto SpawnApi = [Reg](const FSpawnTabArgs& Args)
-	{
-		return SNew(SDockTab)
-			.TabRole(ETabRole::NomadTab)
-			.Label(LOCTEXT("ApiTabLabel", "API Keys & Models"))
-			[
-				SNew(SUnrealAiEditorApiModelsTab).BackendRegistry(Reg)
 			];
 	};
 
@@ -188,12 +422,6 @@ void FUnrealAiEditorModule::RegisterTabs(const TSharedPtr<FUnrealAiBackendRegist
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-							 UnrealAiEditorTabIds::ApiModelsTab,
-							 FOnSpawnTab::CreateLambda(SpawnApi))
-		.SetDisplayName(LOCTEXT("ApiModelsTab", "API Keys & Models"))
-		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
-
-	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 							 UnrealAiEditorTabIds::QuickStartTab,
 							 FOnSpawnTab::CreateLambda(SpawnQuick))
 		.SetDisplayName(LOCTEXT("QuickStartTab", "Quick Start"))
@@ -210,7 +438,6 @@ void FUnrealAiEditorModule::UnregisterTabs()
 {
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::ChatTab);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::SettingsTab);
-	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::ApiModelsTab);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::QuickStartTab);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::HelpTab);
 }
@@ -223,6 +450,9 @@ void FUnrealAiEditorModule::RegisterMenus()
 	UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateLambda(
 		[]()
 		{
+			// Bind commands before toolbar/menu entries that reference the command list.
+			RegisterUnrealAiEditorKeyBindings();
+
 			UToolMenu* WindowMenu = UToolMenus::Get()->ExtendMenu("LevelEditor.MainMenu.Window");
 			FToolMenuSection& Section = WindowMenu->FindOrAddSection("WindowGlobal");
 			Section.AddSubMenu(
@@ -250,15 +480,6 @@ void FUnrealAiEditorModule::RegisterMenus()
 							FUIAction(FExecuteAction::CreateLambda([]()
 							{
 								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::SettingsTab);
-							})));
-						S.AddMenuEntry(
-							"UnrealAiApi",
-							LOCTEXT("MenuApi", "API Keys & Models"),
-							LOCTEXT("MenuApiTip", ""),
-							FSlateIcon(),
-							FUIAction(FExecuteAction::CreateLambda([]()
-							{
-								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::ApiModelsTab);
 							})));
 						S.AddMenuEntry(
 							"UnrealAiQuick",
@@ -309,15 +530,6 @@ void FUnrealAiEditorModule::RegisterMenus()
 								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::SettingsTab);
 							})));
 						S.AddMenuEntry(
-							"UnrealAiApiT",
-							LOCTEXT("MenuApiT", "API Keys & Models"),
-							LOCTEXT("MenuApiTipT", ""),
-							FSlateIcon(),
-							FUIAction(FExecuteAction::CreateLambda([]()
-							{
-								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::ApiModelsTab);
-							})));
-						S.AddMenuEntry(
 							"UnrealAiQuickT",
 							LOCTEXT("MenuQuickT", "Quick Start"),
 							LOCTEXT("MenuQuickTipT", ""),
@@ -337,7 +549,24 @@ void FUnrealAiEditorModule::RegisterMenus()
 							})));
 					}));
 
-			RegisterUnrealAiEditorKeyBindings();
+			// Main Level Editor toolbar (top) — Nomad tabs only list under Window until opened once; this makes the UI discoverable.
+			if (UToolMenu* ToolBarMenu = UToolMenus::Get()->ExtendMenu("LevelEditor.LevelEditorToolBar"))
+			{
+				FToolMenuSection& ToolBarSection = ToolBarMenu->FindOrAddSection("UnrealAiToolbar");
+				ToolBarSection.AddEntry(FToolMenuEntry::InitToolBarButton(
+					FUnrealAiEditorCommands::Get().OpenChatTab,
+					LOCTEXT("ToolbarUnrealAi", "Unreal AI"),
+					LOCTEXT("ToolbarUnrealAiTip", "Open Agent Chat"),
+					FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Question"),
+					NAME_None,
+					TOptional<FName>(FName(TEXT("UnrealAiToolbarChat")))));
+			}
+
+#if WITH_EDITOR
+			UnrealAi_RegisterContextMenu_AddToChat(FName(TEXT("ContentBrowser.AssetContextMenu")));
+			UnrealAi_RegisterContextMenu_AddToChat(FName(TEXT("LevelEditor.ActorContextMenu")));
+			UnrealAi_RegisterContextMenu_AddToChat(FName(TEXT("LevelEditor.SceneOutlinerContextMenu")));
+#endif
 		}));
 }
 
@@ -366,6 +595,31 @@ void FUnrealAiEditorModule::UnregisterSettings()
 	if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
 	{
 		SettingsModule->UnregisterSettings("Project", "Plugins", "UnrealAiEditor");
+	}
+}
+
+void FUnrealAiEditorModule::RegisterOpenChatOnStartup()
+{
+	OpenChatOnStartupHandle = FEditorDelegates::OnEditorInitialized.AddLambda([](double /*DeltaTime*/)
+	{
+		if (!GetDefault<UUnrealAiEditorSettings>()->bOpenAgentChatOnStartup)
+		{
+			return;
+		}
+		// Defer one game-thread pump so the global tab manager and layout are ready.
+		AsyncTask(ENamedThreads::GameThread, []()
+		{
+			FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::ChatTab);
+		});
+	});
+}
+
+void FUnrealAiEditorModule::UnregisterOpenChatOnStartup()
+{
+	if (OpenChatOnStartupHandle.IsValid())
+	{
+		FEditorDelegates::OnEditorInitialized.Remove(OpenChatOnStartupHandle);
+		OpenChatOnStartupHandle.Reset();
 	}
 }
 

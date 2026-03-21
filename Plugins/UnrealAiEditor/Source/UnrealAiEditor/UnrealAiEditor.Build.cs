@@ -6,6 +6,9 @@ public class UnrealAiEditor : ModuleRules
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
+		// SDockingTabStack (OpenTab with insert index) — not exposed under Slate/Public.
+		PrivateIncludePaths.Add(System.IO.Path.Combine(EngineDirectory, "Source", "Runtime", "Slate", "Private"));
+
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
@@ -28,6 +31,8 @@ public class UnrealAiEditor : ModuleRules
 				"DeveloperSettings",
 				"WorkspaceMenuStructure",
 				"EditorFramework",
+				"AppFramework",
+				"DesktopPlatform",
 				"LevelEditor",
 				"ApplicationCore",
 				"Settings",

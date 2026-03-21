@@ -4,11 +4,12 @@ UI shell + **in-editor** stub implementations (persistence, fake stream) for an 
 
 ## What is implemented
 
-- **Window → Unreal AI** submenu: Agent Chat, AI Settings, API Keys & Models, Quick Start, Help.
-- **Nomad tabs** for each surface; dockable like other editor tabs.
-- **Agent Chat**: transcript (`FUnrealAiChatTranscript`), tool rows (`SToolCallCard`), thinking lane (`SThinkingBlock`), assistant streaming + optional typewriter (`SAssistantStreamBlock`), todo panel (`STodoPlanPanel`), **Stop** → `CancelTurn`. Streaming defaults on (`UUnrealAiEditorSettings::bStreamLlmChat`). See [`docs/chat-renderer.md`](../../docs/chat-renderer.md).
-- **API Keys & Models**: provider/base URL/key/model fields, mask toggle, **Test connection** (stub), **Save** → writes JSON via persistence stub.
-- **AI Settings**: placeholder copy + **Save** → `plugin_settings.json` under local data root.
+- **Window → Unreal AI** and **Tools → Unreal AI** submenus: Agent Chat, AI Settings, Quick Start, Help.
+- **Level Editor main toolbar** (top): **Unreal AI** button opens Agent Chat (Nomad tabs are not pinned to the right sidebar until you open them once and dock).
+- **Shortcut:** **Ctrl+K** (default chord for Agent Chat).
+- **Nomad tabs** for each surface; dockable like other editor tabs. **Agent Chat** is invoked automatically on editor startup (see **Project Settings → Plugins → Unreal AI Editor → Open Agent Chat on editor startup**). Dock it once where you want it; the editor remembers layout.
+- **Agent Chat**: transcript (`FUnrealAiChatTranscript`), tool rows (`SToolCallCard`), reasoning subline (`SThinkingSubline`), assistant streaming + optional typewriter (`SAssistantStreamBlock`), todo panel (`STodoPlanPanel`), **Stop** (same control as Send in the composer) → `CancelTurn`. Streaming defaults on (`UUnrealAiEditorSettings::bStreamLlmChat`). See [`docs/chat-renderer.md`](../../docs/chat-renderer.md).
+- **AI Settings** (`Window → Unreal AI → AI Settings`): `plugin_settings.json` (v4: nested **API key sections** with unlimited models each), per-model caps including **`maxAgentLlmRounds`** (max tool↔LLM iterations per send, default 16), company presets + hints, session **usage** per model + rough **USD** estimates when a bundled [Litellm](https://github.com/BerriAI/litellm) `model_prices_and_context_window.json` row matches your model id (`Resources/ModelPricing/`). Cumulative usage in `settings/usage_stats.json`. **Test connection**, **Save** → persistence / LLM reload.
 - **Project Settings → Plugins → Unreal AI Editor**: `UUnrealAiEditorSettings` (default agent, auto connect, verbose logging, OpenRouter fields).
 - **In-module stubs** (`Private/Backend/` — not a separate server process): persistence (writes under `%LOCALAPPDATA%\UnrealAiEditor\` on Windows), chat service (fake stream), model connector (delayed success).
 - **Tool catalog + execution:** [`Resources/UnrealAiToolCatalog.json`](Resources/UnrealAiToolCatalog.json) — single JSON (`meta` + `tools[]`). **`FUnrealAiToolExecutionHost`** (`Private/Tools/`) implements `IToolExecutionHost::InvokeTool` and dispatches to UE5 handlers in `UnrealAiToolDispatch.cpp` + `UnrealAiToolDispatch_Search.cpp` (game thread). **Fuzzy search:** `scene_fuzzy_search` (actors in level), `asset_index_fuzzy_search` (Asset Registry index), `source_search_symbol` (project Source/Config/Plugins/*/Source files); shared scoring in `UnrealAiFuzzySearch.cpp`. Other tool IDs return a structured `not_implemented` until handlers are added.
@@ -25,9 +26,9 @@ UI shell + **in-editor** stub implementations (persistence, fake stream) for an 
 
 ## Manual verification
 
-1. **Window → Unreal AI → Agent Chat** opens without errors.
-2. Click **Connect**, type text in the composer, **Send** — assistant area fills with stub streamed text.
-3. **Window → Unreal AI → API Keys & Models** → **Save** — confirm `%LOCALAPPDATA%\UnrealAiEditor\settings\plugin_settings.json` exists (Windows).
+1. **Unreal AI** toolbar button or **Window → Unreal AI → Agent Chat** opens without errors.
+2. Type text in the composer, **Send** — assistant area fills with stub streamed text (or a real LLM response when API keys are configured).
+3. **Window → Unreal AI → AI Settings** → **Save** — confirm `%LOCALAPPDATA%\UnrealAiEditor\settings\plugin_settings.json` exists (Windows).
 4. **Edit → Project Settings → Plugins → Unreal AI Editor** — fields visible and save to config.
 
 ## Automation tests (Editor, dev builds)
