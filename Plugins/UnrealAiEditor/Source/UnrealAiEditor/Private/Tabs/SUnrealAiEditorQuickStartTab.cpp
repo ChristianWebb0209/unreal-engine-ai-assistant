@@ -31,8 +31,8 @@ void SUnrealAiEditorQuickStartTab::Construct(const FArguments& InArgs)
 							.Text(LOCTEXT(
 								"QsBody",
 								"1) Window → Unreal AI → Agent Chat (or Tools → Unreal AI)\n"
-								"2) Add an API key in API Keys & Models or AI Settings JSON — otherwise the LLM runs in stub mode\n"
-								"3) Use Attach for Content Browser selection; @ mentions resolve assets\n"
+								"2) Add an API key in AI Settings (plugin_settings.json) — otherwise the LLM runs in stub mode\n"
+								"3) Drag assets or actors into Agent Chat, or right-click → Unreal AI → Add to context; @ mentions resolve assets\n"
 								"4) Send a prompt; use Stop to cancel streaming or tool execution\n"
 								"5) New Chat saves the current thread context and starts a fresh thread"))
 					]

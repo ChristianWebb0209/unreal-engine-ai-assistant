@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Input/DragAndDrop.h"
 #include "Widgets/SCompoundWidget.h"
 
 class FUnrealAiBackendRegistry;
@@ -16,6 +17,16 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	virtual ~SUnrealAiEditorChatTab() override;
+
+	virtual FReply OnDragOver(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent) override;
+	virtual FReply OnDrop(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent) override;
+
+	/** Agent Chat tab header context menu (see SDockTab::OnExtendContextMenu). */
+	void MenuNewChat();
+	void MenuExportChat();
+	void MenuCopyChatToClipboard();
+	void MenuDeleteChat();
 
 private:
 	void OpenSettingsTab() const;

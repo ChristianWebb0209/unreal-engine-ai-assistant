@@ -1,21 +1,25 @@
 #include "Tabs/SUnrealAiEditorChatTab.h"
 
+#include "UnrealAiEditorModule.h"
 #include "UnrealAiEditorTabIds.h"
+#include "Context/UnrealAiContextDragDrop.h"
 #include "Widgets/SChatComposer.h"
 #include "Widgets/SChatHeader.h"
 #include "Widgets/SChatMessageList.h"
+#include "Widgets/UnrealAiChatTranscript.h"
+#include "Widgets/UnrealAiChatUiHelpers.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Backend/UnrealAiBackendRegistry.h"
-#include "Context/IAgentContextService.h"
-#include "Context/UnrealAiProjectId.h"
+#include "DesktopPlatformModule.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Framework/Docking/TabManager.h"
-#include "Widgets/Input/SButton.h"
-#include "Widgets/Layout/SBorder.h"
-#include "Widgets/Layout/SBox.h"
+#include "HAL/PlatformApplicationMisc.h"
+#include "IDesktopPlatform.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
-#include "Widgets/SBoxPanel.h"
 #include "Styling/CoreStyle.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
@@ -24,6 +28,7 @@ void SUnrealAiEditorChatTab::Construct(const FArguments& InArgs)
 {
 	BackendRegistry = InArgs._BackendRegistry;
 	Session = MakeShared<FUnrealAiChatUiSession>();
+	FUnrealAiEditorModule::SetActiveChatSession(Session);
 	if (BackendRegistry.IsValid())
 	{
 		if (FUnrealAiModelProfileRegistry* Reg = BackendRegistry->GetModelProfileRegistry())
@@ -52,77 +57,128 @@ void SUnrealAiEditorChatTab::Construct(const FArguments& InArgs)
 			]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
-				SNew(SBorder)
-					.BorderBackgroundColor(FLinearColor(0.16f, 0.14f, 0.1f, 0.85f))
-					.Padding(FMargin(8.f))
-					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().FillWidth(1.f)
-						[
-							SNew(STextBlock)
-								.AutoWrapText(true)
-								.Text(LOCTEXT(
-									"PermHint",
-									"Destructive tools: permission prompts (Allow once / Always / Deny) will appear here when policy is enforced."))
-								.Font(FCoreStyle::GetDefaultFontStyle("Italic", 9))
-								.ColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.62f, 0.55f, 1.f)))
-						]
-						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))
-						[
-							SNew(SButton)
-								.IsEnabled(false)
-								.Text(LOCTEXT("AllowOnce", "Allow once"))
-						]
-						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))
-						[
-							SNew(SButton)
-								.IsEnabled(false)
-								.Text(LOCTEXT("Deny", "Deny"))
-						]
-					]
-			]
-			+ SVerticalBox::Slot().AutoHeight()
-			[
 				SAssignNew(ComposerWidget, SChatComposer)
 					.BackendRegistry(BackendRegistry)
 					.MessageList(MessageListWidget)
 					.Session(Session)
-					.OnNewChat(FSimpleDelegate::CreateSP(this, &SUnrealAiEditorChatTab::OnUnifiedNewChat))
 			]
 		];
 }
 
-void SUnrealAiEditorChatTab::OnUnifiedNewChat()
+SUnrealAiEditorChatTab::~SUnrealAiEditorChatTab()
 {
-	if (!BackendRegistry.IsValid() || !Session.IsValid())
+	if (FUnrealAiEditorModule::GetActiveChatSession() == Session)
 	{
-		return;
+		FUnrealAiEditorModule::SetActiveChatSession(nullptr);
 	}
-	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
-	const FString OldThreadIdStr = Session->ThreadId.ToString(EGuidFormats::DigitsWithHyphens);
-	if (IAgentContextService* Ctx = BackendRegistry->GetContextService())
+}
+
+FReply SUnrealAiEditorChatTab::OnDragOver(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent)
+{
+	TArray<FContextAttachment> Tmp;
+	if (UnrealAiContextDragDrop::TryParseDragDrop(DragDropEvent, Tmp))
 	{
-		Ctx->SaveNow(ProjectId, OldThreadIdStr);
+		return FReply::Handled();
 	}
-	Session->ThreadId = FGuid::NewGuid();
-	const FString NewThreadIdStr = Session->ThreadId.ToString(EGuidFormats::DigitsWithHyphens);
-	if (IAgentContextService* Ctx = BackendRegistry->GetContextService())
+	return SCompoundWidget::OnDragOver(MyGeometry, DragDropEvent);
+}
+
+FReply SUnrealAiEditorChatTab::OnDrop(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent)
+{
+	TArray<FContextAttachment> Atts;
+	if (!UnrealAiContextDragDrop::TryParseDragDrop(DragDropEvent, Atts))
 	{
-		Ctx->LoadOrCreate(ProjectId, NewThreadIdStr);
+		return FReply::Unhandled();
 	}
-	if (MessageListWidget.IsValid())
-	{
-		MessageListWidget->ClearTranscript();
-	}
+	UnrealAiContextDragDrop::AddAttachmentsToActiveChat(BackendRegistry, Session, Atts);
 	if (ComposerWidget.IsValid())
 	{
 		ComposerWidget->SyncAttachmentChipsUi();
 	}
+	FUnrealAiEditorModule::NotifyContextAttachmentsChanged();
+	return FReply::Handled();
+}
+
+void SUnrealAiEditorChatTab::OnUnifiedNewChat()
+{
+	FUnrealAiEditorModule::OpenNewAgentChatTabBeside(AsShared());
 }
 
 void SUnrealAiEditorChatTab::OpenSettingsTab() const
 {
 	FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::SettingsTab);
+}
+
+void SUnrealAiEditorChatTab::MenuNewChat()
+{
+	OnUnifiedNewChat();
+}
+
+void SUnrealAiEditorChatTab::MenuExportChat()
+{
+	if (!MessageListWidget.IsValid())
+	{
+		return;
+	}
+	const TSharedPtr<FUnrealAiChatTranscript> T = MessageListWidget->GetTranscript();
+	if (!T.IsValid())
+	{
+		return;
+	}
+	const FString Text = T->FormatPlainText();
+	if (Text.IsEmpty())
+	{
+		return;
+	}
+	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+	if (!DesktopPlatform)
+	{
+		return;
+	}
+	const FString DefaultName = FString::Printf(
+		TEXT("agent-chat-%s.txt"),
+		*Session->ThreadId.ToString(EGuidFormats::DigitsWithHyphens));
+	TArray<FString> SaveFilenames;
+	const bool bOk = DesktopPlatform->SaveFileDialog(
+		FSlateApplication::Get().FindBestParentWindowHandleForDialogs(AsShared()),
+		TEXT("Export chat"),
+		FPaths::ProjectSavedDir(),
+		*DefaultName,
+		TEXT("Text files (*.txt)|*.txt|All files (*.*)|*.*"),
+		EFileDialogFlags::None,
+		SaveFilenames);
+	if (bOk && SaveFilenames.Num() > 0)
+	{
+		FFileHelper::SaveStringToFile(Text, *SaveFilenames[0]);
+	}
+}
+
+void SUnrealAiEditorChatTab::MenuCopyChatToClipboard()
+{
+	if (!MessageListWidget.IsValid())
+	{
+		return;
+	}
+	const TSharedPtr<FUnrealAiChatTranscript> T = MessageListWidget->GetTranscript();
+	if (!T.IsValid())
+	{
+		return;
+	}
+	const FString Text = T->FormatPlainText();
+	if (!Text.IsEmpty())
+	{
+		FPlatformApplicationMisc::ClipboardCopy(*Text);
+	}
+}
+
+void SUnrealAiEditorChatTab::MenuDeleteChat()
+{
+	UnrealAiChatUi_DeleteChatPermanently(BackendRegistry, Session, MessageListWidget);
+	if (ComposerWidget.IsValid())
+	{
+		ComposerWidget->ResetComposerInput();
+		ComposerWidget->SyncAttachmentChipsUi();
+	}
 }
 
 #undef LOCTEXT_NAMESPACE
