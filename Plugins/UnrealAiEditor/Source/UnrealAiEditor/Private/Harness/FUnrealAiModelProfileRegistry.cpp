@@ -50,7 +50,7 @@ namespace UnrealAiModelProfileRegistryUtil
 		C.bSupportsNativeTools = true;
 		C.bSupportsParallelToolCalls = true;
 		C.bSupportsImages = true;
-		C.MaxAgentLlmRounds = 16;
+		C.MaxAgentLlmRounds = 32;
 		return C;
 	}
 }

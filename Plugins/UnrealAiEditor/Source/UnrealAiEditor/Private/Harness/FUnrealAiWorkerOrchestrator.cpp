@@ -69,6 +69,14 @@ namespace UnrealAiWorkerOrchestratorPriv
 			}
 		}
 
+		virtual void OnEditorBlockingDialogDuringTools(const FString& Summary) override
+		{
+			if (Parent.IsValid())
+			{
+				Parent->OnEditorBlockingDialogDuringTools(Summary);
+			}
+		}
+
 		virtual void OnRunContinuation(int32 PhaseIndex, int32 TotalPhasesHint) override
 		{
 			if (Parent.IsValid())

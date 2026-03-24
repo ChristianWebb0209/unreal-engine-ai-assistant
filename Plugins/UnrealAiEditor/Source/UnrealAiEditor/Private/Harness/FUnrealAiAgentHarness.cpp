@@ -15,6 +15,8 @@
 #include "Backend/FUnrealAiUsageTracker.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Harness/UnrealAiLlmInvocationService.h"
+#include "Misc/UnrealAiEditorModalMonitor.h"
+#include "Widgets/UnrealAiToolUi.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -23,6 +25,21 @@
 
 namespace UnrealAiAgentHarnessPriv
 {
+	static bool ShouldRetryTransientTransportError(const FString& Msg)
+	{
+		if (Msg.IsEmpty())
+		{
+			return false;
+		}
+		const bool bTransportFail = Msg.Contains(TEXT("HTTP request failed"), ESearchCase::IgnoreCase)
+			|| Msg.Contains(TEXT("Failed (Cancelled)"), ESearchCase::IgnoreCase);
+		const bool bTransient = Msg.Contains(TEXT("Cancelled"), ESearchCase::IgnoreCase)
+			|| Msg.Contains(TEXT("ConnectionError"), ESearchCase::IgnoreCase)
+			|| Msg.Contains(TEXT("TimedOut"), ESearchCase::IgnoreCase)
+			|| Msg.Contains(TEXT("Timeout"), ESearchCase::IgnoreCase);
+		return bTransportFail && bTransient;
+	}
+
 	static void MergeToolCallDeltas(TArray<FUnrealAiToolCallSpec>& Acc, const TArray<FUnrealAiToolCallSpec>& Delta)
 	{
 		for (const FUnrealAiToolCallSpec& D : Delta)
@@ -69,8 +86,11 @@ namespace UnrealAiAgentHarnessPriv
 
 		FGuid RunId;
 		int32 LlmRound = 0;
-		/** From model profile `maxAgentLlmRounds` (default 16), set each DispatchLlm. */
-		int32 EffectiveMaxLlmRounds = 16;
+		/** From model profile `maxAgentLlmRounds` (default 32), set each DispatchLlm. */
+		int32 EffectiveMaxLlmRounds = 32;
+		/** Retries transient HTTP-level cancellations without consuming a round. */
+		int32 TransientTransportRetryCountThisRound = 0;
+		static constexpr int32 MaxTransientTransportRetriesPerRound = 5;
 
 		FString AssistantBuffer;
 		TArray<FUnrealAiToolCallSpec> PendingToolCalls;
@@ -79,7 +99,7 @@ namespace UnrealAiAgentHarnessPriv
 		std::atomic<bool> bTerminal{false};
 
 		void HandleEvent(const FUnrealAiLlmStreamEvent& Ev);
-		void DispatchLlm();
+		void DispatchLlm(bool bRetrySameRound = false);
 		void CompleteToolPath();
 		void CompleteAssistantOnly();
 		void Fail(const FString& Msg);
@@ -96,6 +116,7 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
+		FUnrealAiEditorModalMonitor::NotifyAgentTurnEndedForSink(Sink);
 		if (Sink.IsValid())
 		{
 			Sink->OnRunFinished(false, Msg);
@@ -114,7 +135,8 @@ namespace UnrealAiAgentHarnessPriv
 			Conv->SaveNow();
 		}
 		if (UsageTracker && Profiles && !Request.ModelProfileId.IsEmpty()
-			&& (AccumulatedUsage.PromptTokens > 0 || AccumulatedUsage.CompletionTokens > 0))
+			&& (AccumulatedUsage.PromptTokens > 0 || AccumulatedUsage.CompletionTokens > 0
+				|| AccumulatedUsage.TotalTokens > 0))
 		{
 			UsageTracker->RecordUsage(Request.ModelProfileId, AccumulatedUsage, *Profiles);
 		}
@@ -141,6 +163,7 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			Sink->OnRunFinished(true, FString());
 		}
+		FUnrealAiEditorModalMonitor::NotifyAgentTurnEndedForSink(Sink);
 	}
 
 	void FAgentTurnRunner::AccumulateRoundUsage()
@@ -154,10 +177,11 @@ namespace UnrealAiAgentHarnessPriv
 		}
 		AccumulatedUsage.PromptTokens += P;
 		AccumulatedUsage.CompletionTokens += C;
+		AccumulatedUsage.TotalTokens += UsageThisRound.TotalTokens;
 		UsageThisRound = FUnrealAiTokenUsage();
 	}
 
-	void FAgentTurnRunner::DispatchLlm()
+	void FAgentTurnRunner::DispatchLlm(bool bRetrySameRound)
 	{
 		if (!Transport.IsValid() || !Profiles || !Catalog || !ContextService || !Conv.IsValid() || !Tools)
 		{
@@ -171,18 +195,28 @@ namespace UnrealAiAgentHarnessPriv
 		}
 		FUnrealAiModelCapabilities CapLimits;
 		Profiles->GetEffectiveCapabilities(Request.ModelProfileId, CapLimits);
-		const int32 ParsedMax = CapLimits.MaxAgentLlmRounds > 0 ? CapLimits.MaxAgentLlmRounds : 16;
-		EffectiveMaxLlmRounds = FMath::Clamp(ParsedMax, 1, 256);
-
-		if (LlmRound >= EffectiveMaxLlmRounds)
+		int32 ParsedMax = CapLimits.MaxAgentLlmRounds > 0 ? CapLimits.MaxAgentLlmRounds : 32;
+		if (Request.LlmRoundBudgetFloor > 0)
 		{
-			Fail(TEXT("Max tool/LLM rounds exceeded"));
-			return;
+			ParsedMax = FMath::Max(ParsedMax, Request.LlmRoundBudgetFloor);
 		}
-		++LlmRound;
-		if (LlmRound > 1 && Sink.IsValid())
+		EffectiveMaxLlmRounds = FMath::Clamp(ParsedMax, 1, 512);
+
+		if (!bRetrySameRound)
 		{
-			Sink->OnRunContinuation(LlmRound - 1, EffectiveMaxLlmRounds);
+			if (LlmRound >= EffectiveMaxLlmRounds)
+			{
+				Fail(FString::Printf(
+					TEXT("Max tool/LLM rounds exceeded (%d). Increase \"Max agent LLM rounds\" in AI Settings."),
+					EffectiveMaxLlmRounds));
+				return;
+			}
+			++LlmRound;
+			TransientTransportRetryCountThisRound = 0;
+			if (LlmRound > 1 && Sink.IsValid())
+			{
+				Sink->OnRunContinuation(LlmRound - 1, EffectiveMaxLlmRounds);
+			}
 		}
 		UsageThisRound = FUnrealAiTokenUsage();
 		AssistantBuffer.Reset();
@@ -270,8 +304,19 @@ namespace UnrealAiAgentHarnessPriv
 			}
 			break;
 		case EUnrealAiLlmStreamEventType::Error:
-			Fail(Ev.ErrorMessage.IsEmpty() ? TEXT("LLM error") : Ev.ErrorMessage);
+		{
+			const FString ErrorMsg = Ev.ErrorMessage.IsEmpty() ? TEXT("LLM error") : Ev.ErrorMessage;
+			if (!bCancelled.load(std::memory_order_relaxed)
+				&& ShouldRetryTransientTransportError(ErrorMsg)
+				&& TransientTransportRetryCountThisRound < MaxTransientTransportRetriesPerRound)
+			{
+				++TransientTransportRetryCountThisRound;
+				DispatchLlm(true);
+				break;
+			}
+			Fail(ErrorMsg);
 			break;
+		}
 		default:
 			break;
 		}
@@ -310,6 +355,17 @@ namespace UnrealAiAgentHarnessPriv
 				Sink->OnToolCallStarted(Tc.Name, Tc.Id, Tc.ArgumentsJson);
 			}
 			const FUnrealAiToolInvocationResult Inv = Tools->InvokeTool(Tc.Name, Tc.ArgumentsJson, Tc.Id);
+			const FString DialogFootnote = FUnrealAiEditorModalMonitor::ConsumePendingToolDialogFootnote();
+			FString ModelToolContent = Inv.bOk ? Inv.ContentForModel : Inv.ErrorMessage;
+			if (!DialogFootnote.IsEmpty())
+			{
+				if (!ModelToolContent.IsEmpty())
+				{
+					ModelToolContent += TEXT("\n");
+				}
+				ModelToolContent +=
+					FString::Printf(TEXT("[Editor blocking dialog during tool]: %s"), *DialogFootnote);
+			}
 			if (Inv.bOk)
 			{
 				++ToolSuccessCount;
@@ -320,8 +376,12 @@ namespace UnrealAiAgentHarnessPriv
 			}
 			if (Sink.IsValid())
 			{
-				const FString Preview = Inv.bOk ? Inv.ContentForModel : Inv.ErrorMessage;
-				Sink->OnToolCallFinished(Tc.Name, Tc.Id, Inv.bOk, Preview, Inv.EditorPresentation);
+				Sink->OnToolCallFinished(
+					Tc.Name,
+					Tc.Id,
+					Inv.bOk,
+					UnrealAiTruncateForUi(ModelToolContent),
+					Inv.EditorPresentation);
 			}
 			if (Tc.Name == TEXT("agent_emit_todo_plan") && Sink.IsValid())
 			{
@@ -340,7 +400,7 @@ namespace UnrealAiAgentHarnessPriv
 			FUnrealAiConversationMessage Tm;
 			Tm.Role = TEXT("tool");
 			Tm.ToolCallId = Tc.Id;
-			Tm.Content = Inv.bOk ? Inv.ContentForModel : Inv.ErrorMessage;
+			Tm.Content = ModelToolContent;
 			Conv->GetMessagesMutable().Add(Tm);
 		}
 		// The next round still runs (DispatchLlm below), but models often reply with text-only and end
@@ -461,6 +521,8 @@ void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TS
 		}
 		return;
 	}
+
+	FUnrealAiEditorModalMonitor::NotifyAgentTurnStarted(Sink);
 
 	const TSharedPtr<UnrealAiAgentHarnessPriv::FAgentTurnRunner> Runner = MakeShared<UnrealAiAgentHarnessPriv::FAgentTurnRunner>();
 	ActiveRunner = Runner;

@@ -18,7 +18,7 @@ struct FUnrealAiOrchestrateDag
 
 namespace UnrealAiOrchestrateDag
 {
-	/** Parse JSON payload (expects schema unreal_ai.orchestrate_dag and nodes[]). */
+	/** Parse JSON payload: canonical `nodes[]` (+ optional schema unreal_ai.orchestrate_dag), or legacy `steps[]` (id/title/detail/dependsOn). */
 	bool ParseDagJson(const FString& DagJson, FUnrealAiOrchestrateDag& OutDag, FString& OutError);
 	/** Validate graph integrity + acyclicity and bounded size. */
 	bool ValidateDag(const FUnrealAiOrchestrateDag& Dag, int32 MaxNodes, FString& OutError);

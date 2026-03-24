@@ -27,7 +27,7 @@ struct FUnrealAiModelCapabilities
 	 * Max tool↔LLM iterations per user send (each round = one completion, possibly + tool calls).
 	 * Higher values allow longer agent runs but usually consume more tokens. Clamped at runtime (e.g. 1–256).
 	 */
-	int32 MaxAgentLlmRounds = 16;
+	int32 MaxAgentLlmRounds = 32;
 };
 
 /** Single tool invocation produced by the LLM (OpenAI-style). */
@@ -87,6 +87,11 @@ struct FUnrealAiAgentTurnRequest
 	FString ModelProfileId;
 	/** If true, record assistant output as tool result for context demos (compat with stub). */
 	bool bRecordAssistantAsStubToolResult = false;
+	/**
+	 * When > 0, the harness uses max(profile MaxAgentLlmRounds, this) for this turn.
+	 * Orchestrate worker nodes set this so multi-tool steps are not cut off at the profile default.
+	 */
+	int32 LlmRoundBudgetFloor = 0;
 };
 
 /** Structured result from a Level-B worker (parent merge consumes this). */

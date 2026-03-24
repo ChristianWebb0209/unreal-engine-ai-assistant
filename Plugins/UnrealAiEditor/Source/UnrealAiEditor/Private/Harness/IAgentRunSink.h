@@ -28,6 +28,11 @@ public:
 		bool bSuccess,
 		const FString& ResultPreview,
 		const TSharedPtr<FUnrealAiToolEditorPresentation>& EditorPresentation) = 0;
+	/**
+	 * Editor opened a blocking Slate modal while tools were running (e.g. overwrite / confirm).
+	 * UI should surface this immediately; the harness also appends details to the tool message for the model.
+	 */
+	virtual void OnEditorBlockingDialogDuringTools(const FString& Summary) {}
 	/** Multi-round continuation within one user message (plan execution, workers). */
 	virtual void OnRunContinuation(int32 PhaseIndex, int32 TotalPhasesHint) = 0;
 	/** Structured todo plan from tool or harness (JSON body). */

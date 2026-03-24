@@ -7,6 +7,65 @@
 
 namespace UnrealAiOrchestrateDag
 {
+	static void ParseDependsArray(const FJsonObject& O, TArray<FString>& OutDeps)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Deps = nullptr;
+		if (!O.TryGetArrayField(TEXT("depends_on"), Deps) || !Deps)
+		{
+			O.TryGetArrayField(TEXT("dependsOn"), Deps);
+		}
+		if (!Deps)
+		{
+			return;
+		}
+		for (const TSharedPtr<FJsonValue>& D : *Deps)
+		{
+			if (D.IsValid() && D->Type == EJson::String)
+			{
+				const FString Dep = D->AsString().TrimStartAndEnd();
+				if (!Dep.IsEmpty())
+				{
+					OutDeps.Add(Dep);
+				}
+			}
+		}
+	}
+
+	static bool ParseOneDagNodeObject(const TSharedPtr<FJsonObject>& O, FUnrealAiDagNode& OutNode)
+	{
+		if (!O.IsValid())
+		{
+			return false;
+		}
+		O->TryGetStringField(TEXT("id"), OutNode.Id);
+		O->TryGetStringField(TEXT("title"), OutNode.Title);
+		if (OutNode.Title.IsEmpty())
+		{
+			O->TryGetStringField(TEXT("name"), OutNode.Title);
+		}
+		O->TryGetStringField(TEXT("hint"), OutNode.Hint);
+		if (OutNode.Hint.IsEmpty())
+		{
+			// Planner "steps" often use `detail` for the work hint.
+			O->TryGetStringField(TEXT("detail"), OutNode.Hint);
+		}
+		ParseDependsArray(*O, OutNode.DependsOn);
+		return !OutNode.Id.IsEmpty();
+	}
+
+	static void AppendNodesFromJsonArray(const TArray<TSharedPtr<FJsonValue>>& Arr, TArray<FUnrealAiDagNode>& InOutNodes)
+	{
+		for (const TSharedPtr<FJsonValue>& V : Arr)
+		{
+			const TSharedPtr<FJsonObject> O = V.IsValid() ? V->AsObject() : nullptr;
+			FUnrealAiDagNode N;
+			if (ParseOneDagNodeObject(O, N))
+			{
+				InOutNodes.Add(MoveTemp(N));
+			}
+		}
+	}
+
 	static bool IsDoneLike(const FString& S)
 	{
 		return S == TEXT("success") || S == TEXT("failed") || S == TEXT("skipped");
@@ -27,10 +86,20 @@ namespace UnrealAiOrchestrateDag
 		OutDag = FUnrealAiOrchestrateDag();
 		OutError.Empty();
 
+		// Models often append `<chat-name: "...">` after the JSON object; strip it so the payload parses.
+		FString NormalizedDagJson = DagJson.TrimStartAndEnd();
+		{
+			const int32 TagStart = NormalizedDagJson.Find(TEXT("<chat-name"), ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+			if (TagStart > 0)
+			{
+				NormalizedDagJson = NormalizedDagJson.Left(TagStart).TrimEnd();
+			}
+		}
+
 		// Planner text is supposed to be "DAG-only JSON", but in practice many models wrap it in markdown
 		// code fences (```json ... ```) or include leading/trailing prose. Be tolerant and try to extract
 		// the first JSON object.
-		auto TryParseObject = [&OutError](const FString& Candidate, TSharedPtr<FJsonObject>& InOutRoot) -> bool
+		auto TryParseObject = [](const FString& Candidate, TSharedPtr<FJsonObject>& InOutRoot) -> bool
 		{
 			InOutRoot.Reset();
 			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Candidate);
@@ -44,15 +113,14 @@ namespace UnrealAiOrchestrateDag
 		TSharedPtr<FJsonObject> Root;
 		FString FenceStripped;
 		{
-			const FString Trimmed = DagJson.TrimStartAndEnd();
-			if (TryParseObject(Trimmed, Root))
+			if (TryParseObject(NormalizedDagJson, Root))
 			{
 				goto ParsedOk;
 			}
 		}
 
 		// Strip code fences if present.
-		FenceStripped = DagJson;
+		FenceStripped = NormalizedDagJson;
 		FenceStripped = FenceStripped.Replace(TEXT("```json"), TEXT(""), ESearchCase::IgnoreCase);
 		FenceStripped = FenceStripped.Replace(TEXT("```"), TEXT(""), ESearchCase::IgnoreCase);
 		FenceStripped = FenceStripped.TrimStartAndEnd();
@@ -87,48 +155,31 @@ namespace UnrealAiOrchestrateDag
 			return false;
 		}
 		Root->TryGetStringField(TEXT("title"), OutDag.Title);
+		if (OutDag.Title.IsEmpty())
+		{
+			// Planner payloads sometimes use definitionOfDone as the human title.
+			Root->TryGetStringField(TEXT("definitionOfDone"), OutDag.Title);
+		}
 
 		const TArray<TSharedPtr<FJsonValue>>* Nodes = nullptr;
-		if (!Root->TryGetArrayField(TEXT("nodes"), Nodes) || !Nodes || Nodes->Num() == 0)
+		if (Root->TryGetArrayField(TEXT("nodes"), Nodes) && Nodes && Nodes->Num() > 0)
 		{
-			OutError = TEXT("DAG must contain a non-empty nodes array.");
-			return false;
+			OutDag.Nodes.Reserve(Nodes->Num());
+			AppendNodesFromJsonArray(*Nodes, OutDag.Nodes);
 		}
-		OutDag.Nodes.Reserve(Nodes->Num());
-		for (const TSharedPtr<FJsonValue>& V : *Nodes)
+		if (OutDag.Nodes.Num() == 0)
 		{
-			const TSharedPtr<FJsonObject> O = V.IsValid() ? V->AsObject() : nullptr;
-			if (!O.IsValid())
+			const TArray<TSharedPtr<FJsonValue>>* Steps = nullptr;
+			if (Root->TryGetArrayField(TEXT("steps"), Steps) && Steps && Steps->Num() > 0)
 			{
-				continue;
-			}
-			FUnrealAiDagNode N;
-			O->TryGetStringField(TEXT("id"), N.Id);
-			O->TryGetStringField(TEXT("title"), N.Title);
-			O->TryGetStringField(TEXT("hint"), N.Hint);
-			const TArray<TSharedPtr<FJsonValue>>* Deps = nullptr;
-			if (O->TryGetArrayField(TEXT("depends_on"), Deps) && Deps)
-			{
-				for (const TSharedPtr<FJsonValue>& D : *Deps)
-				{
-					if (D.IsValid() && D->Type == EJson::String)
-					{
-						const FString Dep = D->AsString().TrimStartAndEnd();
-						if (!Dep.IsEmpty())
-						{
-							N.DependsOn.Add(Dep);
-						}
-					}
-				}
-			}
-			if (!N.Id.IsEmpty())
-			{
-				OutDag.Nodes.Add(MoveTemp(N));
+				OutDag.Nodes.Reserve(Steps->Num());
+				AppendNodesFromJsonArray(*Steps, OutDag.Nodes);
 			}
 		}
 		if (OutDag.Nodes.Num() == 0)
 		{
-			OutError = TEXT("DAG nodes array has no valid node ids.");
+			OutError = TEXT(
+				"DAG must contain a non-empty `nodes` array (canonical) or legacy `steps` array with `id`/`dependsOn`.");
 			return false;
 		}
 		return true;

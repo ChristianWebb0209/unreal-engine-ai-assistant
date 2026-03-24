@@ -54,6 +54,22 @@ bool FUnrealAiOrchestrateDagValidationTest::RunTest(const FString& Parameters)
 	FUnrealAiOrchestrateDag BadDag;
 	TestTrue(TEXT("parse cyclic dag"), UnrealAiOrchestrateDag::ParseDagJson(CyclicDag, BadDag, Err));
 	TestFalse(TEXT("detect cycle"), UnrealAiOrchestrateDag::ValidateDag(BadDag, 32, Err));
+
+	const FString LegacyStepsDag = TEXT(
+		"{\"schemaVersion\":4,\"definitionOfDone\":\"d\",\"steps\":["
+		"{\"id\":\"s1\",\"title\":\"first\",\"detail\":\"hint1\",\"dependsOn\":[]},"
+		"{\"id\":\"s2\",\"title\":\"second\",\"detail\":\"hint2\",\"dependsOn\":[\"s1\"]}"
+		"]}");
+	FUnrealAiOrchestrateDag StepDag;
+	TestTrue(TEXT("parse legacy steps dag"), UnrealAiOrchestrateDag::ParseDagJson(LegacyStepsDag, StepDag, Err));
+	TestTrue(TEXT("validate legacy steps dag"), UnrealAiOrchestrateDag::ValidateDag(StepDag, 32, Err));
+	TestEqual(TEXT("legacy node count"), StepDag.Nodes.Num(), 2);
+	TestEqual(TEXT("legacy hint from detail"), StepDag.Nodes[1].Hint, FString(TEXT("hint2")));
+
+	const FString DagWithChatNameSuffix = ValidDag + TEXT("\n<chat-name: \"Test\">");
+	FUnrealAiOrchestrateDag Suffixed;
+	TestTrue(TEXT("parse dag with chat-name suffix"), UnrealAiOrchestrateDag::ParseDagJson(DagWithChatNameSuffix, Suffixed, Err));
+	TestEqual(TEXT("suffix node count"), Suffixed.Nodes.Num(), 2);
 	return true;
 }
 

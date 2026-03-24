@@ -3,6 +3,7 @@
 #include "Context/IAgentContextService.h"
 #include "Harness/IAgentRunSink.h"
 #include "Harness/IUnrealAiAgentHarness.h"
+#include "Templates/Function.h"
 
 namespace UnrealAiOrchestrateExecutorPriv
 {
@@ -11,15 +12,50 @@ namespace UnrealAiOrchestrateExecutorPriv
 	public:
 		TFunction<void(bool, const FString&, const FString&)> OnFinished;
 		FString AssistantText;
+		TWeakPtr<IAgentRunSink> ForwardTarget;
+		FString WorkerNodeId;
+		bool bForwardStreamToParent = false;
+
+		FString MakeOrchCallId(const FString& CallId) const
+		{
+			if (WorkerNodeId.IsEmpty())
+			{
+				return CallId;
+			}
+			const FString Prefix = FString::Printf(TEXT("orch_%s_"), *WorkerNodeId);
+			if (CallId.StartsWith(Prefix, ESearchCase::CaseSensitive))
+			{
+				return CallId;
+			}
+			return Prefix + CallId;
+		}
+
+		void ForwardIfPossible(const TFunctionRef<void(IAgentRunSink&)> Fn)
+		{
+			if (!bForwardStreamToParent)
+			{
+				return;
+			}
+			if (const TSharedPtr<IAgentRunSink> P = ForwardTarget.Pin())
+			{
+				Fn(*P);
+			}
+		}
 
 		virtual void OnRunStarted(const FUnrealAiRunIds& Ids) override { (void)Ids; }
-		virtual void OnAssistantDelta(const FString& Chunk) override { AssistantText += Chunk; }
-		virtual void OnThinkingDelta(const FString& Chunk) override { (void)Chunk; }
+		virtual void OnAssistantDelta(const FString& Chunk) override
+		{
+			AssistantText += Chunk;
+			ForwardIfPossible([&](IAgentRunSink& P) { P.OnAssistantDelta(Chunk); });
+		}
+		virtual void OnThinkingDelta(const FString& Chunk) override
+		{
+			ForwardIfPossible([&](IAgentRunSink& P) { P.OnThinkingDelta(Chunk); });
+		}
 		virtual void OnToolCallStarted(const FString& ToolName, const FString& CallId, const FString& ArgumentsJson) override
 		{
-			(void)ToolName;
-			(void)CallId;
-			(void)ArgumentsJson;
+			ForwardIfPossible([&](IAgentRunSink& P)
+			{ P.OnToolCallStarted(ToolName, MakeOrchCallId(CallId), ArgumentsJson); });
 		}
 		virtual void OnToolCallFinished(
 			const FString& ToolName,
@@ -28,21 +64,21 @@ namespace UnrealAiOrchestrateExecutorPriv
 			const FString& ResultPreview,
 			const TSharedPtr<FUnrealAiToolEditorPresentation>& EditorPresentation) override
 		{
-			(void)ToolName;
-			(void)CallId;
-			(void)bSuccess;
-			(void)ResultPreview;
-			(void)EditorPresentation;
+			const FString Id = MakeOrchCallId(CallId);
+			ForwardIfPossible([&](IAgentRunSink& P)
+			{ P.OnToolCallFinished(ToolName, Id, bSuccess, ResultPreview, EditorPresentation); });
+		}
+		virtual void OnEditorBlockingDialogDuringTools(const FString& Summary) override
+		{
+			ForwardIfPossible([&](IAgentRunSink& P) { P.OnEditorBlockingDialogDuringTools(Summary); });
 		}
 		virtual void OnRunContinuation(int32 PhaseIndex, int32 TotalPhasesHint) override
 		{
-			(void)PhaseIndex;
-			(void)TotalPhasesHint;
+			ForwardIfPossible([&](IAgentRunSink& P) { P.OnRunContinuation(PhaseIndex, TotalPhasesHint); });
 		}
 		virtual void OnTodoPlanEmitted(const FString& Title, const FString& PlanJson) override
 		{
-			(void)Title;
-			(void)PlanJson;
+			ForwardIfPossible([&](IAgentRunSink& P) { P.OnTodoPlanEmitted(Title, PlanJson); });
 		}
 		virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) override
 		{
@@ -172,6 +208,14 @@ void FUnrealAiOrchestrateExecutor::BeginNextReadyNode()
 		Finish(false, TEXT("Orchestrate cancelled."));
 		return;
 	}
+	if (ContextService)
+	{
+		ContextService->LoadOrCreate(ParentRequest.ProjectId, ParentRequest.ThreadId);
+		if (Harness && !Harness->IsTurnInProgress())
+		{
+			ContextService->ClearOrchestrateStaleRunningMarkers(ParentRequest.ProjectId, ParentRequest.ThreadId);
+		}
+	}
 	const FAgentContextState* State = nullptr;
 	TMap<FString, FString> Statuses;
 	if (ContextService)
@@ -202,6 +246,8 @@ void FUnrealAiOrchestrateExecutor::BeginNextReadyNode()
 
 	FUnrealAiAgentTurnRequest ChildReq = ParentRequest;
 	ChildReq.Mode = EUnrealAiAgentMode::Agent;
+	/** Worker nodes often need many tool↔model iterations; floor well above the default profile (16). */
+	ChildReq.LlmRoundBudgetFloor = 64;
 	ChildReq.ThreadId = FString::Printf(TEXT("%s_orch_%s"), *ParentRequest.ThreadId, *NodeId);
 	ChildReq.UserText = FString::Printf(
 		TEXT("Execute orchestrate node '%s'.\nTitle: %s\nHint: %s"),
@@ -211,6 +257,9 @@ void FUnrealAiOrchestrateExecutor::BeginNextReadyNode()
 
 	const TSharedRef<UnrealAiOrchestrateExecutorPriv::FCollectingSink> Sink = MakeShared<UnrealAiOrchestrateExecutorPriv::FCollectingSink>();
 	const TWeakPtr<FUnrealAiOrchestrateExecutor> WeakExec = AsShared();
+	Sink->ForwardTarget = ParentSink;
+	Sink->WorkerNodeId = NodeId;
+	Sink->bForwardStreamToParent = true;
 	Sink->OnFinished = [WeakExec, NodeId](bool bSuccess, const FString& Error, const FString& AssistantText)
 	{
 		if (const TSharedPtr<FUnrealAiOrchestrateExecutor> Self = WeakExec.Pin())
@@ -228,16 +277,12 @@ void FUnrealAiOrchestrateExecutor::OnNodeFinished(const FString& NodeId, bool bS
 	{
 		ContextService->SetOrchestrateNodeStatus(NodeId, bSuccess ? TEXT("success") : TEXT("failed"), Summary);
 	}
-	if (ParentSink.IsValid())
+	if (ParentSink.IsValid() && !bSuccess)
 	{
-		if (bSuccess)
-		{
-			ParentSink->OnAssistantDelta(FString::Printf(TEXT("[orchestrate] %s completed.\n"), *NodeId));
-		}
-		else
-		{
-			ParentSink->OnAssistantDelta(FString::Printf(TEXT("[orchestrate] %s failed: %s\n"), *NodeId, *ErrorText));
-		}
+		ParentSink->OnAssistantDelta(FString::Printf(
+			TEXT("Orchestrate node \"%s\" failed: %s\n"),
+			*NodeId,
+			*ErrorText));
 	}
 	BeginNextReadyNode();
 }
