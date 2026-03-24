@@ -39,6 +39,7 @@ public class UnrealAiEditor : ModuleRules
 				"Json",
 				"HTTP",
 				"AssetRegistry",
+				"SourceCodeAccess",
 				"ContentBrowser",
 				"ContentBrowserData",
 				"AssetTools",
@@ -48,7 +49,8 @@ public class UnrealAiEditor : ModuleRules
 				"RenderCore",
 				"LevelSequence",
 				"MovieScene",
-				"ImageWrapper"
+				"ImageWrapper",
+				"UnrealBlueprintFormatter"
 			});
 	}
 }

@@ -3,13 +3,16 @@
 #include "Modules/ModuleManager.h"
 #include "Async/Async.h"
 #include "App/UnrealAiEditorCommands.h"
+#include "Backend/IUnrealAiPersistence.h"
 #include "Backend/UnrealAiBackendRegistry.h"
+#include "Context/UnrealAiProjectId.h"
 #include "Context/AgentContextTypes.h"
 #include "Context/IAgentContextService.h"
 #include "Context/UnrealAiContextDragDrop.h"
 #include "Context/UnrealAiEditorContextQueries.h"
 #include "Style/UnrealAiEditorStyle.h"
 #include "Tabs/SUnrealAiEditorChatTab.h"
+#include "Framework/Docking/SDockingTabStack.h"
 #include "Tabs/SUnrealAiEditorHelpTab.h"
 #include "Tabs/SUnrealAiEditorQuickStartTab.h"
 #include "Tabs/SUnrealAiEditorSettingsTab.h"
@@ -37,12 +40,22 @@
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/SWidget.h"
 #include "WorkspaceMenuStructure.h"
+#include "Misc/CoreDelegates.h"
+#include "Misc/UnrealAiEditorModalMonitor.h"
 #include "Misc/Guid.h"
 #include "WorkspaceMenuStructureModule.h"
+#include "Containers/Ticker.h"
+#include "Framework/Application/SlateApplication.h"
+#include "HAL/IConsoleManager.h"
+#include "Misc/Paths.h"
+#include "Tools/UnrealAiToolCatalogMatrixRunner.h"
+#include "Tools/UnrealAiBlueprintFormatterBridge.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
 static FUnrealAiEditorModule* GUnrealAiModule = nullptr;
+
+static IConsoleObject* GUnrealAiCatalogMatrixConsole = nullptr;
 
 static void RegisterUnrealAiEditorKeyBindings()
 {
@@ -101,10 +114,43 @@ void FUnrealAiEditorModule::StartupModule()
 	RegisterMenus();
 	RegisterSettings();
 	RegisterOpenChatOnStartup();
+	RegisterSaveOpenChatsOnExit();
+	FUnrealAiEditorModalMonitor::Startup(BackendRegistry);
+
+	UnrealAiBlueprintFormatterBridge::ValidatePluginDependencyOnStartup();
+
+	GUnrealAiCatalogMatrixConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.RunCatalogMatrix"),
+		TEXT("Invoke catalog tools (optional filter substring), write Saved/UnrealAiEditor/Automation/tool_matrix_last.json"),
+		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		{
+			const FString Filter = (Args.Num() > 0) ? Args[0] : FString();
+			TArray<FString> Violations;
+			const bool bOk = UnrealAiToolCatalogMatrixRunner::RunAndWriteJson(Filter, &Violations);
+			for (const FString& V : Violations)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("%s"), *V);
+			}
+			const FString OutPath =
+				FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAiEditor/Automation/tool_matrix_last.json"));
+			UE_LOG(LogTemp, Display, TEXT("UnrealAi.RunCatalogMatrix: %s — wrote %s"),
+				bOk ? TEXT("OK") : TEXT("contract violations (see log)"),
+				*OutPath);
+		}),
+		ECVF_Default);
 }
 
 void FUnrealAiEditorModule::ShutdownModule()
 {
+	if (GUnrealAiCatalogMatrixConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiCatalogMatrixConsole);
+		GUnrealAiCatalogMatrixConsole = nullptr;
+	}
+
+	FUnrealAiEditorModalMonitor::Shutdown();
+	CancelDeferredAgentChatInsertsForShutdown();
+
 	if (BackendRegistry.IsValid())
 	{
 		if (IAgentContextService* Ctx = BackendRegistry->GetContextService())
@@ -115,6 +161,8 @@ void FUnrealAiEditorModule::ShutdownModule()
 
 	UnregisterSettings();
 	UnregisterOpenChatOnStartup();
+	UnregisterSaveOpenChatsOnExit();
+	SaveOpenAgentChatTabsNow();
 	UnregisterMenus();
 	UnregisterTabs();
 
@@ -260,9 +308,12 @@ static TSharedPtr<SDockTab> FindParentDockTabForWidget(const TSharedRef<const SW
 
 static TSharedRef<SDockTab> SpawnAgentChatDockTab(
 	const TSharedPtr<FUnrealAiBackendRegistry>& Reg,
-	const FSpawnTabArgs& Args)
+	const FSpawnTabArgs& Args,
+	TSharedPtr<SUnrealAiEditorChatTab>* OutChatTab)
 {
 	(void)Args;
+	FGuid ExplicitThreadId;
+	const bool bUseExplicit = FUnrealAiEditorModule::ConsumePendingExplicitChatThreadId(ExplicitThreadId);
 	TSharedPtr<UnrealAiAgentChatTabSpawn::FContentBox> Box = MakeShared<UnrealAiAgentChatTabSpawn::FContentBox>();
 	TSharedPtr<SUnrealAiEditorChatTab> ChatTab;
 	TSharedRef<SDockTab> Tab = SNew(SDockTab)
@@ -314,22 +365,60 @@ static TSharedRef<SDockTab> SpawnAgentChatDockTab(
 				MenuBuilder.EndSection();
 			}))
 		[
-			SAssignNew(ChatTab, SUnrealAiEditorChatTab).BackendRegistry(Reg)
+			SAssignNew(ChatTab, SUnrealAiEditorChatTab)
+				.BackendRegistry(Reg)
+				.bUseExplicitThreadId(bUseExplicit && ExplicitThreadId.IsValid())
+				.ExplicitThreadId(ExplicitThreadId)
 		];
 	Box->ChatTab = ChatTab;
+	if (OutChatTab)
+	{
+		*OutChatTab = ChatTab;
+	}
+	if (ChatTab.IsValid())
+	{
+		ChatTab->SetHostDockTab(Tab);
+		FUnrealAiEditorModule::RegisterAgentChatTabForPersistence(ChatTab);
+	}
+	/** Defer until SDockTab is parented (InsertNewDocumentTab / OpenTab may happen on later frames during startup). */
+	if (GUnrealAiModule && ChatTab.IsValid())
+	{
+		const TWeakPtr<SUnrealAiEditorChatTab> WeakChat(ChatTab);
+		struct FRestoreNotifyWait
+		{
+			int32 Ticks = 0;
+		};
+		const TSharedRef<FRestoreNotifyWait> Wait = MakeShared<FRestoreNotifyWait>();
+		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakChat, Wait](float /*DeltaTime*/) -> bool
+		{
+			const TSharedPtr<SUnrealAiEditorChatTab> T = WeakChat.Pin();
+			if (!T.IsValid())
+			{
+				return false;
+			}
+			++Wait->Ticks;
+			static constexpr int32 MaxTicks = 900;
+			if (FindParentDockTabForWidget(T.ToSharedRef()).IsValid())
+			{
+				FUnrealAiEditorModule::NotifyAgentChatTabSpawnedForRestoreChain(T);
+				return false;
+			}
+			return Wait->Ticks < MaxTicks;
+		}));
+	}
 	return Tab;
 }
 
-void FUnrealAiEditorModule::OpenNewAgentChatTabBeside(const TSharedPtr<SWidget>& FromWidget)
+TSharedPtr<SUnrealAiEditorChatTab> FUnrealAiEditorModule::OpenNewAgentChatTabBeside(const TSharedPtr<SWidget>& FromWidget)
 {
 	if (!FromWidget.IsValid())
 	{
-		return;
+		return nullptr;
 	}
 	const TSharedPtr<FUnrealAiBackendRegistry> Reg = GetBackendRegistry();
 	if (!Reg.IsValid())
 	{
-		return;
+		return nullptr;
 	}
 	TSharedPtr<SDockTab> ParentDock = FindParentDockTabForWidget(FromWidget.ToSharedRef());
 	TSharedPtr<SWindow> OwnerWindow;
@@ -342,8 +431,9 @@ void FUnrealAiEditorModule::OpenNewAgentChatTabBeside(const TSharedPtr<SWidget>&
 		OwnerWindow = FGlobalTabmanager::Get()->GetRootWindow();
 	}
 	const FSpawnTabArgs Args(OwnerWindow, FTabId(UnrealAiEditorTabIds::ChatTab, INDEX_NONE));
-	TSharedRef<SDockTab> NewTab = SpawnAgentChatDockTab(Reg, Args);
-	NewTab->SetTabIcon(FAppStyle::GetBrush(TEXT("Icons.Comment")));
+	TSharedPtr<SUnrealAiEditorChatTab> NewChatTab;
+	TSharedRef<SDockTab> NewTab = SpawnAgentChatDockTab(Reg, Args, &NewChatTab);
+	NewTab->SetTabIcon(FUnrealAiEditorStyle::GetAgentChatTabIconBrush());
 	// Note: SDockTab::SetLayoutIdentifier is protected (friend FTabManager only). Extra Agent Chat tabs
 	// are spawned manually so FTabManager::SpawnTab is not used (nomad spawner tracks a single SpawnedTabPtr).
 
@@ -372,13 +462,14 @@ void FUnrealAiEditorModule::OpenNewAgentChatTabBeside(const TSharedPtr<SWidget>&
 			FTabManager::ESearchPreference::PreferLiveTab,
 			NewTab);
 	}
+	return NewChatTab;
 }
 
 void FUnrealAiEditorModule::RegisterTabs(const TSharedPtr<FUnrealAiBackendRegistry>& Reg)
 {
 	const auto SpawnChat = [Reg](const FSpawnTabArgs& Args) -> TSharedRef<SDockTab>
 	{
-		return SpawnAgentChatDockTab(Reg, Args);
+		return SpawnAgentChatDockTab(Reg, Args, nullptr);
 	};
 
 	const auto SpawnSettings = [Reg](const FSpawnTabArgs& Args)
@@ -425,7 +516,7 @@ void FUnrealAiEditorModule::RegisterTabs(const TSharedPtr<FUnrealAiBackendRegist
 							 UnrealAiEditorTabIds::ChatTab,
 							 FOnSpawnTab::CreateLambda(SpawnChat))
 		.SetDisplayName(LOCTEXT("ChatTab", "Agent Chat"))
-		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Comment")))
+		.SetIcon(FSlateIcon(FUnrealAiEditorStyle::GetStyleSetName(), FUnrealAiEditorStyle::AgentChatTabIconName()))
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
@@ -489,7 +580,7 @@ void FUnrealAiEditorModule::RegisterMenus()
 							"UnrealAiChat",
 							LOCTEXT("MenuChat", "Agent Chat"),
 							LOCTEXT("MenuChatTip", "Open Agent Chat"),
-							FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Comment")),
+							FSlateIcon(FUnrealAiEditorStyle::GetStyleSetName(), FUnrealAiEditorStyle::AgentChatTabIconName()),
 							FUIAction(FExecuteAction::CreateLambda([]()
 							{
 								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::ChatTab);
@@ -546,7 +637,7 @@ void FUnrealAiEditorModule::RegisterMenus()
 							"UnrealAiChatT",
 							LOCTEXT("MenuChatT", "Agent Chat"),
 							LOCTEXT("MenuChatTipT", "Open Agent Chat"),
-							FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Comment")),
+							FSlateIcon(FUnrealAiEditorStyle::GetStyleSetName(), FUnrealAiEditorStyle::AgentChatTabIconName()),
 							FUIAction(FExecuteAction::CreateLambda([]()
 							{
 								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::ChatTab);
@@ -597,7 +688,7 @@ void FUnrealAiEditorModule::RegisterMenus()
 					FUnrealAiEditorCommands::Get().OpenChatTab,
 					LOCTEXT("ToolbarUnrealAi", "Unreal AI"),
 					LOCTEXT("ToolbarUnrealAiTip", "Open Agent Chat"),
-					FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Comment")),
+					FSlateIcon(FUnrealAiEditorStyle::GetStyleSetName(), FUnrealAiEditorStyle::AgentChatTabIconName()),
 					NAME_None,
 					TOptional<FName>(FName(TEXT("UnrealAiToolbarChat")))));
 			}
@@ -642,16 +733,417 @@ void FUnrealAiEditorModule::RegisterOpenChatOnStartup()
 {
 	OpenChatOnStartupHandle = FEditorDelegates::OnEditorInitialized.AddLambda([](double /*DeltaTime*/)
 	{
+		const TSharedPtr<FUnrealAiBackendRegistry> Reg = FUnrealAiEditorModule::GetBackendRegistry();
+		if (!Reg.IsValid())
+		{
+			return;
+		}
+		IUnrealAiPersistence* P = Reg->GetPersistence();
+		if (!P)
+		{
+			return;
+		}
+		const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+		TArray<FGuid> OpenThreads;
+		if (P->LoadOpenChatTabsState(ProjectId, OpenThreads) && OpenThreads.Num() > 0)
+		{
+			if (GUnrealAiModule)
+			{
+				GUnrealAiModule->BeginRestoreOpenChats(OpenThreads);
+			}
+			return;
+		}
 		if (!GetDefault<UUnrealAiEditorSettings>()->bOpenAgentChatOnStartup)
 		{
 			return;
 		}
-		// Defer one game-thread pump so the global tab manager and layout are ready.
-		AsyncTask(ENamedThreads::GameThread, []()
+
+		FGuid FallbackThread;
+		if (P->TryGetMostRecentThreadWithConversation(ProjectId, FallbackThread) && FallbackThread.IsValid())
 		{
-			FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::ChatTab);
-		});
+			SetPendingExplicitChatThreadId(FallbackThread);
+		}
+
+		if (GUnrealAiModule)
+		{
+			GUnrealAiModule->ScheduleDeferredAgentChatDocumentInsert(Reg);
+		}
 	});
+}
+
+void FUnrealAiEditorModule::RegisterSaveOpenChatsOnExit()
+{
+	SaveOpenChatsOnExitHandle = FCoreDelegates::OnPreExit.AddLambda([]()
+	{
+		if (GUnrealAiModule)
+		{
+			GUnrealAiModule->SaveOpenAgentChatTabsNow();
+		}
+	});
+}
+
+void FUnrealAiEditorModule::UnregisterSaveOpenChatsOnExit()
+{
+	if (SaveOpenChatsOnExitHandle.IsValid())
+	{
+		FCoreDelegates::OnPreExit.Remove(SaveOpenChatsOnExitHandle);
+		SaveOpenChatsOnExitHandle.Reset();
+	}
+}
+
+bool FUnrealAiEditorModule::ConsumePendingExplicitChatThreadId(FGuid& Out)
+{
+	return GUnrealAiModule && GUnrealAiModule->ConsumePendingExplicitChatThreadId_Impl(Out);
+}
+
+bool FUnrealAiEditorModule::ConsumePendingExplicitChatThreadId_Impl(FGuid& Out)
+{
+	Out = FGuid();
+	if (!bPendingExplicitChatThreadId)
+	{
+		return false;
+	}
+	Out = PendingExplicitChatThreadId;
+	bPendingExplicitChatThreadId = false;
+	PendingExplicitChatThreadId = FGuid();
+	return Out.IsValid();
+}
+
+void FUnrealAiEditorModule::SetPendingExplicitChatThreadId(const FGuid& ThreadId)
+{
+	if (!GUnrealAiModule)
+	{
+		return;
+	}
+	if (!ThreadId.IsValid())
+	{
+		GUnrealAiModule->bPendingExplicitChatThreadId = false;
+		GUnrealAiModule->PendingExplicitChatThreadId = FGuid();
+		return;
+	}
+	GUnrealAiModule->bPendingExplicitChatThreadId = true;
+	GUnrealAiModule->PendingExplicitChatThreadId = ThreadId;
+}
+
+void FUnrealAiEditorModule::NotifyAgentChatTabSpawnedForRestoreChain(const TSharedPtr<SUnrealAiEditorChatTab>& Tab)
+{
+	if (GUnrealAiModule)
+	{
+		GUnrealAiModule->OnAgentChatTabSpawnedForRestoreChain(Tab);
+	}
+}
+
+void FUnrealAiEditorModule::RegisterAgentChatTabForPersistence(const TSharedPtr<SUnrealAiEditorChatTab>& Tab)
+{
+	if (GUnrealAiModule && Tab.IsValid())
+	{
+		GUnrealAiModule->RegisteredAgentChatTabsForPersistence.Add(Tab);
+	}
+}
+
+void FUnrealAiEditorModule::UnregisterAgentChatTabForPersistence(const SUnrealAiEditorChatTab* Tab)
+{
+	if (!GUnrealAiModule || !Tab)
+	{
+		return;
+	}
+	TArray<TWeakPtr<SUnrealAiEditorChatTab>>& Arr = GUnrealAiModule->RegisteredAgentChatTabsForPersistence;
+	for (int32 i = Arr.Num() - 1; i >= 0; --i)
+	{
+		const TSharedPtr<SUnrealAiEditorChatTab> Pinned = Arr[i].Pin();
+		if (!Pinned.IsValid() || Pinned.Get() == Tab)
+		{
+			Arr.RemoveAtSwap(i);
+		}
+	}
+}
+
+void FUnrealAiEditorModule::GetOpenAgentChatThreadIds(TArray<FGuid>& OutOrdered)
+{
+	OutOrdered.Reset();
+	if (!GUnrealAiModule)
+	{
+		return;
+	}
+	for (const TWeakPtr<SUnrealAiEditorChatTab>& Weak : GUnrealAiModule->RegisteredAgentChatTabsForPersistence)
+	{
+		const TSharedPtr<SUnrealAiEditorChatTab> Tab = Weak.Pin();
+		if (!Tab.IsValid())
+		{
+			continue;
+		}
+		const TSharedPtr<FUnrealAiChatUiSession> Sess = Tab->GetSession();
+		if (Sess.IsValid() && Sess->ThreadId.IsValid())
+		{
+			OutOrdered.AddUnique(Sess->ThreadId);
+		}
+	}
+}
+
+void FUnrealAiEditorModule::OpenAgentChatTabWithPersistedThread(const FString& ThreadIdDigitsWithHyphens)
+{
+	FGuid G;
+	if (!FGuid::Parse(ThreadIdDigitsWithHyphens, G) || !G.IsValid())
+	{
+		return;
+	}
+	const TSharedPtr<FUnrealAiBackendRegistry> Reg = GetBackendRegistry();
+	AsyncTask(ENamedThreads::GameThread, [Reg, G]()
+	{
+		if (!Reg.IsValid() || !GUnrealAiModule)
+		{
+			return;
+		}
+		SetPendingExplicitChatThreadId(G);
+		GUnrealAiModule->ScheduleDeferredAgentChatDocumentInsert(Reg);
+	});
+}
+
+void FUnrealAiEditorModule::BeginRestoreOpenChats(const TArray<FGuid>& Ids)
+{
+	PendingRestoreTail.Reset();
+	SetPendingExplicitChatThreadId(FGuid());
+	if (Ids.Num() == 0)
+	{
+		return;
+	}
+	SetPendingExplicitChatThreadId(Ids[0]);
+	for (int32 i = 1; i < Ids.Num(); ++i)
+	{
+		if (Ids[i].IsValid())
+		{
+			PendingRestoreTail.Add(Ids[i]);
+		}
+	}
+	ScheduleDeferredAgentChatDocumentInsert(BackendRegistry);
+}
+
+void FUnrealAiEditorModule::RemoveDeferredAgentChatInsertTicker()
+{
+	if (DeferredAgentChatInsertTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(DeferredAgentChatInsertTickerHandle);
+		DeferredAgentChatInsertTickerHandle.Reset();
+	}
+}
+
+void FUnrealAiEditorModule::CancelDeferredAgentChatInsertsForShutdown()
+{
+	RemoveDeferredAgentChatInsertTicker();
+	++DeferredAgentChatInsertTicket;
+}
+
+void FUnrealAiEditorModule::ScheduleDeferredAgentChatDocumentInsert(const TSharedPtr<FUnrealAiBackendRegistry>& Reg)
+{
+	if (!Reg.IsValid() || !GUnrealAiModule)
+	{
+		return;
+	}
+
+	RemoveDeferredAgentChatInsertTicker();
+	++DeferredAgentChatInsertTicket;
+	const int32 Ticket = DeferredAgentChatInsertTicket;
+
+	struct FDeferredInsertState
+	{
+		TWeakPtr<FUnrealAiBackendRegistry> WeakReg;
+		int32 TotalTicks = 0;
+		int32 StableRootFrames = 0;
+		int8 Phase = 0;
+		bool bDidInsert = false;
+		int32 PostInsertTicks = 0;
+		TSharedPtr<SUnrealAiEditorChatTab> ChatTab;
+		TSharedPtr<SDockTab> DockTab;
+	};
+
+	const TSharedRef<FDeferredInsertState> State = MakeShared<FDeferredInsertState>();
+	State->WeakReg = Reg;
+
+	DeferredAgentChatInsertTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([this, Ticket, State](float /*DeltaTime*/) -> bool
+		{
+			if (!GUnrealAiModule || Ticket != DeferredAgentChatInsertTicket)
+			{
+				return false;
+			}
+
+			const TSharedPtr<FUnrealAiBackendRegistry> R = State->WeakReg.Pin();
+			if (!R.IsValid() || !GEditor)
+			{
+				RemoveDeferredAgentChatInsertTicker();
+				return false;
+			}
+
+			++State->TotalTicks;
+			static constexpr int32 MaxWaitTicks = 1200;
+			if (State->TotalTicks > MaxWaitTicks)
+			{
+				UE_LOG(
+					LogLoad,
+					Warning,
+					TEXT("UnrealAiEditor: Timed out waiting to embed Agent Chat; open it from Window -> Unreal AI."));
+				RemoveDeferredAgentChatInsertTicker();
+				return false;
+			}
+
+			if (!FSlateApplication::IsInitialized())
+			{
+				State->StableRootFrames = 0;
+				return true;
+			}
+
+			const TSharedRef<FGlobalTabmanager> TabMgr = FGlobalTabmanager::Get();
+			const TSharedPtr<SWindow> Root = TabMgr->GetRootWindow();
+			if (!Root.IsValid())
+			{
+				State->StableRootFrames = 0;
+				return true;
+			}
+
+			if (State->Phase == 0)
+			{
+				++State->StableRootFrames;
+				static constexpr int32 NeedStableFrames = 20;
+				if (State->StableRootFrames < NeedStableFrames)
+				{
+					return true;
+				}
+
+				const FSpawnTabArgs Args(Root, FTabId(UnrealAiEditorTabIds::ChatTab, INDEX_NONE));
+				TSharedPtr<SUnrealAiEditorChatTab> ChatTab;
+				const TSharedRef<SDockTab> NewTab = SpawnAgentChatDockTab(R, Args, &ChatTab);
+				NewTab->SetTabIcon(FUnrealAiEditorStyle::GetAgentChatTabIconBrush());
+				State->DockTab = NewTab;
+				State->ChatTab = ChatTab;
+				State->Phase = 1;
+				State->bDidInsert = false;
+				State->PostInsertTicks = 0;
+				return true;
+			}
+
+			if (!State->bDidInsert)
+			{
+				TabMgr->InsertNewDocumentTab(
+					UnrealAiEditorTabIds::ChatTab,
+					FTabManager::ESearchPreference::PreferLiveTab,
+					State->DockTab.ToSharedRef());
+				State->bDidInsert = true;
+			}
+
+			++State->PostInsertTicks;
+			if (State->ChatTab.IsValid() && FindParentDockTabForWidget(State->ChatTab.ToSharedRef()).IsValid())
+			{
+				RemoveDeferredAgentChatInsertTicker();
+				return false;
+			}
+
+			static constexpr int32 MaxPostInsertTicks = 180;
+			if (State->PostInsertTicks >= MaxPostInsertTicks)
+			{
+				UE_LOG(
+					LogLoad,
+					Warning,
+					TEXT("UnrealAiEditor: Agent Chat tab was spawned but did not dock; use Window -> Unreal AI -> Agent Chat."));
+				RemoveDeferredAgentChatInsertTicker();
+				return false;
+			}
+			return true;
+		}));
+}
+
+void FUnrealAiEditorModule::OnAgentChatTabSpawnedForRestoreChain(const TSharedPtr<SUnrealAiEditorChatTab>& Tab)
+{
+	if (!Tab.IsValid() || bAgentChatRestoreChainBusy || PendingRestoreTail.Num() == 0)
+	{
+		return;
+	}
+	bAgentChatRestoreChainBusy = true;
+	TArray<FGuid> Tail = MoveTemp(PendingRestoreTail);
+	PendingRestoreTail.Reset();
+	TSharedPtr<SWidget> From = Tab;
+	for (const FGuid& G : Tail)
+	{
+		if (!G.IsValid())
+		{
+			continue;
+		}
+		SetPendingExplicitChatThreadId(G);
+		TSharedPtr<SUnrealAiEditorChatTab> Next = OpenNewAgentChatTabBeside(From);
+		From = Next;
+		if (!From.IsValid())
+		{
+			break;
+		}
+	}
+	SetPendingExplicitChatThreadId(FGuid());
+	bAgentChatRestoreChainBusy = false;
+}
+
+void FUnrealAiEditorModule::SaveOpenAgentChatTabsNow()
+{
+	if (!BackendRegistry.IsValid())
+	{
+		return;
+	}
+	IUnrealAiPersistence* P = BackendRegistry->GetPersistence();
+	if (!P)
+	{
+		return;
+	}
+	struct FSavedTabSortRow
+	{
+		TSharedPtr<SDockingTabStack> Stack;
+		int32 TabIndex = MAX_int32;
+		FGuid ThreadId;
+	};
+	TArray<FSavedTabSortRow> Rows;
+	for (TWeakPtr<SUnrealAiEditorChatTab> Weak : RegisteredAgentChatTabsForPersistence)
+	{
+		TSharedPtr<SUnrealAiEditorChatTab> ChatTab = Weak.Pin();
+		if (!ChatTab.IsValid())
+		{
+			continue;
+		}
+		const TSharedPtr<FUnrealAiChatUiSession> Session = ChatTab->GetSession();
+		if (!Session.IsValid() || !Session->ThreadId.IsValid())
+		{
+			continue;
+		}
+		TSharedPtr<SDockTab> Dock = FindParentDockTabForWidget(ChatTab.ToSharedRef());
+		TSharedPtr<SDockingTabStack> Stack = Dock.IsValid() ? Dock->GetParentDockTabStack() : nullptr;
+		FSavedTabSortRow Row;
+		Row.Stack = Stack;
+		Row.ThreadId = Session->ThreadId;
+		if (Stack.IsValid() && Dock.IsValid())
+		{
+			const TSlotlessChildren<SDockTab>& Tabs = Stack->GetTabs();
+			for (int32 i = 0; i < Tabs.Num(); ++i)
+			{
+				if (Tabs[i] == Dock.ToSharedRef())
+				{
+					Row.TabIndex = i;
+					break;
+				}
+			}
+		}
+		Rows.Add(Row);
+	}
+	Rows.Sort([](const FSavedTabSortRow& A, const FSavedTabSortRow& B)
+	{
+		const UPTRINT PA = reinterpret_cast<UPTRINT>(A.Stack.Get());
+		const UPTRINT PB = reinterpret_cast<UPTRINT>(B.Stack.Get());
+		if (PA != PB)
+		{
+			return PA < PB;
+		}
+		return A.TabIndex < B.TabIndex;
+	});
+	TArray<FGuid> OutIds;
+	for (const FSavedTabSortRow& R : Rows)
+	{
+		OutIds.Add(R.ThreadId);
+	}
+	P->SaveOpenChatTabsState(UnrealAiProjectId::GetCurrentProjectId(), OutIds);
 }
 
 void FUnrealAiEditorModule::UnregisterOpenChatOnStartup()

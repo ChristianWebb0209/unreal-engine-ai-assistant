@@ -4,8 +4,6 @@
 #include "Engine/DeveloperSettings.h"
 #include "UnrealAiEditorSettings.generated.h"
 
-struct FPropertyChangedEvent;
-
 UCLASS(Config = Editor, defaultconfig, meta = (DisplayName = "Unreal AI Editor"))
 class UUnrealAiEditorSettings : public UDeveloperSettings
 {
@@ -15,10 +13,6 @@ public:
 	UUnrealAiEditorSettings(const FObjectInitializer& ObjectInitializer);
 
 	virtual FName GetCategoryName() const override;
-
-#if WITH_EDITOR
-	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
-#endif
 
 	UPROPERTY(EditAnywhere, Config, Category = "Agent")
 	FString DefaultAgentId;
@@ -50,14 +44,6 @@ public:
 	/** Characters per second for typewriter mode. */
 	UPROPERTY(EditAnywhere, Config, Category = "Chat", meta = (ClampMin = "10", ClampMax = "8000"))
 	float AssistantTypewriterCps;
-
-	/** Background for your messages in Agent Chat (warm dark; distinct from agent). */
-	UPROPERTY(EditAnywhere, Config, Category = "Chat", meta = (DisplayName = "User message bubble color"))
-	FLinearColor UserChatBubbleColor;
-
-	/** Background for assistant messages in Agent Chat (cool dark slate). */
-	UPROPERTY(EditAnywhere, Config, Category = "Chat", meta = (DisplayName = "Agent message bubble color"))
-	FLinearColor AgentChatBubbleColor;
 
 	/** When off, the harness should pause between plan steps (UI hint; harness wiring may follow). */
 	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Auto-continue plan steps"))

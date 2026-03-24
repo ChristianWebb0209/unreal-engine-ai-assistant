@@ -2,6 +2,7 @@
 
 #include "Harness/UnrealAiConversationJson.h"
 #include "HttpModule.h"
+#include "Interfaces/IHttpBase.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 #include "Dom/JsonObject.h"
@@ -21,21 +22,26 @@ namespace OpenAiTransportUtil
 	static void ParseUsage(const TSharedPtr<FJsonObject>& Root, FUnrealAiTokenUsage& OutUsage)
 	{
 		const TSharedPtr<FJsonObject>* U = nullptr;
-		if (Root->TryGetObjectField(TEXT("usage"), U) && U->IsValid())
+		if (!Root->TryGetObjectField(TEXT("usage"), U) || !U->IsValid())
 		{
-			double Pt = 0, Ct = 0, Tt = 0;
-			if ((*U)->TryGetNumberField(TEXT("prompt_tokens"), Pt))
-			{
-				OutUsage.PromptTokens = static_cast<int32>(Pt);
-			}
-			if ((*U)->TryGetNumberField(TEXT("completion_tokens"), Ct))
-			{
-				OutUsage.CompletionTokens = static_cast<int32>(Ct);
-			}
-			if ((*U)->TryGetNumberField(TEXT("total_tokens"), Tt))
-			{
-				OutUsage.TotalTokens = static_cast<int32>(Tt);
-			}
+			return;
+		}
+		double Pt = 0, Ct = 0, Tt = 0;
+		if ((*U)->TryGetNumberField(TEXT("prompt_tokens"), Pt)
+			|| (*U)->TryGetNumberField(TEXT("input_tokens"), Pt)
+			|| (*U)->TryGetNumberField(TEXT("prompt_token_count"), Pt))
+		{
+			OutUsage.PromptTokens = static_cast<int32>(Pt);
+		}
+		if ((*U)->TryGetNumberField(TEXT("completion_tokens"), Ct)
+			|| (*U)->TryGetNumberField(TEXT("output_tokens"), Ct)
+			|| (*U)->TryGetNumberField(TEXT("candidates_token_count"), Ct))
+		{
+			OutUsage.CompletionTokens = static_cast<int32>(Ct);
+		}
+		if ((*U)->TryGetNumberField(TEXT("total_tokens"), Tt) || (*U)->TryGetNumberField(TEXT("total_token_count"), Tt))
+		{
+			OutUsage.TotalTokens = static_cast<int32>(Tt);
 		}
 	}
 
@@ -139,6 +145,23 @@ namespace OpenAiTransportUtil
 		TArray<FString> Lines;
 		Body.ParseIntoArrayLines(Lines, false);
 		FUnrealAiTokenUsage LastUsage;
+		FString LastFinishReason;
+		bool bEmittedFinish = false;
+
+		auto EmitFinalFinish = [&OnEvent, &LastUsage, &LastFinishReason, &bEmittedFinish]()
+		{
+			if (bEmittedFinish)
+			{
+				return;
+			}
+			bEmittedFinish = true;
+			FUnrealAiLlmStreamEvent Fin;
+			Fin.Type = EUnrealAiLlmStreamEventType::Finish;
+			Fin.FinishReason = LastFinishReason.IsEmpty() ? TEXT("stop") : LastFinishReason;
+			Fin.Usage = LastUsage;
+			OnEvent.ExecuteIfBound(Fin);
+		};
+
 		for (FString& Line : Lines)
 		{
 			Line.TrimStartAndEndInline();
@@ -153,11 +176,7 @@ namespace OpenAiTransportUtil
 			FString Payload = Line.Mid(5).TrimStart();
 			if (Payload == TEXT("[DONE]"))
 			{
-				FUnrealAiLlmStreamEvent Fin;
-				Fin.Type = EUnrealAiLlmStreamEventType::Finish;
-				Fin.FinishReason = TEXT("stop");
-				Fin.Usage = LastUsage;
-				OnEvent.ExecuteIfBound(Fin);
+				EmitFinalFinish();
 				continue;
 			}
 			TSharedPtr<FJsonObject> Chunk;
@@ -166,6 +185,7 @@ namespace OpenAiTransportUtil
 			{
 				continue;
 			}
+			// Usage may appear on its own chunk (OpenAI stream_options.include_usage) before [DONE].
 			ParseUsage(Chunk, LastUsage);
 			const TArray<TSharedPtr<FJsonValue>>* Choices = nullptr;
 			if (!Chunk->TryGetArrayField(TEXT("choices"), Choices) || !Choices || Choices->Num() == 0)
@@ -239,13 +259,13 @@ namespace OpenAiTransportUtil
 			FString FinishReason;
 			if ((*Choice0)->TryGetStringField(TEXT("finish_reason"), FinishReason) && !FinishReason.IsEmpty())
 			{
-				FUnrealAiLlmStreamEvent Fin;
-				Fin.Type = EUnrealAiLlmStreamEventType::Finish;
-				Fin.FinishReason = FinishReason;
-				Fin.Usage = LastUsage;
-				OnEvent.ExecuteIfBound(Fin);
+				// Defer Finish until [DONE] so usage from stream_options.include_usage is included.
+				LastFinishReason = FinishReason;
 			}
 		}
+
+		// Some proxies omit the final data: [DONE] line; still complete the harness turn.
+		EmitFinalFinish();
 	}
 }
 
@@ -296,6 +316,13 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 		}
 	}
 	Body->SetBoolField(TEXT("stream"), Request.bStream);
+	if (Request.bStream)
+	{
+		// OpenAI Chat Completions: usage is omitted from stream chunks unless this is set.
+		TSharedPtr<FJsonObject> StreamOpts = MakeShared<FJsonObject>();
+		StreamOpts->SetBoolField(TEXT("include_usage"), true);
+		Body->SetObjectField(TEXT("stream_options"), StreamOpts);
+	}
 	Body->SetNumberField(TEXT("max_tokens"), Request.MaxOutputTokens);
 	FString BodyStr;
 	TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&BodyStr);
@@ -322,9 +349,30 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 		[this, OnEvent, bStream = Request.bStream](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bOk)
 		{
 			ActiveRequest.Reset();
-			if (!bOk || !Resp.IsValid())
+			if (!bOk)
 			{
-				OpenAiTransportUtil::EmitError(OnEvent, TEXT("HTTP request failed"));
+				FString Detail = TEXT("HTTP request failed (transport did not complete successfully)");
+				if (Req.IsValid())
+				{
+					Detail = FString::Printf(
+						TEXT("HTTP request failed: %s (%s). URL: %s"),
+						EHttpRequestStatus::ToString(Req->GetStatus()),
+						LexToString(Req->GetFailureReason()),
+						*Req->GetURL());
+				}
+				else if (Resp.IsValid())
+				{
+					Detail = FString::Printf(
+						TEXT("HTTP request failed: %s (%s)"),
+						EHttpRequestStatus::ToString(Resp->GetStatus()),
+						LexToString(Resp->GetFailureReason()));
+				}
+				OpenAiTransportUtil::EmitError(OnEvent, Detail);
+				return;
+			}
+			if (!Resp.IsValid())
+			{
+				OpenAiTransportUtil::EmitError(OnEvent, TEXT("HTTP request failed: no response (check API URL, key, firewall, proxy)"));
 				return;
 			}
 			const int32 Code = Resp->GetResponseCode();
