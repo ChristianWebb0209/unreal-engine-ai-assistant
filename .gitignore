@@ -1,4 +1,5 @@
 # Tracked at repo root: .gitignore, README.md, docs/, Plugins/ (plugin + Blank module sources).
+# Exception: UnrealBlueprintFormatter is developed for a separate repo — see docs/UnrealBlueprintFormatter-remaining-todo.md
 # Other root paths are listed explicitly — no negation patterns (!).
 
 # --- Repo root (everything except README.md, docs/, Plugins/) ---
@@ -27,6 +28,10 @@
 *.xcodeproj
 *.xcworkspace
 
+# Standalone Blueprint Formatter plugin (own repo later; keep local copy untracked here).
+# UnrealAiEditor declares this plugin as a dependency — you need it on disk to compile/run AI Blueprint tools.
+Plugins/UnrealBlueprintFormatter/
+
 # --- UnrealAiEditor plugin: generated / local build outputs (sources stay tracked) ---
 Plugins/**/Intermediate/
 Plugins/**/Binaries/
@@ -50,3 +55,14 @@ Thumbs.db
 # Unreal/automation local output folders
 /BuildOut/
 /tests-failed.txt
+
+# Tool-routing fixtures and LLM audit logs (regenerated locally / CI artifacts)
+/tests/tool-call-prompts.generated.json
+/tests/out/
+
+# Optional local scratch (untracked copies of scripts, experiments)
+/local/
+
+# Python
+**/__pycache__/
+
