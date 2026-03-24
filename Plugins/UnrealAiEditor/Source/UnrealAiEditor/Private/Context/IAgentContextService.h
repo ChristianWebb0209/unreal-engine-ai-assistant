@@ -23,6 +23,8 @@ public:
 	virtual void SetActiveOrchestrateDag(const FString& DagJson) = 0;
 	/** Update per-node orchestrate status and optional summary. */
 	virtual void SetOrchestrateNodeStatus(const FString& NodeId, const FString& Status, const FString& Summary = FString()) = 0;
+	/** Removes in-flight "running" markers so execution can resume after a crash or lost harness callback. */
+	virtual void ClearOrchestrateStaleRunningMarkers(const FString& ProjectId, const FString& ThreadId) = 0;
 	/** Clear active orchestrate DAG and any node execution status. */
 	virtual void ClearActiveOrchestrateDag() = 0;
 
@@ -38,6 +40,9 @@ public:
 
 	/** Persist every loaded session (e.g. editor shutdown). */
 	virtual void FlushAllSessionsToDisk() = 0;
+
+	/** Drop all in-memory thread sessions without writing (e.g. after deleting chat files on disk). */
+	virtual void WipeAllSessionsInMemory() = 0;
 
 	virtual const FAgentContextState* GetState(const FString& ProjectId, const FString& ThreadId) const = 0;
 };

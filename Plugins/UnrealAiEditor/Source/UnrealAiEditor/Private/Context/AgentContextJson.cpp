@@ -287,6 +287,11 @@ namespace UnrealAiAgentContextJson
 					continue;
 				}
 				(*ObjPtr)->TryGetStringField(TEXT("status"), Status);
+				// "running" is non-resumable after reload — treat as unstuck so the DAG can schedule work again.
+				if (Status.Equals(TEXT("running"), ESearchCase::IgnoreCase))
+				{
+					continue;
+				}
 				OutState.OrchestrateNodeStatusById.Add(NodeId, Status);
 				FString Summary;
 				if ((*ObjPtr)->TryGetStringField(TEXT("summary"), Summary) && !Summary.IsEmpty())

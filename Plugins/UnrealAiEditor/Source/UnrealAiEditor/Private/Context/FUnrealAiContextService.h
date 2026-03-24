@@ -23,6 +23,7 @@ public:
 	virtual void SetTodoStepDone(int32 StepIndex, bool bDone) override;
 	virtual void SetActiveOrchestrateDag(const FString& DagJson) override;
 	virtual void SetOrchestrateNodeStatus(const FString& NodeId, const FString& Status, const FString& Summary = FString()) override;
+	virtual void ClearOrchestrateStaleRunningMarkers(const FString& ProjectId, const FString& ThreadId) override;
 	virtual void ClearActiveOrchestrateDag() override;
 
 	virtual void SetEditorSnapshot(const FEditorContextSnapshot& Snapshot) override;
@@ -34,6 +35,7 @@ public:
 	virtual void SaveNow(const FString& ProjectId, const FString& ThreadId) override;
 
 	virtual void FlushAllSessionsToDisk() override;
+	virtual void WipeAllSessionsInMemory() override;
 
 	virtual const FAgentContextState* GetState(const FString& ProjectId, const FString& ThreadId) const override;
 

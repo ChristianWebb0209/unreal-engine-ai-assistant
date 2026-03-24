@@ -244,6 +244,33 @@ void FUnrealAiContextService::SetOrchestrateNodeStatus(const FString& NodeId, co
 	ScheduleSave(ActiveProjectId, ActiveThreadId);
 }
 
+void FUnrealAiContextService::ClearOrchestrateStaleRunningMarkers(const FString& ProjectId, const FString& ThreadId)
+{
+	if (ProjectId.IsEmpty() || ThreadId.IsEmpty())
+	{
+		return;
+	}
+	FAgentContextState* S = FindOrAddState(ProjectId, ThreadId);
+	TArray<FString> RemoveIds;
+	for (const TPair<FString, FString>& Pair : S->OrchestrateNodeStatusById)
+	{
+		if (Pair.Value.Equals(TEXT("running"), ESearchCase::IgnoreCase))
+		{
+			RemoveIds.Add(Pair.Key);
+		}
+	}
+	if (RemoveIds.Num() == 0)
+	{
+		return;
+	}
+	for (const FString& Id : RemoveIds)
+	{
+		S->OrchestrateNodeStatusById.Remove(Id);
+		S->OrchestrateNodeSummaryById.Remove(Id);
+	}
+	ScheduleSave(ProjectId, ThreadId);
+}
+
 void FUnrealAiContextService::ClearActiveOrchestrateDag()
 {
 	if (ActiveProjectId.IsEmpty() || ActiveThreadId.IsEmpty())
@@ -469,4 +496,17 @@ void FUnrealAiContextService::FlushAllSessionsToDisk()
 	{
 		FlushSaveBySessionKey(Pair.Key);
 	}
+}
+
+void FUnrealAiContextService::WipeAllSessionsInMemory()
+{
+	if (SaveTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(SaveTickerHandle);
+		SaveTickerHandle.Reset();
+	}
+	PendingSaveKeys.Reset();
+	Sessions.Reset();
+	ActiveProjectId.Reset();
+	ActiveThreadId.Reset();
 }

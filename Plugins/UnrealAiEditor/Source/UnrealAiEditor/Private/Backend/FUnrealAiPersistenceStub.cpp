@@ -2,6 +2,7 @@
 
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
+#include "Misc/DateTime.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
@@ -9,6 +10,9 @@
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+#include "Misc/Guid.h"
+#include "Harness/UnrealAiConversationJson.h"
 
 namespace UnrealAiPersistenceUtil
 {
@@ -71,7 +75,9 @@ namespace UnrealAiThreadIndex
 		static const TCHAR* Bad = TEXT("\\/:*?\"<>|");
 		for (const TCHAR* P = Bad; *P; ++P)
 		{
-			S.ReplaceInline(FString::Chr(*P), TEXT(""));
+			// ReplaceInline expects null-terminated TCHAR* strings; build a tiny 1-char buffer.
+			TCHAR Search[2] = { *P, TEXT('\0') };
+			S.ReplaceInline(Search, TEXT(""));
 		}
 
 		// Final trim.
@@ -119,12 +125,12 @@ namespace UnrealAiThreadIndex
 		{
 			return false;
 		}
-		TSharedPtr<FJsonObject> ThreadsObj;
-		if (!Root->TryGetObjectField(TEXT("threads"), ThreadsObj) || !ThreadsObj.IsValid())
+		const TSharedPtr<FJsonObject>* ThreadsObjPtr = nullptr;
+		if (!Root->TryGetObjectField(TEXT("threads"), ThreadsObjPtr) || !ThreadsObjPtr || !ThreadsObjPtr->IsValid())
 		{
 			return true;
 		}
-		const TSharedPtr<FJsonObject> Threads = ThreadsObj;
+		const TSharedPtr<FJsonObject> Threads = *ThreadsObjPtr;
 		for (const auto& Pair : Threads->Values)
 		{
 			const FString ThreadId = Pair.Key;
@@ -250,12 +256,32 @@ bool FUnrealAiPersistenceStub::AppendChatMessage(const FString& ProjectId, const
 TArray<FString> FUnrealAiPersistenceStub::ListThreads(const FString& ProjectId)
 {
 	TArray<FString> Result;
-	const FString Dir = FPaths::Combine(GetDataRootDirectory(), TEXT("chats"), ProjectId);
-	if (IFileManager::Get().DirectoryExists(*Dir))
+	const FString TRoot = FPaths::Combine(GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("threads"));
+	if (!IFileManager::Get().DirectoryExists(*TRoot))
 	{
-		IFileManager::Get().FindFiles(Result, *Dir, true, false);
+		return Result;
+	}
+	TArray<FString> Files;
+	IFileManager::Get().FindFiles(Files, *FPaths::Combine(TRoot, TEXT("*-context.json")), true, false);
+	for (FString FileName : Files)
+	{
+		if (FileName.RemoveFromEnd(TEXT("-context.json")))
+		{
+			Result.AddUnique(FileName);
+		}
+	}
+	TArray<FString> Dirs;
+	IFileManager::Get().FindFiles(Dirs, *TRoot, false, true);
+	for (const FString& D : Dirs)
+	{
+		Result.AddUnique(D);
 	}
 	return Result;
+}
+
+FString FUnrealAiPersistenceStub::GetThreadStorageSlug(const FString& ProjectId, const FString& ThreadId) const
+{
+	return UnrealAiThreadIndex::ResolveThreadSlug(this, ProjectId, ThreadId);
 }
 
 bool FUnrealAiPersistenceStub::SaveThreadContextJson(
@@ -264,8 +290,8 @@ bool FUnrealAiPersistenceStub::SaveThreadContextJson(
 	const FString& JsonBody)
 {
 	const FString Slug = UnrealAiThreadIndex::ResolveThreadSlug(this, ProjectId, ThreadId);
-	const FString Dir = EnsureSubdir(FPaths::Combine(TEXT("chats"), ProjectId, TEXT("threads"), Slug));
-	const FString Path = FPaths::Combine(Dir, TEXT("context.json"));
+	const FString ThreadsRoot = EnsureSubdir(FPaths::Combine(TEXT("chats"), ProjectId, TEXT("threads")));
+	const FString Path = FPaths::Combine(ThreadsRoot, Slug + TEXT("-context.json"));
 	return FFileHelper::SaveStringToFile(JsonBody, *Path);
 }
 
@@ -275,18 +301,18 @@ bool FUnrealAiPersistenceStub::LoadThreadContextJson(
 	FString& OutJsonBody)
 {
 	const FString Slug = UnrealAiThreadIndex::ResolveThreadSlug(this, ProjectId, ThreadId);
-	const FString Path = FPaths::Combine(
-		GetDataRootDirectory(),
-		TEXT("chats"),
-		ProjectId,
-		TEXT("threads"),
-		Slug,
-		TEXT("context.json"));
-	if (!FPaths::FileExists(Path))
+	const FString ThreadsRoot = FPaths::Combine(GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("threads"));
+	const FString Flat = FPaths::Combine(ThreadsRoot, Slug + TEXT("-context.json"));
+	if (FFileHelper::LoadFileToString(OutJsonBody, *Flat))
 	{
-		return false;
+		return true;
 	}
-	return FFileHelper::LoadFileToString(OutJsonBody, *Path);
+	const FString Legacy = FPaths::Combine(ThreadsRoot, Slug, TEXT("context.json"));
+	if (FFileHelper::LoadFileToString(OutJsonBody, *Legacy))
+	{
+		return true;
+	}
+	return false;
 }
 
 bool FUnrealAiPersistenceStub::SaveThreadConversationJson(
@@ -295,9 +321,29 @@ bool FUnrealAiPersistenceStub::SaveThreadConversationJson(
 	const FString& JsonBody)
 {
 	const FString Slug = UnrealAiThreadIndex::ResolveThreadSlug(this, ProjectId, ThreadId);
-	const FString Dir = EnsureSubdir(FPaths::Combine(TEXT("chats"), ProjectId, TEXT("threads"), Slug));
-	const FString Path = FPaths::Combine(Dir, TEXT("conversation.json"));
+	const FString ThreadsRoot = EnsureSubdir(FPaths::Combine(TEXT("chats"), ProjectId, TEXT("threads")));
+	const FString Path = FPaths::Combine(ThreadsRoot, Slug + TEXT("-conversation.json"));
 	return FFileHelper::SaveStringToFile(JsonBody, *Path);
+}
+
+bool FUnrealAiPersistenceStub::LoadThreadConversationJson_Impl(
+	const FString& ProjectId,
+	const FString& ThreadId,
+	FString& OutJsonBody) const
+{
+	const FString Slug = UnrealAiThreadIndex::ResolveThreadSlug(this, ProjectId, ThreadId);
+	const FString ThreadsRoot = FPaths::Combine(GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("threads"));
+	const FString Flat = FPaths::Combine(ThreadsRoot, Slug + TEXT("-conversation.json"));
+	if (FFileHelper::LoadFileToString(OutJsonBody, *Flat))
+	{
+		return true;
+	}
+	const FString Legacy = FPaths::Combine(ThreadsRoot, Slug, TEXT("conversation.json"));
+	if (FFileHelper::LoadFileToString(OutJsonBody, *Legacy))
+	{
+		return true;
+	}
+	return false;
 }
 
 bool FUnrealAiPersistenceStub::LoadThreadConversationJson(
@@ -305,19 +351,205 @@ bool FUnrealAiPersistenceStub::LoadThreadConversationJson(
 	const FString& ThreadId,
 	FString& OutJsonBody)
 {
-	const FString Slug = UnrealAiThreadIndex::ResolveThreadSlug(this, ProjectId, ThreadId);
-	const FString Path = FPaths::Combine(
-		GetDataRootDirectory(),
-		TEXT("chats"),
-		ProjectId,
-		TEXT("threads"),
-		Slug,
-		TEXT("conversation.json"));
-	if (!FPaths::FileExists(Path))
+	return LoadThreadConversationJson_Impl(ProjectId, ThreadId, OutJsonBody);
+}
+
+bool FUnrealAiPersistenceStub::ThreadHasUserVisibleMessages(const FString& ProjectId, const FString& ThreadId) const
+{
+	if (ProjectId.IsEmpty() || ThreadId.IsEmpty())
 	{
 		return false;
 	}
-	return FFileHelper::LoadFileToString(OutJsonBody, *Path);
+	FString ConvJson;
+	if (!LoadThreadConversationJson_Impl(ProjectId, ThreadId, ConvJson))
+	{
+		return false;
+	}
+	TArray<FUnrealAiConversationMessage> Messages;
+	TArray<FString> Warnings;
+	if (!UnrealAiConversationJson::JsonToMessages(ConvJson, Messages, Warnings))
+	{
+		return false;
+	}
+	for (const FUnrealAiConversationMessage& M : Messages)
+	{
+		if (M.Role.Equals(TEXT("system"), ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+		return true;
+	}
+	return false;
+}
+
+bool FUnrealAiPersistenceStub::TryGetMostRecentThreadWithConversation(const FString& ProjectId, FGuid& OutThreadId) const
+{
+	OutThreadId = FGuid();
+	if (ProjectId.IsEmpty())
+	{
+		return false;
+	}
+	const FString ThreadsRoot = FPaths::Combine(GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("threads"));
+	if (!IFileManager::Get().DirectoryExists(*ThreadsRoot))
+	{
+		return false;
+	}
+	TMap<FString, UnrealAiThreadIndex::FEntry> Index;
+	const bool bHasIndex = UnrealAiThreadIndex::LoadIndex(this, ProjectId, Index);
+	TMap<FGuid, int64> BestTicks;
+	auto ConsiderPathForThread = [&BestTicks](const FString& AbsolutePath, const FGuid& ThreadGuid)
+	{
+		if (!ThreadGuid.IsValid() || !FPaths::FileExists(AbsolutePath))
+		{
+			return;
+		}
+		const int64 Ticks = IFileManager::Get().GetTimeStamp(*AbsolutePath).GetTicks();
+		if (int64* Prev = BestTicks.Find(ThreadGuid))
+		{
+			if (Ticks > *Prev)
+			{
+				*Prev = Ticks;
+			}
+		}
+		else
+		{
+			BestTicks.Add(ThreadGuid, Ticks);
+		}
+	};
+
+	if (bHasIndex)
+	{
+		for (const TPair<FString, UnrealAiThreadIndex::FEntry>& Pair : Index)
+		{
+			FGuid ThreadGuid;
+			if (!FGuid::Parse(Pair.Key, ThreadGuid) || !ThreadGuid.IsValid())
+			{
+				continue;
+			}
+			const FString& ResolvedSlug = Pair.Value.Slug.IsEmpty() ? Pair.Key : Pair.Value.Slug;
+			ConsiderPathForThread(FPaths::Combine(ThreadsRoot, ResolvedSlug + TEXT("-conversation.json")), ThreadGuid);
+			ConsiderPathForThread(FPaths::Combine(ThreadsRoot, ResolvedSlug, TEXT("conversation.json")), ThreadGuid);
+		}
+	}
+
+	TArray<FString> FlatFiles;
+	IFileManager::Get().FindFiles(FlatFiles, *FPaths::Combine(ThreadsRoot, TEXT("*-conversation.json")), true, false);
+	for (FString FileName : FlatFiles)
+	{
+		if (!FileName.RemoveFromEnd(TEXT("-conversation.json")))
+		{
+			continue;
+		}
+		const FString& SlugFromFile = FileName;
+		FGuid ThreadGuid;
+		bool bMapped = false;
+		if (bHasIndex)
+		{
+			for (const TPair<FString, UnrealAiThreadIndex::FEntry>& Pair : Index)
+			{
+				const FString& ResolvedSlug = Pair.Value.Slug.IsEmpty() ? Pair.Key : Pair.Value.Slug;
+				if (ResolvedSlug != SlugFromFile)
+				{
+					continue;
+				}
+				if (FGuid::Parse(Pair.Key, ThreadGuid) && ThreadGuid.IsValid())
+				{
+					bMapped = true;
+					break;
+				}
+			}
+		}
+		if (!bMapped)
+		{
+			if (!FGuid::Parse(SlugFromFile, ThreadGuid) || !ThreadGuid.IsValid())
+			{
+				continue;
+			}
+		}
+		ConsiderPathForThread(FPaths::Combine(ThreadsRoot, SlugFromFile + TEXT("-conversation.json")), ThreadGuid);
+	}
+
+	TArray<FString> Dirs;
+	IFileManager::Get().FindFiles(Dirs, *ThreadsRoot, false, true);
+	for (const FString& DirName : Dirs)
+	{
+		const FString LegacyConversation = FPaths::Combine(ThreadsRoot, DirName, TEXT("conversation.json"));
+		if (!FPaths::FileExists(LegacyConversation))
+		{
+			continue;
+		}
+		FGuid ThreadGuid;
+		bool bMapped = false;
+		if (bHasIndex)
+		{
+			for (const TPair<FString, UnrealAiThreadIndex::FEntry>& Pair : Index)
+			{
+				const FString& ResolvedSlug = Pair.Value.Slug.IsEmpty() ? Pair.Key : Pair.Value.Slug;
+				if (ResolvedSlug != DirName)
+				{
+					continue;
+				}
+				if (FGuid::Parse(Pair.Key, ThreadGuid) && ThreadGuid.IsValid())
+				{
+					bMapped = true;
+					break;
+				}
+			}
+		}
+		if (!bMapped)
+		{
+			if (!FGuid::Parse(DirName, ThreadGuid) || !ThreadGuid.IsValid())
+			{
+				continue;
+			}
+		}
+		ConsiderPathForThread(LegacyConversation, ThreadGuid);
+	}
+
+	FGuid BestGuid;
+	int64 BestStampTicks = 0;
+	bool bHaveCandidate = false;
+	for (const TPair<FGuid, int64>& Pair : BestTicks)
+	{
+		const FString ThreadStr = Pair.Key.ToString(EGuidFormats::DigitsWithHyphens);
+		if (!ThreadHasUserVisibleMessages(ProjectId, ThreadStr))
+		{
+			continue;
+		}
+		if (!bHaveCandidate || Pair.Value > BestStampTicks)
+		{
+			bHaveCandidate = true;
+			BestStampTicks = Pair.Value;
+			BestGuid = Pair.Key;
+		}
+	}
+	if (!bHaveCandidate || !BestGuid.IsValid())
+	{
+		return false;
+	}
+	OutThreadId = BestGuid;
+	return true;
+}
+
+void FUnrealAiPersistenceStub::ForgetThread(const FString& ProjectId, const FString& ThreadId)
+{
+	if (ProjectId.IsEmpty() || ThreadId.IsEmpty())
+	{
+		return;
+	}
+	const FString Slug = UnrealAiThreadIndex::ResolveThreadSlug(this, ProjectId, ThreadId);
+	TMap<FString, UnrealAiThreadIndex::FEntry> Index;
+	if (UnrealAiThreadIndex::LoadIndex(this, ProjectId, Index))
+	{
+		Index.Remove(ThreadId);
+		UnrealAiThreadIndex::SaveIndex(this, ProjectId, Index);
+	}
+
+	const FString ThreadsRoot = FPaths::Combine(GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("threads"));
+	IFileManager& FM = IFileManager::Get();
+	FM.Delete(*FPaths::Combine(ThreadsRoot, Slug + TEXT("-context.json")), false, true);
+	FM.Delete(*FPaths::Combine(ThreadsRoot, Slug + TEXT("-conversation.json")), false, true);
+	FM.DeleteDirectory(*FPaths::Combine(ThreadsRoot, Slug), false, true);
 }
 
 bool FUnrealAiPersistenceStub::SetThreadChatName(
@@ -353,42 +585,58 @@ bool FUnrealAiPersistenceStub::SetThreadChatName(
 		}
 	}
 
-	// Ensure unique slug if there's already a directory by that name.
-	auto ThreadDirForSlug = [&](const FString& S) -> FString
-	{
-		return FPaths::Combine(GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("threads"), *S);
-	};
-
 	const FString OldSlug = UnrealAiThreadIndex::ResolveThreadSlug(this, ProjectId, ThreadId);
-	FString OldDir = ThreadDirForSlug(OldSlug);
-	const FString NewDirInitial = ThreadDirForSlug(Slug);
-	if (OldSlug != Slug && IFileManager::Get().DirectoryExists(*NewDirInitial))
+
+	// Ensure unique slug when another thread already owns this stem (flat file or legacy folder).
+	if (OldSlug != Slug)
 	{
-		// Collision: append a stable suffix based on thread id.
-		Slug = FString::Printf(TEXT("%s-%s"), *Slug, *ThreadId.Left(8));
+		auto ThreadDirForSlug = [&](const FString& S) -> FString
+		{
+			return FPaths::Combine(GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("threads"), *S);
+		};
+		const FString ThreadsRoot = FPaths::Combine(GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("threads"));
+		const FString FlatCollide = FPaths::Combine(ThreadsRoot, Slug + TEXT("-context.json"));
+		const FString NewDirInitial = ThreadDirForSlug(Slug);
+		if (IFileManager::Get().FileExists(*FlatCollide) || IFileManager::Get().DirectoryExists(*NewDirInitial))
+		{
+			Slug = FString::Printf(TEXT("%s-%s"), *Slug, *ThreadId.Left(8));
+		}
 	}
 
-	const FString NewDir = ThreadDirForSlug(Slug);
 	const FString ThreadsRoot = FPaths::Combine(GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("threads"));
 	IFileManager::Get().MakeDirectory(*ThreadsRoot, true);
+	IFileManager& FM = IFileManager::Get();
 
-	const bool bOldExists = IFileManager::Get().DirectoryExists(*OldDir);
-	const bool bNewExists = IFileManager::Get().DirectoryExists(*NewDir);
+	auto FlatContext = [&](const FString& S) { return FPaths::Combine(ThreadsRoot, S + TEXT("-context.json")); };
+	auto FlatConversation = [&](const FString& S) { return FPaths::Combine(ThreadsRoot, S + TEXT("-conversation.json")); };
+	auto LegacyContext = [&](const FString& S) { return FPaths::Combine(ThreadsRoot, S, TEXT("context.json")); };
+	auto LegacyConversation = [&](const FString& S) { return FPaths::Combine(ThreadsRoot, S, TEXT("conversation.json")); };
 
-	if (OldSlug != Slug && bOldExists && !bNewExists)
+	if (OldSlug != Slug)
 	{
-		// If it somehow didn't exist (race), move the directory.
-		IFileManager::Get().Move(*NewDir, *OldDir);
-	}
-	else if (OldSlug != Slug && bOldExists && bNewExists)
-	{
-		// Target exists; try move anyway (unique slug should usually prevent this).
-		IFileManager::Get().Move(*NewDir, *OldDir);
-	}
-	else if (!bOldExists && !bNewExists)
-	{
-		// New chat with no persisted thread folder yet.
-		IFileManager::Get().MakeDirectory(*NewDir, true);
+		auto MoveFileIfPresent = [&](const FString& From, const FString& To)
+		{
+			if (!FM.FileExists(*From))
+			{
+				return;
+			}
+			if (FM.FileExists(*To))
+			{
+				FM.Delete(*To, false, true);
+			}
+			FM.Move(*To, *From);
+		};
+
+		MoveFileIfPresent(FlatContext(OldSlug), FlatContext(Slug));
+		MoveFileIfPresent(FlatConversation(OldSlug), FlatConversation(Slug));
+
+		const FString OldLegDir = FPaths::Combine(ThreadsRoot, OldSlug);
+		if (FM.DirectoryExists(*OldLegDir))
+		{
+			MoveFileIfPresent(LegacyContext(OldSlug), FlatContext(Slug));
+			MoveFileIfPresent(LegacyConversation(OldSlug), FlatConversation(Slug));
+			FM.DeleteDirectory(*OldLegDir, false, true);
+		}
 	}
 
 	Index.FindOrAdd(ThreadId) = UnrealAiThreadIndex::FEntry{Slug, DisplayName};
@@ -417,4 +665,150 @@ bool FUnrealAiPersistenceStub::GetThreadChatName(
 		return !OutChatName.IsEmpty();
 	}
 	return true; // not found = empty
+}
+
+static const TCHAR* GOpenChatsSchema = TEXT("unreal_ai.open_chats_v1");
+
+static FString OpenChatsPath(const FUnrealAiPersistenceStub* Persist, const FString& ProjectId)
+{
+	const FString ChatsDir = FPaths::Combine(Persist->GetDataRootDirectory(), TEXT("chats"), ProjectId);
+	IFileManager::Get().MakeDirectory(*ChatsDir, true);
+	return FPaths::Combine(ChatsDir, TEXT("ui_open_chats.json"));
+}
+
+bool FUnrealAiPersistenceStub::SaveOpenChatTabsState(
+	const FString& ProjectId,
+	const TArray<FGuid>& OpenThreadIdsInOrder)
+{
+	if (ProjectId.IsEmpty())
+	{
+		return false;
+	}
+	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetStringField(TEXT("schema"), GOpenChatsSchema);
+	TArray<TSharedPtr<FJsonValue>> Arr;
+	for (const FGuid& G : OpenThreadIdsInOrder)
+	{
+		if (G.IsValid())
+		{
+			Arr.Add(MakeShared<FJsonValueString>(G.ToString(EGuidFormats::DigitsWithHyphens)));
+		}
+	}
+	Root->SetArrayField(TEXT("threadIds"), Arr);
+	FString OutJson;
+	const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&OutJson);
+	if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
+	{
+		return false;
+	}
+	const FString Path = OpenChatsPath(this, ProjectId);
+	return FFileHelper::SaveStringToFile(OutJson, *Path);
+}
+
+bool FUnrealAiPersistenceStub::LoadOpenChatTabsState(const FString& ProjectId, TArray<FGuid>& OutOpenThreadIdsInOrder)
+{
+	OutOpenThreadIdsInOrder.Reset();
+	if (ProjectId.IsEmpty())
+	{
+		return true;
+	}
+	const FString Path = OpenChatsPath(this, ProjectId);
+	if (!FPaths::FileExists(Path))
+	{
+		return true;
+	}
+	FString Json;
+	if (!FFileHelper::LoadFileToString(Json, *Path))
+	{
+		return false;
+	}
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		return false;
+	}
+	const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+	if (!Root->TryGetArrayField(TEXT("threadIds"), Arr) || !Arr)
+	{
+		return true;
+	}
+	for (const TSharedPtr<FJsonValue>& V : *Arr)
+	{
+		if (!V.IsValid() || V->Type != EJson::String)
+		{
+			continue;
+		}
+		const FString S = V->AsString();
+		FGuid G;
+		if (FGuid::Parse(S, G) && G.IsValid())
+		{
+			OutOpenThreadIdsInOrder.Add(G);
+		}
+	}
+	return true;
+}
+
+void FUnrealAiPersistenceStub::ListPersistedThreadsForHistory(
+	const FString& ProjectId,
+	TArray<FString>& OutThreadIds,
+	TArray<FString>& OutDisplayNames) const
+{
+	OutThreadIds.Reset();
+	OutDisplayNames.Reset();
+	if (ProjectId.IsEmpty())
+	{
+		return;
+	}
+	TMap<FString, UnrealAiThreadIndex::FEntry> Index;
+	if (!UnrealAiThreadIndex::LoadIndex(this, ProjectId, Index))
+	{
+		return;
+	}
+	struct FRow
+	{
+		FString Id;
+		FString Label;
+	};
+	TArray<FRow> Rows;
+	Rows.Reserve(Index.Num());
+	for (const TPair<FString, UnrealAiThreadIndex::FEntry>& Pair : Index)
+	{
+		FRow R;
+		R.Id = Pair.Key;
+		R.Label = Pair.Value.DisplayName.IsEmpty() ? Pair.Key : Pair.Value.DisplayName;
+		Rows.Add(MoveTemp(R));
+	}
+	Rows.Sort([](const FRow& A, const FRow& B) { return A.Label.Compare(B.Label, ESearchCase::IgnoreCase) < 0; });
+	for (const FRow& R : Rows)
+	{
+		OutThreadIds.Add(R.Id);
+		OutDisplayNames.Add(R.Label);
+	}
+}
+
+bool FUnrealAiPersistenceStub::DeleteAllLocalChatData(FString& OutError)
+{
+	OutError.Reset();
+	IFileManager& FM = IFileManager::Get();
+	const FString ChatsDir = FPaths::Combine(GetDataRootDirectory(), TEXT("chats"));
+	if (FPaths::DirectoryExists(ChatsDir))
+	{
+		if (!FM.DeleteDirectory(*ChatsDir, false, true))
+		{
+			OutError = TEXT("Failed to delete the local chats directory.");
+			return false;
+		}
+	}
+	const FString ProjSavedPlugin = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAiEditor"));
+	if (FPaths::DirectoryExists(ProjSavedPlugin))
+	{
+		if (!FM.DeleteDirectory(*ProjSavedPlugin, false, true))
+		{
+			OutError = TEXT("Failed to delete Saved/UnrealAiEditor.");
+			return false;
+		}
+	}
+	return true;
 }
