@@ -727,7 +727,15 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompile(const TSharedPtr
 	O->SetArrayField(TEXT("compiler_messages"), Msgs);
 	O->SetNumberField(TEXT("compiler_error_count"), static_cast<double>(ErrCount));
 	O->SetNumberField(TEXT("compiler_warning_count"), static_cast<double>(WarnCount));
-	return UnrealAiToolJson::Ok(O);
+
+	const FString ToolMarkdown = FString::Printf(
+		TEXT("### Blueprint compile\n- Errors: %d\n- Warnings: %d\n- Blueprint status: %d\n"),
+		ErrCount,
+		WarnCount,
+		static_cast<int32>(BP->Status));
+	return UnrealAiToolJson::OkWithEditorPresentation(
+		O,
+		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Path, FString(), ToolMarkdown));
 }
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportIr(const TSharedPtr<FJsonObject>& Args)
@@ -1080,7 +1088,45 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGetGraphSummary(const TS
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetArrayField(TEXT("graphs"), GraphArr);
 	O->SetNumberField(TEXT("graph_count"), static_cast<double>(GraphArr.Num()));
-	return UnrealAiToolJson::Ok(O);
+
+	TArray<FString> FirstNames;
+	for (const TSharedPtr<FJsonValue>& V : GraphArr)
+	{
+		if (!V.IsValid())
+		{
+			continue;
+		}
+		const TSharedPtr<FJsonObject>* Obj = nullptr;
+		if (!V->TryGetObject(Obj) || !Obj || !(*Obj).IsValid())
+		{
+			continue;
+		}
+		FString Name;
+		if ((*Obj)->TryGetStringField(TEXT("name"), Name) && !Name.IsEmpty())
+		{
+			FirstNames.Add(Name);
+		}
+		if (FirstNames.Num() >= 8)
+		{
+			break;
+		}
+	}
+
+	const FString GraphScope = GraphName.IsEmpty() ? TEXT("(all)") : GraphName;
+	FString ToolMarkdown = FString::Printf(
+		TEXT("### Blueprint graphs\n- Scope: %s\n- Returned graphs: %d\n"),
+		*GraphScope,
+		GraphArr.Num());
+	if (FirstNames.Num() > 0)
+	{
+		ToolMarkdown += TEXT("- First graphs: ");
+		ToolMarkdown += FString::Join(FirstNames, TEXT(", "));
+		ToolMarkdown += TEXT("\n");
+	}
+
+	return UnrealAiToolJson::OkWithEditorPresentation(
+		O,
+		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Path, GraphName, ToolMarkdown));
 }
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintOpenGraphTab(const TSharedPtr<FJsonObject>& Args)
@@ -1113,7 +1159,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintOpenGraphTab(const TShar
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("graph"), GraphName);
-	return UnrealAiToolJson::Ok(O);
+
+	const FString ToolMarkdown = FString::Printf(TEXT("### Focus graph\n- Graph: %s\n"), *GraphName);
+	return UnrealAiToolJson::OkWithEditorPresentation(
+		O,
+		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Path, GraphName, ToolMarkdown));
 }
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintAddVariable(const TSharedPtr<FJsonObject>& Args)
