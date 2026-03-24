@@ -9,3 +9,9 @@ class UWorld;
 UWorld* UnrealAiGetEditorWorld();
 
 AActor* UnrealAiFindActorByPath(UWorld* World, const FString& ActorPath);
+
+/**
+ * Resolve an actor by full path first, then by path suffix / short name / label-style matches.
+ * Use when the model omits the outer package path or pastes only the PersistentLevel.* segment.
+ */
+AActor* UnrealAiResolveActorInWorld(UWorld* World, const FString& Spec);

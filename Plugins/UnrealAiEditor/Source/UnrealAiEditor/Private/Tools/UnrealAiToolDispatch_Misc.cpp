@@ -66,7 +66,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_PhysicsImpulseActor(const TShared
 		Impulse = FVector(static_cast<float>(X), static_cast<float>(Y), static_cast<float>(Z));
 	}
 	UWorld* World = UnrealAiGetEditorWorld();
-	AActor* A = UnrealAiFindActorByPath(World, ActorPath);
+	AActor* A = UnrealAiResolveActorInWorld(World, ActorPath);
 	if (!A)
 	{
 		return UnrealAiToolJson::Error(TEXT("Actor not found"));

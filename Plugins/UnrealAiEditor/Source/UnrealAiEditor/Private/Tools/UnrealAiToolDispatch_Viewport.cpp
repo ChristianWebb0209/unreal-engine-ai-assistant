@@ -21,6 +21,37 @@ static FEditorViewportClient* GetVc()
 	return UnrealAiGetActiveLevelViewportClient();
 }
 
+namespace UnrealAiViewportFrameInternal
+{
+	static constexpr float MinFallbackExtentUU = 128.f;
+
+	static void AddActorBounds(FBox& Bounds, AActor* A)
+	{
+		if (!A)
+		{
+			return;
+		}
+		FBox Piece;
+		const FBox CompBox = A->GetComponentsBoundingBox();
+		if (CompBox.IsValid && !CompBox.GetExtent().IsNearlyZero(1.f))
+		{
+			Piece = CompBox;
+		}
+		else
+		{
+			Piece = FBox::BuildAABB(A->GetActorLocation(), FVector(MinFallbackExtentUU));
+		}
+		if (!Bounds.IsValid)
+		{
+			Bounds = Piece;
+		}
+		else
+		{
+			Bounds += Piece;
+		}
+	}
+}
+
 FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportCameraGetTransform()
 {
 	FEditorViewportClient* VC = GetVc();
@@ -157,7 +188,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportCameraPilot(const TShared
 	}
 	FEditorViewportClient* VC = GetVc();
 	UWorld* World = UnrealAiGetEditorWorld();
-	AActor* A = UnrealAiFindActorByPath(World, ActorPath);
+	AActor* A = UnrealAiResolveActorInWorld(World, ActorPath);
 	if (!VC || !A)
 	{
 		return UnrealAiToolJson::Error(TEXT("Viewport or actor not found"));
@@ -193,14 +224,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameActors(const TShared
 		{
 			continue;
 		}
-		if (AActor* A = UnrealAiFindActorByPath(World, P))
+		if (AActor* A = UnrealAiResolveActorInWorld(World, P))
 		{
-			Bounds += A->GetComponentsBoundingBox();
+			UnrealAiViewportFrameInternal::AddActorBounds(Bounds, A);
 		}
 	}
-	if (!Bounds.IsValid)
+	if (!Bounds.IsValid || Bounds.GetExtent().IsNearlyZero(1.f))
 	{
-		return UnrealAiToolJson::Error(TEXT("No valid actor bounds"));
+		return UnrealAiToolJson::Error(TEXT("No resolvable actors for framing"));
 	}
 	VC->FocusViewportOnBox(Bounds, true);
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
@@ -226,12 +257,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameSelection(const TSha
 	{
 		if (AActor* A = Cast<AActor>(*It))
 		{
-			Bounds += A->GetComponentsBoundingBox();
+			UnrealAiViewportFrameInternal::AddActorBounds(Bounds, A);
 		}
 	}
-	if (Bounds.GetExtent().IsNearlyZero())
+	if (!Bounds.IsValid || Bounds.GetExtent().IsNearlyZero(1.f))
 	{
-		return UnrealAiToolJson::Error(TEXT("Empty selection or invalid bounds"));
+		return UnrealAiToolJson::Error(TEXT("Empty selection or not enough geometry to frame"));
 	}
 	VC->FocusViewportOnBox(Bounds, true);
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();

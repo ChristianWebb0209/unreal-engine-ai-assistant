@@ -3,6 +3,8 @@
 #include "Tools/UnrealAiToolActorLookup.h"
 #include "Tools/UnrealAiToolJson.h"
 
+#include "Containers/Set.h"
+
 #include "Components/PrimitiveComponent.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
@@ -95,34 +97,159 @@ namespace UnrealAiToolActorsInternal
 		FVector Loc(0.f, 0.f, 0.f);
 		FRotator Rot(0.f, 0.f, 0.f);
 		FVector Scale(1.f, 1.f, 1.f);
-		const TSharedPtr<FJsonObject>* LocObj = nullptr;
-		if (T->TryGetObjectField(TEXT("location"), LocObj) && LocObj->IsValid())
+		const TArray<TSharedPtr<FJsonValue>>* LocArr = nullptr;
+		if (T->TryGetArrayField(TEXT("location"), LocArr) && LocArr && ParseVec3FromArray(*LocArr, Loc))
 		{
-			double X = 0.0, Y = 0.0, Z = 0.0;
-			(*LocObj)->TryGetNumberField(TEXT("x"), X);
-			(*LocObj)->TryGetNumberField(TEXT("y"), Y);
-			(*LocObj)->TryGetNumberField(TEXT("z"), Z);
-			Loc = FVector(static_cast<float>(X), static_cast<float>(Y), static_cast<float>(Z));
 		}
-		const TSharedPtr<FJsonObject>* RotObj = nullptr;
-		if (T->TryGetObjectField(TEXT("rotation"), RotObj) && RotObj->IsValid())
+		else
 		{
-			double P = 0.0, Yaw = 0.0, R = 0.0;
-			(*RotObj)->TryGetNumberField(TEXT("pitch"), P);
-			(*RotObj)->TryGetNumberField(TEXT("yaw"), Yaw);
-			(*RotObj)->TryGetNumberField(TEXT("roll"), R);
-			Rot = FRotator(static_cast<float>(P), static_cast<float>(Yaw), static_cast<float>(R));
+			const TSharedPtr<FJsonObject>* LocObj = nullptr;
+			if (T->TryGetObjectField(TEXT("location"), LocObj) && LocObj->IsValid())
+			{
+				double X = 0.0, Y = 0.0, Z = 0.0;
+				(*LocObj)->TryGetNumberField(TEXT("x"), X);
+				(*LocObj)->TryGetNumberField(TEXT("y"), Y);
+				(*LocObj)->TryGetNumberField(TEXT("z"), Z);
+				Loc = FVector(static_cast<float>(X), static_cast<float>(Y), static_cast<float>(Z));
+			}
 		}
-		const TSharedPtr<FJsonObject>* ScaleObj = nullptr;
-		if (T->TryGetObjectField(TEXT("scale"), ScaleObj) && ScaleObj->IsValid())
+		const TArray<TSharedPtr<FJsonValue>>* RotArr = nullptr;
+		if (T->TryGetArrayField(TEXT("rotation"), RotArr) && RotArr && ParseRotFromArray(*RotArr, Rot))
 		{
-			double X = 1.0, Y = 1.0, Z = 1.0;
-			(*ScaleObj)->TryGetNumberField(TEXT("x"), X);
-			(*ScaleObj)->TryGetNumberField(TEXT("y"), Y);
-			(*ScaleObj)->TryGetNumberField(TEXT("z"), Z);
-			Scale = FVector(static_cast<float>(X), static_cast<float>(Y), static_cast<float>(Z));
+		}
+		else
+		{
+			const TSharedPtr<FJsonObject>* RotObj = nullptr;
+			if (T->TryGetObjectField(TEXT("rotation"), RotObj) && RotObj->IsValid())
+			{
+				double P = 0.0, Yaw = 0.0, R = 0.0;
+				(*RotObj)->TryGetNumberField(TEXT("pitch"), P);
+				(*RotObj)->TryGetNumberField(TEXT("yaw"), Yaw);
+				(*RotObj)->TryGetNumberField(TEXT("roll"), R);
+				Rot = FRotator(static_cast<float>(P), static_cast<float>(Yaw), static_cast<float>(R));
+			}
+		}
+		const TArray<TSharedPtr<FJsonValue>>* ScaleArr = nullptr;
+		if (T->TryGetArrayField(TEXT("scale"), ScaleArr) && ScaleArr && ParseVec3FromArray(*ScaleArr, Scale))
+		{
+		}
+		else
+		{
+			const TSharedPtr<FJsonObject>* ScaleObj = nullptr;
+			if (T->TryGetObjectField(TEXT("scale"), ScaleObj) && ScaleObj->IsValid())
+			{
+				double X = 1.0, Y = 1.0, Z = 1.0;
+				(*ScaleObj)->TryGetNumberField(TEXT("x"), X);
+				(*ScaleObj)->TryGetNumberField(TEXT("y"), Y);
+				(*ScaleObj)->TryGetNumberField(TEXT("z"), Z);
+				Scale = FVector(static_cast<float>(X), static_cast<float>(Y), static_cast<float>(Z));
+			}
 		}
 		Out = FTransform(Rot, Loc, Scale);
+		return true;
+	}
+
+	static bool IsLooseDestructiveConfirm(const FString& Confirm)
+	{
+		FString C = Confirm;
+		C.TrimStartAndEndInline();
+		if (C.IsEmpty())
+		{
+			return false;
+		}
+		if (C.Equals(TEXT("DELETE"), ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		if (C.Equals(TEXT("yes"), ESearchCase::IgnoreCase) //
+			|| C.Equals(TEXT("y"), ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		if (C.Equals(TEXT("true"), ESearchCase::IgnoreCase) //
+			|| C.Equals(TEXT("confirm"), ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		if (C == TEXT("1"))
+		{
+			return true;
+		}
+		return false;
+	}
+
+	static bool ActorMatchesLabelOrPath(AActor* A, const FString& Label)
+	{
+		if (!A || Label.IsEmpty())
+		{
+			return false;
+		}
+		if (A->GetActorLabel().Contains(Label, ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		if (A->GetName().Contains(Label, ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		if (A->GetPathName().Contains(Label, ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		return false;
+	}
+
+	/** Build transform from `transform` object, or top-level location[]/rotation[]/scale[], or current actor pose. */
+	static bool ResolveSetTransformFromArgs(const TSharedPtr<FJsonObject>& Args, AActor* A, FTransform& OutNew, FString& OutErr)
+	{
+		OutErr.Reset();
+		if (!Args.IsValid() || !A)
+		{
+			OutErr = TEXT("internal: bad args or actor");
+			return false;
+		}
+		const TSharedPtr<FJsonObject>* TObj = nullptr;
+		if (Args->TryGetObjectField(TEXT("transform"), TObj) && TObj->IsValid())
+		{
+			if (!ParseTransformJson(*TObj, OutNew))
+			{
+				OutErr = TEXT("Invalid transform");
+				return false;
+			}
+			return true;
+		}
+		const FTransform Cur = A->GetActorTransform();
+		FVector Loc = Cur.GetLocation();
+		FRotator Rot = Cur.Rotator();
+		FVector Scale = Cur.GetScale3D();
+		const TArray<TSharedPtr<FJsonValue>>* LocArr = nullptr;
+		if (Args->TryGetArrayField(TEXT("location"), LocArr) && LocArr)
+		{
+			if (!ParseVec3FromArray(*LocArr, Loc))
+			{
+				OutErr = TEXT("location must be a length-3 number array [x,y,z]");
+				return false;
+			}
+		}
+		const TArray<TSharedPtr<FJsonValue>>* RotArr = nullptr;
+		if (Args->TryGetArrayField(TEXT("rotation"), RotArr) && RotArr)
+		{
+			if (!ParseRotFromArray(*RotArr, Rot))
+			{
+				OutErr = TEXT("rotation must be a length-3 number array [pitch,yaw,roll]");
+				return false;
+			}
+		}
+		const TArray<TSharedPtr<FJsonValue>>* ScaleArr = nullptr;
+		if (Args->TryGetArrayField(TEXT("scale"), ScaleArr) && ScaleArr)
+		{
+			if (!ParseVec3FromArray(*ScaleArr, Scale))
+			{
+				OutErr = TEXT("scale must be a length-3 number array [x,y,z]");
+				return false;
+			}
+		}
+		OutNew = FTransform(Rot, Loc, Scale);
 		return true;
 	}
 }
@@ -136,12 +263,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorDestroy(const TSharedPtr<FJs
 		return UnrealAiToolJson::Error(TEXT("actor_path is required"));
 	}
 	Args->TryGetStringField(TEXT("confirm"), Confirm);
-	if (!Confirm.Equals(TEXT("DELETE"), ESearchCase::IgnoreCase))
+	if (!UnrealAiToolActorsInternal::IsLooseDestructiveConfirm(Confirm))
 	{
-		return UnrealAiToolJson::Error(TEXT("confirm must be DELETE"));
+		return UnrealAiToolJson::Error(TEXT("confirm must show intent to delete: DELETE, yes, true, or y."));
 	}
 	UWorld* World = UnrealAiGetEditorWorld();
-	AActor* A = UnrealAiFindActorByPath(World, ActorPath);
+	AActor* A = UnrealAiResolveActorInWorld(World, ActorPath);
 	if (!A)
 	{
 		return UnrealAiToolJson::Error(TEXT("Actor not found"));
@@ -176,7 +303,21 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorFindByLabel(const TSharedPtr
 	{
 		return UnrealAiToolJson::Error(TEXT("Provide label and/or tag"));
 	}
+	if (!Label.IsEmpty() && Tag.IsEmpty())
+	{
+		if (AActor* Direct = UnrealAiResolveActorInWorld(World, Label))
+		{
+			TArray<TSharedPtr<FJsonValue>> One;
+			One.Add(MakeShareable(new FJsonValueString(Direct->GetPathName())));
+			TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+			O->SetBoolField(TEXT("ok"), true);
+			O->SetArrayField(TEXT("actor_paths"), One);
+			O->SetNumberField(TEXT("count"), 1.0);
+			return UnrealAiToolJson::Ok(O);
+		}
+	}
 	TArray<TSharedPtr<FJsonValue>> Paths;
+	TSet<FString> Seen;
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
 		AActor* A = *It;
@@ -185,7 +326,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorFindByLabel(const TSharedPtr
 			continue;
 		}
 		bool bMatch = true;
-		if (!Label.IsEmpty() && !A->GetActorLabel().Contains(Label))
+		if (!Label.IsEmpty() && !UnrealAiToolActorsInternal::ActorMatchesLabelOrPath(A, Label))
 		{
 			bMatch = false;
 		}
@@ -207,7 +348,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorFindByLabel(const TSharedPtr
 		}
 		if (bMatch)
 		{
-			Paths.Add(MakeShareable(new FJsonValueString(A->GetPathName())));
+			const FString Pn = A->GetPathName();
+			if (!Seen.Contains(Pn))
+			{
+				Seen.Add(Pn);
+				Paths.Add(MakeShareable(new FJsonValueString(Pn)));
+			}
 		}
 	}
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
@@ -225,7 +371,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorGetTransform(const TSharedPt
 		return UnrealAiToolJson::Error(TEXT("actor_path is required"));
 	}
 	UWorld* World = UnrealAiGetEditorWorld();
-	AActor* A = UnrealAiFindActorByPath(World, ActorPath);
+	AActor* A = UnrealAiResolveActorInWorld(World, ActorPath);
 	if (!A)
 	{
 		return UnrealAiToolJson::Error(TEXT("Actor not found"));
@@ -280,23 +426,19 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorSetTransform(const TSharedPt
 	{
 		return UnrealAiToolJson::Error(TEXT("actor_path is required"));
 	}
-	const TSharedPtr<FJsonObject>* TObj = nullptr;
-	if (!Args->TryGetObjectField(TEXT("transform"), TObj) || !TObj->IsValid())
-	{
-		return UnrealAiToolJson::Error(TEXT("transform object is required"));
-	}
-	FTransform NewT;
-	if (!UnrealAiToolActorsInternal::ParseTransformJson(*TObj, NewT))
-	{
-		return UnrealAiToolJson::Error(TEXT("Invalid transform"));
-	}
 	bool bTeleportPhysics = true;
 	Args->TryGetBoolField(TEXT("teleport_physics"), bTeleportPhysics);
 	UWorld* World = UnrealAiGetEditorWorld();
-	AActor* A = UnrealAiFindActorByPath(World, ActorPath);
+	AActor* A = UnrealAiResolveActorInWorld(World, ActorPath);
 	if (!A)
 	{
 		return UnrealAiToolJson::Error(TEXT("Actor not found"));
+	}
+	FTransform NewT;
+	FString TfErr;
+	if (!UnrealAiToolActorsInternal::ResolveSetTransformFromArgs(Args, A, NewT, TfErr))
+	{
+		return UnrealAiToolJson::Error(TfErr.IsEmpty() ? TEXT("Invalid transform arguments") : TfErr);
 	}
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnActorSetXform", "Unreal AI: set transform"));
 	A->SetActorTransform(
@@ -306,7 +448,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorSetTransform(const TSharedPt
 		bTeleportPhysics ? ETeleportType::TeleportPhysics : ETeleportType::None);
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
-	O->SetStringField(TEXT("actor_path"), ActorPath);
+	O->SetStringField(TEXT("actor_path"), A->GetPathName());
 	return UnrealAiToolJson::Ok(O);
 }
 
@@ -320,7 +462,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorSetVisibility(const TSharedP
 	bool bHidden = false;
 	Args->TryGetBoolField(TEXT("hidden"), bHidden);
 	UWorld* World = UnrealAiGetEditorWorld();
-	AActor* A = UnrealAiFindActorByPath(World, ActorPath);
+	AActor* A = UnrealAiResolveActorInWorld(World, ActorPath);
 	if (!A)
 	{
 		return UnrealAiToolJson::Error(TEXT("Actor not found"));
@@ -345,8 +487,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorAttachTo(const TSharedPtr<FJ
 	FString Socket;
 	Args->TryGetStringField(TEXT("socket"), Socket);
 	UWorld* World = UnrealAiGetEditorWorld();
-	AActor* Child = UnrealAiFindActorByPath(World, ChildPath);
-	AActor* Parent = UnrealAiFindActorByPath(World, ParentPath);
+	AActor* Child = UnrealAiResolveActorInWorld(World, ChildPath);
+	AActor* Parent = UnrealAiResolveActorInWorld(World, ParentPath);
 	if (!Child || !Parent)
 	{
 		return UnrealAiToolJson::Error(TEXT("Child or parent actor not found"));
@@ -409,6 +551,15 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorSpawnFromClass(const TShared
 	if (Args->TryGetStringField(TEXT("folder_path"), Folder) && !Folder.IsEmpty())
 	{
 		A->SetFolderPath(FName(*Folder));
+	}
+	FString ActorLabel;
+	if (!Args->TryGetStringField(TEXT("label"), ActorLabel) || ActorLabel.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("actor_label"), ActorLabel);
+	}
+	if (!ActorLabel.IsEmpty())
+	{
+		A->SetActorLabel(ActorLabel, true);
 	}
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);

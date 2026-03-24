@@ -42,19 +42,6 @@ namespace UnrealAiToolDispatchInternal
 		return R;
 	}
 
-	static FUnrealAiToolInvocationResult Banned(const FString& ToolId)
-	{
-		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
-		O->SetBoolField(TEXT("ok"), false);
-		O->SetStringField(TEXT("status"), TEXT("banned"));
-		O->SetStringField(TEXT("tool_id"), ToolId);
-		FUnrealAiToolInvocationResult R;
-		R.bOk = false;
-		R.ErrorMessage = TEXT("Tool is banned by product policy.");
-		R.ContentForModel = UnrealAiToolJson::SerializeObject(O);
-		return R;
-	}
-
 	static FString ResolveProjectId(const FString& Session)
 	{
 		return Session.IsEmpty() ? UnrealAiProjectId::GetCurrentProjectId() : Session;
@@ -82,23 +69,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	}
 
 	const TSharedPtr<FJsonObject>& A = Args.IsValid() ? Args : MakeShared<FJsonObject>();
-
-	if (CatalogEntry.IsValid())
-	{
-		FString Status;
-		if (CatalogEntry->TryGetStringField(TEXT("status"), Status))
-		{
-			if (Status == TEXT("banned_v1"))
-			{
-				return Banned(ToolId);
-			}
-		}
-		FString Category;
-		if (CatalogEntry->TryGetStringField(TEXT("category"), Category) && Category == TEXT("banned"))
-		{
-			return Banned(ToolId);
-		}
-	}
 
 	const FString ProjectId = ResolveProjectId(SessionProjectId);
 	const FString ThreadId = ResolveThreadId(SessionThreadId);

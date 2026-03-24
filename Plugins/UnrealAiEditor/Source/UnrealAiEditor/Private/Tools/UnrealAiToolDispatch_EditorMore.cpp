@@ -73,7 +73,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_OutlinerFolderMove(const TSharedP
 		{
 			continue;
 		}
-		if (AActor* A = UnrealAiFindActorByPath(World, P))
+		if (AActor* A = UnrealAiResolveActorInWorld(World, P))
 		{
 			A->SetFolderPath(FName(*FolderName));
 			++Moved;

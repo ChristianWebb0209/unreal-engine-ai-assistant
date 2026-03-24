@@ -66,7 +66,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_EditorSetSelection(const TSharedP
 		{
 			continue;
 		}
-		if (AActor* A = UnrealAiFindActorByPath(World, P))
+		if (AActor* A = UnrealAiResolveActorInWorld(World, P))
 		{
 			GEditor->SelectActor(A, true, true);
 			++Selected;
