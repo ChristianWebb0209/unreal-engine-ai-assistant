@@ -6,25 +6,32 @@
   PowerShell requires & to invoke .bat files with arguments — a bare quoted path is not a command.
 
   Usage (from repo root):
-    .\build-blank-editor.ps1
-    .\build-blank-editor.ps1 -Headless
-    .\build-blank-editor.ps1 --headless
-    .\build-blank-editor.ps1 -AutomationTests
-    .\build-blank-editor.ps1 -AutomationTests -Headless
-    .\build-blank-editor.ps1 -GenerateProjectFiles
-    $env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\build-blank-editor.ps1
+    .\build-editor.ps1
+    .\build-editor.ps1 -Headless
+    .\build-editor.ps1 --headless
+    .\build-editor.ps1 -Restart
+    .\build-editor.ps1 -Restart -Headless
+    .\build-editor.ps1 -AutomationTests
+    .\build-editor.ps1 -AutomationTests -Headless
+    .\build-editor.ps1 -GenerateProjectFiles
+    $env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\build-editor.ps1
 
   If execution is blocked:
-    powershell -ExecutionPolicy Bypass -File .\build-blank-editor.ps1
+    powershell -ExecutionPolicy Bypass -File .\build-editor.ps1
 
   If linking fails with LNK1104 on UnrealEditor-UnrealAiEditor.dll, close Unreal Editor (it loads the plugin)
-  and run again. -NoHotReloadFromIDE avoids the Live Coding mutex but cannot override a loaded DLL lock.
+  and run again with -Restart, or close manually. -NoHotReloadFromIDE avoids the Live Coding mutex but cannot
+  override a loaded DLL lock.
+
+  -Restart: force-stop UnrealEditor / UnrealEditor-Cmd before compiling (avoids plugin DLL locks). Omit to
+  leave a running editor untouched (incremental / Live Coding workflows).
 #>
 [CmdletBinding()]
 param(
     [switch]$GenerateProjectFiles,
     [string]$EngineRoot = $(if ($env:UE_ENGINE_ROOT) { $env:UE_ENGINE_ROOT } else { 'C:\Program Files\Epic Games\UE_5.7' }),
     [switch]$Headless,
+    [switch]$Restart,
     [switch]$AutomationTests,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$RemainingArguments
@@ -36,6 +43,9 @@ foreach ($r in $RemainingArguments) {
     }
     if ($r -eq '--AutomationTests' -or $r -eq '-AutomationTests') {
         $AutomationTests = $true
+    }
+    if ($r -eq '--restart' -or $r -eq '-restart') {
+        $Restart = $true
     }
 }
 
@@ -57,6 +67,25 @@ if ($GenerateProjectFiles) {
     Write-Host "Generating Visual Studio project files..." -ForegroundColor Cyan
     & $BuildBat -projectfiles "-project=$UProject" -game -rocket -progress
     exit $LASTEXITCODE
+}
+
+if ($Restart) {
+    $unrealNames = @('UnrealEditor', 'UnrealEditor-Cmd')
+    $stopped = $false
+    foreach ($procName in $unrealNames) {
+        $running = @(Get-Process -Name $procName -ErrorAction SilentlyContinue)
+        if ($running.Count -gt 0) {
+            if (-not $stopped) {
+                Write-Host "-Restart: closing Unreal Editor process(es) before build..." -ForegroundColor Yellow
+                $stopped = $true
+            }
+            $running | Stop-Process -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if ($stopped) {
+        Start-Sleep -Seconds 2
+        Write-Host "Editor processes terminated. Continuing build." -ForegroundColor Green
+    }
 }
 
 Write-Host "Building BlankEditor (Development | Win64)..." -ForegroundColor Cyan
