@@ -2,6 +2,8 @@
 
 #include "Backend/UnrealAiBackendRegistry.h"
 #include "Tools/UnrealAiToolDispatch.h"
+#include "Tools/UnrealAiToolFocus.h"
+#include "Tools/UnrealAiToolInvocationArgs.h"
 
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -41,6 +43,13 @@ FUnrealAiToolInvocationResult FUnrealAiToolExecutionHost::InvokeTool(
 		}
 	}
 
+	const bool bFocused = UnrealAiConsumeFocusedFlag(Args);
 	const TSharedPtr<FJsonObject> Entry = Catalog.FindToolDefinition(ToolName);
-	return UnrealAiDispatchTool(ToolName, Args, Entry, Registry, SessionProjectId, SessionThreadId);
+	FUnrealAiToolInvocationResult Result =
+		UnrealAiDispatchTool(ToolName, Args, Entry, Registry, SessionProjectId, SessionThreadId);
+	if (Result.bOk && bFocused)
+	{
+		UnrealAiApplyPostToolEditorFocus(ToolName, Args, Result);
+	}
+	return Result;
 }

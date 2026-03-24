@@ -1,13 +1,14 @@
 #include "Tools/UnrealAiToolDispatch_MoreAssets.h"
 
+#include "Tools/UnrealAiToolDispatch_BlueprintTools.h"
 #include "Tools/UnrealAiToolJson.h"
+#include "Tools/Presentation/UnrealAiEditorNavigation.h"
 
 #include "AssetImportTask.h"
 #include "AssetToolsModule.h"
 #include "Editor.h"
 #include "IAssetTools.h"
 #include "ObjectTools.h"
-#include "Subsystems/AssetEditorSubsystem.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "ScopedTransaction.h"
@@ -158,6 +159,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetOpenEditor(const TSharedPtr<
 	{
 		return UnrealAiToolJson::Error(TEXT("object_path is required"));
 	}
+	UnrealAiNormalizeBlueprintObjectPath(Path);
 	UObject* Obj = LoadObject<UObject>(nullptr, *Path);
 	if (!Obj)
 	{
@@ -167,12 +169,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetOpenEditor(const TSharedPtr<
 	{
 		return UnrealAiToolJson::Error(TEXT("GEditor not available"));
 	}
-	UAssetEditorSubsystem* Sub = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
-	if (!Sub)
-	{
-		return UnrealAiToolJson::Error(TEXT("AssetEditorSubsystem not available"));
-	}
-	Sub->OpenEditorForAsset(Obj);
+	UnrealAiEditorNavigation::OpenAssetEditorPreferDocked(Obj);
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("object_path"), Path);

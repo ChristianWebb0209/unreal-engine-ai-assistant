@@ -28,6 +28,11 @@ namespace UnrealAiGenericAssets
 		{
 			Pkg = FPackageName::ObjectPathToPackageName(Pkg);
 		}
+		// `/Game` is valid content root (CreateAsset accepts it); only `/Game/...` matched before.
+		if (Pkg == TEXT("/Game"))
+		{
+			return true;
+		}
 		return Pkg.StartsWith(TEXT("/Game/"));
 	}
 
@@ -304,7 +309,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetCreate(const TSharedPtr<FJso
 	}
 	if (!IsUnderGameContentPackage(PackagePath))
 	{
-		return UnrealAiToolJson::Error(TEXT("package_path must be under /Game/"));
+		return UnrealAiToolJson::Error(TEXT("package_path must be /Game or a path under /Game/ (e.g. /Game/Blueprints)"));
 	}
 	Args->TryGetStringField(TEXT("factory_class"), FactoryClassPath);
 
@@ -535,7 +540,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_LevelSequenceCreateAsset(const TS
 	}
 	if (!IsUnderGameContentPackage(PackagePath))
 	{
-		return UnrealAiToolJson::Error(TEXT("package_path must be under /Game/"));
+		return UnrealAiToolJson::Error(TEXT("package_path must be /Game or a path under /Game/ (e.g. /Game/Blueprints)"));
 	}
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnLSCreate", "Unreal AI: create Level Sequence"));
 	UObject* NewObj =

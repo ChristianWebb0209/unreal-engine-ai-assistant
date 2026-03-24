@@ -1,5 +1,6 @@
 #include "Tools/UnrealAiToolDispatch_BlueprintTools.h"
 
+#include "Tools/UnrealAiBlueprintFormatterBridge.h"
 #include "Tools/UnrealAiToolDispatch_MoreAssets.h"
 #include "Tools/UnrealAiToolJson.h"
 #include "Tools/Presentation/UnrealAiToolEditorNoteBuilders.h"
@@ -25,10 +26,16 @@
 #include "K2Node_CustomEvent.h"
 #include "Logging/TokenizedMessage.h"
 #include "Editor.h"
+#include "Subsystems/AssetEditorSubsystem.h"
 #include "ScopedTransaction.h"
+#include "Misc/PackageName.h"
+#include "Tools/Presentation/UnrealAiEditorNavigation.h"
 #include "UObject/Class.h"
 #include "UObject/Field.h"
+#include "UObject/Package.h"
+#include "UObject/SoftObjectPath.h"
 #include "UObject/UnrealType.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 
 namespace UnrealAiBlueprintToolsPriv
 {
@@ -79,11 +86,58 @@ namespace UnrealAiBlueprintToolsPriv
 		TArray<FIrNodeDecl> Nodes;
 		TArray<FIrLinkDecl> Links;
 		TArray<FIrDefaultDecl> Defaults;
+		bool bCreateIfMissing = false;
+		FString ParentClassPath;
+		/** When true, run formatter after apply if all IR node positions are zero (requires UnrealBlueprintFormatter). */
+		bool bAutoLayout = true;
 	};
 
-	static UBlueprint* LoadBlueprint(const FString& Path)
+	/**
+	 * Models often pass /Game/Folder/Asset without the required .Asset suffix.
+	 * Canonical form for Unreal object paths is /Game/.../Name.Name (package path + exported object name).
+	 */
+	void NormalizeBlueprintObjectPath(FString& Path)
 	{
-		return LoadObject<UBlueprint>(nullptr, *Path);
+		Path.TrimStartAndEndInline();
+		if (Path.IsEmpty() || Path.Contains(TEXT("..")))
+		{
+			return;
+		}
+		int32 LastSlash = INDEX_NONE;
+		if (!Path.FindLastChar(TEXT('/'), LastSlash))
+		{
+			return;
+		}
+		const FString Leaf = Path.Mid(LastSlash + 1);
+		if (Leaf.IsEmpty() || Leaf.Contains(TEXT(".")))
+		{
+			return;
+		}
+		Path.Reserve(Path.Len() + 1 + Leaf.Len());
+		Path.Append(TEXT(".")).Append(Leaf);
+	}
+
+	static bool IsGameWritableBlueprintObjectPath(const FString& BlueprintObjectPath)
+	{
+		if (BlueprintObjectPath.IsEmpty() || BlueprintObjectPath.Contains(TEXT("..")))
+		{
+			return false;
+		}
+		FString Tmp = BlueprintObjectPath;
+		NormalizeBlueprintObjectPath(Tmp);
+		const FString Pkg = FPackageName::ObjectPathToPackageName(Tmp);
+		return Pkg.StartsWith(TEXT("/Game/")) || Pkg == TEXT("/Game");
+	}
+
+	static UBlueprint* LoadBlueprint(const FString& PathIn)
+	{
+		FString Path = PathIn;
+		NormalizeBlueprintObjectPath(Path);
+		if (UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *Path))
+		{
+			return BP;
+		}
+		return Cast<UBlueprint>(FSoftObjectPath(Path).TryLoad());
 	}
 
 	static UEdGraph* FindGraphByName(UBlueprint* BP, const FString& GraphName)
@@ -167,6 +221,81 @@ namespace UnrealAiBlueprintToolsPriv
 		Errors.Add(MoveTemp(E));
 	}
 
+	static UBlueprint* TryCreateBlueprintAsset(
+		const FString& BlueprintObjectPath,
+		const FString& InParentClassPath,
+		TArray<FIrError>& Errors)
+	{
+		FString CanonPath = BlueprintObjectPath;
+		NormalizeBlueprintObjectPath(CanonPath);
+		FString PackageName;
+		FString AssetShortName;
+		if (!CanonPath.Split(TEXT("."), &PackageName, &AssetShortName, ESearchCase::CaseSensitive, ESearchDir::FromEnd))
+		{
+			AddError(
+				Errors,
+				TEXT("invalid_path"),
+				TEXT("$.blueprint_path"),
+				TEXT("Expected object path /Game/.../Asset or /Game/.../Asset.Asset"),
+				TEXT("Example: /Game/Temp/MyBp or /Game/Temp/MyBp.MyBp"));
+			return nullptr;
+		}
+		if (!IsGameWritableBlueprintObjectPath(CanonPath))
+		{
+			AddError(
+				Errors,
+				TEXT("invalid_path"),
+				TEXT("$.blueprint_path"),
+				TEXT("New Blueprint assets must live under /Game"),
+				TEXT(""));
+			return nullptr;
+		}
+		UClass* ParentClass = AActor::StaticClass();
+		if (!InParentClassPath.IsEmpty())
+		{
+			ParentClass = FindObject<UClass>(nullptr, *InParentClassPath);
+			if (!ParentClass)
+			{
+				ParentClass = LoadObject<UClass>(nullptr, *InParentClassPath);
+			}
+			if (!ParentClass)
+			{
+				AddError(
+					Errors,
+					TEXT("invalid_class"),
+					TEXT("$.parent_class"),
+					TEXT("Could not resolve parent_class"),
+					TEXT("Use /Script/Engine.Actor or another native class path"));
+				return nullptr;
+			}
+		}
+		UPackage* Pkg = CreatePackage(*PackageName);
+		if (!Pkg)
+		{
+			AddError(Errors, TEXT("create_failed"), TEXT("$.blueprint_path"), TEXT("CreatePackage failed"), TEXT(""));
+			return nullptr;
+		}
+		UBlueprint* NewBP = FKismetEditorUtilities::CreateBlueprint(
+			ParentClass,
+			Pkg,
+			FName(*AssetShortName),
+			BPTYPE_Normal,
+			NAME_None);
+		if (!NewBP)
+		{
+			AddError(
+				Errors,
+				TEXT("create_failed"),
+				TEXT("$.blueprint_path"),
+				TEXT("CreateBlueprint failed (asset may already exist with a different type)"),
+				TEXT("Delete the package or use a unique blueprint_path"));
+			return nullptr;
+		}
+		NewBP->MarkPackageDirty();
+		FAssetRegistryModule::AssetCreated(NewBP);
+		return NewBP;
+	}
+
 	static FUnrealAiToolInvocationResult MakeIrErrorResult(const TCHAR* Status, const TCHAR* Headline, const TArray<FIrError>& Errors)
 	{
 		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
@@ -210,7 +339,11 @@ namespace UnrealAiBlueprintToolsPriv
 				TEXT("missing_required"),
 				TEXT("$.blueprint_path"),
 				TEXT("blueprint_path is required"),
-				TEXT("Pass a valid object path, e.g. /Game/BP_MyActor.BP_MyActor"));
+				TEXT("e.g. /Game/BP_MyActor.BP_MyActor or shorthand /Game/BP_MyActor"));
+		}
+		else
+		{
+			NormalizeBlueprintObjectPath(OutIr.BlueprintPath);
 		}
 		if (!Args->TryGetStringField(TEXT("graph_name"), OutIr.GraphName) || OutIr.GraphName.IsEmpty())
 		{
@@ -307,7 +440,7 @@ namespace UnrealAiBlueprintToolsPriv
 						TEXT("missing_required"),
 						FString::Printf(TEXT("$.links[%d]"), i),
 						TEXT("links entries require from and to"),
-						TEXT("Use node.pin syntax, e.g. begin_play.Then -> branch.Exec"));
+						TEXT("Use node.pin syntax, e.g. begin_play.then -> branch.execute"));
 					continue;
 				}
 				OutIr.Links.Add(MoveTemp(D));
@@ -342,6 +475,19 @@ namespace UnrealAiBlueprintToolsPriv
 				}
 				OutIr.Defaults.Add(MoveTemp(D));
 			}
+		}
+
+		bool CreateIfMissing = false;
+		if (Args->TryGetBoolField(TEXT("create_if_missing"), CreateIfMissing))
+		{
+			OutIr.bCreateIfMissing = CreateIfMissing;
+		}
+		Args->TryGetStringField(TEXT("parent_class"), OutIr.ParentClassPath);
+
+		bool AutoLayout = true;
+		if (Args->TryGetBoolField(TEXT("auto_layout"), AutoLayout))
+		{
+			OutIr.bAutoLayout = AutoLayout;
 		}
 
 		return OutErrors.Num() == 0;
@@ -499,6 +645,34 @@ namespace UnrealAiBlueprintToolsPriv
 			}
 		}
 		return nullptr;
+	}
+
+	/** Maps common LLM / doc aliases to real K2 pin names (execute/then/else/condition). */
+	static FString NormalizeBlueprintIrPinToken(const FString& PinName)
+	{
+		FString P = PinName;
+		P.TrimStartAndEndInline();
+		if (P.IsEmpty())
+		{
+			return P;
+		}
+		if (P.Equals(TEXT("Exec"), ESearchCase::IgnoreCase) || P.Equals(TEXT("Execute"), ESearchCase::IgnoreCase))
+		{
+			return UEdGraphSchema_K2::PN_Execute.ToString();
+		}
+		if (P.Equals(TEXT("Then"), ESearchCase::IgnoreCase))
+		{
+			return UEdGraphSchema_K2::PN_Then.ToString();
+		}
+		if (P.Equals(TEXT("Else"), ESearchCase::IgnoreCase))
+		{
+			return UEdGraphSchema_K2::PN_Else.ToString();
+		}
+		if (P.Equals(TEXT("Condition"), ESearchCase::IgnoreCase))
+		{
+			return UEdGraphSchema_K2::PN_Condition.ToString();
+		}
+		return P;
 	}
 
 	static UEdGraphNode* CreateNodeFromDecl(UBlueprint* BP, UEdGraph* Graph, const FIrNodeDecl& D, TArray<FIrError>& Errors)
@@ -688,6 +862,11 @@ namespace UnrealAiBlueprintToolsPriv
 	}
 }
 
+void UnrealAiNormalizeBlueprintObjectPath(FString& BlueprintObjectPath)
+{
+	UnrealAiBlueprintToolsPriv::NormalizeBlueprintObjectPath(BlueprintObjectPath);
+}
+
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompile(const TSharedPtr<FJsonObject>& Args)
 {
 	FString Path;
@@ -699,6 +878,17 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompile(const TSharedPtr
 	if (!BP)
 	{
 		return UnrealAiToolJson::Error(TEXT("Could not load Blueprint"));
+	}
+	bool bFormatGraphs = false;
+	Args->TryGetBoolField(TEXT("format_graphs"), bFormatGraphs);
+	const bool bFormatterLoaded = UnrealAiBlueprintFormatterBridge::EnsureFormatterModuleLoaded(nullptr);
+	int32 GraphsFormatted = 0;
+	if (bFormatGraphs && bFormatterLoaded)
+	{
+		const FScopedTransaction Txn(
+			NSLOCTEXT("UnrealAiEditor", "TxnBpCompileFormat", "Unreal AI: format Blueprint graphs"));
+		BP->Modify();
+		GraphsFormatted = UnrealAiBlueprintFormatterBridge::TryLayoutAllScriptGraphs(BP);
 	}
 	FCompilerResultsLog Results;
 	FKismetEditorUtilities::CompileBlueprint(BP, EBlueprintCompileOptions::None, &Results);
@@ -727,6 +917,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompile(const TSharedPtr
 	O->SetArrayField(TEXT("compiler_messages"), Msgs);
 	O->SetNumberField(TEXT("compiler_error_count"), static_cast<double>(ErrCount));
 	O->SetNumberField(TEXT("compiler_warning_count"), static_cast<double>(WarnCount));
+	O->SetBoolField(TEXT("format_graphs_requested"), bFormatGraphs);
+	O->SetNumberField(TEXT("graphs_auto_formatted"), static_cast<double>(GraphsFormatted));
+	O->SetBoolField(TEXT("formatter_available"), bFormatterLoaded);
+	if (bFormatGraphs && !bFormatterLoaded)
+	{
+		O->SetStringField(TEXT("formatter_hint"), UnrealAiBlueprintFormatterBridge::FormatterInstallHint());
+	}
 
 	const FString ToolMarkdown = FString::Printf(
 		TEXT("### Blueprint compile\n- Errors: %d\n- Warnings: %d\n- Blueprint status: %d\n"),
@@ -859,7 +1056,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportIr(const TSharedPt
 	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 	Out->SetBoolField(TEXT("ok"), true);
 	Out->SetObjectField(TEXT("ir"), Root);
-	return UnrealAiToolJson::Ok(Out);
+	const FString ToolMarkdown = FString::Printf(TEXT("### Blueprint IR export\n- Graph: **%s**\n"), *Graph->GetName());
+	return UnrealAiToolJson::OkWithEditorPresentation(
+		Out,
+		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Path, Graph->GetName(), ToolMarkdown));
 }
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr<FJsonObject>& Args)
@@ -873,7 +1073,18 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 		return MakeIrErrorResult(TEXT("invalid_ir"), TEXT("Invalid blueprint IR"), ParseErrors);
 	}
 
+	bool bCreatedBlueprint = false;
 	UBlueprint* BP = LoadBlueprint(Ir.BlueprintPath);
+	if (!BP && Ir.bCreateIfMissing)
+	{
+		TArray<FIrError> CreateErrors;
+		BP = TryCreateBlueprintAsset(Ir.BlueprintPath, Ir.ParentClassPath, CreateErrors);
+		if (!BP)
+		{
+			return MakeIrErrorResult(TEXT("create_failed"), TEXT("Blueprint create failed"), CreateErrors);
+		}
+		bCreatedBlueprint = true;
+	}
 	if (!BP)
 	{
 		TArray<FIrError> Errors;
@@ -882,7 +1093,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 			TEXT("asset_not_found"),
 			TEXT("$.blueprint_path"),
 			TEXT("Could not load Blueprint"),
-			TEXT("Create the Blueprint first and provide full object path"));
+			TEXT("Set create_if_missing:true (optional parent_class /Script/Engine.Actor) or create the asset with asset_create, then retry."));
 		return MakeIrErrorResult(TEXT("asset_not_found"), TEXT("Blueprint load failed"), Errors);
 	}
 
@@ -988,6 +1199,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 				TEXT(""));
 			continue;
 		}
+		FromPinName = NormalizeBlueprintIrPinToken(FromPinName);
+		ToPinName = NormalizeBlueprintIrPinToken(ToPinName);
 		UEdGraphPin* A = FindPinByName(FromNode, FromPinName);
 		UEdGraphPin* B = FindPinByName(ToNode, ToPinName);
 		if (!A || !B)
@@ -1002,12 +1215,16 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 		}
 		if (!Schema->TryCreateConnection(A, B))
 		{
-			AddError(
-				BuildErrors,
-				TEXT("type_mismatch"),
-				TEXT("$.links"),
-				TEXT("Could not connect pins"),
-				TEXT("Check pin directions and types"));
+			// Models sometimes list links as input->output; try the opposite direction once.
+			if (!Schema->TryCreateConnection(B, A))
+			{
+				AddError(
+					BuildErrors,
+					TEXT("type_mismatch"),
+					TEXT("$.links"),
+					TEXT("Could not connect pins"),
+					TEXT("Use K2 names: execute, then, else, condition (aliases Exec/Then accepted). Direction is from output pin to input pin."));
+			}
 		}
 	}
 
@@ -1015,6 +1232,24 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 	{
 		return MakeIrErrorResult(TEXT("apply_failed"), TEXT("Blueprint IR apply failed"), BuildErrors);
 	}
+
+	TArray<UEdGraphNode*> MaterializedNodes;
+	NodeById.GenerateValueArray(MaterializedNodes);
+	TArray<FUnrealBlueprintIrNodeLayoutHint> LayoutHints;
+	LayoutHints.Reserve(Ir.Nodes.Num());
+	for (const FIrNodeDecl& D : Ir.Nodes)
+	{
+		FUnrealBlueprintIrNodeLayoutHint H;
+		H.NodeId = D.NodeId;
+		H.X = D.X;
+		H.Y = D.Y;
+		LayoutHints.Add(MoveTemp(H));
+	}
+	UnrealAiBlueprintFormatterBridge::EnsureFormatterModuleLoaded(nullptr);
+	const FUnrealBlueprintGraphFormatResult FormatResult =
+		UnrealAiBlueprintFormatterBridge::TryLayoutAfterAiIrApply(Graph, MaterializedNodes, LayoutHints, Ir.bAutoLayout);
+	const bool bFormatterAvailable = UnrealAiBlueprintFormatterBridge::IsFormatterModuleReady();
+	const bool bLayoutApplied = FormatResult.NodesPositioned > 0;
 
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
 	FKismetEditorUtilities::CompileBlueprint(BP, EBlueprintCompileOptions::None);
@@ -1026,6 +1261,24 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 	O->SetNumberField(TEXT("node_count"), static_cast<double>(NodeById.Num()));
 	O->SetNumberField(TEXT("link_count"), static_cast<double>(Ir.Links.Num()));
 	O->SetNumberField(TEXT("blueprint_status"), static_cast<double>(static_cast<int32>(BP->Status)));
+	O->SetBoolField(TEXT("created_blueprint"), bCreatedBlueprint);
+	O->SetBoolField(TEXT("formatter_available"), bFormatterAvailable);
+	O->SetBoolField(TEXT("layout_applied"), bLayoutApplied);
+	O->SetBoolField(TEXT("auto_layout_requested"), Ir.bAutoLayout);
+	O->SetNumberField(TEXT("layout_nodes_positioned"), static_cast<double>(FormatResult.NodesPositioned));
+	if (!bFormatterAvailable && Ir.bAutoLayout)
+	{
+		O->SetStringField(TEXT("formatter_hint"), UnrealAiBlueprintFormatterBridge::FormatterInstallHint());
+	}
+	if (FormatResult.Warnings.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> WarnArr;
+		for (const FString& W : FormatResult.Warnings)
+		{
+			WarnArr.Add(MakeShareable(new FJsonValueString(W)));
+		}
+		O->SetArrayField(TEXT("layout_warnings"), WarnArr);
+	}
 	const FString ToolMarkdown = FString::Printf(
 		TEXT("### Blueprint IR apply\n- Nodes created: %d\n- Links created: %d\n- Blueprint status: %d\n"),
 		NodeById.Num(),
@@ -1138,6 +1391,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintOpenGraphTab(const TShar
 	{
 		return UnrealAiToolJson::Error(TEXT("blueprint_path and graph_name are required"));
 	}
+	UnrealAiNormalizeBlueprintObjectPath(Path);
 	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path);
 	if (!BP)
 	{
@@ -1187,7 +1441,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintAddVariable(const TShare
 	FBlueprintEditorUtils::AddMemberVariable(BP, FName(*VarName), PinType);
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
-	return UnrealAiToolJson::Ok(O);
+	const FString ToolMarkdown = FString::Printf(TEXT("### Blueprint variable\n- Added **%s** (%s)\n"), *VarName, *TypeStr);
+	return UnrealAiToolJson::OkWithEditorPresentation(
+		O,
+		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Path, FString(), ToolMarkdown));
 }
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_AnimBlueprintGetGraphSummary(const TSharedPtr<FJsonObject>& Args)
@@ -1204,4 +1461,34 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AnimBlueprintGetGraphSummary(cons
 	TSharedPtr<FJsonObject> Fake = MakeShared<FJsonObject>();
 	Fake->SetStringField(TEXT("blueprint_path"), Path);
 	return UnrealAiDispatch_BlueprintGetGraphSummary(Fake);
+}
+
+void UnrealAiFocusBlueprintEditor(const FString& BlueprintObjectPath, const FString& GraphName)
+{
+	using namespace UnrealAiBlueprintToolsPriv;
+	if (BlueprintObjectPath.IsEmpty() || !GEditor)
+	{
+		return;
+	}
+	UBlueprint* BP = LoadBlueprint(BlueprintObjectPath);
+	if (!BP)
+	{
+		return;
+	}
+	UnrealAiEditorNavigation::OpenAssetEditorPreferDocked(BP);
+
+	FString FocusGraph = GraphName.TrimStartAndEnd();
+	if (FocusGraph.IsEmpty())
+	{
+		FocusGraph = TEXT("EventGraph");
+	}
+	if (UEdGraph* G = FindGraphByName(BP, FocusGraph))
+	{
+		FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(G);
+		return;
+	}
+	if (BP->UbergraphPages.Num() > 0 && BP->UbergraphPages[0])
+	{
+		FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(BP->UbergraphPages[0]);
+	}
 }

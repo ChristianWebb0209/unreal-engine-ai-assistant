@@ -32,16 +32,8 @@ namespace
 		}
 
 		Wrapper->SetRaw(RawBgra.GetData(), RawBgra.Num(), W, H, ERGBFormat::BGRA, 8);
-		const TArray<uint8>& PngData = Wrapper->GetCompressed(100);
+		const TArray64<uint8>& PngData = Wrapper->GetCompressed(100);
 		return FFileHelper::SaveArrayToFile(PngData, *OutAbsPngPath);
-	}
-
-	static FString MakeSafeToolNoteFileBase(const FString& In)
-	{
-		FString S = In;
-		S.ReplaceInline(TEXT("/"), TEXT("_"));
-		S.ReplaceInline(TEXT("."), TEXT("_"));
-		return S;
 	}
 }
 
