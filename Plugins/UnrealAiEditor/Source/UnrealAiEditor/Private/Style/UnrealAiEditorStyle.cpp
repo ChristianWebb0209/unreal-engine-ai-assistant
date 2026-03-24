@@ -2,6 +2,7 @@
 
 #include "UnrealAiEditorSettings.h"
 #include "Brushes/SlateBoxBrush.h"
+#include "Brushes/SlateRoundedBoxBrush.h"
 #include "Styling/SlateStyleRegistry.h"
 #if WITH_EDITOR
 #include "Framework/Application/SlateApplication.h"
@@ -31,6 +32,8 @@ void FUnrealAiEditorStyle::Initialize()
 	// Todo plan card: muted forest (distinct from user taupe and assistant gray).
 	Style->Set("UnrealAiEditor.TodoPlanPanel", new FSlateColorBrush(FLinearColor(0.11f, 0.16f, 0.13f, 1.f)));
 	Style->Set("UnrealAiEditor.AssistantLane", new FSlateColorBrush(FLinearColor(0.14f, 0.16f, 0.2f, 0.55f)));
+	Style->Set("UnrealAiEditor.DebugNav", new FSlateColorBrush(FLinearColor(0.10f, 0.13f, 0.12f, 1.f)));
+	Style->Set("UnrealAiEditor.DebugInspect", new FSlateColorBrush(FLinearColor(0.09f, 0.11f, 0.14f, 1.f)));
 	ApplyChatBubbleColorsFromSettings();
 
 	FSlateStyleRegistry::RegisterSlateStyle(*StyleSet.Get());
@@ -44,7 +47,7 @@ void FUnrealAiEditorStyle::ApplyChatBubbleColorsFromSettings()
 	}
 	const UUnrealAiEditorSettings* Set = GetDefault<UUnrealAiEditorSettings>();
 	FSlateStyleSet* Style = StyleSet.Get();
-	Style->Set("UnrealAiEditor.UserBubble", new FSlateColorBrush(Set->UserChatBubbleColor));
+	Style->Set("UnrealAiEditor.UserBubble", new FSlateRoundedBoxBrush(Set->UserChatBubbleColor, 8.f));
 	Style->Set("UnrealAiEditor.AssistantBubble", new FSlateColorBrush(Set->AgentChatBubbleColor));
 #if WITH_EDITOR
 	if (FSlateApplication::IsInitialized())
@@ -92,4 +95,14 @@ FSlateColor FUnrealAiEditorStyle::ColorTextPrimary()
 FSlateColor FUnrealAiEditorStyle::ColorAccent()
 {
 	return FSlateColor(FLinearColor(0.231f, 0.510f, 0.965f, 1.f));
+}
+
+FSlateColor FUnrealAiEditorStyle::ColorDebugMuted()
+{
+	return FSlateColor(FLinearColor(0.55f, 0.58f, 0.62f, 1.f));
+}
+
+FSlateColor FUnrealAiEditorStyle::ColorDebugNavFolder()
+{
+	return FSlateColor(FLinearColor(0.45f, 0.72f, 0.55f, 1.f));
 }

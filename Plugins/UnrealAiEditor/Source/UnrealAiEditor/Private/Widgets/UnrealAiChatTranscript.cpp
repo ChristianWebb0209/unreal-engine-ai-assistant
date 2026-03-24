@@ -18,12 +18,7 @@ FString FUnrealAiChatTranscript::FormatPlainText() const
 		switch (B.Kind)
 		{
 		case EUnrealAiChatBlockKind::User:
-			Out += FString::Printf(TEXT("--- User ---\n%s"), *B.UserText);
-			if (!B.UserComplexityLabel.IsEmpty())
-			{
-				Out += FString::Printf(TEXT("\n(Complexity: %s)"), *B.UserComplexityLabel);
-			}
-			Out += TEXT("\n\n");
+			Out += FString::Printf(TEXT("--- User ---\n%s\n\n"), *B.UserText);
 			break;
 		case EUnrealAiChatBlockKind::Thinking:
 			Out += FString::Printf(TEXT("--- Thinking ---\n%s\n\n"), *B.ThinkingText);
@@ -65,19 +60,6 @@ FGuid FUnrealAiChatTranscript::AddUserMessage(const FString& Text, FGuid Desired
 	Blocks.Add(MoveTemp(B));
 	OnStructuralChange.Broadcast();
 	return NewId;
-}
-
-void FUnrealAiChatTranscript::SetUserComplexity(const FGuid& UserBlockId, const FString& ComplexityLabel)
-{
-	for (FUnrealAiChatBlock& B : Blocks)
-	{
-		if (B.Id == UserBlockId && B.Kind == EUnrealAiChatBlockKind::User)
-		{
-			B.UserComplexityLabel = ComplexityLabel;
-			OnStructuralChange.Broadcast();
-			return;
-		}
-	}
 }
 
 void FUnrealAiChatTranscript::BeginRun(const FGuid& RunId)
@@ -177,13 +159,18 @@ void FUnrealAiChatTranscript::BeginToolCall(const FString& ToolName, const FStri
 	B.ToolName = ToolName;
 	B.ToolCallId = CallId;
 	B.ToolArgsPreview = ArgsPreview;
+	B.ToolEditorPresentation = nullptr;
 	B.bToolRunning = true;
 	B.bToolOk = false;
 	Blocks.Add(MoveTemp(B));
 	OnStructuralChange.Broadcast();
 }
 
-void FUnrealAiChatTranscript::EndToolCall(const FString& CallId, bool bSuccess, const FString& ResultPreview)
+void FUnrealAiChatTranscript::EndToolCall(
+	const FString& CallId,
+	bool bSuccess,
+	const FString& ResultPreview,
+	const TSharedPtr<FUnrealAiToolEditorPresentation>& EditorPresentation)
 {
 	const int32 Idx = FindToolIndexByCallId(CallId);
 	if (Idx != INDEX_NONE)
@@ -191,6 +178,7 @@ void FUnrealAiChatTranscript::EndToolCall(const FString& CallId, bool bSuccess, 
 		Blocks[Idx].bToolRunning = false;
 		Blocks[Idx].bToolOk = bSuccess;
 		Blocks[Idx].ToolResultPreview = ResultPreview;
+		Blocks[Idx].ToolEditorPresentation = EditorPresentation;
 		OnStructuralChange.Broadcast();
 	}
 }

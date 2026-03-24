@@ -5,6 +5,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
@@ -19,6 +20,12 @@ void SChatHeader::Construct(const FArguments& InArgs)
 				.Padding(FMargin(8.f))
 				[
 					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(1.f)
+					[
+						SNew(STextBlock)
+						.Text(this, &SChatHeader::GetChatTitleText)
+						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 11))
+					]
 					+ SHorizontalBox::Slot().FillWidth(1.f)
 					+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))
 					[
@@ -41,6 +48,16 @@ void SChatHeader::Construct(const FArguments& InArgs)
 							.OnClicked(this, &SChatHeader::OnNewChatPressed)
 					]
 				]];
+}
+
+FText SChatHeader::GetChatTitleText() const
+{
+	const FString Name = (Session.IsValid()) ? Session->ChatName : FString();
+	if (!Name.IsEmpty())
+	{
+		return FText::FromString(Name);
+	}
+	return LOCTEXT("ChatTitleFallback", "Agent Chat");
 }
 
 FReply SChatHeader::OnNewChatPressed()

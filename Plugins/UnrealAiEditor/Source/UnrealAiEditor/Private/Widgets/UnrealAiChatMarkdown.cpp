@@ -4,7 +4,9 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Widgets/Text/SHyperlink.h"
 
 namespace UnrealAiChatMarkdown
 {
@@ -295,5 +297,247 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownChatBody(const FString& Markdown)
 		++i;
 	}
 
+	return V;
+}
+
+namespace
+{
+	enum class ESegmentKind : uint8
+	{
+		Text,
+		Link,
+	};
+
+	struct FInlineSegment
+	{
+		ESegmentKind Kind = ESegmentKind::Text;
+		FString Text;
+		FString ObjectPath;
+	};
+
+	static void SplitInlineLinks(const FString& InText, TArray<FInlineSegment>& OutSegments)
+	{
+		OutSegments.Reset();
+		FString S = InText;
+		int32 Pos = 0;
+		while (Pos < S.Len())
+		{
+			const int32 Lb = S.Find(TEXT("["), ESearchCase::CaseSensitive, ESearchDir::FromStart, Pos);
+			if (Lb == INDEX_NONE)
+			{
+				const FString Rest = S.Mid(Pos);
+				if (!Rest.IsEmpty())
+				{
+					FInlineSegment Seg;
+					Seg.Kind = ESegmentKind::Text;
+					Seg.Text = Rest;
+					OutSegments.Add(MoveTemp(Seg));
+				}
+				break;
+			}
+			if (Lb > Pos)
+			{
+				const FString Pre = S.Mid(Pos, Lb - Pos);
+				if (!Pre.IsEmpty())
+				{
+					FInlineSegment Seg;
+					Seg.Kind = ESegmentKind::Text;
+					Seg.Text = Pre;
+					OutSegments.Add(MoveTemp(Seg));
+				}
+			}
+
+			const int32 Rb = S.Find(TEXT("]"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Lb + 1);
+			if (Rb == INDEX_NONE)
+			{
+				const FString Tail = S.Mid(Lb);
+				FInlineSegment Seg;
+				Seg.Kind = ESegmentKind::Text;
+				Seg.Text = Tail;
+				OutSegments.Add(MoveTemp(Seg));
+				break;
+			}
+
+			const int32 Lp = S.Find(TEXT("("), ESearchCase::CaseSensitive, ESearchDir::FromStart, Rb + 1);
+			if (Lp == INDEX_NONE)
+			{
+				const FString Tail = S.Mid(Lb);
+				FInlineSegment Seg;
+				Seg.Kind = ESegmentKind::Text;
+				Seg.Text = Tail;
+				OutSegments.Add(MoveTemp(Seg));
+				break;
+			}
+
+			const int32 Rp = S.Find(TEXT(")"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Lp + 1);
+			if (Rp == INDEX_NONE)
+			{
+				const FString Tail = S.Mid(Lb);
+				FInlineSegment Seg;
+				Seg.Kind = ESegmentKind::Text;
+				Seg.Text = Tail;
+				OutSegments.Add(MoveTemp(Seg));
+				break;
+			}
+
+			const FString Label = S.Mid(Lb + 1, Rb - (Lb + 1)).TrimStartAndEnd();
+			const FString Target = S.Mid(Lp + 1, Rp - (Lp + 1)).TrimStartAndEnd();
+
+			FInlineSegment Seg;
+			Seg.Kind = ESegmentKind::Link;
+			Seg.Text = Label;
+			Seg.ObjectPath = Target;
+			if (Seg.Text.IsEmpty() || Seg.ObjectPath.IsEmpty())
+			{
+				Seg.Kind = ESegmentKind::Text;
+				Seg.Text = S.Mid(Lb, Rp - Lb + 1);
+				Seg.ObjectPath.Reset();
+			}
+			OutSegments.Add(MoveTemp(Seg));
+			Pos = Rp + 1;
+		}
+	}
+
+	static TSharedRef<SWidget> MakeLinkAwareBodyText(
+		const FString& LineText,
+		const TFunction<void(const FString& ObjectPath)>& OnLinkClicked,
+		const FSlateFontInfo& Font,
+		const FSlateColor& Color)
+	{
+		using namespace UnrealAiChatMarkdown;
+
+		TArray<FInlineSegment> Segs;
+		SplitInlineLinks(LineText, Segs);
+
+		TSharedRef<SWrapBox> Wrap = SNew(SWrapBox);
+		for (const FInlineSegment& Seg : Segs)
+		{
+			if (Seg.Kind == ESegmentKind::Link)
+			{
+				if (!Seg.ObjectPath.IsEmpty() && Seg.ObjectPath.StartsWith(TEXT("/")))
+				{
+					Wrap->AddSlot()
+						.AutoWidth()
+						[
+							SNew(SHyperlink)
+								.Text(FText::FromString(UnrealAiStripInlineMarkdown(Seg.Text)))
+								.OnNavigate_Lambda([ObjectPath = Seg.ObjectPath, LinkCb = OnLinkClicked]()
+								{
+									LinkCb(ObjectPath);
+								})
+						];
+					continue;
+				}
+			}
+
+			Wrap->AddSlot()
+				.AutoWidth()
+				[
+					SNew(STextBlock)
+						.Font(Font)
+						.ColorAndOpacity(Color)
+						.AutoWrapText(true)
+						.Text(FText::FromString(UnrealAiStripInlineMarkdown(Seg.Text)))
+				];
+		}
+		return Wrap;
+	}
+}
+
+TSharedRef<SWidget> UnrealAiBuildMarkdownToolNoteBody(
+	const FString& Markdown,
+	const TFunctionRef<void(const FString& ObjectPath)>& OnLinkClicked)
+{
+	using namespace UnrealAiChatMarkdown;
+	const TFunction<void(const FString& ObjectPath)> LinkCb = OnLinkClicked;
+	const FString Cleaned = StripMarkdownCodeFences(Markdown);
+	if (Cleaned.IsEmpty())
+	{
+		return SNew(SBox);
+	}
+
+	const TArray<FLine> Lines = SplitLines(Cleaned);
+	TSharedRef<SVerticalBox> V = SNew(SVerticalBox);
+	int32 i = 0;
+	while (i < Lines.Num())
+	{
+		const FLine& L = Lines[i];
+		if (L.Kind == ELineKind::Blank)
+		{
+			++i;
+			continue;
+		}
+
+		auto MakeBody = [&](const FString& S, const FSlateFontInfo& Font, const FSlateColor& Color)
+		{
+			return MakeLinkAwareBodyText(S, LinkCb, Font, Color);
+		};
+
+		if (L.Kind == ELineKind::Plain)
+		{
+			FString Para;
+			while (i < Lines.Num() && Lines[i].Kind == ELineKind::Plain)
+			{
+				if (!Para.IsEmpty())
+				{
+					Para += TEXT(" ");
+				}
+				Para += Lines[i].Text;
+				++i;
+			}
+			V->AddSlot().AutoHeight().Padding(0.f, 1.f)[MakeBody(Para, BodyFont(), FSlateColor(FLinearColor(0.92f, 0.93f, 0.95f, 1.f)))];
+			continue;
+		}
+
+		switch (L.Kind)
+		{
+		case ELineKind::H1:
+			V->AddSlot().AutoHeight().Padding(0.f, 6.f, 0.f, 2.f)
+				[
+					MakeBody(L.Text, HeadingFont(14), FSlateColor(FLinearColor(0.98f, 0.98f, 1.f, 1.f)))
+				];
+			break;
+		case ELineKind::H2:
+			V->AddSlot().AutoHeight().Padding(0.f, 8.f, 0.f, 4.f)
+				[
+					MakeBody(L.Text, HeadingFont(13), FSlateColor(FLinearColor(0.98f, 0.98f, 1.f, 1.f)))
+				];
+			break;
+		case ELineKind::H3:
+			V->AddSlot().AutoHeight().Padding(0.f, 4.f, 0.f, 2.f)
+				[
+					MakeBody(L.Text, HeadingFont(11), FSlateColor(FLinearColor(0.98f, 0.98f, 1.f, 1.f)))
+				];
+			break;
+		case ELineKind::Bullet:
+			V->AddSlot().AutoHeight().Padding(4.f, 1.f, 0.f, 0.f)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0.f, 1.f, 6.f, 0.f)
+					[
+						SNew(STextBlock)
+							.Font(BodyFont())
+							.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.65f, 1.f)))
+							.Text(FText::FromString(TEXT("\x2022")))
+					]
+					+ SHorizontalBox::Slot().FillWidth(1.f)
+					[
+						MakeBody(L.Text, BodyFont(), FSlateColor(FLinearColor(0.92f, 0.93f, 0.95f, 1.f)))
+					]
+				];
+			break;
+		case ELineKind::TodoOpen:
+			V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(false, L.Text)];
+			break;
+		case ELineKind::TodoDone:
+			V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(true, L.Text)];
+			break;
+		default:
+			V->AddSlot().AutoHeight().Padding(0.f, 1.f)[MakeBody(L.Text, BodyFont(), FSlateColor(FLinearColor(0.92f, 0.93f, 0.95f, 1.f)))];
+			break;
+		}
+
+		++i;
+	}
 	return V;
 }

@@ -1727,8 +1727,7 @@ FReply SChatComposer::OnSendClicked()
 		Ctx->RefreshEditorSnapshotFromEngine();
 	}
 
-	const FGuid UserBlockId = MessageList->AddUserMessage(Prompt);
-	ScheduleUserMessageComplexity(UserBlockId, Prompt);
+	MessageList->AddUserMessage(Prompt);
 
 	FUnrealAiAgentTurnRequest Req;
 	Req.ProjectId = ProjectId;
@@ -1948,46 +1947,6 @@ FReply SChatComposer::OnNewChatClicked()
 {
 	FUnrealAiEditorModule::OpenNewAgentChatTabBeside(AsShared());
 	return FReply::Handled();
-}
-
-void SChatComposer::ScheduleUserMessageComplexity(const FGuid& UserBlockId, const FString& PromptText)
-{
-	if (!UserBlockId.IsValid())
-	{
-		return;
-	}
-	TWeakPtr<SChatMessageList> WeakList = MessageList;
-	TWeakPtr<FUnrealAiBackendRegistry> WeakReg = BackendRegistry;
-	TWeakPtr<FUnrealAiChatUiSession> WeakSession = Session;
-	const EUnrealAiAgentMode Mode = AgentMode;
-	AsyncTask(ENamedThreads::GameThread,
-		[WeakList, WeakReg, WeakSession, UserBlockId, PromptText, Mode]()
-		{
-			const TSharedPtr<SChatMessageList> List = WeakList.Pin();
-			const TSharedPtr<FUnrealAiBackendRegistry> Reg = WeakReg.Pin();
-			if (!List.IsValid() || !Reg.IsValid())
-			{
-				return;
-			}
-			IAgentContextService* Ctx = Reg->GetContextService();
-			if (!Ctx)
-			{
-				return;
-			}
-			FAgentContextBuildOptions Opt;
-			Opt.Mode = Mode;
-			Opt.UserMessageForComplexity = PromptText;
-			const TSharedPtr<FUnrealAiChatUiSession> Sess = WeakSession.Pin();
-			const FString ModelProfileId = Sess.IsValid() ? Sess->ModelProfileId : FString();
-			if (FUnrealAiModelProfileRegistry* Prof = Reg->GetModelProfileRegistry())
-			{
-				FUnrealAiModelCapabilities Caps;
-				Prof->GetEffectiveCapabilities(ModelProfileId, Caps);
-				Opt.bModelSupportsImages = Caps.bSupportsImages;
-			}
-			const FAgentContextBuildResult R = Ctx->BuildContextWindow(Opt);
-			List->SetUserMessageComplexity(UserBlockId, R.ComplexityLabel);
-		});
 }
 
 #undef LOCTEXT_NAMESPACE

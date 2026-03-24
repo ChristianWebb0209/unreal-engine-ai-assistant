@@ -74,8 +74,6 @@ private:
 	bool IsSlashMenuOpenWithChoices() const;
 	bool IsMentionPanelBlockingEnterWhileBuilding() const;
 
-	void ScheduleUserMessageComplexity(const FGuid& UserBlockId, const FString& PromptText);
-
 	void OnViewportScreenshotProcessed();
 	void UnbindViewportScreenshotProcessed();
 

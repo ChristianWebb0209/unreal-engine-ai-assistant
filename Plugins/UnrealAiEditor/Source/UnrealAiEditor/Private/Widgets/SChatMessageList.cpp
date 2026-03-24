@@ -59,8 +59,8 @@ private:
 
 	TWeakPtr<SChatMessageList> OwnerList;
 	float SlideProgress = 0.f;
-	static constexpr float SlideDurationSec = 0.22f;
-	static constexpr float SlidePixels = 22.f;
+	static constexpr float SlideDurationSec = 0.48f;
+	static constexpr float SlidePixels = 52.f;
 };
 
 void SChatUserMessageAnimated::Construct(const FArguments& InArgs)
@@ -71,7 +71,7 @@ void SChatUserMessageAnimated::Construct(const FArguments& InArgs)
 			InArgs._Content.Widget
 		];
 	SlideProgress = 0.f;
-	SetRenderOpacity(0.f);
+	SetRenderOpacity(0.02f);
 	SetRenderTransform(TOptional<FSlateRenderTransform>(FSlateRenderTransform(FVector2D(0.f, SlidePixels))));
 	RegisterActiveTimer(
 		1.f / 60.f,
@@ -82,10 +82,11 @@ EActiveTimerReturnType SChatUserMessageAnimated::TickSlideIn(double, float Delta
 {
 	SlideProgress += DeltaTime / SlideDurationSec;
 	const float T = FMath::Clamp(SlideProgress, 0.f, 1.f);
-	const float Eased = FMath::InterpEaseInOut(0.f, 1.f, T, 2.f);
-	SetRenderOpacity(Eased);
+	// Smoothstep: ease in and out for a single smooth glide.
+	const float S = T * T * (3.f - 2.f * T);
+	SetRenderOpacity(S);
 	SetRenderTransform(TOptional<FSlateRenderTransform>(
-		FSlateRenderTransform(FVector2D(0.f, SlidePixels * (1.f - Eased)))));
+		FSlateRenderTransform(FVector2D(0.f, SlidePixels * (1.f - S)))));
 	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 	if (const TSharedPtr<SChatMessageList> L = OwnerList.Pin())
 	{
@@ -125,15 +126,14 @@ void SChatMessageList::Construct(const FArguments& InArgs)
 						.OnUserScrolled(FOnUserScrolled::CreateSP(this, &SChatMessageList::HandleUserScrolled))
 						+ SScrollBox::Slot()
 						[
-							SNew(SBox)
-								.HAlign(HAlign_Center)
-								[
-									SNew(SBox)
-										.MaxDesiredWidth(720.f)
-										[
-											SAssignNew(MessageBox, SVerticalBox)
-										]
-								]
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot()
+								  .FillWidth(1.f)
+								  .VAlign(VAlign_Top)
+								  .Padding(FMargin(10.f, 6.f, 10.f, 6.f))
+							[
+								SAssignNew(MessageBox, SVerticalBox)
+							]
 						]
 					]
 			]
@@ -171,14 +171,6 @@ FGuid SChatMessageList::AddUserMessage(const FString& Text)
 void SChatMessageList::ClearUserAnimId()
 {
 	PendingUserAnimId = FGuid();
-}
-
-void SChatMessageList::SetUserMessageComplexity(const FGuid& UserBlockId, const FString& ComplexityLabel)
-{
-	if (Transcript.IsValid())
-	{
-		Transcript->SetUserComplexity(UserBlockId, ComplexityLabel);
-	}
 }
 
 void SChatMessageList::ClearTranscript()
@@ -237,27 +229,18 @@ void SChatMessageList::RebuildTranscript()
 			{
 				const TSharedRef<SWidget> UserBubble = SNew(SBorder)
 					.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.UserBubble")))
-					.Padding(FMargin(8.f))
+					.Padding(FMargin(10.f, 9.f))
 					[
-						SNew(SVerticalBox)
-						+ SVerticalBox::Slot().AutoHeight()
-						[
-							SNew(SMultiLineEditableText)
-								.IsReadOnly(true)
-								.AutoWrapText(true)
-								.Text(FText::FromString(FString::Printf(TEXT("You: %s"), *B.UserText)))
-						]
-						+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 4.f, 0.f, 0.f)
-						[
-							SNew(STextBlock)
-								.Visibility(
-									B.UserComplexityLabel.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
-								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-								.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.62f, 1.f)))
-								.Text(FText::FromString(
-									FString::Printf(TEXT("Complexity: %s"), *B.UserComplexityLabel)))
-						]
-					];
+						SNew(SBox)
+							.HAlign(HAlign_Fill)
+							[
+								SNew(SMultiLineEditableText)
+									.IsReadOnly(true)
+									.AutoWrapText(true)
+									.Text(FText::FromString(B.UserText))
+							]
+					]
+					;
 
 				if (B.Id == PendingUserAnimId)
 				{
@@ -310,25 +293,21 @@ void SChatMessageList::RebuildTranscript()
 				TSharedPtr<SAssistantStreamBlock> As;
 				TSharedPtr<SThinkingSubline> ThinkLine;
 
-				const TSharedRef<SWidget> AssistantBubble = SNew(SBorder)
-					.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.AssistantBubble")))
-					.Padding(FMargin(6.f, 4.f))
+				const TSharedRef<SWidget> AssistantBubble =
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Top).Padding(FMargin(4.f, 3.f, 6.f, 3.f))
 					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Top).Padding(FMargin(0.f, 0.f, 4.f, 0.f))
-						[
-							SAssignNew(As, SAssistantStreamBlock)
-								.bEnableTypewriter(bTw)
-								.TypewriterCps(Cps)
-								.OnRevealTick(FSimpleDelegate::CreateSP(this, &SChatMessageList::OnAssistantRevealTick))
-						]
-						+ SHorizontalBox::Slot()
-								  .AutoWidth()
-								  .VAlign(VAlign_Top)
-								  .Padding(FMargin(0.f, 2.f, 0.f, 0.f))
-						[
-							ToolsSlot
-						]
+						SAssignNew(As, SAssistantStreamBlock)
+							.bEnableTypewriter(bTw)
+							.TypewriterCps(Cps)
+							.OnRevealTick(FSimpleDelegate::CreateSP(this, &SChatMessageList::OnAssistantRevealTick))
+					]
+					+ SHorizontalBox::Slot()
+							  .AutoWidth()
+							  .VAlign(VAlign_Top)
+							  .Padding(FMargin(0.f, 4.f, 0.f, 0.f))
+					[
+						ToolsSlot
 					];
 
 				if (bMergedThinking)
@@ -419,7 +398,7 @@ void SChatMessageList::RebuildTranscript()
 	}
 
 	// Only the rebuild that immediately follows AddUserMessage should match PendingUserAnimId; clear so
-	// later structural updates (e.g. complexity label) do not replay the slide-in.
+	// later structural updates do not replay the slide-in.
 	PendingUserAnimId = FGuid();
 
 	ScheduleScrollToEndIfFollowing();

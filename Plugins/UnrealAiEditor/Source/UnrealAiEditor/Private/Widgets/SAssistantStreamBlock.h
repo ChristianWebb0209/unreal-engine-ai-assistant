@@ -30,9 +30,12 @@ public:
 private:
 	EActiveTimerReturnType TickTypewriter(double CurrentTime, float DeltaTime);
 	void SyncMarkdownBody();
+	void UpdateTextFadeOpacity();
 
 	bool bEnableTypewriter = true;
 	float TypewriterCps = 400.f;
+	/** When true (history / scroll-back), skip subtle fade and use full opacity. */
+	bool bSkipTextFade = false;
 	FSimpleDelegate OnRevealTick;
 	FString PendingBuffer;
 	FString VisibleText;

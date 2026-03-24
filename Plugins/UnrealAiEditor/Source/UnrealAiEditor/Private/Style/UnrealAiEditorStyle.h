@@ -18,6 +18,8 @@ public:
 	static FSlateColor ColorBackgroundCanvas();
 	static FSlateColor ColorTextPrimary();
 	static FSlateColor ColorAccent();
+	static FSlateColor ColorDebugMuted();
+	static FSlateColor ColorDebugNavFolder();
 
 private:
 	static TSharedPtr<FSlateStyleSet> StyleSet;

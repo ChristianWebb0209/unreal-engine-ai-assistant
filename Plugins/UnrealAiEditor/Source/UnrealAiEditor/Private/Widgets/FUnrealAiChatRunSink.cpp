@@ -2,9 +2,79 @@
 
 #include "Widgets/UnrealAiChatTranscript.h"
 #include "Widgets/UnrealAiToolUi.h"
+#include "Widgets/UnrealAiChatUiSession.h"
+#include "Backend/IUnrealAiPersistence.h"
 
-FUnrealAiChatRunSink::FUnrealAiChatRunSink(TSharedPtr<FUnrealAiChatTranscript> InTranscript)
+static bool TryStripChatNameTokenFromText(FString& InOutText, FString& OutChatName)
+{
+	OutChatName.Reset();
+	bool bFoundAny = false;
+	int32 SearchFrom = 0;
+
+	while (true)
+	{
+		const int32 TagStart = InOutText.Find(TEXT("<chat-name"), ESearchCase::IgnoreCase, ESearchDir::FromStart, SearchFrom);
+		if (TagStart < 0)
+		{
+			break;
+		}
+		const int32 TagEnd = InOutText.Find(TEXT(">"), ESearchCase::CaseSensitive, ESearchDir::FromStart, TagStart);
+		if (TagEnd < 0 || TagEnd <= TagStart)
+		{
+			break;
+		}
+
+		const int32 TagLen = (TagEnd - TagStart) + 1;
+		const FString Tag = InOutText.Mid(TagStart, TagLen);
+
+		FString LocalName;
+		const int32 Colon = Tag.Find(TEXT(":"));
+		if (Colon >= 0)
+		{
+			FString Inner = Tag.Mid(Colon + 1);
+			Inner.TrimStartAndEndInline();
+			// Strip optional quotes.
+			if (Inner.Len() >= 2 &&
+				((Inner.StartsWith(TEXT("\"")) && Inner.EndsWith(TEXT("\""))) ||
+				 (Inner.StartsWith(TEXT("'")) && Inner.EndsWith(TEXT("'")))))
+			{
+				Inner = Inner.Mid(1, Inner.Len() - 2);
+				Inner.TrimStartAndEndInline();
+			}
+			// Drop trailing '>' if it remains inside the captured inner string.
+			if (Inner.EndsWith(TEXT(">")))
+			{
+				Inner.LeftInline(Inner.Len() - 1);
+				Inner.TrimStartAndEndInline();
+			}
+			LocalName = Inner;
+		}
+
+		InOutText.RemoveAt(TagStart, TagLen);
+		bFoundAny = true;
+		if (!LocalName.IsEmpty())
+		{
+			OutChatName = LocalName;
+		}
+		SearchFrom = TagStart; // continue from removal point
+	}
+
+	// Return whether we stripped any token. OutChatName may still be empty if the model
+	// produced an invalid/empty name.
+	return bFoundAny;
+}
+
+FUnrealAiChatRunSink::FUnrealAiChatRunSink(
+	TSharedPtr<FUnrealAiChatTranscript> InTranscript,
+	TSharedPtr<FUnrealAiChatUiSession> InSession,
+	IUnrealAiPersistence* InPersistence,
+	const FString& InProjectId,
+	const FString& InThreadId)
 	: Transcript(MoveTemp(InTranscript))
+	, Session(MoveTemp(InSession))
+	, Persistence(InPersistence)
+	, ProjectId(InProjectId)
+	, ThreadId(InThreadId)
 {
 }
 
@@ -61,12 +131,13 @@ void FUnrealAiChatRunSink::OnToolCallFinished(
 	const FString& ToolName,
 	const FString& CallId,
 	bool bSuccess,
-	const FString& ResultPreview)
+	const FString& ResultPreview,
+	const TSharedPtr<FUnrealAiToolEditorPresentation>& EditorPresentation)
 {
 	(void)ToolName;
 	if (Transcript.IsValid())
 	{
-		Transcript->EndToolCall(CallId, bSuccess, ResultPreview);
+		Transcript->EndToolCall(CallId, bSuccess, ResultPreview, EditorPresentation);
 	}
 }
 
@@ -91,5 +162,49 @@ void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMess
 	if (Transcript.IsValid())
 	{
 		Transcript->EndRun(bSuccess, ErrorMessage);
+
+		if (!Session.IsValid() || Persistence == nullptr || ThreadId.IsEmpty())
+		{
+			return;
+		}
+
+		// Always strip the token from visible assistant output if present,
+		// but only apply/rename once per chat.
+		bool bModifiedAnyAssistantText = false;
+		FString ExtractedName;
+
+		// Walk backwards so we usually pick up the first (most recent) assistant token.
+		for (int32 i = Transcript->Blocks.Num() - 1; i >= 0; --i)
+		{
+			FUnrealAiChatBlock& B = Transcript->Blocks[i];
+			if (B.Kind != EUnrealAiChatBlockKind::Assistant || B.AssistantText.IsEmpty())
+			{
+				continue;
+			}
+
+			FString LocalName;
+			FString LocalText = B.AssistantText;
+			if (TryStripChatNameTokenFromText(LocalText, LocalName))
+			{
+				B.AssistantText = LocalText;
+				B.AssistantText.TrimStartAndEndInline();
+				bModifiedAnyAssistantText = true;
+				ExtractedName = LocalName;
+				break; // only expect one token
+			}
+		}
+
+		if (bModifiedAnyAssistantText)
+		{
+			Transcript->OnStructuralChange.Broadcast();
+		}
+
+		if (Session->ChatName.IsEmpty() && !ExtractedName.IsEmpty())
+		{
+			if (Persistence->SetThreadChatName(ProjectId, ThreadId, ExtractedName))
+			{
+				Session->ChatName = ExtractedName;
+			}
+		}
 	}
 }

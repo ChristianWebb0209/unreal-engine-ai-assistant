@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 
+struct FUnrealAiToolEditorPresentation;
+
 enum class EUnrealAiChatBlockKind : uint8
 {
 	User,
@@ -22,14 +24,13 @@ struct FUnrealAiChatBlock
 	EUnrealAiChatBlockKind Kind = EUnrealAiChatBlockKind::Assistant;
 
 	FString UserText;
-	/** Filled asynchronously after send (complexity assessor label, e.g. low/medium/high). */
-	FString UserComplexityLabel;
 	FString ThinkingText;
 	FString AssistantText;
 	FString ToolName;
 	FString ToolCallId;
 	FString ToolArgsPreview;
 	FString ToolResultPreview;
+	TSharedPtr<FUnrealAiToolEditorPresentation> ToolEditorPresentation;
 	bool bToolRunning = false;
 	bool bToolOk = false;
 	FString NoticeText;
@@ -82,12 +83,15 @@ public:
 	FString FormatPlainText() const;
 	/** @return Id of the new user block (for attaching async metadata). Pass a valid DesiredId to control the block id (e.g. UI animation coordination). */
 	FGuid AddUserMessage(const FString& Text, FGuid DesiredId = FGuid());
-	void SetUserComplexity(const FGuid& UserBlockId, const FString& ComplexityLabel);
 	void BeginRun(const FGuid& RunId);
 	void AppendThinkingDelta(const FString& Chunk);
 	void AppendAssistantDelta(const FString& Chunk);
 	void BeginToolCall(const FString& ToolName, const FString& CallId, const FString& ArgsPreview);
-	void EndToolCall(const FString& CallId, bool bSuccess, const FString& ResultPreview = FString());
+	void EndToolCall(
+		const FString& CallId,
+		bool bSuccess,
+		const FString& ResultPreview = FString(),
+		const TSharedPtr<FUnrealAiToolEditorPresentation>& EditorPresentation = nullptr);
 	void AddTodoPlan(const FString& Title, const FString& PlanJson);
 	void SetRunProgress(const FString& Label);
 	void EndRun(bool bSuccess, const FString& ErrorMessage);

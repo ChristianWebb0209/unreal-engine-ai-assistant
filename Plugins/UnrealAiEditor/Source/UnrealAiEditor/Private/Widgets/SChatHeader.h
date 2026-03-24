@@ -20,6 +20,7 @@ public:
 
 private:
 	FReply OnNewChatPressed();
+	FText GetChatTitleText() const;
 
 	TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry;
 	TSharedPtr<FUnrealAiChatUiSession> Session;

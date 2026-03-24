@@ -25,7 +25,6 @@ public:
 	TSharedPtr<FUnrealAiChatTranscript> GetTranscript() const { return Transcript; }
 
 	FGuid AddUserMessage(const FString& Text);
-	void SetUserMessageComplexity(const FGuid& UserBlockId, const FString& ComplexityLabel);
 	void ClearTranscript();
 
 	/** @deprecated Prefer AddUserMessage; kept for call sites. */

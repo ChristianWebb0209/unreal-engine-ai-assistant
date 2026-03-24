@@ -13,8 +13,8 @@ UUnrealAiEditorSettings::UUnrealAiEditorSettings(const FObjectInitializer& Objec
 	, bOpenAgentChatOnStartup(true)
 	, bStreamLlmChat(true)
 	, bAssistantTypewriter(true)
-	, AssistantTypewriterCps(400.f)
-	, UserChatBubbleColor(FLinearColor(0.13f, 0.105f, 0.095f, 1.f))
+	, AssistantTypewriterCps(88.f)
+	, UserChatBubbleColor(FLinearColor(0.185f, 0.195f, 0.215f, 1.f))
 	, AgentChatBubbleColor(FLinearColor(0.092f, 0.098f, 0.114f, 1.f))
 	, bAutoContinuePlanSteps(true)
 {
