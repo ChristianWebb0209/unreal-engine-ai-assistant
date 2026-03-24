@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 
-struct FUnrealAiToolEditorPresentation;
+#include "Tools/Presentation/UnrealAiToolEditorPresentation.h"
 
 enum class EUnrealAiChatBlockKind : uint8
 {

@@ -33,18 +33,18 @@ static bool TryStripChatNameTokenFromText(FString& InOutText, FString& OutChatNa
 		{
 			FString Inner = Tag.Mid(Colon + 1);
 			Inner.TrimStartAndEndInline();
+			// Drop trailing '>' if it remains inside the captured inner string.
+			if (Inner.EndsWith(TEXT(">")))
+			{
+				Inner.LeftInline(Inner.Len() - 1);
+				Inner.TrimStartAndEndInline();
+			}
 			// Strip optional quotes.
 			if (Inner.Len() >= 2 &&
 				((Inner.StartsWith(TEXT("\"")) && Inner.EndsWith(TEXT("\""))) ||
 				 (Inner.StartsWith(TEXT("'")) && Inner.EndsWith(TEXT("'")))))
 			{
 				Inner = Inner.Mid(1, Inner.Len() - 2);
-				Inner.TrimStartAndEndInline();
-			}
-			// Drop trailing '>' if it remains inside the captured inner string.
-			if (Inner.EndsWith(TEXT(">")))
-			{
-				Inner.LeftInline(Inner.Len() - 1);
 				Inner.TrimStartAndEndInline();
 			}
 			LocalName = Inner;
@@ -199,11 +199,36 @@ void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMess
 			Transcript->OnStructuralChange.Broadcast();
 		}
 
-		if (Session->ChatName.IsEmpty() && !ExtractedName.IsEmpty())
+		if (Session->ChatName.IsEmpty() && bModifiedAnyAssistantText)
 		{
-			if (Persistence->SetThreadChatName(ProjectId, ThreadId, ExtractedName))
+			FString FinalName = ExtractedName;
+			if (FinalName.IsEmpty())
 			{
-				Session->ChatName = ExtractedName;
+				// Fallback to something derived from the user's first/most-recent message.
+				for (int32 i = Transcript->Blocks.Num() - 1; i >= 0; --i)
+				{
+					const FUnrealAiChatBlock& B = Transcript->Blocks[i];
+					if (B.Kind == EUnrealAiChatBlockKind::User && !B.UserText.IsEmpty())
+					{
+						FinalName = B.UserText;
+						FinalName.ReplaceInline(TEXT("\r"), TEXT(""));
+						FinalName.ReplaceInline(TEXT("\n"), TEXT(" "));
+						FinalName.TrimStartAndEndInline();
+						// Limit to a short human-readable label.
+						const int32 MaxChars = 56;
+						if (FinalName.Len() > MaxChars)
+						{
+							FinalName = FinalName.Left(MaxChars);
+							FinalName.TrimEndInline();
+						}
+						break;
+					}
+				}
+			}
+
+			if (!FinalName.IsEmpty() && Persistence->SetThreadChatName(ProjectId, ThreadId, FinalName))
+			{
+				Session->ChatName = FinalName;
 			}
 		}
 	}

@@ -348,6 +348,7 @@ void SChatMessageList::RebuildTranscript()
 						.ResultPreview(B.ToolResultPreview)
 						.bRunning(B.bToolRunning)
 						.bSuccess(B.bToolOk)
+						.EditorPresentation(B.ToolEditorPresentation)
 				];
 			break;
 		case EUnrealAiChatBlockKind::TodoPlan:

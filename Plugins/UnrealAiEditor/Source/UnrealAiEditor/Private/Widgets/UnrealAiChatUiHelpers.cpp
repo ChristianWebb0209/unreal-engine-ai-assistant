@@ -35,6 +35,7 @@ void UnrealAiChatUi_StartNewChat(
 		Ctx->SaveNow(ProjectId, OldThreadIdStr);
 	}
 	Session->ThreadId = FGuid::NewGuid();
+	Session->ChatName.Reset();
 	const FString NewThreadIdStr = Session->ThreadId.ToString(EGuidFormats::DigitsWithHyphens);
 	if (IAgentContextService* Ctx = BackendRegistry->GetContextService())
 	{
@@ -84,6 +85,7 @@ void UnrealAiChatUi_DeleteChatPermanently(
 	}
 
 	Session->ThreadId = FGuid::NewGuid();
+	Session->ChatName.Reset();
 	const FString NewThreadIdStr = Session->ThreadId.ToString(EGuidFormats::DigitsWithHyphens);
 	if (IAgentContextService* Ctx = BackendRegistry->GetContextService())
 	{

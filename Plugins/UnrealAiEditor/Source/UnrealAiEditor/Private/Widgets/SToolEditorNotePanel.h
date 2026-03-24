@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
 
-struct FUnrealAiToolEditorPresentation;
+#include "Tools/Presentation/UnrealAiToolEditorPresentation.h"
 
 /** Renders a rich editor note for a tool call: optional image, markdown body, and clickable asset links. */
 class SToolEditorNotePanel : public SCompoundWidget
