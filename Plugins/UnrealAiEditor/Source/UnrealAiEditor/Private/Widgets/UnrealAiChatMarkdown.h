@@ -2,8 +2,6 @@
 
 #include "CoreMinimal.h"
 
-#include "Templates/Function.h"
-
 #include "Widgets/SWidget.h"
 
 /** Build Slate body for assistant chat: headings, bullets, GitHub-style task list items. */
@@ -13,9 +11,13 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownChatBody(const FString& Markdown);
 FString UnrealAiStripInlineMarkdown(const FString& Line);
 
 /**
- * Build Slate body for tool/editor notes.
- * Supports inline asset links in the form `[label](/Game/Path.Object)` which will be rendered as clickable hyperlinks.
+ * Single clickable link (blue hyperlink styling, small leading icon for web vs editor targets).
+ * Target is passed to navigation (http(s)/mailto vs Unreal object paths).
  */
-TSharedRef<SWidget> UnrealAiBuildMarkdownToolNoteBody(
-	const FString& Markdown,
-	const TFunctionRef<void(const FString& ObjectPath)>& OnLinkClicked);
+TSharedRef<SWidget> UnrealAiMakeChatHyperlink(const FString& Label, const FString& Target);
+
+/**
+ * Build Slate body for tool/editor notes.
+ * Supports `[label](url-or-/Game/...)` and bare `https://` URLs.
+ */
+TSharedRef<SWidget> UnrealAiBuildMarkdownToolNoteBody(const FString& Markdown);

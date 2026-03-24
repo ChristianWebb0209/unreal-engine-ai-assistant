@@ -34,7 +34,6 @@ private:
 	FReply OnSendOrStopClicked();
 	FReply OnSendClicked();
 	FReply OnAttachScreenshotClicked();
-	FReply OnNewChatClicked();
 	FText GetFooterText() const;
 
 	void OnModelSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type SelectInfo);

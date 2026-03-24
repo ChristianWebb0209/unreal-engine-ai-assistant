@@ -16,14 +16,29 @@ Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `orchestrate`. Follow **
 
 - **Primary execution mode:** loop read → act → observe until done, blocked, or round cap.
 - Use standard tool set for direct implementation in a single model thread.
+- When the user tells you **which** tool to run, run **that** tool (minimal args ok). When they only state a goal, prefer read/search first, then act.
 - When complexity gate applies, emit **`unreal_ai.todo_plan`** via **`agent_emit_todo_plan`** before bulk or destructive work.
 
 ---
 
 ## Mode: Orchestrate (`orchestrate`)
 
-- First pass must return a **DAG-style implementation plan** (structured nodes + dependencies), not direct implementation.
-- For the planner pass: output **only** the DAG JSON object (no prose, no markdown/code fences). The harness will parse this as JSON.
+- First pass must return a **DAG-style implementation plan** (acyclic tasks + dependencies), not direct implementation.
+- For the planner pass: output **only** a **single JSON object** (no prose, no markdown/code fences). The harness parses fields **`nodes`** (preferred) or legacy **`steps`**.
+- **Canonical shape** (use this unless constrained):
+
+```json
+{
+  "schema": "unreal_ai.orchestrate_dag",
+  "title": "Short plan title",
+  "nodes": [
+    { "id": "a", "title": "Task A", "hint": "What to do", "depends_on": [] },
+    { "id": "b", "title": "Task B", "hint": "Follow-up", "depends_on": ["a"] }
+  ]
+}
+```
+
+- Do **not** emit `definitionOfDone` / `assumptions` / `risks` wrappers for orchestrate—only the DAG object above (or the same graph using `"steps"` entries with `id`, `title`, `detail`, `dependsOn`).
 - Prefer plans with **independent branches** so workers can run in parallel when the harness supports it.
 - Execution uses **Type-B worker runs** (isolated child thread ids) and merges structured summaries/artifacts back to parent context.
 - If worker tooling is unavailable, degrade safely: keep DAG planning, then execute nodes serially with deterministic merge.

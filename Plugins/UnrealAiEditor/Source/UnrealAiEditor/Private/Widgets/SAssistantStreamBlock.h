@@ -21,6 +21,9 @@ public:
 	/** Append new text from the model (may queue behind typewriter). */
 	void AppendIncoming(const FString& Chunk);
 
+	/** True while typewriter still has queued characters (not caught up to the streaming buffer). */
+	bool HasPendingReveal() const { return PendingBuffer.Len() > 0; }
+
 	/**
 	 * Replace buffer (e.g. after transcript rebuild).
 	 * @param bInstantReveal If false, reveal with typewriter (for live assistant text). If true, show immediately (history / scroll-back).

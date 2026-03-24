@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 
+#include "Harness/UnrealAiAgentTypes.h"
 #include "Tools/Presentation/UnrealAiToolEditorPresentation.h"
 
 enum class EUnrealAiChatBlockKind : uint8
@@ -24,6 +25,8 @@ struct FUnrealAiChatBlock
 	EUnrealAiChatBlockKind Kind = EUnrealAiChatBlockKind::Assistant;
 
 	FString UserText;
+	/** Synthetic harness nudges stored as user role in conversation.json ([Harness] prefix). */
+	bool bHarnessSystemUser = false;
 	FString ThinkingText;
 	FString AssistantText;
 	FString ToolName;
@@ -39,34 +42,19 @@ struct FUnrealAiChatBlock
 	FString TodoJson;
 	FString ProgressLabel;
 	bool bRunCancelled = false;
+
+	/** FPlatformTime::Seconds() when this step started; 0 if not tracking. */
+	double StepMonotonicStart = 0.0;
+	/** e.g. "Thinking · 2m 34s" — shown above agent-side blocks when the step has finished. */
+	FString StepTimingCaption;
 };
-
-/** Tool calls that follow an assistant segment (for verbose UI). */
-struct FUnrealAiAssistantSegmentToolInfo
-{
-	FString ToolName;
-	FString ToolCallId;
-	FString ArgsPreview;
-	FString ResultPreview;
-	bool bRunning = false;
-	bool bOk = false;
-};
-
-/** Ordered tool names following this assistant block until next Assistant or User (inclusive of intermediate non-tool blocks). */
-void UnrealAiCollectToolsAfterAssistant(
-	const TArray<FUnrealAiChatBlock>& Blocks,
-	int32 AssistantIndex,
-	TArray<FString>& OutOrderedToolNames);
-
-/** Full tool-call rows after an assistant block (same span as UnrealAiCollectToolsAfterAssistant). */
-void UnrealAiCollectToolDetailsAfterAssistant(
-	const TArray<FUnrealAiChatBlock>& Blocks,
-	int32 AssistantIndex,
-	TArray<FUnrealAiAssistantSegmentToolInfo>& OutDetails);
 
 DECLARE_MULTICAST_DELEGATE(FUnrealAiChatStructuralDelegate);
 DECLARE_MULTICAST_DELEGATE_OneParam(FUnrealAiChatAssistantDeltaDelegate, const FString& /*Chunk*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FUnrealAiChatThinkingDeltaDelegate, const FString& /*Chunk*/, bool /*bFirstChunk*/);
+
+/** Human-readable duration for step timers (e.g. "45s", "2m 3s"). */
+FString UnrealAiFormatStepDurationForUi(double Seconds);
 
 /** Mutable transcript for the chat UI; updated by FUnrealAiChatRunSink. */
 class FUnrealAiChatTranscript : public TSharedFromThis<FUnrealAiChatTranscript>
@@ -98,16 +86,29 @@ public:
 	void OnContinuation(int32 PhaseIndex, int32 TotalPhasesHint);
 	/** Non-error notice (e.g. context policy dropped an attachment). */
 	void AddInformationalNotice(const FString& Text);
+	/** Blocking editor modal appeared while a tool was running (overwrite, confirm, etc.). */
+	void AddEditorBlockingDialogNotice(const FString& Summary);
+
+	/** Rebuild UI blocks from persisted harness conversation messages (conversation.json). */
+	void HydrateFromConversationMessages(const TArray<FUnrealAiConversationMessage>& Messages);
 
 	/** True while the current run still has an open assistant reply segment (streaming or single-chunk). */
 	bool IsAssistantSegmentOpen() const { return bAssistantSegmentOpen; }
+
+	/**
+	 * True when assistant text chunks arrived within the last QuietSeconds (network still streaming).
+	 * Used to hide a live elapsed footer while tokens are actively arriving.
+	 */
+	bool IsAssistantStreamRecentlyActive(float QuietSeconds = 0.28f) const;
 
 private:
 	FGuid ActiveRunId;
 	bool bHasActiveRun = false;
 	bool bAssistantSegmentOpen = false;
 	bool bThinkingOpen = false;
+	double LastAssistantStreamChunkMonotonicTime = 0.0;
 
 	int32 FindToolIndexByCallId(const FString& CallId) const;
 	void CloseAssistantSegment();
+	void TouchAssistantStreamChunkTime();
 };

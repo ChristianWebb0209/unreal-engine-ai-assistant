@@ -17,3 +17,9 @@ void UnrealAiChatUi_DeleteChatPermanently(
 	TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry,
 	TSharedPtr<FUnrealAiChatUiSession> Session,
 	TSharedPtr<SChatMessageList> MessageList);
+
+/** Load context + conversation.json into UI for an explicit thread id (session must already use this id). */
+void UnrealAiChatUi_LoadPersistedThreadIntoUi(
+	TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry,
+	TSharedPtr<FUnrealAiChatUiSession> Session,
+	TSharedPtr<SChatMessageList> MessageList);

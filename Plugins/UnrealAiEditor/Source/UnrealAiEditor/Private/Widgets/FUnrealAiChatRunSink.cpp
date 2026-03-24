@@ -141,6 +141,14 @@ void FUnrealAiChatRunSink::OnToolCallFinished(
 	}
 }
 
+void FUnrealAiChatRunSink::OnEditorBlockingDialogDuringTools(const FString& Summary)
+{
+	if (Transcript.IsValid())
+	{
+		Transcript->AddEditorBlockingDialogNotice(Summary);
+	}
+}
+
 void FUnrealAiChatRunSink::OnRunContinuation(int32 PhaseIndex, int32 TotalPhasesHint)
 {
 	if (Transcript.IsValid())
@@ -159,77 +167,80 @@ void FUnrealAiChatRunSink::OnTodoPlanEmitted(const FString& Title, const FString
 
 void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMessage)
 {
-	if (Transcript.IsValid())
+	if (!Transcript.IsValid())
 	{
-		Transcript->EndRun(bSuccess, ErrorMessage);
+		return;
+	}
 
-		if (!Session.IsValid() || Persistence == nullptr || ThreadId.IsEmpty())
+	Transcript->EndRun(bSuccess, ErrorMessage);
+
+	// Always strip the token from visible assistant output if present;
+	// rename UI once when ChatName is still empty (independent of persistence success).
+	bool bModifiedAnyAssistantText = false;
+	FString ExtractedName;
+
+	for (int32 i = Transcript->Blocks.Num() - 1; i >= 0; --i)
+	{
+		FUnrealAiChatBlock& B = Transcript->Blocks[i];
+		if (B.Kind != EUnrealAiChatBlockKind::Assistant || B.AssistantText.IsEmpty())
 		{
-			return;
+			continue;
 		}
 
-		// Always strip the token from visible assistant output if present,
-		// but only apply/rename once per chat.
-		bool bModifiedAnyAssistantText = false;
-		FString ExtractedName;
+		FString LocalName;
+		FString LocalText = B.AssistantText;
+		if (TryStripChatNameTokenFromText(LocalText, LocalName))
+		{
+			B.AssistantText = LocalText;
+			B.AssistantText.TrimStartAndEndInline();
+			bModifiedAnyAssistantText = true;
+			ExtractedName = LocalName;
+			break;
+		}
+	}
 
-		// Walk backwards so we usually pick up the first (most recent) assistant token.
+	if (bModifiedAnyAssistantText)
+	{
+		Transcript->OnStructuralChange.Broadcast();
+	}
+
+	if (!Session.IsValid() || !Session->ChatName.IsEmpty() || !bModifiedAnyAssistantText)
+	{
+		return;
+	}
+
+	FString FinalName = ExtractedName;
+	if (FinalName.IsEmpty())
+	{
 		for (int32 i = Transcript->Blocks.Num() - 1; i >= 0; --i)
 		{
-			FUnrealAiChatBlock& B = Transcript->Blocks[i];
-			if (B.Kind != EUnrealAiChatBlockKind::Assistant || B.AssistantText.IsEmpty())
+			const FUnrealAiChatBlock& B = Transcript->Blocks[i];
+			if (B.Kind == EUnrealAiChatBlockKind::User && !B.UserText.IsEmpty())
 			{
-				continue;
-			}
-
-			FString LocalName;
-			FString LocalText = B.AssistantText;
-			if (TryStripChatNameTokenFromText(LocalText, LocalName))
-			{
-				B.AssistantText = LocalText;
-				B.AssistantText.TrimStartAndEndInline();
-				bModifiedAnyAssistantText = true;
-				ExtractedName = LocalName;
-				break; // only expect one token
-			}
-		}
-
-		if (bModifiedAnyAssistantText)
-		{
-			Transcript->OnStructuralChange.Broadcast();
-		}
-
-		if (Session->ChatName.IsEmpty() && bModifiedAnyAssistantText)
-		{
-			FString FinalName = ExtractedName;
-			if (FinalName.IsEmpty())
-			{
-				// Fallback to something derived from the user's first/most-recent message.
-				for (int32 i = Transcript->Blocks.Num() - 1; i >= 0; --i)
+				FinalName = B.UserText;
+				FinalName.ReplaceInline(TEXT("\r"), TEXT(""));
+				FinalName.ReplaceInline(TEXT("\n"), TEXT(" "));
+				FinalName.TrimStartAndEndInline();
+				const int32 MaxChars = 56;
+				if (FinalName.Len() > MaxChars)
 				{
-					const FUnrealAiChatBlock& B = Transcript->Blocks[i];
-					if (B.Kind == EUnrealAiChatBlockKind::User && !B.UserText.IsEmpty())
-					{
-						FinalName = B.UserText;
-						FinalName.ReplaceInline(TEXT("\r"), TEXT(""));
-						FinalName.ReplaceInline(TEXT("\n"), TEXT(" "));
-						FinalName.TrimStartAndEndInline();
-						// Limit to a short human-readable label.
-						const int32 MaxChars = 56;
-						if (FinalName.Len() > MaxChars)
-						{
-							FinalName = FinalName.Left(MaxChars);
-							FinalName.TrimEndInline();
-						}
-						break;
-					}
+					FinalName = FinalName.Left(MaxChars);
+					FinalName.TrimEndInline();
 				}
-			}
-
-			if (!FinalName.IsEmpty() && Persistence->SetThreadChatName(ProjectId, ThreadId, FinalName))
-			{
-				Session->ChatName = FinalName;
+				break;
 			}
 		}
 	}
+
+	if (FinalName.IsEmpty())
+	{
+		return;
+	}
+
+	Session->ChatName = FinalName;
+	if (Persistence && !ProjectId.IsEmpty() && !ThreadId.IsEmpty())
+	{
+		Persistence->SetThreadChatName(ProjectId, ThreadId, FinalName);
+	}
+	Session->OnChatNameChanged.Broadcast();
 }

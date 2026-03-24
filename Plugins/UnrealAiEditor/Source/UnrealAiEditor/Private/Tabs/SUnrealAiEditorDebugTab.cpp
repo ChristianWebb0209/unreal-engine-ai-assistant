@@ -3,6 +3,7 @@
 #include "UnrealAiEditorModule.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Backend/UnrealAiBackendRegistry.h"
+#include "Context/IAgentContextService.h"
 #include "Context/UnrealAiProjectId.h"
 #include "Style/UnrealAiEditorStyle.h"
 #include "Widgets/UnrealAiChatUiSession.h"
@@ -11,6 +12,7 @@
 #include "Containers/StringConv.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "Misc/MessageDialog.h"
 #include "Misc/FileHelper.h"
 #include "Serialization/Archive.h"
 #include "Styling/CoreStyle.h"
@@ -22,6 +24,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Text/SMultiLineEditableText.h"
+#include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Text/STextBlock.h"
@@ -33,6 +36,12 @@
 static constexpr int32 GMaxDebugFileBytes = 512 * 1024;
 static constexpr int32 GMaxDirDepth = 8;
 static constexpr float GAutoRefreshSeconds = 3.f;
+
+static FString UnrealAiNormalizeDebugPath(FString Path)
+{
+	FPaths::NormalizeFilename(Path);
+	return FPaths::ConvertRelativePathToFull(Path);
+}
 
 void SUnrealAiEditorDebugTab::Construct(const FArguments& InArgs)
 {
@@ -60,6 +69,22 @@ void SUnrealAiEditorDebugTab::Construct(const FArguments& InArgs)
 			.Padding(8.f)
 			[
 				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
+				[
+					SNew(SButton)
+					.ButtonColorAndOpacity(FLinearColor(0.55f, 0.12f, 0.12f, 1.f))
+					.ForegroundColor(FLinearColor::White)
+					.ContentPadding(FMargin(10.f, 6.f))
+					.Text(LOCTEXT("DbgDeleteAll", "Delete all local chat data"))
+					.ToolTipText(LOCTEXT(
+						"DbgDeleteAllTip",
+						"Removes all chats under the local data root and Project Saved/UnrealAiEditor. "
+						"Keeps settings (plugin_settings.json, usage_stats.json, model profiles, API keys)."))
+					.OnClicked_Lambda([Self]()
+					{
+						return Self->OnDeleteAllLocalChatDataClicked();
+					})
+				]
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
 				[
 					SNew(SVerticalBox)
@@ -287,10 +312,74 @@ void SUnrealAiEditorDebugTab::RebuildFileList()
 		BuildTreeForRoot(ProjSaved, TEXT("Saved/UnrealAiEditor"), GMaxDirDepth);
 	}
 
+	RebuildOpenChatHighlightCache();
 	if (FileList.IsValid())
 	{
 		FileList->RequestListRefresh();
 	}
+}
+
+void SUnrealAiEditorDebugTab::RebuildOpenChatHighlightCache()
+{
+	OpenChatExactPathsNorm.Reset();
+	OpenChatDirectoryPrefixesNorm.Reset();
+	IUnrealAiPersistence* const P = BackendRegistry.IsValid() ? BackendRegistry->GetPersistence() : nullptr;
+	if (!P)
+	{
+		return;
+	}
+	const FString Proj = UnrealAiProjectId::GetCurrentProjectId();
+	const FString ThreadsRoot = FPaths::Combine(P->GetDataRootDirectory(), TEXT("chats"), Proj, TEXT("threads"));
+	TArray<FGuid> Open;
+	FUnrealAiEditorModule::GetOpenAgentChatThreadIds(Open);
+	for (const FGuid& G : Open)
+	{
+		if (!G.IsValid())
+		{
+			continue;
+		}
+		const FString Tid = G.ToString(EGuidFormats::DigitsWithHyphens);
+		const FString Slug = P->GetThreadStorageSlug(Proj, Tid);
+		if (Slug.IsEmpty())
+		{
+			continue;
+		}
+		const FString Ctx = UnrealAiNormalizeDebugPath(FPaths::Combine(ThreadsRoot, Slug + TEXT("-context.json")));
+		const FString Conv =
+			UnrealAiNormalizeDebugPath(FPaths::Combine(ThreadsRoot, Slug + TEXT("-conversation.json")));
+		const FString LegDir = UnrealAiNormalizeDebugPath(FPaths::Combine(ThreadsRoot, Slug));
+		OpenChatExactPathsNorm.Add(Ctx);
+		OpenChatExactPathsNorm.Add(Conv);
+		OpenChatDirectoryPrefixesNorm.Add(LegDir);
+	}
+}
+
+bool SUnrealAiEditorDebugTab::IsPathHighlighted(const FString& FullPathNormalized) const
+{
+	if (FullPathNormalized.IsEmpty())
+	{
+		return false;
+	}
+	if (OpenChatExactPathsNorm.Contains(FullPathNormalized))
+	{
+		return true;
+	}
+	for (const FString& Prefix : OpenChatDirectoryPrefixesNorm)
+	{
+		if (FullPathNormalized.Equals(Prefix, ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		if (FullPathNormalized.Len() > Prefix.Len() && FullPathNormalized.StartsWith(Prefix, ESearchCase::IgnoreCase))
+		{
+			const TCHAR C = FullPathNormalized[Prefix.Len()];
+			if (C == TEXT('/') || C == TEXT('\\'))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 void SUnrealAiEditorDebugTab::BuildTreeForRoot(const FString& RootPath, const FString& LabelForRoot, int32 MaxDepth)
@@ -416,15 +505,25 @@ TSharedRef<ITableRow> SUnrealAiEditorDebugTab::OnGenerateRow(
 		? static_cast<FSlateColor>(FUnrealAiEditorStyle::ColorDebugNavFolder())
 		: static_cast<FSlateColor>(FUnrealAiEditorStyle::ColorTextPrimary());
 
+	const FString PathNorm =
+		Item.IsValid() && !Item->FullPath.IsEmpty() ? UnrealAiNormalizeDebugPath(Item->FullPath) : FString();
+	const bool bOpenChatRow = IsPathHighlighted(PathNorm);
+
 	return SNew(STableRow<TSharedPtr<FUnrealAiDebugListEntry>>, OwnerTable)
 		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().AutoWidth().Padding(Pad, 4, 8, 4)
+			SNew(SBorder)
+			.Padding(FMargin(0))
+			.BorderBackgroundColor(
+				bOpenChatRow ? FLinearColor(0.12f, 0.26f, 0.48f, 1.f) : FLinearColor::Transparent)
 			[
-				SNew(STextBlock)
-				.Text(Item.IsValid() ? FText::FromString(Item->DisplayName) : FText::GetEmpty())
-				.ColorAndOpacity(Col)
-				.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Roboto"), 9))
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(Pad, 4, 8, 4)
+				[
+					SNew(STextBlock)
+					.Text(Item.IsValid() ? FText::FromString(Item->DisplayName) : FText::GetEmpty())
+					.ColorAndOpacity(Col)
+					.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Roboto"), 9))
+				]
 			]
 		];
 }
@@ -539,6 +638,44 @@ void SUnrealAiEditorDebugTab::OnCopyInspectorClicked()
 	{
 		FPlatformApplicationMisc::ClipboardCopy(*S);
 	}
+}
+
+FReply SUnrealAiEditorDebugTab::OnDeleteAllLocalChatDataClicked()
+{
+	IUnrealAiPersistence* const P = BackendRegistry.IsValid() ? BackendRegistry->GetPersistence() : nullptr;
+	if (!P)
+	{
+		return FReply::Handled();
+	}
+	const FString ChatsRoot = FPaths::Combine(P->GetDataRootDirectory(), TEXT("chats"));
+	const FString SavedPlugin = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAiEditor"));
+	const FText Msg = FText::Format(
+		LOCTEXT(
+			"DbgDelConfirm",
+			"Delete ALL local chat data?\n\nThis removes:\n- {0}\n- {1}\n\nKeeps: settings (models, API keys, usage stats).\n\n"
+			"Open Agent Chat tabs may still show cached messages until you start a new chat or restart the editor."),
+		FText::FromString(ChatsRoot),
+		FText::FromString(SavedPlugin));
+	if (FMessageDialog::Open(EAppMsgType::YesNo, Msg) != EAppReturnType::Yes)
+	{
+		return FReply::Handled();
+	}
+	FString Err;
+	if (!P->DeleteAllLocalChatData(Err))
+	{
+		FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Err.IsEmpty() ? TEXT("Delete failed.") : Err));
+		return FReply::Handled();
+	}
+	const FString Proj = UnrealAiProjectId::GetCurrentProjectId();
+	P->SaveOpenChatTabsState(Proj, {});
+	if (IAgentContextService* Ctx = BackendRegistry->GetContextService())
+	{
+		Ctx->WipeAllSessionsInMemory();
+	}
+	RebuildFileList();
+	RefreshActiveSessionUi();
+	FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("DbgDelOk", "Local chat data deleted."));
+	return FReply::Handled();
 }
 
 FString SUnrealAiEditorDebugTab::PrettyOrRawJson(const FString& Raw) const

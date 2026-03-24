@@ -1,6 +1,9 @@
 #include "Tabs/SUnrealAiEditorSettingsTab.h"
 
+#include "UnrealAiEditorModule.h"
+#include "UnrealAiEditorSettings.h"
 #include "Backend/FUnrealAiUsageTracker.h"
+#include "Context/UnrealAiProjectId.h"
 #include "Backend/IUnrealAiModelConnector.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Backend/UnrealAiBackendRegistry.h"
@@ -21,10 +24,13 @@
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SSpinBox.h"
+#include "Widgets/Colors/SColorBlock.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SGridPanel.h"
 #include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
@@ -384,115 +390,171 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
 					[
-						SNew(STextBlock)
-							.AutoWrapText(true)
-							.Text(LOCTEXT(
-								"SettingsHelp",
-								"Add API key sections (one provider account each) and attach any number of model profiles. "
-								"Rough token pricing uses a bundled Litellm dataset when the model id matches; unknown models still work. "
-								"Settings save automatically; use Save and apply for an immediate LLM reload."))
-					]
-					+ SVerticalBox::Slot().FillHeight(1.f).Padding(FMargin(0.f, 4.f))
-					[
-						SNew(SBox)
-							.MinDesiredHeight(280.f)
-							[
-								SNew(SScrollBox)
-								+ SScrollBox::Slot()
-								[
-									SNew(SVerticalBox)
-									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
-									[
-										SNew(STextBlock)
-											.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
-											.Text(LOCTEXT("SecGlobal", "Global API defaults"))
-									]
-									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
-									[
-										SNew(SGridPanel).FillColumn(1, 1.f)
-										+ SGridPanel::Slot(0, 0).Padding(4.f)
-										[
-											SNew(STextBlock).Text(LOCTEXT("BaseUrl", "Base URL"))
-										]
-										+ SGridPanel::Slot(1, 0).Padding(4.f)
-										[
-											SAssignNew(ApiBaseUrlBox, SEditableTextBox)
-												.Text(FText::FromString(TEXT("https://openrouter.ai/api/v1")))
-												.OnTextChanged(this, &SUnrealAiEditorSettingsTab::OnAnySettingsChanged)
-										]
-										+ SGridPanel::Slot(0, 1).Padding(4.f)
-										[
-											SNew(STextBlock).Text(LOCTEXT("ApiKeyGlobal", "Global API key (optional)"))
-										]
-										+ SGridPanel::Slot(1, 1).Padding(4.f)
-										[
-											SAssignNew(ApiKeyBox, SEditableTextBox)
-												.OnTextChanged(this, &SUnrealAiEditorSettingsTab::OnAnySettingsChanged)
-										]
-										+ SGridPanel::Slot(0, 2).Padding(4.f)
-										[
-											SNew(STextBlock).Text(LOCTEXT("DefaultModel", "Default model profile key"))
-										]
-										+ SGridPanel::Slot(1, 2).Padding(4.f)
-										[
-											SAssignNew(ApiDefaultModelBox, SEditableTextBox)
-												.Text(FText::FromString(TEXT("openai/gpt-4o-mini")))
-												.OnTextChanged(this, &SUnrealAiEditorSettingsTab::OnAnySettingsChanged)
-										]
-										+ SGridPanel::Slot(0, 3).Padding(4.f)
-										[
-											SNew(STextBlock).Text(LOCTEXT("DefaultProviderId", "Default section id"))
-										]
-										+ SGridPanel::Slot(1, 3).Padding(4.f)
-										[
-											SAssignNew(ApiDefaultProviderIdBox, SEditableTextBox)
-												.OnTextChanged(this, &SUnrealAiEditorSettingsTab::OnAnySettingsChanged)
-										]
-									]
-									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
-									[
-										SNew(SHorizontalBox)
-										+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
-										[
-											SNew(STextBlock)
-												.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
-												.Text(LOCTEXT("SecSections", "API key sections"))
-										]
-										+ SHorizontalBox::Slot().AutoWidth()
-										[
-											SNew(SButton)
-												.Text(LOCTEXT("AddSection", "Add section"))
-												.OnClicked(this, &SUnrealAiEditorSettingsTab::OnAddSectionClicked)
-										]
-									]
-									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
-									[
-										SAssignNew(SectionsVBox, SVerticalBox)
-									]
-								]
-							]
-					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 8.f, 0.f, 4.f))
-					[
 						SNew(SHorizontalBox)
 						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 						[
 							SNew(SButton)
-								.Text(LOCTEXT("Test", "Test connection"))
-								.OnClicked(this, &SUnrealAiEditorSettingsTab::OnTestConnectionClicked)
+								.Text(LOCTEXT("SettingsSegConfig", "Configuration"))
+								.OnClicked_Lambda([this]()
+								{
+									return OnSettingsSegmentClicked(0);
+								})
 						]
-						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+						+ SHorizontalBox::Slot().AutoWidth()
 						[
 							SNew(SButton)
-								.Text(LOCTEXT("SaveSettings", "Save and apply"))
-								.OnClicked(this, &SUnrealAiEditorSettingsTab::OnSaveClicked)
+								.Text(LOCTEXT("SettingsChatHistory", "Chat history"))
+								.OnClicked_Lambda([this]()
+								{
+									return OnSettingsSegmentClicked(1);
+								})
 						]
 					]
-					+ SVerticalBox::Slot().AutoHeight()
+					+ SVerticalBox::Slot().FillHeight(1.f).Padding(FMargin(0.f, 4.f))
 					[
-						SNew(STextBlock)
-							.AutoWrapText(true)
-							.Text_Lambda([this]() { return StatusText; })
+						SAssignNew(SettingsMainSwitcher, SWidgetSwitcher)
+						+ SWidgetSwitcher::Slot()
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+							[
+								SNew(STextBlock)
+									.AutoWrapText(true)
+									.Text(LOCTEXT(
+										"SettingsHelp",
+										"Add API key sections (one provider account each) and attach any number of model profiles. "
+										"Rough token pricing uses a bundled Litellm dataset when the model id matches; unknown models still work. "
+										"Settings save automatically; use Save and apply for an immediate LLM reload."))
+							]
+							+ SVerticalBox::Slot().FillHeight(1.f)
+							[
+								SNew(SBox)
+									.MinDesiredHeight(280.f)
+									[
+										SNew(SScrollBox)
+										+ SScrollBox::Slot()
+										[
+											SNew(SVerticalBox)
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
+											[
+												SNew(STextBlock)
+													.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+													.Text(LOCTEXT("SecGlobal", "Global API defaults"))
+											]
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
+											[
+												SNew(SGridPanel).FillColumn(1, 1.f)
+												+ SGridPanel::Slot(0, 0).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("BaseUrl", "Base URL"))
+												]
+												+ SGridPanel::Slot(1, 0).Padding(4.f)
+												[
+													SAssignNew(ApiBaseUrlBox, SEditableTextBox)
+														.Text(FText::FromString(TEXT("https://openrouter.ai/api/v1")))
+														.OnTextChanged(this, &SUnrealAiEditorSettingsTab::OnAnySettingsChanged)
+												]
+												+ SGridPanel::Slot(0, 1).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("ApiKeyGlobal", "Global API key (optional)"))
+												]
+												+ SGridPanel::Slot(1, 1).Padding(4.f)
+												[
+													SAssignNew(ApiKeyBox, SEditableTextBox)
+														.OnTextChanged(this, &SUnrealAiEditorSettingsTab::OnAnySettingsChanged)
+												]
+												+ SGridPanel::Slot(0, 2).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("DefaultModel", "Default model profile key"))
+												]
+												+ SGridPanel::Slot(1, 2).Padding(4.f)
+												[
+													SAssignNew(ApiDefaultModelBox, SEditableTextBox)
+														.Text(FText::FromString(TEXT("openai/gpt-4o-mini")))
+														.OnTextChanged(this, &SUnrealAiEditorSettingsTab::OnAnySettingsChanged)
+												]
+												+ SGridPanel::Slot(0, 3).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("DefaultProviderId", "Default section id"))
+												]
+												+ SGridPanel::Slot(1, 3).Padding(4.f)
+												[
+													SAssignNew(ApiDefaultProviderIdBox, SEditableTextBox)
+														.OnTextChanged(this, &SUnrealAiEditorSettingsTab::OnAnySettingsChanged)
+												]
+											]
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+											[
+												SNew(SHorizontalBox)
+												+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+												[
+													SNew(STextBlock)
+														.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+														.Text(LOCTEXT("SecSections", "API key sections"))
+												]
+												+ SHorizontalBox::Slot().AutoWidth()
+												[
+													SNew(SButton)
+														.Text(LOCTEXT("AddSection", "Add section"))
+														.OnClicked(this, &SUnrealAiEditorSettingsTab::OnAddSectionClicked)
+												]
+											]
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
+											[
+												SAssignNew(SectionsVBox, SVerticalBox)
+											]
+										]
+									]
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 8.f, 0.f, 4.f))
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+								[
+									SNew(SButton)
+										.Text(LOCTEXT("Test", "Test connection"))
+										.OnClicked(this, &SUnrealAiEditorSettingsTab::OnTestConnectionClicked)
+								]
+								+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+								[
+									SNew(SButton)
+										.Text(LOCTEXT("SaveSettings", "Save and apply"))
+										.OnClicked(this, &SUnrealAiEditorSettingsTab::OnSaveClicked)
+								]
+							]
+							+ SVerticalBox::Slot().AutoHeight()
+							[
+								SNew(STextBlock)
+									.AutoWrapText(true)
+									.Text_Lambda([this]() { return StatusText; })
+							]
+						]
+						+ SWidgetSwitcher::Slot()
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+							[
+								SNew(STextBlock)
+									.AutoWrapText(true)
+									.Text(LOCTEXT(
+										"ChatHistoryHelp",
+										"Open a past chat in a new Agent Chat tab. Threads are listed from your local thread index."))
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+							[
+								SNew(SButton)
+									.Text(LOCTEXT("ChatHistoryRefresh", "Refresh list"))
+									.OnClicked(this, &SUnrealAiEditorSettingsTab::OnChatHistoryRefreshClicked)
+							]
+							+ SVerticalBox::Slot().FillHeight(1.f)
+							[
+								SNew(SScrollBox)
+								+ SScrollBox::Slot()
+								[
+									SAssignNew(ChatHistoryListVBox, SVerticalBox)
+								]
+							]
+						]
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 16.f, 0.f, 0.f))
 					[
@@ -542,6 +604,92 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 			return true;
 		}),
 		1.5f);
+}
+
+FReply SUnrealAiEditorSettingsTab::OnSettingsSegmentClicked(const int32 Index)
+{
+	if (SettingsMainSwitcher.IsValid())
+	{
+		SettingsMainSwitcher->SetActiveWidgetIndex(Index);
+	}
+	if (Index == 1)
+	{
+		RebuildChatHistoryListUi();
+	}
+	return FReply::Handled();
+}
+
+FReply SUnrealAiEditorSettingsTab::OnChatHistoryRefreshClicked()
+{
+	RebuildChatHistoryListUi();
+	return FReply::Handled();
+}
+
+void SUnrealAiEditorSettingsTab::RebuildChatHistoryListUi()
+{
+	if (!ChatHistoryListVBox.IsValid())
+	{
+		return;
+	}
+	ChatHistoryListVBox->ClearChildren();
+	if (!BackendRegistry.IsValid())
+	{
+		ChatHistoryListVBox->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock)
+				.Text(LOCTEXT("ChatHistoryNoBackend", "Backend not ready."))
+		];
+		return;
+	}
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	if (!Persist)
+	{
+		ChatHistoryListVBox->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock)
+				.Text(LOCTEXT("ChatHistoryNoPersist", "Persistence not available."))
+		];
+		return;
+	}
+	TArray<FString> ThreadIds;
+	TArray<FString> DisplayNames;
+	Persist->ListPersistedThreadsForHistory(UnrealAiProjectId::GetCurrentProjectId(), ThreadIds, DisplayNames);
+	if (ThreadIds.Num() == 0)
+	{
+		ChatHistoryListVBox->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock)
+				.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.58f, 1.f)))
+				.Text(LOCTEXT("ChatHistoryEmpty", "No saved chats indexed yet for this project."))
+		];
+		return;
+	}
+	for (int32 i = 0; i < ThreadIds.Num(); ++i)
+	{
+		const FString& ThreadId = ThreadIds[i];
+		const FString Label = DisplayNames.IsValidIndex(i) ? DisplayNames[i] : ThreadId;
+		ChatHistoryListVBox->AddSlot().AutoHeight().Padding(0.f, 2.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(0.f, 0.f, 8.f, 0.f)
+			[
+				SNew(STextBlock)
+					.AutoWrapText(true)
+					.Text(FText::FromString(Label))
+					.ToolTipText(FText::FromString(ThreadId))
+			]
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				SNew(SButton)
+					.Text(LOCTEXT("ChatHistoryOpen", "Open"))
+					.OnClicked_Lambda([ThreadId]()
+					{
+						FUnrealAiEditorModule::OpenAgentChatTabWithPersistedThread(ThreadId);
+						return FReply::Handled();
+					})
+			]
+		];
+	}
 }
 
 SUnrealAiEditorSettingsTab::~SUnrealAiEditorSettingsTab()
@@ -849,11 +997,11 @@ void SUnrealAiEditorSettingsTab::LoadSettingsIntoUi()
 					double Mar = 0;
 					if ((*Mo)->TryGetNumberField(TEXT("maxAgentLlmRounds"), Mar))
 					{
-						Mr.MaxAgentLlmRoundsStr = FString::FromInt(FMath::Clamp(static_cast<int32>(Mar), 1, 256));
+						Mr.MaxAgentLlmRoundsStr = FString::FromInt(FMath::Clamp(static_cast<int32>(Mar), 1, 512));
 					}
 					else
 					{
-						Mr.MaxAgentLlmRoundsStr = TEXT("16");
+						Mr.MaxAgentLlmRoundsStr = TEXT("32");
 					}
 					(*Mo)->TryGetBoolField(TEXT("supportsNativeTools"), Mr.bSupportsNativeTools);
 					(*Mo)->TryGetBoolField(TEXT("supportsParallelToolCalls"), Mr.bSupportsParallelToolCalls);
@@ -883,7 +1031,7 @@ void SUnrealAiEditorSettingsTab::LoadSettingsIntoUi()
 		Mr.ProfileKey = TEXT("openai/gpt-4o-mini");
 		Mr.MaxContextStr = TEXT("128000");
 		Mr.MaxOutputStr = TEXT("4096");
-		Mr.MaxAgentLlmRoundsStr = TEXT("16");
+		Mr.MaxAgentLlmRoundsStr = TEXT("32");
 		UpdateModelPricingHint(Mr);
 		R.Models.Add(Mr);
 		SectionRows.Add(MoveTemp(R));
@@ -1182,7 +1330,7 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 											.OnTextChanged(this, &SUnrealAiEditorSettingsTab::OnAnySettingsChanged)
 											.ToolTipText(LOCTEXT(
 												"MaxAgentRoundsTipEdit",
-												"Maximum completions per send (tool↔LLM iterations). Default 16. "
+												"Maximum completions per send (tool↔LLM iterations). Default 32. "
 												"Higher values allow more agent steps but typically use more tokens."))
 									]
 									+ SGridPanel::Slot(0, 5).Padding(4.f)
@@ -1429,12 +1577,12 @@ bool SUnrealAiEditorSettingsTab::BuildJsonFromUi(FString& OutJson, FString& OutE
 			}
 			const int32 Ctx = UnrealAiSettingsTabUtil::ParsePositiveInt(Mr.MaxContextStr, 128000);
 			const int32 MaxOutTok = UnrealAiSettingsTabUtil::ParsePositiveInt(Mr.MaxOutputStr, 4096);
-			int32 MaxRounds = UnrealAiSettingsTabUtil::ParsePositiveInt(Mr.MaxAgentLlmRoundsStr, 16);
+			int32 MaxRounds = UnrealAiSettingsTabUtil::ParsePositiveInt(Mr.MaxAgentLlmRoundsStr, 32);
 			if (MaxRounds <= 0)
 			{
-				MaxRounds = 16;
+				MaxRounds = 32;
 			}
-			MaxRounds = FMath::Clamp(MaxRounds, 1, 256);
+			MaxRounds = FMath::Clamp(MaxRounds, 1, 512);
 			Mo->SetNumberField(TEXT("maxContextTokens"), Ctx);
 			Mo->SetNumberField(TEXT("maxOutputTokens"), MaxOutTok);
 			Mo->SetNumberField(TEXT("maxAgentLlmRounds"), MaxRounds);
@@ -1567,7 +1715,7 @@ FReply SUnrealAiEditorSettingsTab::OnAddModelClicked(int32 SectionIndex)
 	Mr.ProfileKey = TEXT("openai/gpt-4o-mini");
 	Mr.MaxContextStr = TEXT("128000");
 	Mr.MaxOutputStr = TEXT("4096");
-	Mr.MaxAgentLlmRoundsStr = TEXT("16");
+	Mr.MaxAgentLlmRoundsStr = TEXT("32");
 	UpdateModelPricingHint(Mr);
 	SectionRows[SectionIndex].Models.Add(MoveTemp(Mr));
 	RebuildDynamicRows();

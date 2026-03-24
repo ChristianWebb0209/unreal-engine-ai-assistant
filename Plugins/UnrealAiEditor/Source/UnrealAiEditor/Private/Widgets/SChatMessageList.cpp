@@ -3,12 +3,15 @@
 #include "Widgets/SAssistantStreamBlock.h"
 #include "Widgets/SThinkingSubline.h"
 #include "Widgets/STodoPlanPanel.h"
-#include "Widgets/SAssistantToolsDropdown.h"
 #include "Widgets/SToolCallCard.h"
 #include "Widgets/UnrealAiChatTranscript.h"
+#include "Harness/UnrealAiAgentTypes.h"
+#include "HAL/PlatformTime.h"
 #include "Style/UnrealAiEditorStyle.h"
+#include "Templates/Function.h"
 #include "UnrealAiEditorSettings.h"
 #include "Styling/AppStyle.h"
+#include "Styling/SlateTypes.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -21,11 +24,37 @@
 #include "Widgets/SPanel.h"
 #include "Layout/Geometry.h"
 #include "Rendering/SlateRenderTransform.h"
+#include "Containers/Ticker.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
+/** Row padding around user messages. */
+static const FMargin GChatMessageListRowMargin(12.f, 11.f, 12.f, 11.f);
+/** Tighter vertical rhythm for assistant stream: tools, timestamps, thinking, notices. */
+static const FMargin GChatMessageListAgentRowMargin(12.f, 4.f, 12.f, 4.f);
+
 namespace UnrealAiChatListUi
 {
+	static TSharedRef<SWidget> WrapWithStepCaption(const FString& Caption, const TSharedRef<SWidget>& Body)
+	{
+		if (Caption.IsEmpty())
+		{
+			return Body;
+		}
+		return SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 2.f)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Caption))
+				.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted())
+			]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				Body
+			];
+	}
+
 	static bool IsLastAssistantBlock(const TArray<FUnrealAiChatBlock>& Blocks, const int32 BlockIndex)
 	{
 		if (!Blocks.IsValidIndex(BlockIndex) || Blocks[BlockIndex].Kind != EUnrealAiChatBlockKind::Assistant)
@@ -41,6 +70,89 @@ namespace UnrealAiChatListUi
 		}
 		return true;
 	}
+}
+
+/** Footer under assistant markdown: live "reply · Ns" while the step is open, "Writing…" while streaming/typewriter is active. */
+class SAssistantReplyTimingFooter final : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SAssistantReplyTimingFooter) {}
+	SLATE_ARGUMENT(double, StepMonotonicStart)
+	SLATE_ARGUMENT(FString, FinalCaption)
+	SLATE_ARGUMENT(TFunction<bool()>, IsWritingMask)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs);
+
+private:
+	EActiveTimerReturnType TickFooter(double CurrentTime, float DeltaTime);
+	void SyncLabel();
+
+	double StepMonotonicStart = 0.0;
+	FString FinalCaption;
+	TFunction<bool()> IsWritingMask;
+	TSharedPtr<STextBlock> Label;
+};
+
+void SAssistantReplyTimingFooter::Construct(const FArguments& InArgs)
+{
+	StepMonotonicStart = InArgs._StepMonotonicStart;
+	FinalCaption = InArgs._FinalCaption;
+	IsWritingMask = InArgs._IsWritingMask;
+
+	ChildSlot
+		[
+			SAssignNew(Label, STextBlock)
+				.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted())
+		];
+	SyncLabel();
+	if (FinalCaption.IsEmpty() && StepMonotonicStart > 0.0)
+	{
+		RegisterActiveTimer(
+			0.125f,
+			FWidgetActiveTimerDelegate::CreateSP(this, &SAssistantReplyTimingFooter::TickFooter));
+	}
+}
+
+EActiveTimerReturnType SAssistantReplyTimingFooter::TickFooter(double CurrentTime, float DeltaTime)
+{
+	(void)CurrentTime;
+	(void)DeltaTime;
+	SyncLabel();
+	if (!FinalCaption.IsEmpty() || StepMonotonicStart <= 0.0)
+	{
+		return EActiveTimerReturnType::Stop;
+	}
+	return EActiveTimerReturnType::Continue;
+}
+
+void SAssistantReplyTimingFooter::SyncLabel()
+{
+	if (!Label.IsValid())
+	{
+		return;
+	}
+	if (StepMonotonicStart <= 0.0 && FinalCaption.IsEmpty())
+	{
+		SetVisibility(EVisibility::Collapsed);
+		return;
+	}
+	SetVisibility(EVisibility::Visible);
+	if (!FinalCaption.IsEmpty())
+	{
+		Label->SetText(FText::FromString(FinalCaption));
+		return;
+	}
+	if (IsWritingMask && IsWritingMask())
+	{
+		Label->SetText(LOCTEXT("AssistantFooterWriting", "Writing…"));
+		return;
+	}
+	const double Dur = FPlatformTime::Seconds() - StepMonotonicStart;
+	Label->SetText(FText::FromString(FString::Printf(
+		TEXT("reply · %s"),
+		*UnrealAiFormatStepDurationForUi(Dur))));
 }
 
 /** Slides user message up + fades in (one-shot). */
@@ -59,8 +171,10 @@ private:
 
 	TWeakPtr<SChatMessageList> OwnerList;
 	float SlideProgress = 0.f;
+	float TimeSinceFollowScrollNotify = 0.f;
 	static constexpr float SlideDurationSec = 0.48f;
 	static constexpr float SlidePixels = 52.f;
+	static constexpr float FollowScrollNotifyMinIntervalSec = 0.12f;
 };
 
 void SChatUserMessageAnimated::Construct(const FArguments& InArgs)
@@ -71,6 +185,7 @@ void SChatUserMessageAnimated::Construct(const FArguments& InArgs)
 			InArgs._Content.Widget
 		];
 	SlideProgress = 0.f;
+	TimeSinceFollowScrollNotify = FollowScrollNotifyMinIntervalSec;
 	SetRenderOpacity(0.02f);
 	SetRenderTransform(TOptional<FSlateRenderTransform>(FSlateRenderTransform(FVector2D(0.f, SlidePixels))));
 	RegisterActiveTimer(
@@ -88,9 +203,14 @@ EActiveTimerReturnType SChatUserMessageAnimated::TickSlideIn(double, float Delta
 	SetRenderTransform(TOptional<FSlateRenderTransform>(
 		FSlateRenderTransform(FVector2D(0.f, SlidePixels * (1.f - S)))));
 	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+	TimeSinceFollowScrollNotify += DeltaTime;
 	if (const TSharedPtr<SChatMessageList> L = OwnerList.Pin())
 	{
-		L->NotifyFollowingScrollToBottom();
+		if (TimeSinceFollowScrollNotify >= FollowScrollNotifyMinIntervalSec)
+		{
+			TimeSinceFollowScrollNotify = 0.f;
+			L->NotifyFollowingScrollToBottom();
+		}
 	}
 	if (T >= 1.f - KINDA_SMALL_NUMBER)
 	{
@@ -110,7 +230,7 @@ void SChatMessageList::Construct(const FArguments& InArgs)
 	BackendRegistry = InArgs._BackendRegistry;
 	Session = InArgs._Session;
 	Transcript = MakeShared<FUnrealAiChatTranscript>();
-	Transcript->OnStructuralChange.AddSP(this, &SChatMessageList::RebuildTranscript);
+	Transcript->OnStructuralChange.AddSP(this, &SChatMessageList::ScheduleRebuildTranscript);
 	Transcript->OnAssistantStreamDelta.AddSP(this, &SChatMessageList::OnAssistantDeltaUi);
 	Transcript->OnThinkingStreamDelta.AddSP(this, &SChatMessageList::OnThinkingDeltaUi);
 
@@ -142,15 +262,21 @@ void SChatMessageList::Construct(const FArguments& InArgs)
 				.HAlign(HAlign_Left)
 				.Padding(FMargin(10.f, 0.f, 0.f, 10.f))
 				[
-					SNew(SButton)
-						.ButtonStyle(FAppStyle::Get(), TEXT("FlatButton"))
-						.ContentPadding(FMargin(10.f, 6.f))
+					SNew(SBorder)
 						.Visibility(this, &SChatMessageList::GetJumpToBottomVisibility)
-						.OnClicked(this, &SChatMessageList::OnJumpToBottomClicked)
+						.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.Elevated")))
+						.Padding(FMargin(0))
 						[
-							SNew(STextBlock)
-								.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
-								.Text(LOCTEXT("JumpToBottom", "↓ New messages"))
+							SNew(SButton)
+								.ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
+								.ContentPadding(FMargin(10.f, 6.f))
+								.OnClicked(this, &SChatMessageList::OnJumpToBottomClicked)
+								[
+									SNew(STextBlock)
+										.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
+										.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextPrimary())
+										.Text(LOCTEXT("JumpToBottom", "↓ New messages"))
+								]
 						]
 				]
 		];
@@ -176,11 +302,25 @@ void SChatMessageList::ClearUserAnimId()
 void SChatMessageList::ClearTranscript()
 {
 	PendingUserAnimId = FGuid();
+	ExpandedToolCallBlockIds.Reset();
 	bStickToBottom = true;
 	if (Transcript.IsValid())
 	{
 		Transcript->Clear();
 	}
+}
+
+void SChatMessageList::HydrateTranscriptFromPersistedConversation(const TArray<FUnrealAiConversationMessage>& Messages)
+{
+	PendingUserAnimId = FGuid();
+	bStickToBottom = true;
+	if (Transcript.IsValid())
+	{
+		Transcript->Clear();
+		Transcript->HydrateFromConversationMessages(Messages);
+	}
+	RebuildTranscript();
+	ForceScrollToBottomAndFollow();
 }
 
 void SChatMessageList::NotifyFollowingScrollToBottom()
@@ -193,18 +333,46 @@ void SChatMessageList::ResetAssistant()
 	// Legacy no-op: transcript drives assistant rows.
 }
 
+void SChatMessageList::ScheduleRebuildTranscript()
+{
+	bTranscriptRebuildPending = true;
+	if (bTranscriptRebuildTickerActive)
+	{
+		return;
+	}
+	bTranscriptRebuildTickerActive = true;
+	const TWeakPtr<SChatMessageList> WeakSelf(StaticCastSharedRef<SChatMessageList>(AsShared()));
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakSelf](float) -> bool
+	{
+		const TSharedPtr<SChatMessageList> Self = WeakSelf.Pin();
+		if (!Self.IsValid())
+		{
+			return false;
+		}
+		Self->bTranscriptRebuildTickerActive = false;
+		if (Self->bTranscriptRebuildPending)
+		{
+			Self->bTranscriptRebuildPending = false;
+			Self->RebuildTranscript();
+		}
+		return false;
+	}));
+}
+
 void SChatMessageList::RebuildTranscript()
 {
 	if (!MessageBox.IsValid())
 	{
 		return;
 	}
+	bSuppressToolExpansionCallbacks = true;
 	MessageBox->ClearChildren();
 	ActiveAssistantWidget.Reset();
 	ActiveThinkingWidget.Reset();
 
 	if (!Transcript.IsValid())
 	{
+		bSuppressToolExpansionCallbacks = false;
 		return;
 	}
 
@@ -227,24 +395,37 @@ void SChatMessageList::RebuildTranscript()
 		{
 		case EUnrealAiChatBlockKind::User:
 			{
-				const TSharedRef<SWidget> UserBubble = SNew(SBorder)
-					.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.UserBubble")))
-					.Padding(FMargin(10.f, 9.f))
-					[
-						SNew(SBox)
-							.HAlign(HAlign_Fill)
-							[
-								SNew(SMultiLineEditableText)
-									.IsReadOnly(true)
-									.AutoWrapText(true)
-									.Text(FText::FromString(B.UserText))
-							]
-					]
-					;
+				const TSharedRef<SWidget> UserBubble = B.bHarnessSystemUser
+					? StaticCastSharedRef<SWidget>(
+						  SNew(SBox)
+							  .Padding(FMargin(12.f, 2.f, 12.f, 8.f))
+							  .HAlign(HAlign_Fill)
+							  [
+								  SNew(STextBlock)
+									  .AutoWrapText(true)
+									  .WrapTextAt(800.f)
+									  .Text(FText::FromString(B.UserText))
+									  .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 11))
+									  .ColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted())
+							  ])
+					: StaticCastSharedRef<SWidget>(
+						  SNew(SBorder)
+							  .BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.UserBubble")))
+							  .Padding(FMargin(10.f, 9.f))
+							  [
+								  SNew(SBox)
+									  .HAlign(HAlign_Fill)
+									  [
+										  SNew(SMultiLineEditableText)
+											  .IsReadOnly(true)
+											  .AutoWrapText(true)
+											  .Text(FText::FromString(B.UserText))
+									  ]
+							  ]);
 
 				if (B.Id == PendingUserAnimId)
 				{
-					MessageBox->AddSlot().AutoHeight().Padding(4.f)
+					MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListRowMargin)
 						[
 							SNew(SChatUserMessageAnimated)
 								.OwnerList(WeakList)
@@ -255,7 +436,7 @@ void SChatMessageList::RebuildTranscript()
 				}
 				else
 				{
-					MessageBox->AddSlot().AutoHeight().Padding(4.f)
+					MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListRowMargin)
 						[
 							UserBubble
 						];
@@ -265,9 +446,11 @@ void SChatMessageList::RebuildTranscript()
 		case EUnrealAiChatBlockKind::Thinking:
 			{
 				TSharedPtr<SThinkingSubline> Th;
-				MessageBox->AddSlot().AutoHeight().Padding(4.f)
+				MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 					[
-						SAssignNew(Th, SThinkingSubline)
+						UnrealAiChatListUi::WrapWithStepCaption(
+							B.StepTimingCaption,
+							SAssignNew(Th, SThinkingSubline))
 					];
 				Th->SetFullText(B.ThinkingText);
 				ActiveThinkingWidget = Th;
@@ -275,14 +458,6 @@ void SChatMessageList::RebuildTranscript()
 			break;
 		case EUnrealAiChatBlockKind::Assistant:
 			{
-				TArray<FUnrealAiAssistantSegmentToolInfo> ToolDetails;
-				UnrealAiCollectToolDetailsAfterAssistant(Transcript->Blocks, i, ToolDetails);
-
-				const TSharedRef<SWidget> ToolsSlot = ToolDetails.Num() > 0
-					? StaticCastSharedRef<SWidget>(
-						  SNew(SAssistantToolsDropdown).ToolDetails(ToolDetails).RunId(B.RunId))
-					: SNullWidget::NullWidget;
-
 				const bool bInstantReveal =
 					!(Transcript->IsAssistantSegmentOpen()
 					  && UnrealAiChatListUi::IsLastAssistantBlock(Transcript->Blocks, i));
@@ -290,34 +465,74 @@ void SChatMessageList::RebuildTranscript()
 				const bool bMergedThinking = i > 0
 					&& Transcript->Blocks[i - 1].Kind == EUnrealAiChatBlockKind::Thinking;
 
+				const FString MergedThinkingCaption =
+					bMergedThinking ? Transcript->Blocks[i - 1].StepTimingCaption : FString();
+
 				TSharedPtr<SAssistantStreamBlock> As;
 				TSharedPtr<SThinkingSubline> ThinkLine;
 
 				const TSharedRef<SWidget> AssistantBubble =
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Top).Padding(FMargin(4.f, 3.f, 6.f, 3.f))
-					[
-						SAssignNew(As, SAssistantStreamBlock)
-							.bEnableTypewriter(bTw)
-							.TypewriterCps(Cps)
-							.OnRevealTick(FSimpleDelegate::CreateSP(this, &SChatMessageList::OnAssistantRevealTick))
-					]
-					+ SHorizontalBox::Slot()
-							  .AutoWidth()
-							  .VAlign(VAlign_Top)
-							  .Padding(FMargin(0.f, 4.f, 0.f, 0.f))
-					[
-						ToolsSlot
-					];
+					SNew(SBox)
+						.Clipping(EWidgetClipping::ClipToBounds)
+						.Padding(FMargin(4.f, 3.f, 4.f, 3.f))
+						[
+							SAssignNew(As, SAssistantStreamBlock)
+								.bEnableTypewriter(bTw)
+								.TypewriterCps(Cps)
+								.OnRevealTick(FSimpleDelegate::CreateSP(this, &SChatMessageList::OnAssistantRevealTick))
+						];
+
+				const bool bThisBlockIsLiveAssistantTail =
+					Transcript->IsAssistantSegmentOpen() && !Transcript->Blocks.IsEmpty()
+					&& Transcript->Blocks.Last().Kind == EUnrealAiChatBlockKind::Assistant
+					&& Transcript->Blocks.Last().Id == B.Id;
+				TWeakPtr<SAssistantStreamBlock> WeakAs(As);
+				const TSharedPtr<FUnrealAiChatTranscript> TranscriptPin = Transcript;
+				const TFunction<bool()> FooterWritingMask = [TranscriptPin, WeakAs, bThisBlockIsLiveAssistantTail]()
+				{
+					if (!bThisBlockIsLiveAssistantTail || !TranscriptPin.IsValid())
+					{
+						return false;
+					}
+					if (TranscriptPin->IsAssistantStreamRecentlyActive(0.28f))
+					{
+						return true;
+					}
+					if (const TSharedPtr<SAssistantStreamBlock> P = WeakAs.Pin())
+					{
+						return P->HasPendingReveal();
+					}
+					return false;
+				};
+
+				const TSharedRef<SWidget> ReplyFooter = SNew(SAssistantReplyTimingFooter)
+														   .StepMonotonicStart(B.StepMonotonicStart)
+														   .FinalCaption(B.StepTimingCaption)
+														   .IsWritingMask(FooterWritingMask);
 
 				if (bMergedThinking)
 				{
-					MessageBox->AddSlot().AutoHeight().Padding(4.f)
+					MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 						[
 							SNew(SVerticalBox)
+							+ SVerticalBox::Slot()
+								  .AutoHeight()
+								  .Padding(0.f, 0.f, 0.f, MergedThinkingCaption.IsEmpty() ? 0.f : 3.f)
+							[
+								SNew(STextBlock)
+								.Visibility(
+									MergedThinkingCaption.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+								.Text(FText::FromString(MergedThinkingCaption))
+								.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
+								.ColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted())
+							]
 							+ SVerticalBox::Slot().AutoHeight()
 							[
 								AssistantBubble
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 3.f, 0.f, 0.f)
+							[
+								ReplyFooter
 							]
 							+ SVerticalBox::Slot().AutoHeight()
 							[
@@ -329,9 +544,17 @@ void SChatMessageList::RebuildTranscript()
 				}
 				else
 				{
-					MessageBox->AddSlot().AutoHeight().Padding(4.f)
+					MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 						[
-							AssistantBubble
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot().AutoHeight()
+							[
+								AssistantBubble
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 3.f, 0.f, 0.f)
+							[
+								ReplyFooter
+							]
 						];
 				}
 
@@ -340,19 +563,38 @@ void SChatMessageList::RebuildTranscript()
 			}
 			break;
 		case EUnrealAiChatBlockKind::ToolCall:
-			MessageBox->AddSlot().AutoHeight().Padding(4.f)
+			MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 				[
-					SNew(SToolCallCard)
-						.ToolName(B.ToolName)
-						.ArgumentsPreview(B.ToolArgsPreview)
-						.ResultPreview(B.ToolResultPreview)
-						.bRunning(B.bToolRunning)
-						.bSuccess(B.bToolOk)
-						.EditorPresentation(B.ToolEditorPresentation)
+					UnrealAiChatListUi::WrapWithStepCaption(
+						B.StepTimingCaption,
+						SNew(SToolCallCard)
+							.ToolName(B.ToolName)
+							.ArgumentsPreview(B.ToolArgsPreview)
+							.ResultPreview(B.ToolResultPreview)
+							.bRunning(B.bToolRunning)
+							.bSuccess(B.bToolOk)
+							.EditorPresentation(B.ToolEditorPresentation)
+							.bInitiallyCollapsed(!ExpandedToolCallBlockIds.Contains(B.Id))
+							.OnExpansionChanged(FOnBooleanValueChanged::CreateLambda(
+								[this, BlockId = B.Id](bool bExpanded)
+								{
+									if (bSuppressToolExpansionCallbacks)
+									{
+										return;
+									}
+									if (bExpanded)
+									{
+										ExpandedToolCallBlockIds.Add(BlockId);
+									}
+									else
+									{
+										ExpandedToolCallBlockIds.Remove(BlockId);
+									}
+								})))
 				];
 			break;
 		case EUnrealAiChatBlockKind::TodoPlan:
-			MessageBox->AddSlot().AutoHeight().Padding(4.f)
+			MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 				[
 					SNew(STodoPlanPanel)
 						.Title(B.TodoTitle)
@@ -362,7 +604,7 @@ void SChatMessageList::RebuildTranscript()
 				];
 			break;
 		case EUnrealAiChatBlockKind::RunProgress:
-			MessageBox->AddSlot().AutoHeight().Padding(4.f)
+			MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 				[
 					SNew(SBorder)
 						.BorderBackgroundColor(FLinearColor(0.2f, 0.2f, 0.25f, 0.6f))
@@ -376,7 +618,7 @@ void SChatMessageList::RebuildTranscript()
 				];
 			break;
 		case EUnrealAiChatBlockKind::Notice:
-			MessageBox->AddSlot().AutoHeight().Padding(4.f)
+			MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 				[
 					SNew(SBorder)
 						.BorderBackgroundColor(B.bRunCancelled
@@ -402,6 +644,7 @@ void SChatMessageList::RebuildTranscript()
 	// later structural updates do not replay the slide-in.
 	PendingUserAnimId = FGuid();
 
+	bSuppressToolExpansionCallbacks = false;
 	ScheduleScrollToEndIfFollowing();
 }
 
@@ -450,30 +693,42 @@ void SChatMessageList::ScheduleScrollToEndIfFollowing()
 	{
 		return;
 	}
-	if (bScrollToEndTimerPending)
+	if (bSmoothFollowScrollActive)
 	{
 		return;
 	}
-	bScrollToEndTimerPending = true;
+	bSmoothFollowScrollActive = true;
 	RegisterActiveTimer(
 		0.f,
-		FWidgetActiveTimerDelegate::CreateSP(this, &SChatMessageList::FlushPendingScrollToEnd));
+		FWidgetActiveTimerDelegate::CreateSP(this, &SChatMessageList::TickSmoothFollowScroll));
 }
 
-EActiveTimerReturnType SChatMessageList::FlushPendingScrollToEnd(double, float)
+EActiveTimerReturnType SChatMessageList::TickSmoothFollowScroll(double, float DeltaTime)
 {
-	bScrollToEndTimerPending = false;
-	if (bStickToBottom && ScrollBox.IsValid())
+	if (!bStickToBottom || !ScrollBox.IsValid())
 	{
-		ScrollBox->ScrollToEnd();
+		bSmoothFollowScrollActive = false;
+		return EActiveTimerReturnType::Stop;
 	}
-	return EActiveTimerReturnType::Stop;
+
+	const float EndOffset = ScrollBox->GetScrollOffsetOfEnd();
+	const float Current = ScrollBox->GetScrollOffset();
+	const float Next = FMath::FInterpTo(Current, EndOffset, DeltaTime, FollowScrollInterpSpeed);
+	ScrollBox->SetScrollOffset(Next);
+
+	if (FMath::IsNearlyEqual(Next, EndOffset, 0.85f))
+	{
+		ScrollBox->SetScrollOffset(EndOffset);
+		bSmoothFollowScrollActive = false;
+		return EActiveTimerReturnType::Stop;
+	}
+	return EActiveTimerReturnType::Continue;
 }
 
 void SChatMessageList::ForceScrollToBottomAndFollow()
 {
 	bStickToBottom = true;
-	bScrollToEndTimerPending = false;
+	bSmoothFollowScrollActive = false;
 	if (ScrollBox.IsValid())
 	{
 		ScrollBox->ScrollToEnd();

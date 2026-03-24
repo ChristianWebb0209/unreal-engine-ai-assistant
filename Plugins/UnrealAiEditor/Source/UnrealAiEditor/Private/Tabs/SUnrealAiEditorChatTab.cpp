@@ -1,5 +1,6 @@
 #include "Tabs/SUnrealAiEditorChatTab.h"
 
+#include "Async/Async.h"
 #include "UnrealAiEditorModule.h"
 #include "UnrealAiEditorTabIds.h"
 #include "Context/UnrealAiContextDragDrop.h"
@@ -21,13 +22,39 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Styling/CoreStyle.h"
+#include "Widgets/Docking/SDockTab.h"
+#include "Widgets/SWidget.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
+
+namespace UnrealAiChatTabChrome
+{
+	static TSharedPtr<SDockTab> FindParentDockTab(const TSharedRef<const SWidget>& Widget)
+	{
+		TSharedPtr<SWidget> Current = Widget->GetParentWidget();
+		while (Current.IsValid())
+		{
+			if (Current->GetType() == FName(TEXT("SDockTab")))
+			{
+				return StaticCastSharedPtr<SDockTab>(Current);
+			}
+			Current = Current->GetParentWidget();
+		}
+		return nullptr;
+	}
+}
+
+void SUnrealAiEditorChatTab::SetHostDockTab(const TSharedRef<SDockTab>& InHostTab)
+{
+	HostDockTab = InHostTab;
+	RefreshChatChrome();
+}
 
 void SUnrealAiEditorChatTab::Construct(const FArguments& InArgs)
 {
 	BackendRegistry = InArgs._BackendRegistry;
 	Session = MakeShared<FUnrealAiChatUiSession>();
+	Session->OnChatNameChanged.AddSP(this, &SUnrealAiEditorChatTab::RefreshChatChrome);
 	FUnrealAiEditorModule::SetActiveChatSession(Session);
 	if (BackendRegistry.IsValid())
 	{
@@ -35,7 +62,14 @@ void SUnrealAiEditorChatTab::Construct(const FArguments& InArgs)
 		{
 			Session->ModelProfileId = Reg->GetDefaultModelId();
 		}
-		Session->ThreadId = FGuid::NewGuid();
+		if (InArgs._bUseExplicitThreadId && InArgs._ExplicitThreadId.IsValid())
+		{
+			Session->ThreadId = InArgs._ExplicitThreadId;
+		}
+		else
+		{
+			Session->ThreadId = FGuid::NewGuid();
+		}
 	}
 
 	ChildSlot
@@ -63,14 +97,51 @@ void SUnrealAiEditorChatTab::Construct(const FArguments& InArgs)
 					.Session(Session)
 			]
 		];
+
+	if (InArgs._bUseExplicitThreadId && InArgs._ExplicitThreadId.IsValid())
+	{
+		UnrealAiChatUi_LoadPersistedThreadIntoUi(BackendRegistry, Session, MessageListWidget);
+	}
+
+	RefreshChatChrome();
+	const TWeakPtr<SUnrealAiEditorChatTab> WeakChatForChrome = SharedThis(this);
+	AsyncTask(ENamedThreads::GameThread, [WeakChatForChrome]()
+	{
+		if (const TSharedPtr<SUnrealAiEditorChatTab> Self = WeakChatForChrome.Pin())
+		{
+			Self->RefreshChatChrome();
+		}
+	});
 }
 
 SUnrealAiEditorChatTab::~SUnrealAiEditorChatTab()
 {
+	FUnrealAiEditorModule::UnregisterAgentChatTabForPersistence(this);
+	if (Session.IsValid())
+	{
+		Session->OnChatNameChanged.RemoveAll(this);
+	}
 	if (FUnrealAiEditorModule::GetActiveChatSession() == Session)
 	{
 		FUnrealAiEditorModule::SetActiveChatSession(nullptr);
 	}
+}
+
+void SUnrealAiEditorChatTab::RefreshChatChrome()
+{
+	const FText DockLabel = (Session.IsValid() && !Session->ChatName.IsEmpty())
+		? FText::FromString(Session->ChatName)
+		: LOCTEXT("AgentChatDockFallback", "Agent Chat");
+	TSharedPtr<SDockTab> DockTab = HostDockTab.Pin();
+	if (!DockTab.IsValid())
+	{
+		DockTab = UnrealAiChatTabChrome::FindParentDockTab(StaticCastSharedRef<const SWidget>(AsShared()));
+	}
+	if (DockTab.IsValid())
+	{
+		DockTab->SetLabel(DockLabel);
+	}
+	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 }
 
 FReply SUnrealAiEditorChatTab::OnDragOver(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent)

@@ -17,10 +17,12 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	virtual ~SChatHeader() override;
 
 private:
 	FReply OnNewChatPressed();
 	FText GetChatTitleText() const;
+	void OnChatNameChanged();
 
 	TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry;
 	TSharedPtr<FUnrealAiChatUiSession> Session;

@@ -1,6 +1,7 @@
 #include "Widgets/SChatComposer.h"
 
 #include "UnrealAiEditorModule.h"
+#include "Style/UnrealAiEditorStyle.h"
 #include "Async/Async.h"
 #include "Widgets/SChatMessageList.h"
 #include "Widgets/UnrealAiChatTranscript.h"
@@ -172,18 +173,18 @@ namespace UnrealAiModeUi
 		}
 	}
 
-	static const TCHAR* IconName(EUnrealAiAgentMode M)
+	static const FSlateBrush* ModeIconBrush(EUnrealAiAgentMode M)
 	{
 		switch (M)
 		{
 		case EUnrealAiAgentMode::Ask:
-			return TEXT("Icons.Help");
+			return FAppStyle::GetBrush(TEXT("Icons.Help"));
 		case EUnrealAiAgentMode::Agent:
-			return TEXT("Icons.User");
+			return FUnrealAiEditorStyle::GetAgentChatTabIconBrush();
 		case EUnrealAiAgentMode::Orchestrate:
-			return TEXT("Icons.Blueprint");
+			return FAppStyle::GetBrush(TEXT("Icons.Blueprint"));
 		default:
-			return TEXT("Icons.Help");
+			return FAppStyle::GetBrush(TEXT("Icons.Help"));
 		}
 	}
 }
@@ -284,6 +285,94 @@ namespace UnrealAiComposerMentionInsert
 			Src = LastPathSegment(C.PrimaryKey);
 		}
 		return SanitizeInlineMentionToken(Src);
+	}
+
+	/** Same rules as @ tokens inserted by OnPickMentionCandidate (not chip label truncation). */
+	static FString InlineTokenFromContextAttachment(const FContextAttachment& A)
+	{
+		switch (A.Type)
+		{
+		case EContextAttachmentType::AssetPath:
+		{
+			if (A.Payload.IsEmpty())
+			{
+				return FString();
+			}
+			FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+			const FAssetData AD = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(A.Payload));
+			const FString Src = AD.IsValid() ? AD.AssetName.ToString() : FPaths::GetBaseFilename(A.Payload);
+			return SanitizeInlineMentionToken(Src);
+		}
+		case EContextAttachmentType::ActorReference:
+		{
+			FString Src = A.Label;
+			if (Src.IsEmpty())
+			{
+				Src = LastPathSegment(A.Payload);
+			}
+			return SanitizeInlineMentionToken(Src);
+		}
+		case EContextAttachmentType::FilePath:
+		{
+			if (A.Payload.IsEmpty())
+			{
+				return FString();
+			}
+			return SanitizeInlineMentionToken(FPaths::GetCleanFilename(A.Payload));
+		}
+		case EContextAttachmentType::ContentFolder:
+		{
+			if (A.Payload.IsEmpty())
+			{
+				return FString();
+			}
+			return SanitizeInlineMentionToken(LastPathSegment(A.Payload));
+		}
+		case EContextAttachmentType::FreeText:
+		case EContextAttachmentType::BlueprintNodeRef:
+		{
+			const FString Src = A.Label.IsEmpty() ? A.Payload : A.Label;
+			if (Src.IsEmpty())
+			{
+				return FString();
+			}
+			return SanitizeInlineMentionToken(Src);
+		}
+		default:
+			return FString();
+		}
+	}
+
+	/** Remove @<fragment> (and one trailing space if present) when fragment sanitizes to Tok. */
+	static void RemoveAtMentionsForToken(FString& Text, const FString& Tok)
+	{
+		if (Tok.IsEmpty())
+		{
+			return;
+		}
+		for (int32 i = 0; i < Text.Len(); ++i)
+		{
+			if (Text[i] != TEXT('@'))
+			{
+				continue;
+			}
+			int32 j = i + 1;
+			while (j < Text.Len() && !FChar::IsWhitespace(Text[j]))
+			{
+				++j;
+			}
+			const FString Candidate = Text.Mid(i + 1, j - (i + 1));
+			if (SanitizeInlineMentionToken(Candidate).Equals(Tok, ESearchCase::CaseSensitive))
+			{
+				int32 End = j;
+				if (End < Text.Len() && Text[End] == TEXT(' '))
+				{
+					++End;
+				}
+				Text.RemoveAt(i, End - i);
+				i = FMath::Max(i - 1, 0);
+			}
+		}
 	}
 } // namespace UnrealAiComposerMentionInsert
 
@@ -605,18 +694,12 @@ void SChatComposer::Construct(const FArguments& InArgs)
 				+ SHorizontalBox::Slot().AutoWidth().Padding(2.f)
 				[
 					SNew(SButton)
-						.Text(LOCTEXT("NewChat", "New chat"))
-						.OnClicked(this, &SChatComposer::OnNewChatClicked)
+						.Text(LOCTEXT("AttachScreenshot", "Attach screenshot"))
+						.ToolTipText(LOCTEXT(
+							"AttachScreenshotTip",
+							"Capture the active level viewport to PNG (max ~1280px on the long side for speed) and attach it to context."))
+						.OnClicked(this, &SChatComposer::OnAttachScreenshotClicked)
 				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(4.f, 2.f, 4.f, 2.f)
-			[
-				SNew(SButton)
-					.Text(LOCTEXT("AttachScreenshot", "Attach screenshot"))
-					.ToolTipText(LOCTEXT(
-						"AttachScreenshotTip",
-						"Capture the active level viewport to PNG (max ~1280px on the long side for speed) and attach it to context."))
-					.OnClicked(this, &SChatComposer::OnAttachScreenshotClicked)
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(PadFooterSlot)
 			[
@@ -1655,11 +1738,28 @@ FReply SChatComposer::OnRemoveAttachment(int32 Index)
 	}
 	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
 	const FString Tid = Session->ThreadId.ToString(EGuidFormats::DigitsWithHyphens);
+	TOptional<FContextAttachment> Removed;
 	if (IAgentContextService* Ctx = BackendRegistry->GetContextService())
 	{
 		Ctx->LoadOrCreate(ProjectId, Tid);
+		if (const FAgentContextState* St = Ctx->GetState(ProjectId, Tid))
+		{
+			if (St->Attachments.IsValidIndex(Index))
+			{
+				Removed = St->Attachments[Index];
+			}
+		}
 		Ctx->RemoveAttachment(Index);
 	}
+#if WITH_EDITOR
+	if (Removed.IsSet() && InputBox.IsValid())
+	{
+		FString S = InputBox->GetText().ToString();
+		const FString Tok = UnrealAiComposerMentionInsert::InlineTokenFromContextAttachment(Removed.GetValue());
+		UnrealAiComposerMentionInsert::RemoveAtMentionsForToken(S, Tok);
+		InputBox->SetText(FText::FromString(S));
+	}
+#endif
 	RefreshAttachmentChips();
 	return FReply::Handled();
 }
@@ -1794,7 +1894,7 @@ FLinearColor SChatComposer::GetModeAccent() const
 
 const FSlateBrush* SChatComposer::GetModeIconBrush() const
 {
-	return FAppStyle::GetBrush(UnrealAiModeUi::IconName(AgentMode));
+	return UnrealAiModeUi::ModeIconBrush(AgentMode);
 }
 
 TSharedRef<SWidget> SChatComposer::MakeModeMenuRow(EUnrealAiAgentMode Mode, FText Title, FText Blurb)
@@ -1835,7 +1935,7 @@ TSharedRef<SWidget> SChatComposer::MakeModeMenuRow(EUnrealAiAgentMode Mode, FTex
 					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 8.f, 0.f)
 					[
 						SNew(SImage)
-							.Image(FAppStyle::GetBrush(UnrealAiModeUi::IconName(Mode)))
+							.Image(UnrealAiModeUi::ModeIconBrush(Mode))
 							.ColorAndOpacity(FSlateColor(FLinearColor::White))
 					]
 					+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
@@ -1947,12 +2047,6 @@ FReply SChatComposer::OnAttachScreenshotClicked()
 		return false;
 	}));
 #endif
-	return FReply::Handled();
-}
-
-FReply SChatComposer::OnNewChatClicked()
-{
-	FUnrealAiEditorModule::OpenNewAgentChatTabBeside(AsShared());
 	return FReply::Handled();
 }
 

@@ -13,7 +13,10 @@ public:
 	static FName GetStyleSetName();
 
 	static const FSlateBrush* GetBrush(FName PropertyName);
-	/** Re-read bubble colors from project settings (called after edits and during style init). */
+	/** Agent Chat tab/menus/mode: Starship AIController_16 vector icon from engine Editor/Slate (always present). */
+	static FName AgentChatTabIconName();
+	static const FSlateBrush* GetAgentChatTabIconBrush();
+	/** Refreshes fixed chat bubble brushes (plugin-defined; not user-configurable). */
 	static void ApplyChatBubbleColorsFromSettings();
 	static FSlateColor ColorBackgroundCanvas();
 	static FSlateColor ColorTextPrimary();

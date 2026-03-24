@@ -1,6 +1,5 @@
 #include "Widgets/SToolEditorNotePanel.h"
 
-#include "Tools/Presentation/UnrealAiEditorNavigation.h"
 #include "Tools/Presentation/UnrealAiToolEditorNoteBuilders.h"
 #include "Tools/Presentation/UnrealAiToolEditorPresentation.h"
 
@@ -11,7 +10,6 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SWrapBox.h"
-#include "Widgets/Text/SHyperlink.h"
 
 void SToolEditorNotePanel::Construct(const FArguments& InArgs)
 {
@@ -25,11 +23,6 @@ void SToolEditorNotePanel::Construct(const FArguments& InArgs)
 			];
 		return;
 	}
-
-	const auto OnLinkClicked = [](const FString& ObjectPath)
-	{
-		UnrealAiEditorNavigation::NavigateToAssetObjectPath(ObjectPath);
-	};
 
 	TSharedRef<SVerticalBox> Root = SNew(SVerticalBox);
 
@@ -53,7 +46,7 @@ void SToolEditorNotePanel::Construct(const FArguments& InArgs)
 			.AutoHeight()
 			.Padding(0.f, 0.f, 0.f, 6.f)
 			[
-				UnrealAiBuildMarkdownToolNoteBody(EditorPresentation->MarkdownBody, OnLinkClicked)
+				UnrealAiBuildMarkdownToolNoteBody(EditorPresentation->MarkdownBody)
 			];
 	}
 
@@ -65,15 +58,9 @@ void SToolEditorNotePanel::Construct(const FArguments& InArgs)
 			const FString Label = L.Label.IsEmpty() ? L.ObjectPath : L.Label;
 			const FString ObjectPath = L.ObjectPath;
 			LinksWrap->AddSlot()
-				.AutoWidth()
 				.Padding(FMargin(0.f, 2.f, 10.f, 2.f))
 				[
-					SNew(SHyperlink)
-						.Text(FText::FromString(Label))
-						.OnNavigate_Lambda([ObjectPath, OnLinkClicked]()
-						{
-							OnLinkClicked(ObjectPath);
-						})
+					UnrealAiMakeChatHyperlink(Label, ObjectPath)
 				];
 		}
 

@@ -1,14 +1,29 @@
 #include "Style/UnrealAiEditorStyle.h"
 
-#include "UnrealAiEditorSettings.h"
 #include "Brushes/SlateBoxBrush.h"
+#include "Math/Color.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Styling/SlateStyleRegistry.h"
+#include "Brushes/SlateImageBrush.h"
 #if WITH_EDITOR
 #include "Framework/Application/SlateApplication.h"
 #endif
 
 TSharedPtr<FSlateStyleSet> FUnrealAiEditorStyle::StyleSet = nullptr;
+
+namespace UnrealAiEditorBubbleColors
+{
+	/** User message bubble: #1e1e1e (sRGB → linear for Slate). */
+	static FLinearColor UserBubbleFill()
+	{
+		return FLinearColor(FColor(0x1e, 0x1e, 0x1e, 0xff));
+	}
+
+	static FLinearColor AssistantBubbleFill()
+	{
+		return FLinearColor(0.092f, 0.098f, 0.114f, 1.f);
+	}
+} // namespace UnrealAiEditorBubbleColors
 
 void FUnrealAiEditorStyle::Initialize()
 {
@@ -36,6 +51,16 @@ void FUnrealAiEditorStyle::Initialize()
 	Style->Set("UnrealAiEditor.DebugInspect", new FSlateColorBrush(FLinearColor(0.09f, 0.11f, 0.14f, 1.f)));
 	ApplyChatBubbleColorsFromSettings();
 
+	// Agent Chat branding: engine SVG under Content/Editor/Slate (avoids missing FAppStyle "Icons.*" names on some versions).
+	{
+		const FVector2D AgentIconSize(16.f, 16.f);
+		Style->Set(
+			"UnrealAiEditor.AgentChatTabIcon",
+			new FSlateVectorImageBrush(
+				Style->RootToContentDir(TEXT("Starship/AssetIcons/AIController_16"), TEXT(".svg")),
+				AgentIconSize));
+	}
+
 	FSlateStyleRegistry::RegisterSlateStyle(*StyleSet.Get());
 }
 
@@ -45,10 +70,13 @@ void FUnrealAiEditorStyle::ApplyChatBubbleColorsFromSettings()
 	{
 		return;
 	}
-	const UUnrealAiEditorSettings* Set = GetDefault<UUnrealAiEditorSettings>();
 	FSlateStyleSet* Style = StyleSet.Get();
-	Style->Set("UnrealAiEditor.UserBubble", new FSlateRoundedBoxBrush(Set->UserChatBubbleColor, 8.f));
-	Style->Set("UnrealAiEditor.AssistantBubble", new FSlateColorBrush(Set->AgentChatBubbleColor));
+	Style->Set(
+		"UnrealAiEditor.UserBubble",
+		new FSlateRoundedBoxBrush(UnrealAiEditorBubbleColors::UserBubbleFill(), 8.f));
+	Style->Set(
+		"UnrealAiEditor.AssistantBubble",
+		new FSlateColorBrush(UnrealAiEditorBubbleColors::AssistantBubbleFill()));
 #if WITH_EDITOR
 	if (FSlateApplication::IsInitialized())
 	{
@@ -80,6 +108,17 @@ FName FUnrealAiEditorStyle::GetStyleSetName()
 const FSlateBrush* FUnrealAiEditorStyle::GetBrush(FName PropertyName)
 {
 	return StyleSet.IsValid() ? StyleSet->GetBrush(PropertyName) : nullptr;
+}
+
+FName FUnrealAiEditorStyle::AgentChatTabIconName()
+{
+	static const FName N(TEXT("UnrealAiEditor.AgentChatTabIcon"));
+	return N;
+}
+
+const FSlateBrush* FUnrealAiEditorStyle::GetAgentChatTabIconBrush()
+{
+	return GetBrush(AgentChatTabIconName());
 }
 
 FSlateColor FUnrealAiEditorStyle::ColorBackgroundCanvas()

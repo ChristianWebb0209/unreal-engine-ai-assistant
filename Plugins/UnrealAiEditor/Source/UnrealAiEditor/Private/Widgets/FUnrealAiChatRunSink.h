@@ -29,6 +29,7 @@ public:
 		bool bSuccess,
 		const FString& ResultPreview,
 		const TSharedPtr<FUnrealAiToolEditorPresentation>& EditorPresentation) override;
+	virtual void OnEditorBlockingDialogDuringTools(const FString& Summary) override;
 	virtual void OnRunContinuation(int32 PhaseIndex, int32 TotalPhasesHint) override;
 	virtual void OnTodoPlanEmitted(const FString& Title, const FString& PlanJson) override;
 	virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) override;

@@ -13,6 +13,12 @@ void SChatHeader::Construct(const FArguments& InArgs)
 {
 	OnOpenSettings = InArgs._OnOpenSettings;
 	OnNewChatDelegate = InArgs._OnNewChat;
+	BackendRegistry = InArgs._BackendRegistry;
+	Session = InArgs._Session;
+	if (Session.IsValid())
+	{
+		Session->OnChatNameChanged.AddSP(this, &SChatHeader::OnChatNameChanged);
+	}
 
 	ChildSlot
 		[SNew(SBorder)
@@ -48,6 +54,19 @@ void SChatHeader::Construct(const FArguments& InArgs)
 							.OnClicked(this, &SChatHeader::OnNewChatPressed)
 					]
 				]];
+}
+
+SChatHeader::~SChatHeader()
+{
+	if (Session.IsValid())
+	{
+		Session->OnChatNameChanged.RemoveAll(this);
+	}
+}
+
+void SChatHeader::OnChatNameChanged()
+{
+	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 }
 
 FText SChatHeader::GetChatTitleText() const

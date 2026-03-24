@@ -10,6 +10,7 @@ class FUnrealAiBackendRegistry;
 class SEditableTextBox;
 class SVerticalBox;
 class STextBlock;
+class SWidgetSwitcher;
 
 class SUnrealAiEditorSettingsTab final : public SCompoundWidget
 {
@@ -78,6 +79,15 @@ private:
 	void UpdateModelPricingHint(FDynModelRow& Row);
 	void ApplyCompanyPreset(FDynSectionRow& Row, const FString& PresetId);
 
+	FReply OnSettingsSegmentClicked(int32 Index);
+	FReply OnChatHistoryRefreshClicked();
+	void RebuildChatHistoryListUi();
+
+	void SyncChatAppearanceWidgetsFromSettings();
+	void CommitUserChatBubbleComponent(int32 ChannelIndex, float Value);
+	void CommitAgentChatBubbleComponent(int32 ChannelIndex, float Value);
+	FReply OnResetChatBubbleColorsClicked();
+
 	TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry;
 	TSharedPtr<FJsonObject> CachedSettingsRoot;
 
@@ -91,6 +101,8 @@ private:
 	TSharedPtr<SEditableTextBox> ApiDefaultProviderIdBox;
 
 	TSharedPtr<SVerticalBox> SectionsVBox;
+	TSharedPtr<SWidgetSwitcher> SettingsMainSwitcher;
+	TSharedPtr<SVerticalBox> ChatHistoryListVBox;
 	TSharedPtr<STextBlock> UsageSummaryBlock;
 
 	TArray<TSharedPtr<FString>> CompanyPresetOptions;

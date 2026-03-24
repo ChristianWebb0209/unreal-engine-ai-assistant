@@ -1,10 +1,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/Set.h"
 #include "Layout/Visibility.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
+
+struct FUnrealAiConversationMessage;
 
 class FUnrealAiChatTranscript;
 class FUnrealAiBackendRegistry;
@@ -27,6 +30,9 @@ public:
 	FGuid AddUserMessage(const FString& Text);
 	void ClearTranscript();
 
+	/** Replace transcript from disk (conversation.json) and rebuild the list. */
+	void HydrateTranscriptFromPersistedConversation(const TArray<FUnrealAiConversationMessage>& Messages);
+
 	/** @deprecated Prefer AddUserMessage; kept for call sites. */
 	void ResetAssistant();
 
@@ -37,6 +43,8 @@ public:
 	void NotifyFollowingScrollToBottom();
 
 private:
+	/** Coalesces rapid OnStructuralChange bursts (e.g. tool start/end) to one rebuild tick. */
+	void ScheduleRebuildTranscript();
 	void RebuildTranscript();
 	void OnAssistantDeltaUi(const FString& Chunk);
 	void OnThinkingDeltaUi(const FString& Chunk, bool bFirstChunk);
@@ -44,7 +52,7 @@ private:
 	void OnAssistantRevealTick();
 	void ScheduleScrollToEndIfFollowing();
 	void ForceScrollToBottomAndFollow();
-	EActiveTimerReturnType FlushPendingScrollToEnd(double InCurrentTime, float InDeltaTime);
+	EActiveTimerReturnType TickSmoothFollowScroll(double InCurrentTime, float InDeltaTime);
 	EVisibility GetJumpToBottomVisibility() const;
 	FReply OnJumpToBottomClicked();
 
@@ -60,11 +68,23 @@ private:
 	/** User message that plays the slide-in animation on next rebuild. */
 	FGuid PendingUserAnimId;
 
+	/** Tool call blocks the user left expanded; preserved across transcript rebuilds. */
+	TSet<FGuid> ExpandedToolCallBlockIds;
+
+	/** SExpandableArea may emit "collapsed" while destroying old rows; ignore during rebuild. */
+	bool bSuppressToolExpansionCallbacks = false;
+
 	/** When true, new assistant/thinking content keeps the view pinned to the bottom. */
 	bool bStickToBottom = true;
 
 	/** Slate units: treat as "at bottom" if this close to max scroll. */
 	static constexpr float StickToBottomThresholdPx = 48.f;
 
-	bool bScrollToEndTimerPending = false;
+	/** True while actively interpolating scroll offset toward the bottom. */
+	bool bSmoothFollowScrollActive = false;
+	/** Larger = snappier follow; smaller = smoother drift. */
+	static constexpr float FollowScrollInterpSpeed = 11.f;
+
+	bool bTranscriptRebuildPending = false;
+	bool bTranscriptRebuildTickerActive = false;
 };

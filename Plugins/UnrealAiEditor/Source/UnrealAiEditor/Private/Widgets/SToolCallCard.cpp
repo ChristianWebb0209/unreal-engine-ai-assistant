@@ -49,6 +49,14 @@ FReply SToolCallCard::OnCopyClicked()
 	return FReply::Handled();
 }
 
+void SToolCallCard::HandleExpansionChanged(const bool bIsExpanded)
+{
+	if (OnExpansionChanged.IsBound())
+	{
+		OnExpansionChanged.Execute(bIsExpanded);
+	}
+}
+
 void SToolCallCard::Construct(const FArguments& InArgs)
 {
 	ToolName = InArgs._ToolName;
@@ -57,6 +65,7 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 	bRunning = InArgs._bRunning;
 	bSuccess = InArgs._bSuccess;
 	EditorPresentation = InArgs._EditorPresentation;
+	OnExpansionChanged = InArgs._OnExpansionChanged;
 
 	const EUnrealAiToolVisualCategory Cat = UnrealAiClassifyToolVisuals(ToolName);
 	CategoryTint = UnrealAiToolCategoryTint(Cat);
@@ -75,10 +84,12 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 					const FLinearColor Bright = BaseTint * FLinearColor(0.95f, 0.95f, 0.95f, 0.95f);
 					return FSlateColor(FLinearColor::LerpUsingHSV(Dim, Bright, T));
 				})
-				.Padding(FMargin(4.f))
+				.Padding(FMargin(2.f))
 				[
 					SNew(SExpandableArea)
-						.InitiallyCollapsed(true)
+						.InitiallyCollapsed(InArgs._bInitiallyCollapsed)
+						.OnAreaExpansionChanged(
+							FOnBooleanValueChanged::CreateSP(this, &SToolCallCard::HandleExpansionChanged))
 						.AreaTitle(FText::GetEmpty())
 						.BorderBackgroundColor(FLinearColor(0.09f, 0.09f, 0.1f, 0.98f))
 						.HeaderContent()
@@ -146,7 +157,7 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 						.BodyContent()
 						[
 							SNew(SVerticalBox)
-							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 2.f, 4.f, 2.f))
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(3.f, 1.f, 3.f, 1.f))
 							[
 								SNew(STextBlock)
 									.Text(LOCTEXT("ArgsHdr", "Arguments (JSON)"))
@@ -187,7 +198,7 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 												ResultPreview.IsEmpty() && bRunning ? FString(TEXT("…")) : ResultPreview))
 									]
 							]
-							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 4.f, 0.f, 0.f))
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 2.f, 0.f, 0.f))
 							[
 								SNew(SToolEditorNotePanel)
 									.EditorPresentation(EditorPresentation)

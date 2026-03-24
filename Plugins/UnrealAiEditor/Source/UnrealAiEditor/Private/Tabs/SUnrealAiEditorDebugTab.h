@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Containers/Ticker.h"
+#include "Input/Reply.h"
 #include "Widgets/SCompoundWidget.h"
 
 class FUnrealAiBackendRegistry;
@@ -35,6 +36,10 @@ private:
 	void OnLoadActiveContext();
 	void OnLoadActiveConversation();
 	void OnCopyInspectorClicked();
+	FReply OnDeleteAllLocalChatDataClicked();
+
+	void RebuildOpenChatHighlightCache();
+	bool IsPathHighlighted(const FString& FullPathNormalized) const;
 
 	FString PrettyOrRawJson(const FString& Raw) const;
 	FString LoadFileCapped(const FString& Path, bool& bOutTruncated) const;
@@ -58,4 +63,7 @@ private:
 	bool bAutoRefresh = false;
 	float AutoRefreshAccumSeconds = 0.f;
 	FTSTicker::FDelegateHandle TickerHandle;
+
+	TSet<FString> OpenChatExactPathsNorm;
+	TSet<FString> OpenChatDirectoryPrefixesNorm;
 };
