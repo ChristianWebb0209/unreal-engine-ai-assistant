@@ -2,6 +2,7 @@
 
 #include "Tools/UnrealAiToolDispatch_MoreAssets.h"
 #include "Tools/UnrealAiToolJson.h"
+#include "Tools/Presentation/UnrealAiToolEditorNoteBuilders.h"
 
 #include "Animation/AnimBlueprint.h"
 #include "EdGraph/EdGraph.h"
@@ -1017,7 +1018,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 	O->SetNumberField(TEXT("node_count"), static_cast<double>(NodeById.Num()));
 	O->SetNumberField(TEXT("link_count"), static_cast<double>(Ir.Links.Num()));
 	O->SetNumberField(TEXT("blueprint_status"), static_cast<double>(static_cast<int32>(BP->Status)));
-	return UnrealAiToolJson::Ok(O);
+	const FString ToolMarkdown = FString::Printf(
+		TEXT("### Blueprint IR apply\n- Nodes created: %d\n- Links created: %d\n- Blueprint status: %d\n"),
+		NodeById.Num(),
+		Ir.Links.Num(),
+		static_cast<int32>(BP->Status));
+	return UnrealAiToolJson::OkWithEditorPresentation(
+		O,
+		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Ir.BlueprintPath, Ir.GraphName, ToolMarkdown));
 }
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGetGraphSummary(const TSharedPtr<FJsonObject>& Args)
