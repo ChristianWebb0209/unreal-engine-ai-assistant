@@ -657,6 +657,8 @@ These align with [`PRD.md`](../PRD.md) §6 and are the first implementation wave
 
 ## Blueprints & graph tooling
 
+**Layout + merge (append new logic to existing events like Tick instead of duplicating):** see [`PRD-blueprint-formatter.md`](PRD-blueprint-formatter.md).
+
 ### `blueprint_compile`
 
 | Field | Value |
