@@ -21,12 +21,18 @@ namespace UnrealAiOrchestrateExecutorPriv
 			(void)CallId;
 			(void)ArgumentsJson;
 		}
-		virtual void OnToolCallFinished(const FString& ToolName, const FString& CallId, bool bSuccess, const FString& ResultPreview) override
+		virtual void OnToolCallFinished(
+			const FString& ToolName,
+			const FString& CallId,
+			bool bSuccess,
+			const FString& ResultPreview,
+			const TSharedPtr<FUnrealAiToolEditorPresentation>& EditorPresentation) override
 		{
 			(void)ToolName;
 			(void)CallId;
 			(void)bSuccess;
 			(void)ResultPreview;
+			(void)EditorPresentation;
 		}
 		virtual void OnRunContinuation(int32 PhaseIndex, int32 TotalPhasesHint) override
 		{
@@ -108,6 +114,28 @@ void FUnrealAiOrchestrateExecutor::OnPlannerFinished(bool bSuccess, const FStrin
 		Finish(false, TEXT("Orchestrate cancelled."));
 		return;
 	}
+
+	// Chat naming token propagation:
+	// Orchestrate planner output is not streamed directly into the chat transcript (we only forward
+	// a short "plan ready" message). If the model appended `<chat-name: ...>` to the planner response,
+	// forward just that token to the parent sink so the UI can rename/strip it.
+	if (ParentSink.IsValid())
+	{
+		const int32 TagStart = PlannerText.Find(TEXT("<chat-name"), ESearchCase::IgnoreCase);
+		if (TagStart >= 0)
+		{
+			const int32 TagEnd = PlannerText.Find(TEXT(">"), ESearchCase::CaseSensitive, ESearchDir::FromStart, TagStart);
+			if (TagEnd >= 0 && TagEnd >= TagStart)
+			{
+				const FString TokenChunk = PlannerText.Mid(TagStart, (TagEnd - TagStart) + 1);
+				if (!TokenChunk.IsEmpty())
+				{
+					ParentSink->OnAssistantDelta(TokenChunk);
+				}
+			}
+		}
+	}
+
 	if (!bSuccess)
 	{
 		Finish(false, ErrorText.IsEmpty() ? TEXT("Planner turn failed.") : ErrorText);

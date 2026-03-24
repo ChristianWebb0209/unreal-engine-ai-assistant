@@ -19,6 +19,9 @@ public:
 	virtual bool SaveThreadConversationJson(const FString& ProjectId, const FString& ThreadId, const FString& JsonBody) override;
 	virtual bool LoadThreadConversationJson(const FString& ProjectId, const FString& ThreadId, FString& OutJsonBody) override;
 
+	virtual bool SetThreadChatName(const FString& ProjectId, const FString& ThreadId, const FString& ChatName) override;
+	virtual bool GetThreadChatName(const FString& ProjectId, const FString& ThreadId, FString& OutChatName) override;
+
 private:
 	FString EnsureSubdir(const FString& RelativePath) const;
 };

@@ -30,4 +30,11 @@ public:
 	/** Per-thread chat transcript for the harness: `chats/<ProjectId>/threads/<ThreadId>/conversation.json`. */
 	virtual bool SaveThreadConversationJson(const FString& ProjectId, const FString& ThreadId, const FString& JsonBody) = 0;
 	virtual bool LoadThreadConversationJson(const FString& ProjectId, const FString& ThreadId, FString& OutJsonBody) = 0;
+
+	/**
+	 * Optional: rename a chat on disk using a model-proposed name.
+	 * This may move the per-thread folder (e.g. `threads/<ThreadId>` -> `threads/<slug>`).
+	 */
+	virtual bool SetThreadChatName(const FString& ProjectId, const FString& ThreadId, const FString& ChatName) = 0;
+	virtual bool GetThreadChatName(const FString& ProjectId, const FString& ThreadId, FString& OutChatName) = 0;
 };

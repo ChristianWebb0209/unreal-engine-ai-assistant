@@ -26,13 +26,59 @@ namespace UnrealAiOrchestrateDag
 	{
 		OutDag = FUnrealAiOrchestrateDag();
 		OutError.Empty();
-		TSharedPtr<FJsonObject> Root;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(DagJson);
-		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+
+		// Planner text is supposed to be "DAG-only JSON", but in practice many models wrap it in markdown
+		// code fences (```json ... ```) or include leading/trailing prose. Be tolerant and try to extract
+		// the first JSON object.
+		auto TryParseObject = [&OutError](const FString& Candidate, TSharedPtr<FJsonObject>& InOutRoot) -> bool
 		{
-			OutError = TEXT("Planner output is not valid JSON.");
-			return false;
+			InOutRoot.Reset();
+			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Candidate);
+			if (!FJsonSerializer::Deserialize(Reader, InOutRoot) || !InOutRoot.IsValid())
+			{
+				return false;
+			}
+			return true;
+		};
+
+		TSharedPtr<FJsonObject> Root;
+		FString FenceStripped;
+		{
+			const FString Trimmed = DagJson.TrimStartAndEnd();
+			if (TryParseObject(Trimmed, Root))
+			{
+				goto ParsedOk;
+			}
 		}
+
+		// Strip code fences if present.
+		FenceStripped = DagJson;
+		FenceStripped = FenceStripped.Replace(TEXT("```json"), TEXT(""), ESearchCase::IgnoreCase);
+		FenceStripped = FenceStripped.Replace(TEXT("```"), TEXT(""), ESearchCase::IgnoreCase);
+		FenceStripped = FenceStripped.TrimStartAndEnd();
+		if (TryParseObject(FenceStripped, Root))
+		{
+			goto ParsedOk;
+		}
+
+		// Fallback: find first '{' and last '}' and parse the substring.
+		{
+			const int32 FirstBrace = FenceStripped.Find(TEXT("{"), ESearchCase::CaseSensitive, ESearchDir::FromStart);
+			const int32 LastBrace = FenceStripped.Find(TEXT("}"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+			if (FirstBrace >= 0 && LastBrace > FirstBrace)
+			{
+				const FString Sub = FenceStripped.Mid(FirstBrace, (LastBrace - FirstBrace) + 1);
+				if (TryParseObject(Sub, Root))
+				{
+					goto ParsedOk;
+				}
+			}
+		}
+
+		OutError = TEXT("Planner output is not valid JSON.");
+		return false;
+
+	ParsedOk:
 		FString Schema;
 		Root->TryGetStringField(TEXT("schema"), Schema);
 		if (!Schema.IsEmpty() && Schema != TEXT("unreal_ai.orchestrate_dag"))

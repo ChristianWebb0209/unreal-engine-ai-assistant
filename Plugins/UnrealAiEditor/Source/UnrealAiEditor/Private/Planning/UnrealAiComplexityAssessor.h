@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "Context/AgentContextTypes.h"
 
-/** Deterministic complexity signal (see docs/complexity-assessor-todos-and-chat-phases.md). */
+/** Deterministic complexity signal (see docs/context-management.md §8.1). */
 struct FUnrealAiComplexityAssessment
 {
 	float ScoreNormalized = 0.f;

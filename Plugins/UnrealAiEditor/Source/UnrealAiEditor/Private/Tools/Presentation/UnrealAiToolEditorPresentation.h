@@ -18,7 +18,9 @@ struct FUnrealAiToolEditorPresentation
 	/** Tool note markdown (rendered in UI, never sent to the model). */
 	FString MarkdownBody;
 
-	/** Optional image shown under the tool card (png path owned by Saved/ by default). */
+	/** Optional image shown under the tool card (png path owned by Saved/ by default).
+	 * Phase 2 idea: optionally regenerate/carry this across chat reloads if desired.
+	 */
 	FString ImageFilePath;
 
 	/** Optional clickable links row. */

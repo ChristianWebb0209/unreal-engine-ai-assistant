@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "Harness/UnrealAiAgentTypes.h"
 
+struct FUnrealAiToolEditorPresentation;
+
 DECLARE_DELEGATE_OneParam(FUnrealAiAssistantDeltaSink, const FString& /*Chunk*/);
 DECLARE_DELEGATE(FUnrealAiTurnCompleteSink);
 
@@ -24,7 +26,8 @@ public:
 		const FString& ToolName,
 		const FString& CallId,
 		bool bSuccess,
-		const FString& ResultPreview) = 0;
+		const FString& ResultPreview,
+		const TSharedPtr<FUnrealAiToolEditorPresentation>& EditorPresentation) = 0;
 	/** Multi-round continuation within one user message (plan execution, workers). */
 	virtual void OnRunContinuation(int32 PhaseIndex, int32 TotalPhasesHint) = 0;
 	/** Structured todo plan from tool or harness (JSON body). */

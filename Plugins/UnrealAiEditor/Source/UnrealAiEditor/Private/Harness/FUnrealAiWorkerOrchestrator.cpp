@@ -60,11 +60,12 @@ namespace UnrealAiWorkerOrchestratorPriv
 			const FString& ToolName,
 			const FString& CallId,
 			bool bSuccess,
-			const FString& ResultPreview) override
+			const FString& ResultPreview,
+			const TSharedPtr<FUnrealAiToolEditorPresentation>& EditorPresentation) override
 		{
 			if (Parent.IsValid())
 			{
-				Parent->OnToolCallFinished(ToolName, CallId, bSuccess, ResultPreview);
+				Parent->OnToolCallFinished(ToolName, CallId, bSuccess, ResultPreview, EditorPresentation);
 			}
 		}
 

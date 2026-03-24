@@ -321,7 +321,7 @@ namespace UnrealAiAgentHarnessPriv
 			if (Sink.IsValid())
 			{
 				const FString Preview = Inv.bOk ? Inv.ContentForModel : Inv.ErrorMessage;
-				Sink->OnToolCallFinished(Tc.Name, Tc.Id, Inv.bOk, Preview);
+				Sink->OnToolCallFinished(Tc.Name, Tc.Id, Inv.bOk, Preview, Inv.EditorPresentation);
 			}
 			if (Tc.Name == TEXT("agent_emit_todo_plan") && Sink.IsValid())
 			{
@@ -385,6 +385,25 @@ namespace UnrealAiAgentHarnessPriv
 		Am.Role = TEXT("assistant");
 		Am.Content = AssistantBuffer;
 		Conv->GetMessagesMutable().Add(Am);
+
+		// Second+ LLM rounds often end with finish_reason=stop and no tool_calls. Models sometimes return an
+		// empty assistant message (streaming quirk or "done" signal) even though work is unfinished—treat
+		// that as a stall, not a successful completion, and schedule another round while under the cap.
+		const bool bModeWantsTools =
+			(Request.Mode == EUnrealAiAgentMode::Agent || Request.Mode == EUnrealAiAgentMode::Orchestrate);
+		if (bModeWantsTools && AssistantBuffer.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
+		{
+			FUnrealAiConversationMessage Nudge;
+			Nudge.Role = TEXT("user");
+			Nudge.Content = TEXT(
+				"[Harness] The model returned an empty assistant message. Continue the user's task: call the ")
+				TEXT("next tool(s) now, or briefly explain what blocks you. Do not reply with an empty message.");
+			Conv->GetMessagesMutable().Add(Nudge);
+			AssistantBuffer.Reset();
+			DispatchLlm();
+			return;
+		}
+
 		Succeed();
 	}
 }
@@ -465,6 +484,22 @@ void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TS
 	FUnrealAiRunIds Ids;
 	Ids.RunId = Runner->RunId;
 	Sink->OnRunStarted(Ids);
+
+	// Chat naming is a first-turn-only instruction. We inject it into the LLM conversation,
+	// but it is never shown in the chat UI because the UI transcript is driven by chat send/stream events.
+	const bool bFirstUserMessageInThread = (Runner->Conv->GetMessages().Num() == 0);
+	if (bFirstUserMessageInThread)
+	{
+		FUnrealAiConversationMessage NameInstr;
+		NameInstr.Role = TEXT("system");
+		NameInstr.Content = TEXT(
+			"[Hidden] Chat naming:\n"
+			"On your FIRST assistant reply in this chat, you MUST append exactly one token:\n"
+			"<chat-name: \"<short name>\"> \n"
+			"The chat name should be 3-8 words, human-friendly, and derived from the user's goal.\n"
+			"Do not explain the token to the user. The application will strip the token from visible output.\n");
+		Runner->Conv->GetMessagesMutable().Add(NameInstr);
+	}
 
 	FUnrealAiConversationMessage UserMsg;
 	UserMsg.Role = TEXT("user");

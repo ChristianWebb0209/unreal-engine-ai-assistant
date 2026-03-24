@@ -2,12 +2,16 @@
 
 #include "CoreMinimal.h"
 
+struct FUnrealAiToolEditorPresentation;
+
 /** Result returned to the agent loop for injection as a `tool` message. */
 struct FUnrealAiToolInvocationResult
 {
 	bool bOk = false;
 	FString ContentForModel;
 	FString ErrorMessage;
+	/** Optional UI-only payload for richer tool cards (markdown, images, navigation links). */
+	TSharedPtr<FUnrealAiToolEditorPresentation> EditorPresentation;
 };
 
 /** Executes tools on behalf of the harness (typically game-thread editor work). */
