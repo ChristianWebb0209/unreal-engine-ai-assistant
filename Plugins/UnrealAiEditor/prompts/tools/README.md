@@ -10,4 +10,4 @@
 
 | `tool_id` | Purpose |
 |-----------|---------|
-| `agent_emit_todo_plan` | Emit validated `unreal_ai.todo_plan` JSON (see [`complexity-assessor-todos-and-chat-phases.md`](../../../../docs/complexity-assessor-todos-and-chat-phases.md)). Add to catalog when implemented. |
+| `agent_emit_todo_plan` | Emit validated `unreal_ai.todo_plan` JSON (see [`context-management.md`](../../../../docs/context-management.md) §8). Add to catalog when implemented. |

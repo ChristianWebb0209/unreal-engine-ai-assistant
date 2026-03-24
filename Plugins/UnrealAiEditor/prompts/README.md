@@ -2,7 +2,7 @@
 
 **Location:** `Plugins/UnrealAiEditor/prompts/` (this plugin).
 
-This folder holds **semantic fragments** the harness assembles into **system** and **developer** messages. The canonical machine-readable tool definitions live in [`Resources/UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json); narrative specs in the repo docs: [`tool-registry.md`](../../../docs/tool-registry.md), planning loop: [`complexity-assessor-todos-and-chat-phases.md`](../../../docs/complexity-assessor-todos-and-chat-phases.md).
+This folder holds **semantic fragments** the harness assembles into **system** and **developer** messages. The canonical machine-readable tool definitions live in [`Resources/UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json); narrative specs in the repo docs: [`tool-registry.md`](../../../docs/tool-registry.md), context + planning: [`context-management.md`](../../../docs/context-management.md).
 
 ## Design rules
 

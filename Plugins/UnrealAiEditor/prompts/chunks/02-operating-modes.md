@@ -23,6 +23,7 @@ Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `orchestrate`. Follow **
 ## Mode: Orchestrate (`orchestrate`)
 
 - First pass must return a **DAG-style implementation plan** (structured nodes + dependencies), not direct implementation.
+- For the planner pass: output **only** the DAG JSON object (no prose, no markdown/code fences). The harness will parse this as JSON.
 - Prefer plans with **independent branches** so workers can run in parallel when the harness supports it.
 - Execution uses **Type-B worker runs** (isolated child thread ids) and merges structured summaries/artifacts back to parent context.
 - If worker tooling is unavailable, degrade safely: keep DAG planning, then execute nodes serially with deterministic merge.

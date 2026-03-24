@@ -2,7 +2,7 @@
 
 This document captures the **target** interaction model for Unreal AI Editor: what **Orchestrate** means, how it differs from **Agent**, how **Fast** is retired, and how execution maps to the existing harness (`FUnrealAiAgentHarness`), context service, tool catalog, and model caps (`maxAgentLlmRounds`, etc.).
 
-Related: [`agent-harness.md`](agent-harness.md), [`context-service.md`](context-service.md), [`complexity-assessor-todos-and-chat-phases.md`](complexity-assessor-todos-and-chat-phases.md), prompt chunk [`02-operating-modes.md`](../Plugins/UnrealAiEditor/prompts/chunks/02-operating-modes.md), [`09-orchestration-workers.md`](../Plugins/UnrealAiEditor/prompts/chunks/09-orchestration-workers.md).
+Related: [`agent-harness.md`](agent-harness.md), [`context-management.md`](context-management.md) §8.4, prompt chunk [`02-operating-modes.md`](../Plugins/UnrealAiEditor/prompts/chunks/02-operating-modes.md), [`09-orchestration-workers.md`](../Plugins/UnrealAiEditor/prompts/chunks/09-orchestration-workers.md).
 
 ---
 

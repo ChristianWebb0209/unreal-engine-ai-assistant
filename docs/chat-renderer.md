@@ -27,4 +27,4 @@ Slate UI that renders **transcript blocks** (user, thinking, assistant, tools, t
 ## Related
 
 - [`agent-harness.md`](agent-harness.md) — harness and `conversation.json`.
-- [`complexity-assessor-todos-and-chat-phases.md`](complexity-assessor-todos-and-chat-phases.md) — planning loop UX.
+- [`context-management.md`](context-management.md) — planning artifacts; continuation UX aligns with harness events below.

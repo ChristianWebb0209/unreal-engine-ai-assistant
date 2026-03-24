@@ -7,7 +7,7 @@
 
 **This Markdown file** remains the **human-readable** narrative, Epic links, and engineering notes.
 
-**Related:** [`PRD.md`](../PRD.md) §6–7, [`agent-and-tool-requirements.md`](../agent-and-tool-requirements.md), [`context-service.md`](context-service.md).
+**Related:** [`PRD.md`](../PRD.md) §6–7, [`agent-and-tool-requirements.md`](../agent-and-tool-requirements.md), [`context-management.md`](context-management.md).
 
 ---
 
@@ -924,7 +924,7 @@ These align with [`PRD.md`](../PRD.md) §6 and are the first implementation wave
 | **permission** | `read` |
 | **ue_entry_points** | Same sources as `FUnrealAiContextService` — Asset Registry, `GEditor`, viewport. |
 | **threading** | Game thread. |
-| **doc_links** | [`context-service.md`](context-service.md) |
+| **doc_links** | [`context-management.md`](context-management.md) |
 | **status** | `research` |
 
 ---

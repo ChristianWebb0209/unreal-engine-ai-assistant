@@ -1,6 +1,6 @@
 # Agent harness (Unreal AI Editor plugin)
 
-Single orchestration layer for **LLM turns**, **tool calls**, and optional **Level-B worker chaining**. Runs **inside the editor process** (see [`PRD.md`](PRD.md) §2.3). Complements the **context service** ([`context-service.md`](context-service.md)), which only assembles editor/context blocks and persists `context.json`.
+Single orchestration layer for **LLM turns**, **tool calls**, and optional **Level-B worker chaining**. Runs **inside the editor process** (see [`PRD.md`](PRD.md) §2.3). Complements **context management** ([`context-management.md`](context-management.md)), which assembles editor/context blocks and persists `context.json`.
 
 ## Three boundaries
 
@@ -65,4 +65,4 @@ Each LLM request resolves **base URL + bearer key** with `TryResolveApiForModel`
 ## Related design
 
 - [`chat-renderer.md`](chat-renderer.md) — Slate transcript, tool cards, thinking lane, streaming/typewriter, Stop.
-- [`complexity-assessor-todos-and-chat-phases.md`](complexity-assessor-todos-and-chat-phases.md) — v1 planning loop (complexity assessor, validated todo plan, **summary + pointer** sub-turns, **rails**), multi-phase chat UI. See [`agent-and-tool-requirements.md`](../agent-and-tool-requirements.md) §1.5.
+- [`context-management.md`](context-management.md) §8 — planning artifacts (complexity assessor, todo plan persistence, summary + pointer); continuation **rails** and multi-phase UI are harness + [`chat-renderer.md`](chat-renderer.md).

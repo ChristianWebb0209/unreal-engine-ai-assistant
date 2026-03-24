@@ -1,6 +1,6 @@
 # Frontend (client-side) implementation guide — Unreal AI Editor plugin
 
-This document **inventories** all user-facing surfaces in the plugin today, **maps** them to product docs ([`PRD.md`](../PRD.md), [`agent-and-tool-requirements.md`](../agent-and-tool-requirements.md), [`context-service.md`](context-service.md), [`chat-renderer.md`](chat-renderer.md), [`complexity-assessor-todos-and-chat-phases.md`](complexity-assessor-todos-and-chat-phases.md), [`agent-harness.md`](agent-harness.md)), and gives a **concrete backlog** to finish client-side work.
+This document **inventories** all user-facing surfaces in the plugin today, **maps** them to product docs ([`PRD.md`](../PRD.md), [`agent-and-tool-requirements.md`](../agent-and-tool-requirements.md), [`context-management.md`](context-management.md), [`chat-renderer.md`](chat-renderer.md), [`agent-harness.md`](agent-harness.md)), and gives a **concrete backlog** to finish client-side work.
 
 **Scope:** Slate UI in `Plugins/UnrealAiEditor/` — not backend/tool handlers unless the UI must call them.
 
@@ -71,9 +71,9 @@ Registered in [`UnrealAiEditorModule.cpp`](../Plugins/UnrealAiEditor/Source/Unre
 | **PRD §8.2** Gear settings | Profiles + tools matrix + MCP + env | **Missing** as dedicated panel — JSON tab only |
 | **PRD §2.4** Instant durability | Material changes persisted immediately | **Partial** — context flush on shutdown; chat **conversation** persistence via harness; verify **write-ahead** for every message |
 | **PRD §5.7** Tool audit | Local log file + UI path to open | **Missing** frontend (may be file-only later) |
-| **context-service.md** | @ mentions, attach, snapshot on send | **Implemented** core paths; **UI** could show snapshot summary |
+| **context-management.md** | @ mentions, attach, snapshot on send | **Implemented** core paths; **UI** could show snapshot summary |
 | **chat-renderer.md** | Transcript, streaming, typewriter, scroll, Stop | **Implemented** baseline; optional **stick-to-bottom**, **markdown** |
-| **complexity-assessor…** | Complexity block in context; **todo plan** tool; **continuation** non-terminal UX | **Backend/design** partly done; **FUnrealAiComplexityAssessor** **not** implemented; harness **continuation loop** **not** fully implemented; UI **`OnRunContinuation`** stub |
+| **Planning + complexity** (see **context-management.md** §8) | Complexity block in context; **todo plan** tool; **continuation** non-terminal UX | **Backend/design** partly done; harness **continuation loop** may still be incomplete; UI **`OnRunContinuation`** stub — verify code |
 | **agent-harness.md** | Reload LLM on settings save | **Implemented** via registry |
 
 ---
@@ -84,7 +84,7 @@ Registered in [`UnrealAiEditorModule.cpp`](../Plugins/UnrealAiEditor/Source/Unre
 
 1. **Composer keyboard** — `Enter` send, `Shift+Enter` newline (`SMultiLineEditableTextBox` custom behavior or `OnKeyDownHandler`).
 2. **@ mention UX** — popup [`SMenu`](https://dev.epicgames.com/documentation/en-us/unreal-engine/slate-widgets) or list view: query Asset Registry as user types after `@` (debounced). Align with [`UnrealAiContextMentionParser`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiContextMentionParser.cpp) resolution rules.
-3. **Attachment chips** — horizontal list of `FContextAttachment` / labels above input; remove button; reflect [`context.json`](../docs/context-service.md) attachments.
+3. **Attachment chips** — horizontal list of `FContextAttachment` / labels above input; remove button; reflect [`context.json`](context-management.md) attachments.
 4. **Tool cards** — collapsible body for args + result (expand/collapse); optional **copy** button; monospace for JSON per PRD §9.3.
 5. **Thinking block** — collapsible when non-empty; **don’t** show placeholder “…” when empty (hide row).
 6. **Connect / session state** — visual **connected** vs **stub/offline** vs **error**; disable Send when not configured (optional).
@@ -93,7 +93,7 @@ Registered in [`UnrealAiEditorModule.cpp`](../Plugins/UnrealAiEditor/Source/Unre
 ### Tier B — Planning loop UI (ties to architecture docs)
 
 8. **`FUnrealAiComplexityAssessor`** — not UI, but **surface** the score: optional small badge in header or footer (“Complexity: high”) when context includes it — purely read-only from next `BuildContextWindow` extension.
-9. **`agent_emit_todo_plan`** — ensure tool exists in [`UnrealAiToolCatalog.json`](../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) + handler; [`STodoPlanPanel`](Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/STodoPlanPanel.cpp) already renders — add **step checkboxes** bound to persisted `activeTodoPlan` in context ([`context-service.md`](context-service.md) schema bump).
+9. **`agent_emit_todo_plan`** — ensure tool exists in [`UnrealAiToolCatalog.json`](../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) + handler; [`STodoPlanPanel`](Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/STodoPlanPanel.cpp) already renders — add **step checkboxes** bound to persisted `activeTodoPlan` in context ([`context-management.md`](context-management.md) §4).
 10. **Continuation affordance** — when harness runs **sub-turns**, call `IAgentRunSink::OnRunContinuation` and show **“Round 2/5”** strip ([`FUnrealAiChatTranscript::SetRunProgress`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/UnrealAiChatTranscript.cpp) already exists). Wire harness orchestration first, then polish UI.
 11. **Auto-continue toggle** — settings checkbox (PRD): “Run plan steps automatically” vs “pause after plan.”
 
@@ -142,7 +142,7 @@ Registered in [`UnrealAiEditorModule.cpp`](../Plugins/UnrealAiEditor/Source/Unre
 1. **Window → Unreal AI → Agent Chat** — send message; verify user bubble, assistant streaming/typewriter, tool rows after model returns tools, **Stop** cancels.
 2. **AI Settings** — save JSON/settings; restart optional; verify harness uses HTTP when key present (see plugin README).
 3. **Project Settings → Unreal AI Editor** — toggle stream/typewriter; relaunch chat behavior.
-4. **New chat** — clears transcript; thread id rotates; context save on old thread (see [`context-service.md`](context-service.md)).
+4. **New chat** — clears transcript; thread id rotates; context save on old thread (see [`context-management.md`](context-management.md) §3).
 
 ---
 
@@ -150,7 +150,7 @@ Registered in [`UnrealAiEditorModule.cpp`](../Plugins/UnrealAiEditor/Source/Unre
 
 - [`chat-renderer.md`](chat-renderer.md) — implemented renderer behavior.
 - [`agent-harness.md`](agent-harness.md) — when UI must trigger reload / cancel.
-- [`complexity-assessor-todos-and-chat-phases.md`](complexity-assessor-todos-and-chat-phases.md) — planning UX and persistence.
+- [`context-management.md`](context-management.md) — context + planning persistence (`context.json`).
 - [`../PRD.md`](../PRD.md) §8–§9 — full UI inventory and visual spec.
 
 ---
