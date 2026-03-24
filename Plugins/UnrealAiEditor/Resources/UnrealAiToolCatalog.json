@@ -8,7 +8,6 @@
       "animation_sequencer",
       "assets_content",
       "audio_metasounds",
-      "banned",
       "blueprints",
       "build_packaging",
       "capture_vision",
@@ -23,9 +22,15 @@
       "project_files_search",
       "selection_framing",
       "viewport_camera",
-      "world_actors"
+      "world_actors",
+      "network",
+      "filesystem",
+      "exec"
     ],
-    "tool_count": 81
+    "tool_count": 81,
+    "invocation": {
+      "focused_flag": "Optional JSON field \"focused\": true on supported tools. Stripped before handlers; after a successful run the editor opens or foregrounds the related Blueprint, asset, Content Browser selection, or project source file in the IDE. Tools list this property explicitly where the catalog schema is strict (additionalProperties: false)."
+    }
   },
   "tools": [
     {
@@ -102,7 +107,8 @@
             "type": "string"
           },
           "confirm": {
-            "type": "string"
+            "type": "string",
+            "description": "Assent to delete: DELETE, yes, y, true, confirm, or 1 (case-insensitive)."
           }
         },
         "required": [
@@ -120,7 +126,7 @@
     },
     {
       "tool_id": "actor_find_by_label",
-      "summary": "Find actors by label or tag.",
+      "summary": "Find actors by outliner label, internal actor name, full object path substring, or exact actor_path match.",
       "category": "world_actors",
       "tags": [
         "actor",
@@ -201,7 +207,7 @@
     },
     {
       "tool_id": "actor_set_transform",
-      "summary": "Set actor transform.",
+      "summary": "Set actor transform. Omit `transform` and top-level location/rotation/scale to keep the current pose (useful with `teleport_physics` only). Use `transform` object, or top-level `location`/`rotation`/`scale` number arrays [x,y,z]. `actor_path` accepts full path or a unique suffix (e.g. PersistentLevel.Actor_UAID_...).",
       "category": "world_actors",
       "tags": [
         "actor"
@@ -226,15 +232,30 @@
             "type": "string"
           },
           "transform": {
-            "type": "object"
+            "type": "object",
+            "description": "Optional if using top-level location[]/rotation[]/scale[] instead. Arrays inside transform also accepted ([x,y,z] form)."
+          },
+          "location": {
+            "type": "array",
+            "items": { "type": "number" },
+            "description": "Optional when transform omitted: [x,y,z] applied with current rotation/scale."
+          },
+          "rotation": {
+            "type": "array",
+            "items": { "type": "number" },
+            "description": "Optional when transform omitted: [pitch,yaw,roll] with current location/scale."
+          },
+          "scale": {
+            "type": "array",
+            "items": { "type": "number" },
+            "description": "Optional when transform omitted: [x,y,z] scale with current location/rotation."
           },
           "teleport_physics": {
             "type": "boolean"
           }
         },
         "required": [
-          "actor_path",
-          "transform"
+          "actor_path"
         ]
       },
       "side_effects": "scene",
@@ -374,6 +395,10 @@
         "properties": {
           "anim_blueprint_path": {
             "type": "string"
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open this AnimBlueprint in the editor."
           }
         },
         "required": [
@@ -390,13 +415,13 @@
     },
     {
       "tool_id": "arbitrary_network_fetch",
-      "summary": "Banned: generic network fetch.",
-      "category": "banned",
+      "summary": "HTTP fetch helper (high risk). Call when the user requests this tool by name; use minimal args if unspecified. Handler may return not_implemented until wired.",
+      "category": "network",
       "tags": [
         "security",
         "network"
       ],
-      "tier": "banned",
+      "tier": "experimental",
       "modes": {
         "ask": false,
         "fast": true,
@@ -420,17 +445,16 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "banned_v1",
-      "ban_reason": "Only user-configured LLM endpoints per PRD."
+      "status": "experimental"
     },
     {
       "tool_id": "arbitrary_process_spawn",
-      "summary": "Banned: spawn arbitrary OS processes.",
-      "category": "banned",
+      "summary": "Spawn OS process (high risk). Call when the user names this tool; minimal args ok. Handler may return not_implemented until wired.",
+      "category": "exec",
       "tags": [
         "security"
       ],
-      "tier": "banned",
+      "tier": "experimental",
       "modes": {
         "ask": false,
         "fast": true,
@@ -454,17 +478,16 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "banned_v1",
-      "ban_reason": "Security: no arbitrary process spawn in default product."
+      "status": "experimental"
     },
     {
       "tool_id": "arbitrary_python_eval",
-      "summary": "Banned: arbitrary Python execution.",
-      "category": "banned",
+      "summary": "Python eval hook (high risk). Call when the user names this tool; use `{}` if no code given. Handler may return not_implemented until wired.",
+      "category": "exec",
       "tags": [
         "security"
       ],
-      "tier": "banned",
+      "tier": "experimental",
       "modes": {
         "ask": false,
         "fast": true,
@@ -488,8 +511,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "banned_v1",
-      "ban_reason": "Not allowed in default product."
+      "status": "experimental"
     },
     {
       "tool_id": "asset_delete",
@@ -695,6 +717,10 @@
         "properties": {
           "object_path": {
             "type": "string"
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, foreground the asset editor (redundant with tool behavior if already opening)."
           }
         },
         "required": [
@@ -919,6 +945,10 @@
           },
           "category": {
             "type": "string"
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open this Blueprint in the editor."
           }
         },
         "required": [
@@ -960,6 +990,14 @@
         "properties": {
           "blueprint_path": {
             "type": "string"
+          },
+          "format_graphs": {
+            "type": "boolean",
+            "description": "When true, run Unreal Blueprint Formatter on all non-empty ubergraph, function, and macro graphs before compiling. Requires the UnrealBlueprintFormatter plugin (declared dependency of Unreal AI Editor)."
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open and foreground this Blueprint in the editor."
           }
         },
         "required": [
@@ -1006,6 +1044,22 @@
           },
           "graph_name": {
             "type": "string"
+          },
+          "create_if_missing": {
+            "type": "boolean",
+            "description": "When true and blueprint_path is not on disk yet, create an Actor-based Blueprint at that path before applying IR (must be under /Game)."
+          },
+          "parent_class": {
+            "type": "string",
+            "description": "Optional native class path when using create_if_missing (default /Script/Engine.Actor)."
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open this Blueprint and focus graph_name when set."
+          },
+          "auto_layout": {
+            "type": "boolean",
+            "description": "When true (default), run Unreal Blueprint Formatter after wiring when every IR node has x,y at 0. Requires the UnrealBlueprintFormatter plugin; if missing, apply still succeeds and formatter_hint explains how to enable it."
           },
           "variables": {
             "type": "array",
@@ -1124,6 +1178,7 @@
       "failure_modes": [
         "invalid_ir",
         "asset_not_found",
+        "create_failed",
         "graph_not_found",
         "apply_failed"
       ],
@@ -1159,6 +1214,10 @@
           },
           "graph_name": {
             "type": "string"
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open this Blueprint (and graph when named)."
           }
         },
         "required": [
@@ -1373,6 +1432,10 @@
         "properties": {
           "path": {
             "type": "string"
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, also open the asset editor for this path when it is an object path."
           }
         },
         "required": [
@@ -1430,12 +1493,12 @@
     },
     {
       "tool_id": "delete_system_files",
-      "summary": "Banned: paths outside project scope.",
-      "category": "banned",
+      "summary": "Delete files by path (destructive). Call when the user names this tool; use `{}` if paths unspecified. Handler may enforce project scope.",
+      "category": "filesystem",
       "tags": [
         "security"
       ],
-      "tier": "banned",
+      "tier": "experimental",
       "modes": {
         "ask": false,
         "fast": true,
@@ -1459,8 +1522,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "banned_v1",
-      "ban_reason": "All paths must be project-scoped."
+      "status": "experimental"
     },
     {
       "tool_id": "editor_get_selection",
@@ -2322,6 +2384,10 @@
           },
           "max_bytes": {
             "type": "integer"
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open this file in the configured source IDE (best-effort)."
           }
         },
         "required": [
@@ -2367,6 +2433,10 @@
           },
           "confirm": {
             "type": "boolean"
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open the written file in the configured source IDE (best-effort)."
           }
         },
         "required": [
@@ -2385,12 +2455,12 @@
     },
     {
       "tool_id": "raw_user_exec_string",
-      "summary": "Banned: raw exec/console string.",
-      "category": "banned",
+      "summary": "Execute a raw console/exec string (high risk). Call when the user names this tool; `{}` ok—handler may delegate or return not_implemented.",
+      "category": "exec",
       "tags": [
         "security"
       ],
-      "tier": "banned",
+      "tier": "experimental",
       "modes": {
         "ask": false,
         "fast": true,
@@ -2414,8 +2484,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "banned_v1",
-      "ban_reason": "Use console_command allow-list instead."
+      "status": "experimental"
     },
     {
       "tool_id": "render_target_readback_editor",
@@ -3207,7 +3276,7 @@
     },
     {
       "tool_id": "viewport_frame_actors",
-      "summary": "Frame actors by path using bounds and FOV fit.",
+      "summary": "Frame actors by path using bounds and FOV fit. Actors with no renderable geometry fall back to a small box at their location.",
       "category": "selection_framing",
       "tags": [
         "viewport",
@@ -3433,6 +3502,10 @@
           "factory_class": {
             "type": "string",
             "description": "Optional UFactory class path when the engine requires a factory"
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open the new asset in its editor (uses object_path from the result)."
           }
         },
         "required": [
@@ -3695,6 +3768,10 @@
           },
           "graph_name": {
             "type": "string"
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open this Blueprint editor (optional graph_name)."
           }
         },
         "required": [
