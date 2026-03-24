@@ -13,6 +13,7 @@
 #include "Tabs/SUnrealAiEditorHelpTab.h"
 #include "Tabs/SUnrealAiEditorQuickStartTab.h"
 #include "Tabs/SUnrealAiEditorSettingsTab.h"
+#include "Tabs/SUnrealAiEditorDebugTab.h"
 #include "UnrealAiEditorSettings.h"
 #include "UnrealAiEditorTabIds.h"
 #include "Widgets/UnrealAiChatUiSession.h"
@@ -342,6 +343,7 @@ void FUnrealAiEditorModule::OpenNewAgentChatTabBeside(const TSharedPtr<SWidget>&
 	}
 	const FSpawnTabArgs Args(OwnerWindow, FTabId(UnrealAiEditorTabIds::ChatTab, INDEX_NONE));
 	TSharedRef<SDockTab> NewTab = SpawnAgentChatDockTab(Reg, Args);
+	NewTab->SetTabIcon(FAppStyle::GetBrush(TEXT("Icons.Comment")));
 	// Note: SDockTab::SetLayoutIdentifier is protected (friend FTabManager only). Extra Agent Chat tabs
 	// are spawned manually so FTabManager::SpawnTab is not used (nomad spawner tracks a single SpawnedTabPtr).
 
@@ -409,16 +411,28 @@ void FUnrealAiEditorModule::RegisterTabs(const TSharedPtr<FUnrealAiBackendRegist
 			];
 	};
 
+	const auto SpawnDebug = [Reg](const FSpawnTabArgs& Args)
+	{
+		return SNew(SDockTab)
+			.TabRole(ETabRole::NomadTab)
+			.Label(LOCTEXT("DebugTabLabel", "Debug"))
+			[
+				SNew(SUnrealAiEditorDebugTab).BackendRegistry(Reg)
+			];
+	};
+
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 							 UnrealAiEditorTabIds::ChatTab,
 							 FOnSpawnTab::CreateLambda(SpawnChat))
 		.SetDisplayName(LOCTEXT("ChatTab", "Agent Chat"))
+		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Comment")))
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 							 UnrealAiEditorTabIds::SettingsTab,
 							 FOnSpawnTab::CreateLambda(SpawnSettings))
 		.SetDisplayName(LOCTEXT("SettingsTab", "AI Settings"))
+		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Settings")))
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
@@ -432,6 +446,13 @@ void FUnrealAiEditorModule::RegisterTabs(const TSharedPtr<FUnrealAiBackendRegist
 							 FOnSpawnTab::CreateLambda(SpawnHelp))
 		.SetDisplayName(LOCTEXT("HelpTab", "Help"))
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
+
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
+							 UnrealAiEditorTabIds::DebugTab,
+							 FOnSpawnTab::CreateLambda(SpawnDebug))
+		.SetDisplayName(LOCTEXT("DebugTab", "AI Debug"))
+		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Search")))
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 }
 
 void FUnrealAiEditorModule::UnregisterTabs()
@@ -440,6 +461,7 @@ void FUnrealAiEditorModule::UnregisterTabs()
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::SettingsTab);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::QuickStartTab);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::HelpTab);
+	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::DebugTab);
 }
 
 void FUnrealAiEditorModule::RegisterMenus()
@@ -467,7 +489,7 @@ void FUnrealAiEditorModule::RegisterMenus()
 							"UnrealAiChat",
 							LOCTEXT("MenuChat", "Agent Chat"),
 							LOCTEXT("MenuChatTip", "Open Agent Chat"),
-							FSlateIcon(),
+							FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Comment")),
 							FUIAction(FExecuteAction::CreateLambda([]()
 							{
 								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::ChatTab);
@@ -476,7 +498,7 @@ void FUnrealAiEditorModule::RegisterMenus()
 							"UnrealAiSettings",
 							LOCTEXT("MenuSettings", "AI Settings"),
 							LOCTEXT("MenuSettingsTip", ""),
-							FSlateIcon(),
+							FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Settings")),
 							FUIAction(FExecuteAction::CreateLambda([]()
 							{
 								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::SettingsTab);
@@ -499,6 +521,15 @@ void FUnrealAiEditorModule::RegisterMenus()
 							{
 								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::HelpTab);
 							})));
+						S.AddMenuEntry(
+							"UnrealAiDebug",
+							LOCTEXT("MenuDebug", "AI Debug"),
+							LOCTEXT("MenuDebugTip", "Inspect Unreal AI local persistence and chat threads."),
+							FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Search")),
+							FUIAction(FExecuteAction::CreateLambda([]()
+							{
+								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::DebugTab);
+							})));
 					}));
 
 			UToolMenu* ToolsMenu = UToolMenus::Get()->ExtendMenu("LevelEditor.MainMenu.Tools");
@@ -515,7 +546,7 @@ void FUnrealAiEditorModule::RegisterMenus()
 							"UnrealAiChatT",
 							LOCTEXT("MenuChatT", "Agent Chat"),
 							LOCTEXT("MenuChatTipT", "Open Agent Chat"),
-							FSlateIcon(),
+							FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Comment")),
 							FUIAction(FExecuteAction::CreateLambda([]()
 							{
 								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::ChatTab);
@@ -524,7 +555,7 @@ void FUnrealAiEditorModule::RegisterMenus()
 							"UnrealAiSettingsT",
 							LOCTEXT("MenuSettingsT", "AI Settings"),
 							LOCTEXT("MenuSettingsTipT", ""),
-							FSlateIcon(),
+							FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Settings")),
 							FUIAction(FExecuteAction::CreateLambda([]()
 							{
 								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::SettingsTab);
@@ -547,6 +578,15 @@ void FUnrealAiEditorModule::RegisterMenus()
 							{
 								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::HelpTab);
 							})));
+						S.AddMenuEntry(
+							"UnrealAiDebugT",
+							LOCTEXT("MenuDebugT", "AI Debug"),
+							LOCTEXT("MenuDebugTipT", "Inspect Unreal AI local persistence and chat threads."),
+							FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Search")),
+							FUIAction(FExecuteAction::CreateLambda([]()
+							{
+								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::DebugTab);
+							})));
 					}));
 
 			// Main Level Editor toolbar (top) — Nomad tabs only list under Window until opened once; this makes the UI discoverable.
@@ -557,7 +597,7 @@ void FUnrealAiEditorModule::RegisterMenus()
 					FUnrealAiEditorCommands::Get().OpenChatTab,
 					LOCTEXT("ToolbarUnrealAi", "Unreal AI"),
 					LOCTEXT("ToolbarUnrealAiTip", "Open Agent Chat"),
-					FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Question"),
+					FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Comment")),
 					NAME_None,
 					TOptional<FName>(FName(TEXT("UnrealAiToolbarChat")))));
 			}

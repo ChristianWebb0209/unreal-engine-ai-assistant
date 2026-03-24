@@ -46,6 +46,9 @@ public class UnrealAiEditor : ModuleRules
 				"BlueprintGraph",
 				"StructUtils",
 				"RenderCore",
+				"LevelSequence",
+				"MovieScene",
+				"ImageWrapper"
 			});
 	}
 }
