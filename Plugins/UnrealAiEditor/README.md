@@ -1,10 +1,10 @@
 # Unreal AI Editor (Editor Plugin Shell)
 
-UI shell + **in-editor** stub implementations (persistence, fake stream) for an Unreal Engine 5.5+ **Editor** plugin. **MVP:** no product server or hosted backend — all logic lives in the plugin; see [`PRD.md`](../../PRD.md) §2.3–§2.5.
+**Unreal AI Editor** — in-editor AI assistant for Unreal Engine **5.7+** **Editor**. Core behavior ships in-plugin (UI, persistence, tool execution, LLM connectors). **MVP:** no product server or hosted backend — see [`PRD.md`](../../PRD.md) §2.3–§2.5 and the [repo `README.md`](../../README.md) for positioning (free vs. commercial assistants).
 
 ## What is implemented
 
-- **Window → Unreal AI** and **Tools → Unreal AI** submenus: Agent Chat, AI Settings, Quick Start, Help.
+- **Window → Unreal AI** and **Tools → Unreal AI** submenus: Agent Chat, AI Settings, Quick Start, Help, **Debug** (local persistence / threads inspector; does not open on startup).
 - **Level Editor main toolbar** (top): **Unreal AI** button opens Agent Chat (Nomad tabs are not pinned to the right sidebar until you open them once and dock).
 - **Shortcut:** **Ctrl+K** (default chord for Agent Chat).
 - **Nomad tabs** for each surface; dockable like other editor tabs. **Agent Chat** is invoked automatically on editor startup (see **Project Settings → Plugins → Unreal AI Editor → Open Agent Chat on editor startup**). Dock it once where you want it; the editor remembers layout.
@@ -12,7 +12,7 @@ UI shell + **in-editor** stub implementations (persistence, fake stream) for an 
 - **AI Settings** (`Window → Unreal AI → AI Settings`): `plugin_settings.json` (v4: nested **API key sections** with unlimited models each), per-model caps including **`maxAgentLlmRounds`** (max tool↔LLM iterations per send, default 16), company presets + hints, session **usage** per model + rough **USD** estimates when a bundled [Litellm](https://github.com/BerriAI/litellm) `model_prices_and_context_window.json` row matches your model id (`Resources/ModelPricing/`). Cumulative usage in `settings/usage_stats.json`. **Test connection**, **Save** → persistence / LLM reload.
 - **Project Settings → Plugins → Unreal AI Editor**: `UUnrealAiEditorSettings` (default agent, auto connect, verbose logging, OpenRouter fields).
 - **In-module stubs** (`Private/Backend/` — not a separate server process): persistence (writes under `%LOCALAPPDATA%\UnrealAiEditor\` on Windows), chat service (fake stream), model connector (delayed success).
-- **Tool catalog + execution:** [`Resources/UnrealAiToolCatalog.json`](Resources/UnrealAiToolCatalog.json) — single JSON (`meta` + `tools[]`). **`FUnrealAiToolExecutionHost`** (`Private/Tools/`) implements `IToolExecutionHost::InvokeTool` and dispatches to UE5 handlers in `UnrealAiToolDispatch.cpp` + `UnrealAiToolDispatch_Search.cpp` (game thread). **Fuzzy search:** `scene_fuzzy_search` (actors in level), `asset_index_fuzzy_search` (Asset Registry index), `source_search_symbol` (project Source/Config/Plugins/*/Source files); shared scoring in `UnrealAiFuzzySearch.cpp`. Other tool IDs return a structured `not_implemented` until handlers are added.
+- **Tool catalog + execution:** [`Resources/UnrealAiToolCatalog.json`](Resources/UnrealAiToolCatalog.json) — single JSON (`meta` + `tools[]`). **`FUnrealAiToolExecutionHost`** (`Private/Tools/`) implements `IToolExecutionHost::InvokeTool` and dispatches to UE5 handlers via `UnrealAiToolDispatch.cpp` and modular `UnrealAiToolDispatch_*.cpp` units (game thread). **Search:** `scene_fuzzy_search`, `asset_index_fuzzy_search`, `source_search_symbol` (`UnrealAiFuzzySearch.cpp`). **Blueprints:** `blueprint_compile`, `blueprint_export_ir`, `blueprint_apply_ir`, summaries, open graph, add variable. **Generic assets:** `asset_create`, `asset_export_properties`, `asset_apply_properties`, dependencies/referencers, and more—see catalog and router for the full set. Tools without a handler return a structured `not_implemented`.
 
 ## Install into a UE project
 
@@ -39,21 +39,33 @@ When `WITH_DEV_AUTOMATION_TESTS` is enabled (default for **Development** Editor 
 |------|----------------|
 | `UnrealAiEditor.Tools.JsonHelpers` | `UnrealAiToolJson::Ok` / `Error` round-trip (shared JSON contract for all tools). |
 | `UnrealAiEditor.Tools.DispatchEditorSmoke` | Router returns structured `not_implemented` for unknown IDs; `editor_get_selection` reaches `GEditor` and returns `actor_paths` / `labels` / `count`. |
+| `UnrealAiEditor.Tools.CatalogMatrix` | Every catalog tool ID: dispatch with `{}` or `tests/fixtures/<tool_id>.json`; asserts non-empty, parseable JSON with `ok` / `status` / `error`; writes `Saved/UnrealAiEditor/Automation/tool_matrix_last.json`. |
+| `UnrealAiEditor.Harness.*` | Orchestrator merge, DAG parse/validation (see `UnrealAiAgentHarnessAutomationTests.cpp`). |
 
-**Run:** Editor → **Tools → Session Frontend** (or **Test Automation** in some UE versions) → search `UnrealAiEditor.Tools`.
+**Run from repo root (log + matrix JSON for LLM workflows):**
 
-These are **smoke** tests: they catch broken wiring and JSON shape regressions; they do **not** replace per-tool integration tests (maps, assets, PIE) for every tool ID.
+```powershell
+.\run-unreal-ai-tests.ps1
+# optional: .\run-unreal-ai-tests.ps1 -Build
+# optional: .\run-unreal-ai-tests.ps1 -MatrixFilter blueprint
+```
 
-## Out of scope (shell)
+Artifacts: [`tests/out/editor-last.log`](../tests/out/editor-last.log), [`tests/out/last-matrix.json`](../tests/out/last-matrix.json) (copy of the Saved report). See [`tests/README.md`](../tests/README.md).
 
-Real HTTP/OpenRouter, tool execution, `@` asset search, encryption beyond future work, separate OS service process.
+**Run in editor:** **Tools → Session Frontend** (or **Test Automation** in some UE versions) → search `UnrealAiEditor`.
+
+Catalog matrix tests catch **contract** breaks (empty responses, non-JSON, missing structured fields). They do **not** prove every tool succeeds with minimal args (`bOk` may be false by design). Add fixtures under `tests/fixtures/` for deeper per-tool checks; maps/assets/PIE still need targeted integration tests.
+
+## Out of scope (product)
+
+Hosted product backend, mandatory cloud accounts, separate **required** OS service for core chat (optional local helpers are fine). Features not yet implemented are reflected per tool (`not_implemented` or catalog notes), not listed here.
 
 ## Context service
 
-Per-chat **context assembly** (`IAgentContextService` / `FUnrealAiContextService`): attachments, tool-result memory, editor snapshot, `BuildContextWindow` → persisted as `chats/<project_id>/threads/<thread_id>/context.json`. See repo [`docs/context-service.md`](../../docs/context-service.md).
+Per-chat **context assembly** (`IAgentContextService` / `FUnrealAiContextService`): attachments, tool-result memory, editor snapshot, `BuildContextWindow` → persisted as `chats/<project_id>/threads/<thread_id>/context.json`. See repo [`docs/context-management.md`](../../docs/context-management.md).
 
 ## Engine module layout
 
 - `Public/` — module API, tab IDs, `UUnrealAiEditorSettings`.
-- `Private/` — Slate widgets/tabs, style, commands, persistence/stream stubs, **`Private/Context/`** context service, **`Private/Tools/`** tool catalog load + modular dispatch (`UnrealAiToolDispatch.cpp` router, `UnrealAiToolJson.*`, `UnrealAiToolDispatch_Context`, `_Actors`, `_EditorUi`, `_Viewport`, `_ProjectFiles`, `_Console`, `_AssetsMaterials`, `_MoreAssets`, `_BlueprintTools`, `_EditorMore`, `_BuildPackaging`, `_ExtraFeatures`, `_ContentBrowserEx`, `_Pie`, `_Misc`, `_Search`), module implementation.
+- `Private/` — Slate widgets/tabs (including **Debug**), style, commands, persistence, LLM HTTP transport, **`Private/Context/`** context service, **`Private/Tools/`** tool catalog load + modular dispatch (`UnrealAiToolDispatch.cpp` router, `UnrealAiToolJson.*`, `UnrealAiToolDispatch_*` including `_Search`, `_BlueprintTools`, `_GenericAssets`, …), module implementation.
 - `Resources/` — **`UnrealAiToolCatalog.json`** (single tool catalog for the plugin).
