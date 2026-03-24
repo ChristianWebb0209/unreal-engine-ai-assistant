@@ -110,4 +110,118 @@ bool FUnrealAiToolDispatchEditorSmokeTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiBlueprintApplyIrContractTest,
+	"UnrealAiEditor.Tools.BlueprintApplyIrContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiBlueprintApplyIrContractTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	TestTrue(TEXT("Runs on game thread (tool dispatch requirement)"), IsInGameThread());
+
+	// Missing required fields should return structured invalid_ir.
+	{
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_apply_ir"),
+			MakeShared<FJsonObject>(),
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_apply_ir missing required: bOk"), R.bOk);
+
+		TSharedPtr<FJsonObject> O;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
+		TestTrue(TEXT("blueprint_apply_ir missing required: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+		TestFalse(TEXT("blueprint_apply_ir missing required: ok field"), O->GetBoolField(TEXT("ok")));
+
+		FString Status;
+		TestTrue(TEXT("blueprint_apply_ir missing required: status"), O->TryGetStringField(TEXT("status"), Status));
+		TestEqual(TEXT("blueprint_apply_ir missing required: status value"), Status, FString(TEXT("invalid_ir")));
+		TestTrue(TEXT("blueprint_apply_ir missing required: errors present"), O->HasTypedField<EJson::Array>(TEXT("errors")));
+	}
+
+	// Unsupported op should fail deterministically with apply_failed.
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/__does_not_exist__.__does_not_exist__"));
+		TArray<TSharedPtr<FJsonValue>> Nodes;
+		{
+			TSharedPtr<FJsonObject> N = MakeShared<FJsonObject>();
+			N->SetStringField(TEXT("node_id"), TEXT("n1"));
+			N->SetStringField(TEXT("op"), TEXT("totally_unknown_op"));
+			Nodes.Add(MakeShareable(new FJsonValueObject(N.ToSharedRef())));
+		}
+		Args->SetArrayField(TEXT("nodes"), Nodes);
+
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_apply_ir"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_apply_ir unsupported op: bOk"), R.bOk);
+
+		TSharedPtr<FJsonObject> O;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
+		TestTrue(TEXT("blueprint_apply_ir unsupported op: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+		TestFalse(TEXT("blueprint_apply_ir unsupported op: ok field"), O->GetBoolField(TEXT("ok")));
+		TestTrue(TEXT("blueprint_apply_ir unsupported op: has status"), O->HasTypedField<EJson::String>(TEXT("status")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiGenericAssetToolsContractTest,
+	"UnrealAiEditor.Tools.GenericAssetToolsContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiGenericAssetToolsContractTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	TestTrue(TEXT("Runs on game thread"), IsInGameThread());
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("object_path"), TEXT("/Game/__unreal_ai_missing_asset__.__unreal_ai_missing_asset__"));
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("asset_export_properties"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("asset_export_properties missing asset: bOk"), R.bOk);
+	}
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("object_path"), TEXT("/Game/Test.Test"));
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("asset_apply_properties"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("asset_apply_properties missing properties field: bOk"), R.bOk);
+	}
+
+	{
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_export_ir"),
+			MakeShared<FJsonObject>(),
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_export_ir missing blueprint_path: bOk"), R.bOk);
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

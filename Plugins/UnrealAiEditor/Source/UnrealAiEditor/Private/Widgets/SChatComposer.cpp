@@ -8,6 +8,7 @@
 #include "Widgets/FUnrealAiChatRunSink.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Backend/UnrealAiBackendRegistry.h"
+#include "Backend/IUnrealAiPersistence.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Harness/FUnrealAiOrchestrateExecutor.h"
 #include "Harness/IAgentRunSink.h"
@@ -1737,7 +1738,13 @@ FReply SChatComposer::OnSendClicked()
 	Req.ModelProfileId = Session->ModelProfileId;
 	Req.bRecordAssistantAsStubToolResult = true;
 
-	const TSharedPtr<IAgentRunSink> Sink = MakeShared<FUnrealAiChatRunSink>(MessageList->GetTranscript());
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	const TSharedPtr<IAgentRunSink> Sink = MakeShared<FUnrealAiChatRunSink>(
+		MessageList->GetTranscript(),
+		Session,
+		Persist,
+		ProjectId,
+		ThreadIdStr);
 	if (AgentMode == EUnrealAiAgentMode::Orchestrate)
 	{
 		ActiveOrchestrateExecutor = FUnrealAiOrchestrateExecutor::Start(

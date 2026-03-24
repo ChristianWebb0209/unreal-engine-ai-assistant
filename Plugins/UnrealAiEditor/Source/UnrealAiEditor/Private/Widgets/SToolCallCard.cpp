@@ -13,6 +13,7 @@
 #include "HAL/PlatformTime.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/UnrealAiToolUi.h"
+#include "Widgets/SToolEditorNotePanel.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
@@ -55,6 +56,7 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 	ResultPreview = InArgs._ResultPreview;
 	bRunning = InArgs._bRunning;
 	bSuccess = InArgs._bSuccess;
+	EditorPresentation = InArgs._EditorPresentation;
 
 	const EUnrealAiToolVisualCategory Cat = UnrealAiClassifyToolVisuals(ToolName);
 	CategoryTint = UnrealAiToolCategoryTint(Cat);
@@ -184,6 +186,11 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 											.Text(FText::FromString(
 												ResultPreview.IsEmpty() && bRunning ? FString(TEXT("…")) : ResultPreview))
 									]
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 4.f, 0.f, 0.f))
+							[
+								SNew(SToolEditorNotePanel)
+									.EditorPresentation(EditorPresentation)
 							]
 						]
 				]];

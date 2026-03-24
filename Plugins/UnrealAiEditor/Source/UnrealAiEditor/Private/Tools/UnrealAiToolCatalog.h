@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Context/AgentContextTypes.h"
 #include "Dom/JsonObject.h"
+#include "Templates/Function.h"
 
 struct FUnrealAiModelCapabilities;
 
@@ -21,6 +22,9 @@ public:
 	TSharedPtr<FJsonObject> FindToolDefinition(const FString& ToolId) const;
 
 	int32 GetToolCount() const { return ToolById.Num(); }
+
+	/** Invoke Fn for each tool in deterministic order (sorted by tool_id). */
+	void ForEachTool(TFunctionRef<void(const FString& ToolId, const TSharedPtr<FJsonObject>& Definition)> Fn) const;
 
 	/** OpenAI `tools` JSON array filtered by agent mode + model capabilities. */
 	void BuildOpenAiToolsJsonForMode(EUnrealAiAgentMode Mode, const FUnrealAiModelCapabilities& Caps, FString& OutJsonArray) const;

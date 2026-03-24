@@ -25,7 +25,7 @@
       "viewport_camera",
       "world_actors"
     ],
-    "tool_count": 74
+    "tool_count": 81
   },
   "tools": [
     {
@@ -974,6 +974,160 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/blueprints-visual-scripting-in-unreal-engine"
       ],
+      "status": "research"
+    },
+    {
+      "tool_id": "blueprint_apply_ir",
+      "summary": "Apply compact Blueprint IR and materialize/wire EventGraph nodes.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "ir",
+        "graph"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true,
+        "orchestrate": true
+      },
+      "context_selector": {
+        "priority": 68,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string"
+          },
+          "graph_name": {
+            "type": "string"
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "type"
+              ]
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "node_id": {
+                  "type": "string"
+                },
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "event_begin_play",
+                    "branch",
+                    "sequence",
+                    "call_function",
+                    "delay",
+                    "get_variable",
+                    "set_variable",
+                    "dynamic_cast"
+                  ]
+                },
+                "x": {
+                  "type": "integer"
+                },
+                "y": {
+                  "type": "integer"
+                },
+                "class_path": {
+                  "type": "string"
+                },
+                "function_name": {
+                  "type": "string"
+                },
+                "variable": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "node_id",
+                "op"
+              ]
+            }
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ]
+            }
+          },
+          "defaults": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "node_id": {
+                  "type": "string"
+                },
+                "pin": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "node_id",
+                "pin"
+              ]
+            }
+          }
+        },
+        "required": [
+          "blueprint_path",
+          "nodes"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "UEdGraph node APIs; FBlueprintEditorUtils; FKismetEditorUtilities::CompileBlueprint",
+      "threading": "game_thread",
+      "failure_modes": [
+        "invalid_ir",
+        "asset_not_found",
+        "graph_not_found",
+        "apply_failed"
+      ],
+      "doc_links": [],
       "status": "research"
     },
     {
@@ -3235,6 +3389,321 @@
       "side_effects": "memory",
       "permission": "write",
       "ue_entry_points": "IAgentContextService::SetActiveTodoPlan",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_create",
+      "summary": "Create a new asset under /Game via IAssetTools (class + optional UFactory). Enables broad asset-type coverage when combined with asset_apply_properties.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "write"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true,
+        "orchestrate": true
+      },
+      "context_selector": {
+        "priority": 76,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "package_path": {
+            "type": "string",
+            "description": "Long package path folder under /Game, e.g. /Game/AI/Generated"
+          },
+          "asset_name": {
+            "type": "string",
+            "description": "Asset name without path"
+          },
+          "asset_class": {
+            "type": "string",
+            "description": "UClass path, e.g. /Script/Engine.Material or /Script/LevelSequence.LevelSequence"
+          },
+          "factory_class": {
+            "type": "string",
+            "description": "Optional UFactory class path when the engine requires a factory"
+          }
+        },
+        "required": [
+          "package_path",
+          "asset_name",
+          "asset_class"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "IAssetTools::CreateAsset",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_export_properties",
+      "summary": "Export editable UObject properties under /Game to JSON (reflection). Prefer before bespoke subsystem reads.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true,
+        "orchestrate": true
+      },
+      "context_selector": {
+        "priority": 77,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FProperty::ExportTextItem",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_apply_properties",
+      "summary": "Apply JSON property deltas to an asset under /Game (reflection / ImportText). Use dry_run to validate.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "write"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true,
+        "orchestrate": true
+      },
+      "context_selector": {
+        "priority": 75,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_path": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object",
+            "description": "Map of property name to JSON value"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "If true, validate only (no transaction)"
+          }
+        },
+        "required": [
+          "object_path",
+          "properties"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "FProperty::ImportText",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_find_referencers",
+      "summary": "List Asset Registry referencers for an asset identifier.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "read",
+        "dependencies"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true,
+        "orchestrate": true
+      },
+      "context_selector": {
+        "priority": 74,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IAssetRegistry::GetReferencers",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_get_dependencies",
+      "summary": "List Asset Registry direct dependencies for an asset.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "read",
+        "dependencies"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true,
+        "orchestrate": true
+      },
+      "context_selector": {
+        "priority": 73,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IAssetRegistry::GetDependencies",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "level_sequence_create_asset",
+      "summary": "Create a Level Sequence asset under /Game (typed shortcut over asset_create).",
+      "category": "animation_sequencer",
+      "tags": [
+        "sequencer",
+        "asset",
+        "write"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true,
+        "orchestrate": true
+      },
+      "context_selector": {
+        "priority": 72,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "package_path": {
+            "type": "string"
+          },
+          "asset_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "package_path",
+          "asset_name"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "ULevelSequence; IAssetTools::CreateAsset",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "blueprint_export_ir",
+      "summary": "Serialize Blueprint graph nodes/links/defaults to blueprint_apply_ir-style JSON (lossy for unknown node types).",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "read",
+        "graph"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "fast": true,
+        "agent": true,
+        "orchestrate": true
+      },
+      "context_selector": {
+        "priority": 71,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string"
+          },
+          "graph_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UBlueprint; UEdGraph",
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],

@@ -70,6 +70,21 @@ TSharedPtr<FJsonObject> FUnrealAiToolCatalog::FindToolDefinition(const FString& 
 	return nullptr;
 }
 
+void FUnrealAiToolCatalog::ForEachTool(TFunctionRef<void(const FString& ToolId, const TSharedPtr<FJsonObject>& Definition)> Fn) const
+{
+	TArray<FString> Keys;
+	ToolById.GetKeys(Keys);
+	Keys.Sort();
+	for (const FString& Key : Keys)
+	{
+		const TSharedPtr<FJsonObject>* Def = ToolById.Find(Key);
+		if (Def && Def->IsValid())
+		{
+			Fn(Key, *Def);
+		}
+	}
+}
+
 void FUnrealAiToolCatalog::BuildOpenAiToolsJsonForMode(
 	EUnrealAiAgentMode Mode,
 	const FUnrealAiModelCapabilities& Caps,

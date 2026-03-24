@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
 
+#include "Tools/Presentation/UnrealAiToolEditorPresentation.h"
+
 /** Inline tool call row with collapsible args/result and copy. */
 class SToolCallCard final : public SCompoundWidget
 {
@@ -13,6 +15,7 @@ public:
 	SLATE_ARGUMENT(FString, ResultPreview)
 	SLATE_ARGUMENT(bool, bRunning)
 	SLATE_ARGUMENT(bool, bSuccess)
+	SLATE_ARGUMENT(TSharedPtr<FUnrealAiToolEditorPresentation>, EditorPresentation)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -30,4 +33,5 @@ private:
 	bool bRunning = true;
 	bool bSuccess = false;
 	FLinearColor CategoryTint = FLinearColor::White;
+	TSharedPtr<FUnrealAiToolEditorPresentation> EditorPresentation;
 };

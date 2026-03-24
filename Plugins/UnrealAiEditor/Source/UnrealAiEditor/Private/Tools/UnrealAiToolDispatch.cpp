@@ -16,6 +16,7 @@
 #include "Tools/UnrealAiToolDispatch_EditorMore.h"
 #include "Tools/UnrealAiToolDispatch_BuildPackaging.h"
 #include "Tools/UnrealAiToolDispatch_ExtraFeatures.h"
+#include "Tools/UnrealAiToolDispatch_GenericAssets.h"
 #include "Tools/UnrealAiToolJson.h"
 
 #include "Backend/UnrealAiBackendRegistry.h"
@@ -258,10 +259,42 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_AssetOpenEditor(A);
 	}
+	if (ToolId == TEXT("asset_create"))
+	{
+		return UnrealAiDispatch_AssetCreate(A);
+	}
+	if (ToolId == TEXT("asset_export_properties"))
+	{
+		return UnrealAiDispatch_AssetExportProperties(A);
+	}
+	if (ToolId == TEXT("asset_apply_properties"))
+	{
+		return UnrealAiDispatch_AssetApplyProperties(A);
+	}
+	if (ToolId == TEXT("asset_find_referencers"))
+	{
+		return UnrealAiDispatch_AssetFindReferencers(A);
+	}
+	if (ToolId == TEXT("asset_get_dependencies"))
+	{
+		return UnrealAiDispatch_AssetGetDependencies(A);
+	}
+	if (ToolId == TEXT("level_sequence_create_asset"))
+	{
+		return UnrealAiDispatch_LevelSequenceCreateAsset(A);
+	}
 
 	if (ToolId == TEXT("blueprint_compile"))
 	{
 		return UnrealAiDispatch_BlueprintCompile(A);
+	}
+	if (ToolId == TEXT("blueprint_export_ir"))
+	{
+		return UnrealAiDispatch_BlueprintExportIr(A);
+	}
+	if (ToolId == TEXT("blueprint_apply_ir"))
+	{
+		return UnrealAiDispatch_BlueprintApplyIr(A);
 	}
 	if (ToolId == TEXT("blueprint_get_graph_summary"))
 	{
