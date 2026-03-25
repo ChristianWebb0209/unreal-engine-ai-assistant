@@ -1,1 +1,4 @@
-What test codeword did I give you in this conversation? Reply with the codeword only or say you do not see it.
+What test codeword did I give you in this conversation?
+
+Reply with the codeword only, or the exact phrase: I do not see it.
+Do not invent a codeword. Do not call editor tools unless you truly cannot answer from conversation context.

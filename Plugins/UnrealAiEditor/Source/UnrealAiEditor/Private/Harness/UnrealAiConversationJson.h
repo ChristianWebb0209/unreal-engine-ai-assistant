@@ -8,6 +8,6 @@ namespace UnrealAiConversationJson
 	bool MessagesToJson(const TArray<FUnrealAiConversationMessage>& Messages, FString& OutJson);
 	bool JsonToMessages(const FString& Json, TArray<FUnrealAiConversationMessage>& OutMessages, TArray<FString>& OutWarnings);
 
-	/** Build OpenAI `messages` JSON array value (content for HTTP body). */
-	bool MessagesToOpenAiJsonArray(const TArray<FUnrealAiConversationMessage>& Messages, FString& OutJsonArray);
+	/** Build `messages` JSON array for chat-completions-style HTTP bodies. */
+	bool MessagesToChatCompletionsJsonArray(const TArray<FUnrealAiConversationMessage>& Messages, FString& OutJsonArray);
 }

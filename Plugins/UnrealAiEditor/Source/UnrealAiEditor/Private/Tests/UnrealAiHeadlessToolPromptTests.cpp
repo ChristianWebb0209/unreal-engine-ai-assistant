@@ -298,6 +298,9 @@ bool FUnrealAiHeadlessPromptToolRoutingTest::RunTest(const FString& Parameters)
 
 	using namespace UnrealAiHeadlessToolPromptTestsPriv;
 
+	// Dispatch surface exposes only `unreal_ai_dispatch` in tools[]; this test expects per-tool function names in tools[].
+	FPlatformMisc::SetEnvironmentVar(TEXT("UNREAL_AI_TOOL_SURFACE"), TEXT("native"));
+
 	TArray<FPromptCase> Cases;
 	FString LoadErr;
 	if (!LoadPromptCases(Cases, LoadErr))

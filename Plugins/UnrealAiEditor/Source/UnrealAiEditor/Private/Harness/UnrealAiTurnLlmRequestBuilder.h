@@ -10,8 +10,8 @@ struct FUnrealAiAgentTurnRequest;
 struct FUnrealAiLlmRequest;
 
 /**
- * Builds a full OpenAI-compatible request: prompt chunks + context + conversation + tools + model/endpoint fields.
- * HTTP POST is performed by ILlmTransport (see FUnrealAiLlmInvocationService).
+ * Assembles a chat request for ILlmTransport: prompt chunks + context + conversation + tools + model/endpoint fields.
+ * Matches the common HTTPS chat-completions JSON shape used by multiple LLM vendors and aggregators.
  */
 namespace UnrealAiTurnLlmRequestBuilder
 {

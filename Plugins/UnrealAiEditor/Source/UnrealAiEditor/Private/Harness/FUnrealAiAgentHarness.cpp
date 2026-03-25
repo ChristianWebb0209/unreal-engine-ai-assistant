@@ -14,17 +14,73 @@
 #include "Context/AgentContextTypes.h"
 #include "Backend/FUnrealAiUsageTracker.h"
 #include "Backend/IUnrealAiPersistence.h"
+#include "HAL/PlatformMisc.h"
 #include "Harness/UnrealAiLlmInvocationService.h"
 #include "Misc/UnrealAiEditorModalMonitor.h"
 #include "Widgets/UnrealAiToolUi.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 #include <atomic>
 
 namespace UnrealAiAgentHarnessPriv
 {
+	static const TCHAR* GUnrealAiDispatchToolName = TEXT("unreal_ai_dispatch");
+
+	static bool UnwrapDispatchToolCall(const FUnrealAiToolCallSpec& Tc, FString& OutInvokeName, FString& OutInvokeArgsJson, FString& OutError)
+	{
+		if (Tc.Name != GUnrealAiDispatchToolName)
+		{
+			OutInvokeName = Tc.Name;
+			OutInvokeArgsJson = Tc.ArgumentsJson;
+			OutError.Reset();
+			return true;
+		}
+		TSharedPtr<FJsonObject> Root;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Tc.ArgumentsJson);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			OutError = TEXT("unreal_ai_dispatch: invalid JSON arguments");
+			return false;
+		}
+		if (!Root->TryGetStringField(TEXT("tool_id"), OutInvokeName) || OutInvokeName.TrimStartAndEnd().IsEmpty())
+		{
+			OutError = TEXT("unreal_ai_dispatch: missing or empty tool_id");
+			return false;
+		}
+		OutInvokeName.TrimStartAndEndInline();
+		const TSharedPtr<FJsonObject>* ArgsObjPtr = nullptr;
+		if (Root->TryGetObjectField(TEXT("arguments"), ArgsObjPtr) && ArgsObjPtr && (*ArgsObjPtr).IsValid())
+		{
+			FString Out;
+			TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
+			if (FJsonSerializer::Serialize((*ArgsObjPtr).ToSharedRef(), W))
+			{
+				OutInvokeArgsJson = Out;
+			}
+			else
+			{
+				OutInvokeArgsJson = TEXT("{}");
+			}
+		}
+		else
+		{
+			FString ArgsStr;
+			if (Root->TryGetStringField(TEXT("arguments"), ArgsStr))
+			{
+				OutInvokeArgsJson = ArgsStr;
+			}
+			else
+			{
+				OutInvokeArgsJson = TEXT("{}");
+			}
+		}
+		OutError.Reset();
+		return true;
+	}
+
 	static bool ShouldRetryTransientTransportError(const FString& Msg)
 	{
 		if (Msg.IsEmpty())
@@ -90,7 +146,8 @@ namespace UnrealAiAgentHarnessPriv
 		int32 EffectiveMaxLlmRounds = 32;
 		/** Retries transient HTTP-level cancellations without consuming a round. */
 		int32 TransientTransportRetryCountThisRound = 0;
-		static constexpr int32 MaxTransientTransportRetriesPerRound = 5;
+		// Keep retries minimal so headed live runs fail fast instead of stalling for many minutes.
+		static constexpr int32 MaxTransientTransportRetriesPerRound = 0;
 
 		FString AssistantBuffer;
 		TArray<FUnrealAiToolCallSpec> PendingToolCalls;
@@ -116,6 +173,11 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("UnrealAi harness: runner_terminal_set result=failed msg=%s"),
+			Msg.IsEmpty() ? TEXT("<none>") : *Msg);
 		FUnrealAiEditorModalMonitor::NotifyAgentTurnEndedForSink(Sink);
 		if (Sink.IsValid())
 		{
@@ -130,6 +192,7 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
+		UE_LOG(LogTemp, Display, TEXT("UnrealAi harness: runner_terminal_set result=success"));
 		if (Conv.IsValid())
 		{
 			Conv->SaveNow();
@@ -196,6 +259,17 @@ namespace UnrealAiAgentHarnessPriv
 		FUnrealAiModelCapabilities CapLimits;
 		Profiles->GetEffectiveCapabilities(Request.ModelProfileId, CapLimits);
 		int32 ParsedMax = CapLimits.MaxAgentLlmRounds > 0 ? CapLimits.MaxAgentLlmRounds : 32;
+		{
+			const FString MaxRoundsEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_MAX_LLM_ROUNDS"));
+			if (!MaxRoundsEnv.IsEmpty())
+			{
+				const int32 EnvMax = FCString::Atoi(*MaxRoundsEnv);
+				if (EnvMax > 0)
+				{
+					ParsedMax = FMath::Min(ParsedMax, EnvMax);
+				}
+			}
+		}
 		if (Request.LlmRoundBudgetFloor > 0)
 		{
 			ParsedMax = FMath::Max(ParsedMax, Request.LlmRoundBudgetFloor);
@@ -248,6 +322,12 @@ namespace UnrealAiAgentHarnessPriv
 		}
 
 		const TSharedPtr<FAgentTurnRunner> Self = AsShared();
+		UE_LOG(LogTemp, Display,
+			TEXT("UnrealAi harness: LLM round %d/%d — submitting HTTP request (stream=%s). "
+				 "No viewport progress until tools execute."),
+			LlmRound,
+			EffectiveMaxLlmRounds,
+			LlmReq.bStream ? TEXT("yes") : TEXT("no"));
 		const FUnrealAiLlmInvocationService Invoker(Transport);
 		Invoker.SubmitStreamChatCompletion(
 			LlmReq,
@@ -338,8 +418,17 @@ namespace UnrealAiAgentHarnessPriv
 			Fail(TEXT("Model completed tool_calls but no valid tool name (empty function.name)"));
 			return;
 		}
+		FString TodoPlanEffectiveName;
+		if (PendingToolCalls.Num() == 1)
+		{
+			FString TmpArgs, UnwrapE;
+			if (!UnwrapDispatchToolCall(PendingToolCalls[0], TodoPlanEffectiveName, TmpArgs, UnwrapE))
+			{
+				TodoPlanEffectiveName.Reset();
+			}
+		}
 		const bool bTodoPlanOnly = PendingToolCalls.Num() == 1
-			&& PendingToolCalls[0].Name == TEXT("agent_emit_todo_plan");
+			&& TodoPlanEffectiveName == TEXT("agent_emit_todo_plan");
 		int32 ToolSuccessCount = 0;
 		int32 ToolFailCount = 0;
 		FUnrealAiConversationMessage Am;
@@ -350,11 +439,33 @@ namespace UnrealAiAgentHarnessPriv
 
 		for (const FUnrealAiToolCallSpec& Tc : PendingToolCalls)
 		{
+			FString InvokeName;
+			FString InvokeArgs;
+			FString UnwrapErr;
+			if (!UnwrapDispatchToolCall(Tc, InvokeName, InvokeArgs, UnwrapErr))
+			{
+				if (Sink.IsValid())
+				{
+					Sink->OnToolCallStarted(Tc.Name, Tc.Id, Tc.ArgumentsJson);
+				}
+				const FString ModelToolContent = UnwrapErr;
+				if (Sink.IsValid())
+				{
+					Sink->OnToolCallFinished(Tc.Name, Tc.Id, false, UnrealAiTruncateForUi(ModelToolContent), nullptr);
+				}
+				FUnrealAiConversationMessage Tm;
+				Tm.Role = TEXT("tool");
+				Tm.ToolCallId = Tc.Id;
+				Tm.Content = ModelToolContent;
+				Conv->GetMessagesMutable().Add(Tm);
+				++ToolFailCount;
+				continue;
+			}
 			if (Sink.IsValid())
 			{
-				Sink->OnToolCallStarted(Tc.Name, Tc.Id, Tc.ArgumentsJson);
+				Sink->OnToolCallStarted(InvokeName, Tc.Id, InvokeArgs);
 			}
-			const FUnrealAiToolInvocationResult Inv = Tools->InvokeTool(Tc.Name, Tc.ArgumentsJson, Tc.Id);
+			const FUnrealAiToolInvocationResult Inv = Tools->InvokeTool(InvokeName, InvokeArgs, Tc.Id);
 			const FString DialogFootnote = FUnrealAiEditorModalMonitor::ConsumePendingToolDialogFootnote();
 			FString ModelToolContent = Inv.bOk ? Inv.ContentForModel : Inv.ErrorMessage;
 			if (!DialogFootnote.IsEmpty())
@@ -377,24 +488,24 @@ namespace UnrealAiAgentHarnessPriv
 			if (Sink.IsValid())
 			{
 				Sink->OnToolCallFinished(
-					Tc.Name,
+					InvokeName,
 					Tc.Id,
 					Inv.bOk,
 					UnrealAiTruncateForUi(ModelToolContent),
 					Inv.EditorPresentation);
 			}
-			if (Tc.Name == TEXT("agent_emit_todo_plan") && Sink.IsValid())
+			if (InvokeName == TEXT("agent_emit_todo_plan") && Sink.IsValid())
 			{
 				FString PlanTitle = TEXT("Plan");
 				TSharedPtr<FJsonObject> ArgsObj;
-				TSharedRef<TJsonReader<>> AR = TJsonReaderFactory<>::Create(Tc.ArgumentsJson);
+				TSharedRef<TJsonReader<>> AR = TJsonReaderFactory<>::Create(InvokeArgs);
 				if (FJsonSerializer::Deserialize(AR, ArgsObj) && ArgsObj.IsValid())
 				{
 					ArgsObj->TryGetStringField(TEXT("title"), PlanTitle);
 				}
 				const FString PlanBody = (Inv.bOk && Inv.ContentForModel.TrimStart().StartsWith(TEXT("{")))
 					? Inv.ContentForModel
-					: Tc.ArgumentsJson;
+					: InvokeArgs;
 				Sink->OnTodoPlanEmitted(PlanTitle, PlanBody);
 			}
 			FUnrealAiConversationMessage Tm;

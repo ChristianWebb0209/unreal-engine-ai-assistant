@@ -5,6 +5,7 @@
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Harness/ILlmTransport.h"
 #include "Harness/UnrealAiAgentTypes.h"
+#include "HAL/PlatformMisc.h"
 #include "Prompt/UnrealAiPromptBuilder.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "UnrealAiEditorSettings.h"
@@ -74,10 +75,65 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 
 	const FString SystemContent = UnrealAiPromptBuilder::BuildSystemDeveloperContent(P);
 
+	if (!Catalog->IsLoaded())
+	{
+		const_cast<FUnrealAiToolCatalog*>(Catalog)->LoadFromPlugin();
+	}
+	FUnrealAiToolPackOptions PackOpt;
+	{
+		const FString PackEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_TOOL_PACK")).TrimStartAndEnd().ToLower();
+		if (PackEnv == TEXT("core"))
+		{
+			PackOpt.bRestrictToCorePack = true;
+		}
+		const FString ExtraEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_TOOL_PACK_EXTRA"));
+		if (!ExtraEnv.IsEmpty())
+		{
+			TArray<FString> RawParts;
+			ExtraEnv.ParseIntoArray(RawParts, TEXT(","), true);
+			for (FString& Part : RawParts)
+			{
+				Part.TrimStartAndEndInline();
+				if (!Part.IsEmpty())
+				{
+					PackOpt.AdditionalToolIds.Add(Part);
+				}
+			}
+		}
+	}
+	const FUnrealAiToolPackOptions* PackPtr = PackOpt.bRestrictToCorePack ? &PackOpt : nullptr;
+
+	FString SystemAugmented = SystemContent;
+	FString ToolsJson;
+	// Default: dispatch (tiny tools[] + index in system text). Set UNREAL_AI_TOOL_SURFACE=native for full per-tool JSON Schema.
+	const FString SurfaceEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_TOOL_SURFACE")).TrimStartAndEnd();
+	const bool bWantDispatchSurface = !SurfaceEnv.Equals(TEXT("native"), ESearchCase::IgnoreCase);
+	bool bUsingDispatchSurface = false;
+	if (Request.Mode != EUnrealAiAgentMode::Orchestrate && Caps.bSupportsNativeTools && bWantDispatchSurface)
+	{
+		FString ToolIndexMd;
+		Catalog->BuildCompactToolIndexAppendix(Request.Mode, Caps, PackPtr, ToolIndexMd);
+		if (!ToolIndexMd.IsEmpty())
+		{
+			Catalog->BuildUnrealAiDispatchToolsJson(Request.Mode, Caps, PackPtr, ToolsJson);
+			bUsingDispatchSurface = true;
+			SystemAugmented += TEXT("\n\n---\n\n## Unreal tool index (`unreal_ai_dispatch`)\n");
+			SystemAugmented += TEXT("Use the function tool **`unreal_ai_dispatch`** with ");
+			SystemAugmented += TEXT("`{\"tool_id\":\"<id>\",\"arguments\":{ ... }}` ");
+			SystemAugmented += TEXT("(`arguments` must match the JSON schema for that tool in the catalog). ");
+			SystemAugmented += TEXT("Enabled tools for this session:\n\n");
+			SystemAugmented += ToolIndexMd;
+		}
+	}
+	if (!bUsingDispatchSurface)
+	{
+		Catalog->BuildLlmToolsJsonArrayForMode(Request.Mode, Caps, PackPtr, ToolsJson);
+	}
+
 	TArray<FUnrealAiConversationMessage> ApiMsgs;
 	FUnrealAiConversationMessage Sys;
 	Sys.Role = TEXT("system");
-	Sys.Content = SystemContent;
+	Sys.Content = SystemAugmented;
 	ApiMsgs.Add(Sys);
 	ApiMsgs.Append(Conv->GetMessages());
 
@@ -87,16 +143,23 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 		ApiMsgs.RemoveAt(1);
 	}
 
-	if (!Catalog->IsLoaded())
-	{
-		const_cast<FUnrealAiToolCatalog*>(Catalog)->LoadFromPlugin();
-	}
-	FString ToolsJson;
-	Catalog->BuildOpenAiToolsJsonForMode(Request.Mode, Caps, ToolsJson);
 	if (Request.Mode == EUnrealAiAgentMode::Orchestrate)
 	{
 		// Planner pass must be DAG-only in v1; executor child turns run in Agent mode.
 		ToolsJson = TEXT("[]");
+	}
+	else
+	{
+		// Wiring / latency checks only: full tool array is often 50k+ chars and dominates upload + server time vs. curl smoke tests.
+		const FString OmitToolsEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_OMIT_TOOLS"));
+		if (!OmitToolsEnv.IsEmpty())
+		{
+			const FString O = OmitToolsEnv.TrimStartAndEnd().ToLower();
+			if (O == TEXT("1") || O == TEXT("true") || O == TEXT("yes"))
+			{
+				ToolsJson = TEXT("[]");
+			}
+		}
 	}
 
 	OutRequest = FUnrealAiLlmRequest();
@@ -104,6 +167,22 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	OutRequest.Messages = MoveTemp(ApiMsgs);
 	OutRequest.ToolsJsonArray = MoveTemp(ToolsJson);
 	OutRequest.bStream = GetDefault<UUnrealAiEditorSettings>()->bStreamLlmChat;
+	// UNREAL_AI_LLM_STREAM: 0/false/off = non-streaming (single JSON body, often more reliable with UE HTTP); 1/true = stream
+	{
+		const FString StreamOverride = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_LLM_STREAM"));
+		if (!StreamOverride.IsEmpty())
+		{
+			const FString S = StreamOverride.TrimStartAndEnd().ToLower();
+			if (S == TEXT("0") || S == TEXT("false") || S == TEXT("no") || S == TEXT("off"))
+			{
+				OutRequest.bStream = false;
+			}
+			else if (S == TEXT("1") || S == TEXT("true") || S == TEXT("yes") || S == TEXT("on"))
+			{
+				OutRequest.bStream = true;
+			}
+		}
+	}
 	OutRequest.MaxOutputTokens = FMath::Clamp(Caps.MaxOutputTokens, 1, 128000);
 
 	if (Profiles->HasAnyConfiguredApiKey())

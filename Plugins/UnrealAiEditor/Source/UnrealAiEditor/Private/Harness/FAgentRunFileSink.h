@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "Harness/IAgentRunSink.h"
 
+#include <atomic>
+
 class IAgentContextService;
 class FEvent;
 
@@ -64,4 +66,5 @@ private:
 	FEvent* DoneEvent = nullptr;
 	bool* CompletionSuccessPtr = nullptr;
 	FString* CompletionErrorPtr = nullptr;
+	std::atomic<bool> bFinished{false};
 };

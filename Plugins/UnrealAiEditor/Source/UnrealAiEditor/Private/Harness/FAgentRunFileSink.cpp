@@ -5,6 +5,7 @@
 #include "Context/IAgentContextService.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -55,9 +56,37 @@ void FAgentRunFileSink::MaybeDumpContextWindow(const TCHAR* Reason)
 	}
 	FAgentContextBuildOptions Opt;
 	Opt.Mode = EUnrealAiAgentMode::Agent;
+	{
+		const FString EnvVerbose = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_CONTEXT_VERBOSE"));
+		const bool bVerbose = EnvVerbose.Equals(TEXT("1"), ESearchCase::IgnoreCase)
+			|| EnvVerbose.Equals(TEXT("true"), ESearchCase::IgnoreCase)
+			|| EnvVerbose.Equals(TEXT("yes"), ESearchCase::IgnoreCase);
+		Opt.bVerboseContextBuild = bVerbose;
+	}
 	const FAgentContextBuildResult Built = ContextService->BuildContextWindow(Opt);
-	const FString Base = FPaths::GetPath(JsonlPath) / FString::Printf(TEXT("context_window_%s.txt"), Reason);
+	const FString BaseDir = FPaths::GetPath(JsonlPath);
+	const FString Base = BaseDir / FString::Printf(TEXT("context_window_%s.txt"), Reason);
 	FFileHelper::SaveStringToFile(Built.ContextBlock, *Base, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	if (Opt.bVerboseContextBuild && Built.VerboseTraceLines.Num() > 0)
+	{
+		const FString TracePath = BaseDir / FString::Printf(TEXT("context_build_trace_%s.txt"), Reason);
+		FString Trace;
+		Trace += FString::Printf(TEXT("Context build trace (reason=%s)\n"), Reason);
+		if (Built.Warnings.Num() > 0)
+		{
+			Trace += FString::Printf(TEXT("Warnings (%d)\n"), Built.Warnings.Num());
+			for (const FString& W : Built.Warnings)
+			{
+				Trace += FString::Printf(TEXT("- %s\n"), *W);
+			}
+			Trace += TEXT("\n");
+		}
+		for (const FString& L : Built.VerboseTraceLines)
+		{
+			Trace += L + TEXT("\n");
+		}
+		FFileHelper::SaveStringToFile(Trace, *TracePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	}
 }
 
 void FAgentRunFileSink::OnRunStarted(const FUnrealAiRunIds& Ids)
@@ -156,6 +185,11 @@ void FAgentRunFileSink::OnTodoPlanEmitted(const FString& Title, const FString& P
 
 void FAgentRunFileSink::OnRunFinished(const bool bSuccess, const FString& ErrorMessage)
 {
+	bool bExpected = false;
+	if (!bFinished.compare_exchange_strong(bExpected, true, std::memory_order_relaxed))
+	{
+		return;
+	}
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetStringField(TEXT("type"), TEXT("run_finished"));
 	O->SetBoolField(TEXT("success"), bSuccess);

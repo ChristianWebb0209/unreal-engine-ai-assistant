@@ -1,1 +1,8 @@
 Create a controllable third-person character with WASD movement and mouse camera control.
+
+Hard requirements:
+- Verify assets and parent classes with tools before creating or editing blueprints.
+- If Engine third-person template content is missing, use existing project classes only; do not assume paths like `/Game/ThirdPerson/...` without listing them.
+- Prefer `Pawn` or `Character` only if you confirm the module/class is available.
+- Small incremental `blueprint_apply_ir` or editor tools; compile and fix errors between steps.
+- End with the exact blueprint(s) and input mappings you used; if blocked, list what is missing.

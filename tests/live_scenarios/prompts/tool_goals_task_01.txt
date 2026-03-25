@@ -1,1 +1,17 @@
-Build a simple scene with a coin object that rotates around and hovers up and down. When it collides with anything, it disappears and plays a sound.
+Build a simple scene with a coin object that rotates and hovers up/down. When it collides with anything, it should disappear and play a sound.
+
+Hard requirements:
+- Use only assets/classes/functions you can verify exist via tools first.
+- Before editing, run preflight discovery:
+  1) search for candidate coin mesh/material/blueprint assets
+  2) search for candidate sound assets
+  3) inspect the target blueprint graph(s) before apply
+- If a required asset is missing, do NOT invent names. Choose an existing alternative from search results, or stop and report exactly what is missing.
+- Prefer small valid `blueprint_apply_ir` changes over one large speculative patch.
+- After each apply, verify compile/save status and continue only if valid.
+
+Completion criteria:
+- A concrete coin actor/blueprint exists in `/Game` and has visible rotation + hover behavior.
+- Collision behavior removes/hides/destroys the coin actor.
+- A verified existing sound asset is triggered on collision.
+- End with a concise validation summary listing the actual asset paths used.

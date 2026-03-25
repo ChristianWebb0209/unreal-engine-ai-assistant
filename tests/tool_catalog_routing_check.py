@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 1) Static: each catalog tool_id is included in the OpenAI tools surface for its mode
-   (FUnrealAiToolCatalog::BuildOpenAiToolsJsonForMode).
+   (FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode).
 
 2) Optional --llm: loads API URL + key + default model from the same plugin_settings.json
    the Unreal editor uses (%LOCALAPPDATA%/UnrealAiEditor/settings on Windows), assembles the
@@ -96,7 +96,7 @@ def build_tool_ids_for_mode(catalog: dict[str, Any], mode: str, supports_native_
 def build_openai_tools_array(
     catalog: dict[str, Any], mode: str, supports_native_tools: bool
 ) -> list[dict[str, Any]]:
-    """Mirror FUnrealAiToolCatalog::BuildOpenAiToolsJsonForMode (JSON array content)."""
+    """Mirror FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode (JSON array content)."""
     if not supports_native_tools:
         return []
     tools = catalog.get("tools")
@@ -796,7 +796,7 @@ def main() -> int:
         print(f"FAILED (static): {failures} check(s)", file=sys.stderr)
         return 1
 
-    print(f"OK (static): {len(cases)} case(s), catalog routing matches C++ BuildOpenAiToolsJsonForMode.")
+    print(f"OK (static): {len(cases)} case(s), catalog routing matches C++ BuildLlmToolsJsonArrayForMode.")
 
     settings: dict[str, Any] | None = None
     if args.settings and args.settings.is_file():

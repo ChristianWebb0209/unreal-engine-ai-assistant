@@ -1,0 +1,22 @@
+{
+  "responses": [
+    {
+      "events": [
+        { "type": "assistant_delta", "text": "Running scene_fuzzy_search for lighting-related actors in the current level." },
+        {
+          "type": "tool_calls",
+          "calls": [
+            { "id": "call_scene", "name": "scene_fuzzy_search", "arguments": "{\"query\":\"Light\",\"max_results\":8}" }
+          ]
+        },
+        { "type": "finish", "finish_reason": "stop" }
+      ]
+    },
+    {
+      "events": [
+        { "type": "assistant_delta", "text": "Matches and scores are in the scene_fuzzy_search tool output." },
+        { "type": "finish", "finish_reason": "stop" }
+      ]
+    }
+  ]
+}

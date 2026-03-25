@@ -146,7 +146,7 @@ namespace UnrealAiConversationJson
 		return true;
 	}
 
-	bool MessagesToOpenAiJsonArray(const TArray<FUnrealAiConversationMessage>& Messages, FString& OutJsonArray)
+	bool MessagesToChatCompletionsJsonArray(const TArray<FUnrealAiConversationMessage>& Messages, FString& OutJsonArray)
 	{
 		TArray<TSharedPtr<FJsonValue>> Arr;
 		for (const FUnrealAiConversationMessage& M : Messages)

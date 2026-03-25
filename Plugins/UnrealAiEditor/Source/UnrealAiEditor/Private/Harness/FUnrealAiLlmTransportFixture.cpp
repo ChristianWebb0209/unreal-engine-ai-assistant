@@ -1,6 +1,5 @@
 #include "Harness/FUnrealAiLlmTransportFixture.h"
 
-#include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "HAL/FileManager.h"
@@ -162,28 +161,19 @@ void FUnrealAiLlmTransportFixture::StreamChatCompletion(
 
 	bCancelRequested.store(false, std::memory_order_relaxed);
 
-	const TSharedPtr<FUnrealAiLlmTransportFixture> Self = AsShared();
-	int32 Idx = 0;
-	FTSTicker::GetCoreTicker().AddTicker(
-		FTickerDelegate::CreateLambda(
-			[Self, Events, OnEvent, Idx](float) mutable -> bool
-			{
-				if (Self.IsValid() && Self->bCancelRequested.load(std::memory_order_relaxed))
-				{
-					FUnrealAiLlmStreamEvent E;
-					E.Type = EUnrealAiLlmStreamEventType::Error;
-					E.ErrorMessage = TEXT("Cancelled");
-					OnEvent.ExecuteIfBound(E);
-					return false;
-				}
-				if (Idx >= Events.Num())
-				{
-					return false;
-				}
-				OnEvent.ExecuteIfBound(Events[Idx++]);
-				return Idx < Events.Num();
-			}),
-		0.01f);
+	// Emit synchronously to avoid deadlocks in RunAgentTurnSync (which can block the game thread and prevent ticking).
+	for (const FUnrealAiLlmStreamEvent& Ev : Events)
+	{
+		if (bCancelRequested.load(std::memory_order_relaxed))
+		{
+			FUnrealAiLlmStreamEvent E;
+			E.Type = EUnrealAiLlmStreamEventType::Error;
+			E.ErrorMessage = TEXT("Cancelled");
+			OnEvent.ExecuteIfBound(E);
+			return;
+		}
+		OnEvent.ExecuteIfBound(Ev);
+	}
 }
 
 void FUnrealAiLlmTransportFixture::CancelActiveRequest()

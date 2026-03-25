@@ -23,6 +23,7 @@
 #include "AssetRegistry/AssetData.h"
 #include "ContentBrowserModule.h"
 #include "Editor.h"
+#include "Misc/CommandLine.h"
 #include "Framework/Commands/UIAction.h"
 #include "Framework/Commands/UICommandList.h"
 #include "Framework/Docking/TabManager.h"
@@ -148,36 +149,69 @@ void FUnrealAiEditorModule::StartupModule()
 
 	GUnrealAiRunAgentTurnConsole = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("UnrealAi.RunAgentTurn"),
-		TEXT("Run one agent harness turn (same path as Agent Chat). Args: <MessageFilePath> [ThreadGuid] [agent|ask|orchestrate] [OutputDir] [dumpcontext|nodump]. Writes Saved/UnrealAiEditor/HarnessRuns/<ts>/run.jsonl and optional context_window_*.txt. Set UNREAL_AI_HARNESS_DUMP_CONTEXT=1 to dump context after each tool (overridable by 5th arg). Set UNREAL_AI_LLM_FIXTURE to tests/harness_llm_fixture.example.json for deterministic LLM."),
+		TEXT("Run one agent harness turn (same path as Agent Chat). Args: <MessageFilePath> [ThreadGuid] [agent|ask|orchestrate] [OutputDir] [dumpcontext|nodump]. If no file arg is passed, reads UNREAL_AI_HARNESS_MESSAGE_FILE (UTF-8 text); optional UNREAL_AI_HARNESS_THREAD_GUID and UNREAL_AI_HARNESS_AGENT_MODE (ask|orchestrate|agent) when thread/mode are not on the command line. Writes Saved/UnrealAiEditor/HarnessRuns/<ts>/run.jsonl and optional context_window_*.txt. Set UNREAL_AI_HARNESS_DUMP_CONTEXT=1 to dump context after each tool (overridable by 5th arg). Set UNREAL_AI_LLM_FIXTURE to tests/harness_llm_fixture.example.json for deterministic LLM."),
 		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 		{
-			if (Args.Num() < 1)
+			FString MsgFilePath;
+			int32 BaseIdx = 0;
+			if (Args.Num() >= 1 && !Args[0].IsEmpty())
 			{
-				UE_LOG(LogTemp, Error, TEXT("UnrealAi.RunAgentTurn: first arg must be a UTF-8 text file with the user message"));
+				MsgFilePath = Args[0];
+				BaseIdx = 1;
+			}
+			else
+			{
+				MsgFilePath = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_MESSAGE_FILE"));
+				BaseIdx = 0;
+			}
+			if (MsgFilePath.IsEmpty())
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.RunAgentTurn: pass a UTF-8 message file as first arg, or set UNREAL_AI_HARNESS_MESSAGE_FILE"));
 				return;
 			}
 			FString Msg;
-			if (!FFileHelper::LoadFileToString(Msg, *Args[0]))
+			if (!FFileHelper::LoadFileToString(Msg, *MsgFilePath))
 			{
-				UE_LOG(LogTemp, Error, TEXT("UnrealAi.RunAgentTurn: could not read %s"), *Args[0]);
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.RunAgentTurn: could not read %s"), *MsgFilePath);
 				return;
 			}
-			const FString ThreadId = (Args.Num() > 1)
-				? Args[1]
-				: FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens);
-			EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Agent;
-			if (Args.Num() > 2)
+			FString ThreadId;
+			if (Args.Num() > BaseIdx)
 			{
-				if (Args[2].Equals(TEXT("ask"), ESearchCase::IgnoreCase))
+				ThreadId = Args[BaseIdx];
+			}
+			else
+			{
+				const FString ThreadEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_THREAD_GUID"));
+				ThreadId = ThreadEnv.IsEmpty()
+					? FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens)
+					: ThreadEnv;
+			}
+			EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Agent;
+			if (Args.Num() > BaseIdx + 1)
+			{
+				if (Args[BaseIdx + 1].Equals(TEXT("ask"), ESearchCase::IgnoreCase))
 				{
 					Mode = EUnrealAiAgentMode::Ask;
 				}
-				else if (Args[2].Equals(TEXT("orchestrate"), ESearchCase::IgnoreCase))
+				else if (Args[BaseIdx + 1].Equals(TEXT("orchestrate"), ESearchCase::IgnoreCase))
 				{
 					Mode = EUnrealAiAgentMode::Orchestrate;
 				}
 			}
-			const FString OutDir = (Args.Num() > 3) ? Args[3] : FString();
+			else
+			{
+				const FString ModeEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_AGENT_MODE"));
+				if (ModeEnv.Equals(TEXT("ask"), ESearchCase::IgnoreCase))
+				{
+					Mode = EUnrealAiAgentMode::Ask;
+				}
+				else if (ModeEnv.Equals(TEXT("orchestrate"), ESearchCase::IgnoreCase))
+				{
+					Mode = EUnrealAiAgentMode::Orchestrate;
+				}
+			}
+			const FString OutDir = (Args.Num() > BaseIdx + 2) ? Args[BaseIdx + 2] : FString();
 			bool bDumpContextAfterEachTool = false;
 			{
 				const FString EnvDump = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_DUMP_CONTEXT"));
@@ -188,13 +222,13 @@ void FUnrealAiEditorModule::StartupModule()
 					bDumpContextAfterEachTool = true;
 				}
 			}
-			if (Args.Num() > 4)
+			if (Args.Num() > BaseIdx + 3)
 			{
-				if (Args[4].Equals(TEXT("dumpcontext"), ESearchCase::IgnoreCase))
+				if (Args[BaseIdx + 3].Equals(TEXT("dumpcontext"), ESearchCase::IgnoreCase))
 				{
 					bDumpContextAfterEachTool = true;
 				}
-				else if (Args[4].Equals(TEXT("nodump"), ESearchCase::IgnoreCase))
+				else if (Args[BaseIdx + 3].Equals(TEXT("nodump"), ESearchCase::IgnoreCase))
 				{
 					bDumpContextAfterEachTool = false;
 				}
@@ -260,6 +294,13 @@ void FUnrealAiEditorModule::StartupModule()
 			Ctx->RefreshEditorSnapshotFromEngine();
 			FAgentContextBuildOptions Opt;
 			Opt.Mode = EUnrealAiAgentMode::Agent;
+			{
+				const FString EnvVerbose = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_CONTEXT_VERBOSE"));
+				const bool bVerbose = EnvVerbose.Equals(TEXT("1"), ESearchCase::IgnoreCase)
+					|| EnvVerbose.Equals(TEXT("true"), ESearchCase::IgnoreCase)
+					|| EnvVerbose.Equals(TEXT("yes"), ESearchCase::IgnoreCase);
+				Opt.bVerboseContextBuild = bVerbose;
+			}
 			const FAgentContextBuildResult Built = Ctx->BuildContextWindow(Opt);
 			const FString Ts = FDateTime::UtcNow().ToString(TEXT("%Y%m%d_%H%M%S"));
 			const FString OutDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAiEditor/ContextSnapshots"));
@@ -269,6 +310,26 @@ void FUnrealAiEditorModule::StartupModule()
 			{
 				UE_LOG(LogTemp, Error, TEXT("UnrealAi.DumpContextWindow: failed to write %s"), *OutPath);
 				return;
+			}
+			if (Opt.bVerboseContextBuild && Built.VerboseTraceLines.Num() > 0)
+			{
+				const FString TracePath = FPaths::Combine(OutDir, FString::Printf(TEXT("%s_%s_trace.txt"), *Reason, *Ts));
+				FString Trace;
+				Trace += FString::Printf(TEXT("Context build trace (reason=%s)\n"), *Reason);
+				if (Built.Warnings.Num() > 0)
+				{
+					Trace += FString::Printf(TEXT("Warnings (%d)\n"), Built.Warnings.Num());
+					for (const FString& W : Built.Warnings)
+					{
+						Trace += FString::Printf(TEXT("- %s\n"), *W);
+					}
+					Trace += TEXT("\n");
+				}
+				for (const FString& L : Built.VerboseTraceLines)
+				{
+					Trace += L + TEXT("\n");
+				}
+				FFileHelper::SaveStringToFile(Trace, *TracePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 			}
 			UE_LOG(LogTemp, Display, TEXT("UnrealAi.DumpContextWindow: wrote %s (chars=%d warnings=%d)"),
 				*OutPath,
@@ -883,6 +944,16 @@ void FUnrealAiEditorModule::UnregisterSettings()
 
 void FUnrealAiEditorModule::RegisterOpenChatOnStartup()
 {
+	// Automation runs (especially with -unattended) should not restore/open UI tabs.
+	// Restoring chat tabs can trigger additional async behavior and can interfere with Automation RunTests.
+	{
+		const FString Cmd = FCommandLine::Get();
+		if (Cmd.Contains(TEXT("Automation RunTests")) || Cmd.Contains(TEXT("Automation ListTests")))
+		{
+			return;
+		}
+	}
+
 	OpenChatOnStartupHandle = FEditorDelegates::OnEditorInitialized.AddLambda([](double /*DeltaTime*/)
 	{
 		const TSharedPtr<FUnrealAiBackendRegistry> Reg = FUnrealAiEditorModule::GetBackendRegistry();

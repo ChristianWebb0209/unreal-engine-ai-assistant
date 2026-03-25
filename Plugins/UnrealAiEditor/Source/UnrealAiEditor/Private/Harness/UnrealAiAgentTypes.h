@@ -30,7 +30,7 @@ struct FUnrealAiModelCapabilities
 	int32 MaxAgentLlmRounds = 32;
 };
 
-/** Single tool invocation produced by the LLM (OpenAI-style). */
+/** Single function/tool call from the model (chat-completions tool_calls shape). */
 struct FUnrealAiToolCallSpec
 {
 	FString Id;

@@ -336,6 +336,14 @@ void FUnrealAiContextService::RefreshEditorSnapshotFromEngine()
 FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgentContextBuildOptions& Options)
 {
 	FAgentContextBuildResult Result;
+	const bool bVerbose = Options.bVerboseContextBuild;
+	auto AddTraceLine = [&Result, bVerbose](const FString& Line)
+	{
+		if (bVerbose)
+		{
+			Result.VerboseTraceLines.Add(Line);
+		}
+	};
 	if (ActiveProjectId.IsEmpty() || ActiveThreadId.IsEmpty())
 	{
 		Result.Warnings.Add(TEXT("No active thread — call LoadOrCreate first."));
@@ -350,17 +358,52 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 	}
 
 	FAgentContextState Working = *Found;
+	const int32 PreModeToolResultsCount = Working.ToolResults.Num();
 	UnrealAiAgentContextFormat::ApplyModeToStateForBuild(Working, Options);
+	if (bVerbose)
+	{
+		const FString ModeStr = [&Options]()
+		{
+			switch (Options.Mode)
+			{
+			case EUnrealAiAgentMode::Ask: return TEXT("ask");
+			case EUnrealAiAgentMode::Agent: return TEXT("agent");
+			case EUnrealAiAgentMode::Orchestrate: return TEXT("orchestrate");
+			default: return TEXT("unknown");
+			}
+		}();
+		AddTraceLine(FString::Printf(TEXT("BuildContextWindow verbose: mode=%s includeAttachments=%d includeToolResults=%d includeEditorSnapshot=%d modelSupportsImages=%d"),
+			*ModeStr,
+			Options.bIncludeAttachments ? 1 : 0,
+			Options.bIncludeToolResults ? 1 : 0,
+			Options.bIncludeEditorSnapshot ? 1 : 0,
+			Options.bModelSupportsImages ? 1 : 0));
+		AddTraceLine(FString::Printf(TEXT("State snapshot (before formatting): attachments=%d toolResults=%d preModeToolResults=%d snapshotSet=%d"),
+			Working.Attachments.Num(),
+			Working.ToolResults.Num(),
+			PreModeToolResultsCount,
+			Found->EditorSnapshot.IsSet() ? 1 : 0));
+	}
 
 	if (Options.bIncludeAttachments && !Options.bModelSupportsImages)
 	{
 		TArray<FContextAttachment> Kept;
 		Kept.Reserve(Working.Attachments.Num());
+		int32 DroppedImages = 0;
 		for (const FContextAttachment& A : Working.Attachments)
 		{
 			if (UnrealAiEditorContextQueries::IsImageLikeAttachment(A))
 			{
+				++DroppedImages;
 				const FString Display = !A.Label.IsEmpty() ? A.Label : A.Payload;
+				if (bVerbose)
+				{
+					AddTraceLine(FString::Printf(
+						TEXT("DROP attachment: image-like (reason: model profile has Support images disabled). attachmentType=%d display=\"%s\" payload=\"%s\""),
+						static_cast<int32>(A.Type),
+						*Display,
+						*A.Payload));
+				}
 				Result.UserVisibleMessages.Add(FString::Printf(
 					TEXT("Image attachment was not sent to the model (this model profile has \"Support images\" disabled): %s"),
 					*Display));
@@ -369,6 +412,10 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 			Kept.Add(A);
 		}
 		Working.Attachments = MoveTemp(Kept);
+		if (bVerbose && DroppedImages > 0)
+		{
+			AddTraceLine(FString::Printf(TEXT("Image stripping summary: dropped=%d attachments; remaining=%d"), DroppedImages, Working.Attachments.Num()));
+		}
 	}
 
 	int32 Budget = Options.MaxContextChars;
@@ -381,6 +428,53 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 	const int32 RawLen = Block.Len();
 	Block = UnrealAiAgentContextFormat::TruncateToBudget(Block, Budget, Result.Warnings);
 	Result.bTruncated = Block.Len() < RawLen;
+	if (bVerbose)
+	{
+		auto CountOccurrences = [](const FString& Text, const FString& Needle) -> int32
+		{
+			int32 Count = 0;
+			int32 Pos = 0;
+			while (true)
+			{
+				const int32 FoundPos = Text.Find(Needle, ESearchCase::CaseSensitive, ESearchDir::FromStart, Pos);
+				if (FoundPos == INDEX_NONE)
+				{
+					return Count;
+				}
+				++Count;
+				Pos = FoundPos + Needle.Len();
+			}
+		};
+
+		const int32 KeptAttachmentsByMarker = Options.bIncludeAttachments
+			? CountOccurrences(Block, TEXT("### Attachment ("))
+			: 0;
+		const int32 KeptToolsByMarker = (Options.bIncludeToolResults && Options.Mode != EUnrealAiAgentMode::Ask)
+			? CountOccurrences(Block, TEXT("### Tool: "))
+			: 0;
+		const bool bSnapshotIncluded = Options.bIncludeEditorSnapshot
+			&& Block.Contains(TEXT("### Editor snapshot"));
+
+		AddTraceLine(FString::Printf(TEXT("Budget trim: budgetChars=%d rawBlockChars=%d finalBlockChars=%d truncated=%d"),
+			Budget,
+			RawLen,
+			Block.Len(),
+			Result.bTruncated ? 1 : 0));
+		AddTraceLine(FString::Printf(TEXT("Budget trim kept markers (approx): attachments=%d/%d tools=%d/%d snapshotIncluded=%d"),
+			KeptAttachmentsByMarker,
+			Working.Attachments.Num(),
+			KeptToolsByMarker,
+			Working.ToolResults.Num(),
+			bSnapshotIncluded ? 1 : 0));
+
+		// Mode-driven drops
+		if (Options.Mode == EUnrealAiAgentMode::Ask && PreModeToolResultsCount > 0)
+		{
+			AddTraceLine(FString::Printf(TEXT("DROP (mode-driven): ask mode omitted tool results: preModeToolResults=%d keptInContext=%d"),
+				PreModeToolResultsCount,
+				Working.ToolResults.Num()));
+		}
+	}
 
 	if (!Options.StaticSystemPrefix.IsEmpty())
 	{

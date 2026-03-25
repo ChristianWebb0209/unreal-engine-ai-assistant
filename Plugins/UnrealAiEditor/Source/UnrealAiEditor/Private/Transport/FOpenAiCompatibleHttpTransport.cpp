@@ -8,6 +8,7 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "HAL/PlatformMisc.h"
 
 namespace OpenAiTransportUtil
 {
@@ -185,7 +186,7 @@ namespace OpenAiTransportUtil
 			{
 				continue;
 			}
-			// Usage may appear on its own chunk (OpenAI stream_options.include_usage) before [DONE].
+			// Usage may appear on its own chunk (e.g. stream_options.include_usage) before [DONE].
 			ParseUsage(Chunk, LastUsage);
 			const TArray<TSharedPtr<FJsonValue>>* Choices = nullptr;
 			if (!Chunk->TryGetArrayField(TEXT("choices"), Choices) || !Choices || Choices->Num() == 0)
@@ -282,14 +283,14 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 {
 	CancelActiveRequest();
 	const FString Base = Request.ApiBaseUrl;
-	const FString Key = Request.ApiKey;
+	const FString Key = Request.ApiKey.TrimStartAndEnd();
 	if (Base.IsEmpty() || Key.IsEmpty())
 	{
 		OpenAiTransportUtil::EmitError(OnEvent, TEXT("API base URL or API key missing on request (configure settings / providers)"));
 		return;
 	}
 	FString MessagesJson;
-	if (!UnrealAiConversationJson::MessagesToOpenAiJsonArray(Request.Messages, MessagesJson))
+	if (!UnrealAiConversationJson::MessagesToChatCompletionsJsonArray(Request.Messages, MessagesJson))
 	{
 		OpenAiTransportUtil::EmitError(OnEvent, TEXT("Failed to serialize messages"));
 		return;
@@ -318,7 +319,7 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 	Body->SetBoolField(TEXT("stream"), Request.bStream);
 	if (Request.bStream)
 	{
-		// OpenAI Chat Completions: usage is omitted from stream chunks unless this is set.
+		// Many chat-completions APIs omit usage from stream chunks unless stream_options.include_usage (or equivalent) is set.
 		TSharedPtr<FJsonObject> StreamOpts = MakeShared<FJsonObject>();
 		StreamOpts->SetBoolField(TEXT("include_usage"), true);
 		Body->SetObjectField(TEXT("stream_options"), StreamOpts);
@@ -344,6 +345,35 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 	HttpRequest->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *Key));
 	HttpRequest->SetContentAsString(BodyStr);
+	// Hard cap 30s: agent chat in-editor should complete quickly; longer waits usually mean wrong URL, blocked TLS, or huge payloads.
+	// Override: UNREAL_AI_HTTP_REQUEST_TIMEOUT_SEC (clamped to 5-30). Same limit for streaming and non-streaming.
+	float TimeoutSec = 30.0f;
+	{
+		const FString TEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HTTP_REQUEST_TIMEOUT_SEC"));
+		if (!TEnv.IsEmpty())
+		{
+			float Parsed = FCString::Atof(*TEnv);
+			if (Parsed < 5.0f)
+			{
+				Parsed = 5.0f;
+			}
+			if (Parsed > 30.0f)
+			{
+				Parsed = 30.0f;
+			}
+			TimeoutSec = Parsed;
+		}
+	}
+	HttpRequest->SetTimeout(TimeoutSec);
+
+	UE_LOG(LogTemp, Display,
+		TEXT("UnrealAi HTTP: stream=%s timeout=%.0fs url=%s bearerLen=%d bodyChars=%d toolsChars=%d"),
+		Request.bStream ? TEXT("yes") : TEXT("no"),
+		TimeoutSec,
+		*Url,
+		Key.Len(),
+		BodyStr.Len(),
+		Request.ToolsJsonArray.Len());
 	ActiveRequest = HttpRequest;
 	HttpRequest->OnProcessRequestComplete().BindLambda(
 		[this, OnEvent, bStream = Request.bStream](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bOk)
@@ -391,5 +421,14 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 				OpenAiTransportUtil::ParseNonStreamBody(RespBody, OnEvent);
 			}
 		});
-	HttpRequest->ProcessRequest();
+	const bool bStarted = HttpRequest->ProcessRequest();
+	if (!bStarted)
+	{
+		ActiveRequest.Reset();
+		OpenAiTransportUtil::EmitError(
+			OnEvent,
+			FString::Printf(
+				TEXT("HTTP request failed to start (URL=%s). Check API URL, TLS/proxy/firewall, and provider settings."),
+				*Url));
+	}
 }

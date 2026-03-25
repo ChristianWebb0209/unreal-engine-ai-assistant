@@ -5,7 +5,7 @@
 
 class IUnrealAiPersistence;
 
-/** One named API endpoint + key (OpenAI-compatible). */
+/** One named HTTPS endpoint + bearer/API key (chat-completions compatible base URLs). */
 struct FUnrealAiProviderEntry
 {
 	FString Id;

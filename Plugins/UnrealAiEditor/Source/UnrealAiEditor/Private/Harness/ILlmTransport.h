@@ -5,7 +5,7 @@
 
 DECLARE_DELEGATE_OneParam(FUnrealAiLlmStreamCallback, const FUnrealAiLlmStreamEvent& /*Event*/);
 
-/** OpenAI-compatible (and similar) chat completion — no tool execution here. */
+/** Request payload for HTTPS chat/completions-style endpoints (multiple vendors, same JSON shape). No tool execution here. */
 struct FUnrealAiLlmRequest
 {
 	FString ApiModelName;

@@ -94,10 +94,23 @@ void FUnrealAiModelProfileRegistry::Reload()
 	const TSharedPtr<FJsonObject>* ApiObj = nullptr;
 	if (Root->TryGetObjectField(TEXT("api"), ApiObj) && ApiObj->IsValid())
 	{
-		(*ApiObj)->TryGetStringField(TEXT("baseUrl"), ApiBaseUrl);
-		(*ApiObj)->TryGetStringField(TEXT("apiKey"), ApiKey);
-		(*ApiObj)->TryGetStringField(TEXT("defaultModel"), DefaultModelId);
-		(*ApiObj)->TryGetStringField(TEXT("defaultProviderId"), DefaultProviderId);
+		FString Tmp;
+		if ((*ApiObj)->TryGetStringField(TEXT("baseUrl"), Tmp))
+		{
+			ApiBaseUrl = Tmp.TrimStartAndEnd();
+		}
+		if ((*ApiObj)->TryGetStringField(TEXT("apiKey"), Tmp))
+		{
+			ApiKey = Tmp.TrimStartAndEnd();
+		}
+		if ((*ApiObj)->TryGetStringField(TEXT("defaultModel"), Tmp))
+		{
+			DefaultModelId = Tmp.TrimStartAndEnd();
+		}
+		if ((*ApiObj)->TryGetStringField(TEXT("defaultProviderId"), Tmp))
+		{
+			DefaultProviderId = Tmp.TrimStartAndEnd();
+		}
 	}
 
 	bool bLoadedSections = false;
@@ -113,9 +126,19 @@ void FUnrealAiModelProfileRegistry::Reload()
 				continue;
 			}
 			FUnrealAiProviderEntry E;
-			(*So)->TryGetStringField(TEXT("id"), E.Id);
-			(*So)->TryGetStringField(TEXT("baseUrl"), E.BaseUrl);
-			(*So)->TryGetStringField(TEXT("apiKey"), E.ApiKey);
+			FString TmpS;
+			if ((*So)->TryGetStringField(TEXT("id"), TmpS))
+			{
+				E.Id = TmpS.TrimStartAndEnd();
+			}
+			if ((*So)->TryGetStringField(TEXT("baseUrl"), TmpS))
+			{
+				E.BaseUrl = TmpS.TrimStartAndEnd();
+			}
+			if ((*So)->TryGetStringField(TEXT("apiKey"), TmpS))
+			{
+				E.ApiKey = TmpS.TrimStartAndEnd();
+			}
 			if (E.Id.IsEmpty())
 			{
 				continue;
@@ -165,9 +188,19 @@ void FUnrealAiModelProfileRegistry::Reload()
 					continue;
 				}
 				FUnrealAiProviderEntry E;
-				(*Po)->TryGetStringField(TEXT("id"), E.Id);
-				(*Po)->TryGetStringField(TEXT("baseUrl"), E.BaseUrl);
-				(*Po)->TryGetStringField(TEXT("apiKey"), E.ApiKey);
+				FString TmpP;
+				if ((*Po)->TryGetStringField(TEXT("id"), TmpP))
+				{
+					E.Id = TmpP.TrimStartAndEnd();
+				}
+				if ((*Po)->TryGetStringField(TEXT("baseUrl"), TmpP))
+				{
+					E.BaseUrl = TmpP.TrimStartAndEnd();
+				}
+				if ((*Po)->TryGetStringField(TEXT("apiKey"), TmpP))
+				{
+					E.ApiKey = TmpP.TrimStartAndEnd();
+				}
 				if (!E.Id.IsEmpty())
 				{
 					ProvidersById.Add(E.Id, MoveTemp(E));

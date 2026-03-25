@@ -4,8 +4,8 @@
 #include "Harness/ILlmTransport.h"
 
 /**
- * Thin façade over ILlmTransport — posts the assembled `FUnrealAiLlmRequest` to the configured HTTP endpoint.
- * Pair with `UnrealAiTurnLlmRequestBuilder` (build prompt) + `FOpenAiCompatibleHttpTransport` (execute).
+ * Thin façade over ILlmTransport — submits the assembled `FUnrealAiLlmRequest`.
+ * Pair with `UnrealAiTurnLlmRequestBuilder`; inject any transport that speaks your provider’s wire format.
  */
 class FUnrealAiLlmInvocationService
 {

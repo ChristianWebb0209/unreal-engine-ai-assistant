@@ -96,6 +96,12 @@ struct FAgentContextBuildOptions
 	FString UserMessageForComplexity;
 	/** From model profile: if false, image-like attachments are stripped when building context. */
 	bool bModelSupportsImages = true;
+	/**
+	 * If true, BuildContextWindow emits a verbose, out-of-band trace explaining
+	 * which parts were added/dropped (mode, image stripping, and budget trimming).
+	 * This trace must not be injected into the prompt context.
+	 */
+	bool bVerboseContextBuild = false;
 };
 
 struct FAgentContextBuildResult
@@ -115,4 +121,6 @@ struct FAgentContextBuildResult
 	bool bTruncated = false;
 	/** Shown in chat by the UI when attachments are dropped (e.g. model does not support images). */
 	TArray<FString> UserVisibleMessages;
+	/** Out-of-band trace lines for qualitative analysis (only when options requested). */
+	TArray<FString> VerboseTraceLines;
 };

@@ -147,9 +147,14 @@ bool UnrealAiToolCatalogMatrixRunner::RunAndWriteJson(const FString& MatrixFilte
 		++Invoked;
 
 		const double T0 = FPlatformTime::Seconds();
+		UE_LOG(LogTemp, Warning, TEXT("CatalogMatrix: invoking %s (%d/%d)"), *ToolId, Invoked, Cat.GetToolCount());
 		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(ToolId, Args, Def, nullptr, FString(), FString());
 		const double T1 = FPlatformTime::Seconds();
 		const double Ms = (T1 - T0) * 1000.0;
+		UE_LOG(LogTemp, Warning, TEXT("CatalogMatrix: done %s ok=%s duration_ms=%.3f"),
+			*ToolId,
+			R.bOk ? TEXT("true") : TEXT("false"),
+			Ms);
 
 		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 		Row->SetStringField(TEXT("tool_id"), ToolId);

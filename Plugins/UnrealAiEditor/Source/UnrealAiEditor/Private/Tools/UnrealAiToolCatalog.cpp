@@ -1,5 +1,6 @@
 #include "Tools/UnrealAiToolCatalog.h"
 
+#include "Containers/Set.h"
 #include "Dom/JsonValue.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Interfaces/IPluginManager.h"
@@ -85,15 +86,27 @@ void FUnrealAiToolCatalog::ForEachTool(TFunctionRef<void(const FString& ToolId, 
 	}
 }
 
-void FUnrealAiToolCatalog::BuildOpenAiToolsJsonForMode(
+void FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode(
 	EUnrealAiAgentMode Mode,
 	const FUnrealAiModelCapabilities& Caps,
+	const FUnrealAiToolPackOptions* PackOptions,
 	FString& OutJsonArray) const
 {
 	OutJsonArray.Reset();
 	if (!Caps.bSupportsNativeTools || !bLoaded)
 	{
 		return;
+	}
+	TSet<FString> ExtraIdSet;
+	if (PackOptions && PackOptions->bRestrictToCorePack)
+	{
+		for (const FString& Id : PackOptions->AdditionalToolIds)
+		{
+			if (!Id.IsEmpty())
+			{
+				ExtraIdSet.Add(Id);
+			}
+		}
 	}
 	TArray<TSharedPtr<FJsonValue>> ToolsOut;
 	for (const TPair<FString, TSharedPtr<FJsonObject>>& Pair : ToolById)
@@ -139,6 +152,20 @@ void FUnrealAiToolCatalog::BuildOpenAiToolsJsonForMode(
 		FString Tid;
 		FString Summary;
 		Obj->TryGetStringField(TEXT("tool_id"), Tid);
+		if (PackOptions && PackOptions->bRestrictToCorePack)
+		{
+			bool bCorePack = false;
+			const TSharedPtr<FJsonObject>* ContextSel = nullptr;
+			if (Obj->TryGetObjectField(TEXT("context_selector"), ContextSel) && ContextSel && (*ContextSel).IsValid())
+			{
+				(*ContextSel)->TryGetBoolField(TEXT("always_include_in_core_pack"), bCorePack);
+			}
+			const bool bExtraListed = ExtraIdSet.Contains(Tid);
+			if (!bCorePack && !bExtraListed)
+			{
+				continue;
+			}
+		}
 		Obj->TryGetStringField(TEXT("summary"), Summary);
 		const TSharedPtr<FJsonObject>* Params = nullptr;
 		TSharedPtr<FJsonObject> ParamsToUse;
@@ -167,4 +194,143 @@ void FUnrealAiToolCatalog::BuildOpenAiToolsJsonForMode(
 		return;
 	}
 	OutJsonArray = Out;
+}
+
+void FUnrealAiToolCatalog::BuildUnrealAiDispatchToolsJson(
+	EUnrealAiAgentMode Mode,
+	const FUnrealAiModelCapabilities& Caps,
+	const FUnrealAiToolPackOptions* PackOptions,
+	FString& OutJsonArray) const
+{
+	OutJsonArray.Reset();
+	if (!Caps.bSupportsNativeTools || !bLoaded)
+	{
+		OutJsonArray = TEXT("[]");
+		return;
+	}
+	TSharedPtr<FJsonObject> ToolIdProp = MakeShared<FJsonObject>();
+	ToolIdProp->SetStringField(TEXT("type"), TEXT("string"));
+	ToolIdProp->SetStringField(
+		TEXT("description"),
+		TEXT("Catalog tool_id listed in the Unreal tool index section of the system/developer message."));
+	TSharedPtr<FJsonObject> ArgsProp = MakeShared<FJsonObject>();
+	ArgsProp->SetStringField(TEXT("type"), TEXT("object"));
+	ArgsProp->SetStringField(
+		TEXT("description"),
+		TEXT("Arguments object for that tool; must satisfy the tool JSON schema (often in plugin Resources/UnrealAiToolCatalog.json)."));
+	ArgsProp->SetBoolField(TEXT("additionalProperties"), true);
+	TSharedPtr<FJsonObject> Props = MakeShared<FJsonObject>();
+	Props->SetObjectField(TEXT("tool_id"), ToolIdProp);
+	Props->SetObjectField(TEXT("arguments"), ArgsProp);
+	TArray<TSharedPtr<FJsonValue>> Req;
+	Req.Add(MakeShared<FJsonValueString>(TEXT("tool_id")));
+	Req.Add(MakeShared<FJsonValueString>(TEXT("arguments")));
+	TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+	Params->SetStringField(TEXT("type"), TEXT("object"));
+	Params->SetObjectField(TEXT("properties"), Props);
+	Params->SetArrayField(TEXT("required"), Req);
+	TSharedPtr<FJsonObject> Func = MakeShared<FJsonObject>();
+	Func->SetStringField(TEXT("name"), TEXT("unreal_ai_dispatch"));
+	Func->SetStringField(
+		TEXT("description"),
+		TEXT("Invoke one Unreal Editor tool. Use tool_id + arguments from the compact tool index in the system message."));
+	Func->SetObjectField(TEXT("parameters"), Params);
+	TSharedPtr<FJsonObject> Wrap = MakeShared<FJsonObject>();
+	Wrap->SetStringField(TEXT("type"), TEXT("function"));
+	Wrap->SetObjectField(TEXT("function"), Func);
+	TArray<TSharedPtr<FJsonValue>> ToolsOut;
+	ToolsOut.Add(MakeShared<FJsonValueObject>(Wrap.ToSharedRef()));
+	FString Out;
+	TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
+	if (!FJsonSerializer::Serialize(ToolsOut, W))
+	{
+		OutJsonArray = TEXT("[]");
+		return;
+	}
+	OutJsonArray = Out;
+}
+
+void FUnrealAiToolCatalog::BuildCompactToolIndexAppendix(
+	EUnrealAiAgentMode Mode,
+	const FUnrealAiModelCapabilities& Caps,
+	const FUnrealAiToolPackOptions* PackOptions,
+	FString& OutMarkdown) const
+{
+	OutMarkdown.Reset();
+	if (!Caps.bSupportsNativeTools || !bLoaded)
+	{
+		return;
+	}
+	TSet<FString> ExtraIdSet;
+	if (PackOptions && PackOptions->bRestrictToCorePack)
+	{
+		for (const FString& Id : PackOptions->AdditionalToolIds)
+		{
+			if (!Id.IsEmpty())
+			{
+				ExtraIdSet.Add(Id);
+			}
+		}
+	}
+	TArray<FString> Lines;
+	for (const TPair<FString, TSharedPtr<FJsonObject>>& Pair : ToolById)
+	{
+		const TSharedPtr<FJsonObject>& Obj = Pair.Value;
+		if (!Obj.IsValid())
+		{
+			continue;
+		}
+		bool bInclude = false;
+		const TSharedPtr<FJsonObject>* Modes = nullptr;
+		if (Obj->TryGetObjectField(TEXT("modes"), Modes) && Modes && (*Modes).IsValid())
+		{
+			switch (Mode)
+			{
+			case EUnrealAiAgentMode::Ask:
+				(*Modes)->TryGetBoolField(TEXT("ask"), bInclude);
+				break;
+			case EUnrealAiAgentMode::Agent:
+				(*Modes)->TryGetBoolField(TEXT("agent"), bInclude);
+				if (!bInclude)
+				{
+					(*Modes)->TryGetBoolField(TEXT("fast"), bInclude);
+				}
+				break;
+			case EUnrealAiAgentMode::Orchestrate:
+				(*Modes)->TryGetBoolField(TEXT("orchestrate"), bInclude);
+				if (!bInclude)
+				{
+					(*Modes)->TryGetBoolField(TEXT("agent"), bInclude);
+				}
+				break;
+			default:
+				break;
+			}
+		}
+		if (!bInclude)
+		{
+			continue;
+		}
+		FString Tid;
+		FString Summary;
+		Obj->TryGetStringField(TEXT("tool_id"), Tid);
+		if (PackOptions && PackOptions->bRestrictToCorePack)
+		{
+			bool bCorePack = false;
+			const TSharedPtr<FJsonObject>* ContextSel = nullptr;
+			if (Obj->TryGetObjectField(TEXT("context_selector"), ContextSel) && ContextSel && (*ContextSel).IsValid())
+			{
+				(*ContextSel)->TryGetBoolField(TEXT("always_include_in_core_pack"), bCorePack);
+			}
+			const bool bExtraListed = ExtraIdSet.Contains(Tid);
+			if (!bCorePack && !bExtraListed)
+			{
+				continue;
+			}
+		}
+		Obj->TryGetStringField(TEXT("summary"), Summary);
+		Lines.Add(FString::Printf(TEXT("- `%s`: %s"), *Tid, *Summary));
+	}
+	Lines.Sort();
+	OutMarkdown = FString::Join(Lines, LINE_TERMINATOR);
 }
