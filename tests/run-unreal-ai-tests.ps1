@@ -5,12 +5,12 @@
   Agent handoff (prompts, harness, escalation): docs\AGENT_HARNESS_HANDOFF.md
 
   Usage (from repo root):
-    .\run-unreal-ai-tests.ps1
-    .\run-unreal-ai-tests.ps1 -Build
-    .\run-unreal-ai-tests.ps1 -Headed
-    .\run-unreal-ai-tests.ps1 -TestFilter UnrealAiEditor -MatrixFilter blueprint
-    .\run-unreal-ai-tests.ps1 -Summarize
-    $env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\run-unreal-ai-tests.ps1
+    .\tests\run-unreal-ai-tests.ps1
+    .\tests\run-unreal-ai-tests.ps1 -Build
+    .\tests\run-unreal-ai-tests.ps1 -Headed
+    .\tests\run-unreal-ai-tests.ps1 -TestFilter UnrealAiEditor -MatrixFilter blueprint
+    .\tests\run-unreal-ai-tests.ps1 -Summarize
+    $env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\tests\run-unreal-ai-tests.ps1
 
   -Headed: use UnrealEditor.exe (visible window) instead of UnrealEditor-Cmd.exe. Same ExecCmds automation.
 
@@ -37,7 +37,7 @@
 [CmdletBinding()]
 param(
     [switch]$Build,
-    [string]$EngineRoot = $(if ($env:UE_ENGINE_ROOT) { $env:UE_ENGINE_ROOT } else { 'C:\Program Files\Epic Games\UE_5.7' }),
+    [string]$EngineRoot = '',
     [string]$TestFilter = 'UnrealAiEditor',
     [switch]$CatalogMatrixOnly,
     [string]$MatrixFilter = '',
@@ -49,10 +49,17 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+. (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\Import-RepoDotenv.ps1')
+Import-RepoDotenv -RepoRoot (Split-Path -Parent $PSScriptRoot)
+if ([string]::IsNullOrWhiteSpace($EngineRoot)) {
+    $EngineRoot = if ($env:UE_ENGINE_ROOT) { $env:UE_ENGINE_ROOT } else { 'C:\Program Files\Epic Games\UE_5.7' }
+}
+
 if ($CatalogMatrixOnly) {
     $TestFilter = 'UnrealAiEditor.Tools.CatalogMatrix'
 }
-$ProjectRoot = $PSScriptRoot
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
 $UProject = Join-Path $ProjectRoot 'blank.uproject'
 $EditorCmd = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
 $EditorExe = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor.exe'
@@ -91,13 +98,13 @@ try {
     $env:GIT_COMMIT = ''
 }
 
-$ExecCmdsValue = "Automation RunTests $TestFilter; Quit"
+$ExecCmdsValue = "Automation RunTests $TestFilter;Quit"
 $CmdArgs = @(
     "`"$UProject`"",
     '-nop4',
     '-nosplash',
     '-log',
-    '-LogCmds=LogAutomationController Verbose, LogAutomationCommandLine Verbose'
+    '-LogCmds=LogAutomationController Verbose, LogAutomationCommandLine Verbose, LogAutomationTest Verbose'
 )
 if (-not $AllowDialogs) {
     $CmdArgs += '-unattended'
@@ -113,38 +120,133 @@ foreach ($x in $ExtraEditorArgs) {
         $CmdArgs += $x
     }
 }
-$CmdArgs += "-ExecCmds=$ExecCmdsValue"
+# UnrealEditor must receive -ExecCmds value as one argv token.
+# Quote only the value side to avoid silent command truncation.
+$CmdArgs += "-ExecCmds=`"$ExecCmdsValue`""
 
 $logsDir = Join-Path $ProjectRoot 'Saved\Logs'
 
+# UnrealEditor.exe (headed) is a GUI app: it will not write engine log lines to this PowerShell console.
+# UnrealEditor-Cmd streams more to the attached console. We always tail Saved\Logs\*.log here so headed runs stay readable.
+$script:TailedLogPath = ''
+$script:TailedLogByteOffset = 0L
+
+function Get-NewestSavedEditorLogPath {
+    param([string]$Dir)
+    if (-not (Test-Path -LiteralPath $Dir)) {
+        return $null
+    }
+    $item = Get-ChildItem -Path $Dir -Filter '*.log' -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($item) {
+        return $item.FullName
+    }
+    return $null
+}
+
+function Write-NewBytesFromEditorLog {
+    $path = Get-NewestSavedEditorLogPath -Dir $logsDir
+    if (-not $path) {
+        return
+    }
+    if ($path -ne $script:TailedLogPath) {
+        if ($script:TailedLogPath) {
+            Write-Host ("[run-unreal-ai-tests] Log file rotated -> " + (Split-Path -Leaf $path)) -ForegroundColor DarkCyan
+        } else {
+            Write-Host ("[run-unreal-ai-tests] Tailing log: " + $path) -ForegroundColor DarkCyan
+        }
+        $script:TailedLogPath = $path
+        $script:TailedLogByteOffset = 0L
+    }
+    try {
+        $len = (Get-Item -LiteralPath $path).Length
+        if ($len -lt $script:TailedLogByteOffset) {
+            $script:TailedLogByteOffset = 0L
+        }
+        if ($len -le $script:TailedLogByteOffset) {
+            return
+        }
+        $fs = [System.IO.File]::Open(
+            $path,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            [System.IO.FileShare]::ReadWrite)
+        try {
+            $null = $fs.Seek($script:TailedLogByteOffset, [System.IO.SeekOrigin]::Begin)
+            $buf = New-Object byte[] ($len - $script:TailedLogByteOffset)
+            $read = $fs.Read($buf, 0, $buf.Length)
+            if ($read -gt 0) {
+                $script:TailedLogByteOffset = $len
+                $text = [System.Text.Encoding]::UTF8.GetString($buf, 0, $read)
+                # Normalize and split lines; avoid dumping huge blobs as one line
+                $text = $text -replace "`r`n", "`n" -replace "`r", "`n"
+                foreach ($line in ($text -split "`n")) {
+                    if ($line.Length -gt 0) {
+                        Write-Host $line
+                    }
+                }
+            }
+        } finally {
+            $fs.Dispose()
+        }
+    } catch {
+        # Log may be briefly locked or mid-rotation; skip this tick
+    }
+}
+
 Write-Host "Running: $EditorBinary" -ForegroundColor Cyan
 if ($Headed) {
-    Write-Host "  Mode: headed (visible editor window)" -ForegroundColor DarkGray
+    Write-Host "  Mode: headed (visible editor window; engine log is tailed from Saved\Logs below)" -ForegroundColor DarkGray
 }
 Write-Host "  Args: $($CmdArgs -join ' ')" -ForegroundColor DarkGray
 Write-Host ''
-Write-Host "  The editor does not stream progress to this terminal. Startup + tests can take 5-30+ minutes" -ForegroundColor Yellow
-Write-Host "  (full UnrealAiEditor filter runs every automation test; CatalogMatrix alone calls every tool)." -ForegroundColor Yellow
-Write-Host "  Live log: $logsDir - watch the newest .log, or use -CatalogMatrixOnly for matrix test only." -ForegroundColor DarkGray
-Write-Host "  Harmless Chromium/CEF lines may appear in the console." -ForegroundColor DarkGray
+Write-Host "  Startup + tests can take 5-30+ minutes (CatalogMatrix invokes every catalog tool)." -ForegroundColor Yellow
+Write-Host "  Log directory: $logsDir" -ForegroundColor DarkGray
 Write-Host ''
 
 $t0 = Get-Date
-$p = Start-Process -FilePath $EditorBinary -ArgumentList $CmdArgs -WorkingDirectory $ProjectRoot -PassThru -NoNewWindow
+# Headed UnrealEditor.exe should not use -NoNewWindow: it can interfere with console ownership on some setups.
+$procArgs = @{
+    FilePath = $EditorBinary
+    ArgumentList = $CmdArgs
+    WorkingDirectory = $ProjectRoot
+    PassThru = $true
+}
+if (-not $Headed) {
+    $procArgs['NoNewWindow'] = $true
+}
+$p = Start-Process @procArgs
 if (-not $p) {
     Write-Error 'Failed to start Unreal Editor process.'
 }
+$nextHeartbeatSec = 30
 while (-not $p.HasExited) {
-    Start-Sleep -Seconds 30
+    Start-Sleep -Seconds 2
+    Write-NewBytesFromEditorLog
     $sec = [int]((Get-Date) - $t0).TotalSeconds
-    $min = [math]::Floor($sec / 60)
-    $srem = $sec % 60
-    Write-Host ('[run-unreal-ai-tests] Editor still running ({0} min {1} sec, PID {2})...' -f $min, $srem, $p.Id) -ForegroundColor DarkGray
-    if ($sec -gt 7200) {
-        Write-Warning 'Over 2 hours elapsed - if the editor is not actually running, kill the process and check Saved/Logs.'
+    if ($sec -ge $nextHeartbeatSec) {
+        $nextHeartbeatSec = $sec + 30
+        $min = [math]::Floor($sec / 60)
+        $srem = $sec % 60
+        Write-Host ('[run-unreal-ai-tests] Editor still running ({0} min {1} sec, PID {2})...' -f $min, $srem, $p.Id) -ForegroundColor DarkGray
+        if ($sec -gt 7200) {
+            Write-Warning 'Over 2 hours elapsed - if the editor is not actually running, kill the process and check Saved/Logs.'
+        }
     }
 }
-$procExit = $p.ExitCode
+# Drain any trailing log bytes after exit
+Write-NewBytesFromEditorLog
+
+$p.Refresh()
+$procExit = 0
+try {
+    if ($null -ne $p.ExitCode) {
+        $procExit = $p.ExitCode
+    }
+} catch {
+    $procExit = 0
+}
 
 # Copy newest log in Saved\Logs (typically the editor session that just finished)
 $failLogParse = $false

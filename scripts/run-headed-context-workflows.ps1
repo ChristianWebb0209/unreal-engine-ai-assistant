@@ -9,11 +9,11 @@
 
   Do NOT set UNREAL_AI_LLM_FIXTURE for realistic runs (use -AllowFixture to override).
 
-  See docs\CONTEXT_HARNESS.md and tests\context_workflows\README.md
+  See docs\AGENT_HARNESS_HANDOFF.md and tests\context_workflows\README.md
 #>
 [CmdletBinding()]
 param(
-    [string]$EngineRoot = $(if ($env:UE_ENGINE_ROOT) { $env:UE_ENGINE_ROOT } else { 'C:\Program Files\Epic Games\UE_5.7' }),
+    [string]$EngineRoot = '',
     [string]$ProjectRoot = '',
     [string]$SuiteManifest = '',
     [string]$WorkflowManifest = '',
@@ -23,11 +23,23 @@ param(
     [string]$MatrixFilter = '',
     [switch]$SingleSession,
     [switch]$DumpContext,
+    [switch]$ContextVerbose,
     [switch]$DryRun,
-    [switch]$AllowFixture
+    [switch]$AllowFixture,
+    [int]$MaxLlmRounds = 4,
+    [int]$EditorExitTimeoutSec = 300
 )
 
 $ErrorActionPreference = 'Stop'
+
+$RepoRootForEnv = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'Import-RepoDotenv.ps1')
+Import-RepoDotenv -RepoRoot $RepoRootForEnv
+. (Join-Path $PSScriptRoot 'Set-UnrealAiHeadedToolPackDefaults.ps1')
+
+if ([string]::IsNullOrWhiteSpace($EngineRoot)) {
+    $EngineRoot = if ($env:UE_ENGINE_ROOT) { $env:UE_ENGINE_ROOT } else { 'C:\Program Files\Epic Games\UE_5.7' }
+}
 
 if (-not $ProjectRoot) {
     $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -49,8 +61,14 @@ if (-not (Test-Path $EditorExe)) {
     Write-Error "UnrealEditor.exe not found: $EditorExe (set UE_ENGINE_ROOT or -EngineRoot)"
 }
 
-if ($env:UNREAL_AI_LLM_FIXTURE -and -not $AllowFixture) {
-    Write-Error "UNREAL_AI_LLM_FIXTURE is set ($($env:UNREAL_AI_LLM_FIXTURE)). Clear it for live API runs or pass -AllowFixture."
+if (-not $AllowFixture) {
+    if ($env:UNREAL_AI_LLM_FIXTURE) {
+        Write-Warning "UNREAL_AI_LLM_FIXTURE was set - clearing for live API (use -AllowFixture to keep)."
+        Remove-Item Env:\UNREAL_AI_LLM_FIXTURE -ErrorAction SilentlyContinue
+    }
+}
+elseif (-not $env:UNREAL_AI_LLM_FIXTURE) {
+    Write-Warning '-AllowFixture passed but UNREAL_AI_LLM_FIXTURE is unset.'
 }
 
 if ($WorkflowManifest -and $SuiteManifest) {
@@ -61,6 +79,16 @@ if (-not $WorkflowManifest -and -not $SuiteManifest) {
 }
 
 $runsRoot = Join-Path $ProjectRoot 'Saved\UnrealAiEditor\HarnessRuns'
+
+if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HARNESS_SYNC_WAIT_MS)) {
+    $env:UNREAL_AI_HARNESS_SYNC_WAIT_MS = '180000'
+}
+if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HTTP_REQUEST_TIMEOUT_SEC)) {
+    $env:UNREAL_AI_HTTP_REQUEST_TIMEOUT_SEC = '30'
+}
+if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_LLM_STREAM)) {
+    $env:UNREAL_AI_LLM_STREAM = '0'
+}
 
 function Get-HarnessRunDirs {
     param([string]$Root)
@@ -100,23 +128,46 @@ function Invoke-HeadedEditor {
     $ecEsc = Escape-Win32QuotedArgContent $ExecCmds
     $psi.Arguments = '"' + $upEsc + '" -unattended -nop4 -NoSplash -ExecCmds="' + $ecEsc + '" -log'
 
+    function Wait-ForEditorExitOrKill {
+        param([System.Diagnostics.Process]$Proc)
+        if ($null -eq $Proc) { return 1 }
+        $waitMs = [Math]::Max(1000, $EditorExitTimeoutSec * 1000)
+        if (-not $Proc.WaitForExit($waitMs)) {
+            Write-Warning "UnrealEditor did not exit within $EditorExitTimeoutSec seconds; force-killing for fast iteration."
+            try { $Proc.Kill() } catch {}
+            try { $Proc.WaitForExit() } catch {}
+        }
+        Write-Host "  UnrealEditor exit: $($Proc.ExitCode)" -ForegroundColor $(if ($Proc.ExitCode -eq 0) { 'Green' } else { 'Yellow' })
+        return $Proc.ExitCode
+    }
+
     $run = {
         $proc = [System.Diagnostics.Process]::Start($psi)
         if (-not $proc) {
             Write-Error "Failed to start UnrealEditor: $EditorExe"
         }
-        $proc.WaitForExit()
-        Write-Host "  UnrealEditor exit: $($proc.ExitCode)" -ForegroundColor $(if ($proc.ExitCode -eq 0) { 'Green' } else { 'Yellow' })
-        return $proc.ExitCode
+        return (Wait-ForEditorExitOrKill $proc)
     }
 
+    $prevDump = $null
+    $prevVerbose = $null
+    $didSetDump = $false
+    $didSetVerbose = $false
     if ($DumpContext) {
         $prevDump = $env:UNREAL_AI_HARNESS_DUMP_CONTEXT
         $env:UNREAL_AI_HARNESS_DUMP_CONTEXT = '1'
-        try {
-            return & $run
-        }
-        finally {
+        $didSetDump = $true
+    }
+    if ($ContextVerbose) {
+        $prevVerbose = $env:UNREAL_AI_CONTEXT_VERBOSE
+        $env:UNREAL_AI_CONTEXT_VERBOSE = '1'
+        $didSetVerbose = $true
+    }
+    try {
+        return & $run
+    }
+    finally {
+        if ($didSetDump) {
             if ($null -ne $prevDump -and $prevDump -ne '') {
                 $env:UNREAL_AI_HARNESS_DUMP_CONTEXT = $prevDump
             }
@@ -124,25 +175,37 @@ function Invoke-HeadedEditor {
                 Remove-Item Env:\UNREAL_AI_HARNESS_DUMP_CONTEXT -ErrorAction SilentlyContinue
             }
         }
-    }
-    else {
-        return & $run
+        if ($didSetVerbose) {
+            if ($null -ne $prevVerbose -and $prevVerbose -ne '') {
+                $env:UNREAL_AI_CONTEXT_VERBOSE = $prevVerbose
+            }
+            else {
+                Remove-Item Env:\UNREAL_AI_CONTEXT_VERBOSE -ErrorAction SilentlyContinue
+            }
+        }
     }
 }
 
-function Build-RunAgentTurnWithThread {
+function Set-ContextHarnessStepEnv {
     param(
         [string]$MsgAbs,
         [string]$ThreadGuid,
         [string]$Mode
     )
-    $p = ($MsgAbs -replace '\\', '/')
-    if ($p -match '\s') {
-        Write-Error "Message path must not contain spaces for -ExecCmds (got: $p). Move prompts or use a short path."
-    }
+    $env:UNREAL_AI_HARNESS_MESSAGE_FILE = $MsgAbs
+    $env:UNREAL_AI_HARNESS_THREAD_GUID = $ThreadGuid
+    Remove-Item Env:\UNREAL_AI_HARNESS_AGENT_MODE -ErrorAction SilentlyContinue
     $m = if ($Mode) { $Mode.ToLowerInvariant() } else { 'agent' }
-    # No quotes around path: nested quotes break UE's -ExecCmds= parsing (see docs/AGENT_HARNESS_HANDOFF.md).
-    return "UnrealAi.RunAgentTurn $p $ThreadGuid $m"
+    if ($m -ne 'agent') {
+        $env:UNREAL_AI_HARNESS_AGENT_MODE = $m
+    }
+}
+
+function Clear-ContextHarnessStepEnv {
+    Remove-Item Env:\UNREAL_AI_HARNESS_MESSAGE_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:\UNREAL_AI_HARNESS_THREAD_GUID -ErrorAction SilentlyContinue
+    Remove-Item Env:\UNREAL_AI_HARNESS_AGENT_MODE -ErrorAction SilentlyContinue
+    Remove-Item Env:\UNREAL_AI_HARNESS_MAX_LLM_ROUNDS -ErrorAction SilentlyContinue
 }
 
 function Resolve-WorkflowPath {
@@ -228,8 +291,8 @@ if (-not $SkipMatrix) {
     else {
         $matrixCmd = "UnrealAi.RunCatalogMatrix $MatrixFilter"
     }
-    Write-Host "Catalog matrix (headed): $matrixCmd;Quit" -ForegroundColor Cyan
-    [void](Invoke-HeadedEditor "$matrixCmd;Quit")
+    Write-Host "Catalog matrix (headed): $matrixCmd,Quit" -ForegroundColor Cyan
+    [void](Invoke-HeadedEditor "$matrixCmd,Quit")
 }
 
 foreach ($job in $workflowJobs) {
@@ -255,62 +318,55 @@ foreach ($job in $workflowJobs) {
     Write-Host "Workflow $wfId thread=$threadGuid steps=$($steps.Count)" -ForegroundColor Cyan
 
     if ($SingleSession) {
-        $namesBefore = @{}
-        if (Test-Path $runsRoot) {
-            foreach ($d in Get-ChildItem -Path $runsRoot -Directory -ErrorAction SilentlyContinue) {
-                $namesBefore[$d.Name] = $true
-            }
-        }
-        $parts = @()
-        $ix = 0
+        $cmds = @()
+        $si3 = 0
         foreach ($st in $steps) {
-            $ix++
-            $msgAbs = Join-Path $job.BaseDir ([string]$st.message_file)
+            $si3++
+            $msgAbs = (Resolve-Path -LiteralPath (Join-Path $job.BaseDir ([string]$st.message_file))).Path
             if (-not (Test-Path -LiteralPath $msgAbs)) {
                 Write-Error "Message file not found: $msgAbs"
             }
             $mode = if ($st.mode) { [string]$st.mode } else { $defaultMode }
-            $parts += (Build-RunAgentTurnWithThread $msgAbs $threadGuid $mode)
-        }
-        $parts += 'Quit'
-        $ExecCmds = $parts -join ';'
-        Write-Host "  SingleSession (len=$($ExecCmds.Length))" -ForegroundColor DarkGray
-        [void](Invoke-HeadedEditor $ExecCmds)
-
-        if (-not (Test-Path $runsRoot)) {
-            Write-Warning "No HarnessRuns at $runsRoot"
-            continue
-        }
-        $newDirs = @(Get-ChildItem -Path $runsRoot -Directory | Where-Object { -not $namesBefore.ContainsKey($_.Name) } | Sort-Object Name)
-        $idx = 0
-        $si2 = 0
-        foreach ($st in $steps) {
-            $si2++
-            if ($idx -ge $newDirs.Count) {
-                Write-Warning "Missing harness dir for step $($st.id)"
-                break
-            }
             $safeId = ([string]$st.id) -replace '[^a-zA-Z0-9_-]', '_'
-            $stepDir = "step_{0:D2}_{1}" -f $si2, $safeId
-            $dest = Join-Path $wfOut $stepDir
-            if (Test-Path $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
-            Copy-Item -LiteralPath $newDirs[$idx].FullName -Destination $dest -Recurse
-            Write-Host "  Copied $($newDirs[$idx].Name) -> $dest" -ForegroundColor Green
-            $idx++
+            $stepDirRel = "step_{0:D2}_{1}" -f $si3, $safeId
+            $dest = Join-Path $wfOut $stepDirRel
+            if (Test-Path -LiteralPath $dest) {
+                Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            $cmds += ('UnrealAi.RunAgentTurn "{0}" "{1}" "{2}" "{3}"' -f $msgAbs, $threadGuid, $mode, $dest)
+        }
+        $execCmds = ($cmds -join ',') + ',Quit'
+        Write-Host "  SingleSession: chained $($steps.Count) turns in one editor run" -ForegroundColor Cyan
+        try {
+            if ($MaxLlmRounds -gt 0) {
+                $env:UNREAL_AI_HARNESS_MAX_LLM_ROUNDS = [string]$MaxLlmRounds
+            }
+            [void](Invoke-HeadedEditor $execCmds)
+        }
+        finally {
+            Remove-Item Env:\UNREAL_AI_HARNESS_MAX_LLM_ROUNDS -ErrorAction SilentlyContinue
         }
     }
     else {
         $si3 = 0
         foreach ($st in $steps) {
             $si3++
-            $msgAbs = Join-Path $job.BaseDir ([string]$st.message_file)
+            $msgAbs = (Resolve-Path -LiteralPath (Join-Path $job.BaseDir ([string]$st.message_file))).Path
             if (-not (Test-Path -LiteralPath $msgAbs)) {
                 Write-Error "Message file not found: $msgAbs"
             }
             $mode = if ($st.mode) { [string]$st.mode } else { $defaultMode }
-            $one = "$(Build-RunAgentTurnWithThread $msgAbs $threadGuid $mode);Quit"
-            Write-Host "  Step $($st.id): $one" -ForegroundColor Cyan
-            [void](Invoke-HeadedEditor $one)
+            Set-ContextHarnessStepEnv $msgAbs $threadGuid $mode
+            if ($MaxLlmRounds -gt 0) {
+                $env:UNREAL_AI_HARNESS_MAX_LLM_ROUNDS = [string]$MaxLlmRounds
+            }
+            try {
+                Write-Host "  Step $($st.id): UNREAL_AI_HARNESS_MESSAGE_FILE=$msgAbs | UnrealAi.RunAgentTurn" -ForegroundColor Cyan
+                [void](Invoke-HeadedEditor 'UnrealAi.RunAgentTurn,Quit')
+            }
+            finally {
+                Clear-ContextHarnessStepEnv
+            }
             $safeId = ([string]$st.id) -replace '[^a-zA-Z0-9_-]', '_'
             $stepDir = "step_{0:D2}_{1}" -f $si3, $safeId
             $dest = Join-Path $wfOut $stepDir

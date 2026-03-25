@@ -2,7 +2,7 @@
 
 **Maintainer-only:** prompts and manifests here support **internal** qualitative runs (real API, headed editor)—not an end-user feature.
 
-This folder holds **manifest-driven prompts** for the **live headed qualitative** harness tier (see [docs/LIVE_HARNESS.md](../../docs/LIVE_HARNESS.md)).
+This folder holds **manifest-driven prompts** for the **live headed qualitative** harness tier (see [docs/AGENT_HARNESS_HANDOFF.md](../../docs/AGENT_HARNESS_HANDOFF.md)).
 
 ## What this is not
 
@@ -20,7 +20,7 @@ Full suite = many agent turns × API calls. Use `-MaxScenarios` or a subset mani
 
 ## Known gaps
 
-See [docs/TOOLING_FOLLOWUPS.md](../../docs/TOOLING_FOLLOWUPS.md) for tooling follow-ups and catalog gaps.
+See [docs/tool-goals.md](../../docs/tool-goals.md) for known tooling gaps.
 
 ## Running
 

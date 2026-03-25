@@ -13,7 +13,7 @@
 - **Project Settings → Plugins → Unreal AI Editor**: `UUnrealAiEditorSettings` (default agent, auto connect, verbose logging, OpenRouter fields).
 - **In-module stubs** (`Private/Backend/` — not a separate server process): persistence (writes under `%LOCALAPPDATA%\UnrealAiEditor\` on Windows), chat service (fake stream), model connector (delayed success).
 - **Tool catalog + execution:** [`Resources/UnrealAiToolCatalog.json`](Resources/UnrealAiToolCatalog.json) — single JSON (`meta` + `tools[]`). **`FUnrealAiToolExecutionHost`** (`Private/Tools/`) implements `IToolExecutionHost::InvokeTool` and dispatches to UE5 handlers via `UnrealAiToolDispatch.cpp` and modular `UnrealAiToolDispatch_*.cpp` units (game thread). **Search:** `scene_fuzzy_search`, `asset_index_fuzzy_search`, `source_search_symbol` (`UnrealAiFuzzySearch.cpp`). **Blueprints:** `blueprint_compile`, `blueprint_export_ir`, `blueprint_apply_ir` (merge_policy / event_tick / layout_scope), `blueprint_format_graph`, summaries, open graph, add variable. **Generic assets:** `asset_create`, `asset_export_properties`, `asset_apply_properties`, dependencies/referencers, and more—see catalog and router for the full set. Tools without a handler return a structured `not_implemented`.
-- **Unreal Blueprint Formatter:** `UnrealAiEditor.uplugin` lists **`UnrealBlueprintFormatter`** as an enabled plugin dependency and `UnrealAiEditor.Build.cs` links the module. **`.\build-editor.ps1`** syncs the canonical repo into `Plugins/UnrealBlueprintFormatter/` (clone or `git pull --ff-only`) before each build; see [`docs/UnrealBlueprintFormatter-dependency.md`](../../docs/UnrealBlueprintFormatter-dependency.md). Opt out with **`-SkipBlueprintFormatterSync`** / **`UE_SKIP_BLUEPRINT_FORMATTER_SYNC`**. AI prompts in `prompts/chunks/04-tool-calling-contract.md` describe **`merge_policy`**, **`layout_scope`**, **`blueprint_format_graph`**, and **`blueprint_compile`**’s **`format_graphs`** flag so agents use the formatter end-to-end.
+- **Unreal Blueprint Formatter:** `UnrealAiEditor.uplugin` lists **`UnrealBlueprintFormatter`** as an enabled plugin dependency and `UnrealAiEditor.Build.cs` links the module. **`.\build-editor.ps1`** syncs the canonical repo into `Plugins/UnrealBlueprintFormatter/` (clone or `git pull --ff-only`) before each build; see [`docs/UnrealBlueprintFormatter.md`](../../docs/UnrealBlueprintFormatter.md). Opt out with **`-SkipBlueprintFormatterSync`** / **`UE_SKIP_BLUEPRINT_FORMATTER_SYNC`**. AI prompts in `prompts/chunks/04-tool-calling-contract.md` describe **`merge_policy`**, **`layout_scope`**, **`blueprint_format_graph`**, and **`blueprint_compile`**’s **`format_graphs`** flag so agents use the formatter end-to-end.
 
 ## Install into a UE project
 
@@ -34,7 +34,7 @@
 
 ## Harness testing & agent handoff
 
-**Single doc for prompts, catalog, dispatch, scripts, and escalation:** [`docs/AGENT_HARNESS_HANDOFF.md`](../../docs/AGENT_HARNESS_HANDOFF.md). Use it when onboarding a new agent or a fresh iteration thread. **Details:** [`docs/AGENT_HARNESS_TESTING.md`](../../docs/AGENT_HARNESS_TESTING.md) (console commands, fixtures, `run.jsonl`). **Headed smoke** (visible editor + matrix + two `UnrealAi.RunAgentTurn` scenarios): `.\build-editor.ps1 -HeadedScenarioSmoke` from repo root.
+**Single doc for prompts, catalog, dispatch, scripts, and escalation:** [`docs/AGENT_HARNESS_HANDOFF.md`](../../docs/AGENT_HARNESS_HANDOFF.md). Use it when onboarding a new agent or a fresh iteration thread. **Headed smoke** (visible editor + matrix + two `UnrealAi.RunAgentTurn` scenarios): `.\build-editor.ps1 -HeadedScenarioSmoke` from repo root.
 
 ## Automation tests (Editor, dev builds)
 
@@ -51,9 +51,9 @@ When `WITH_DEV_AUTOMATION_TESTS` is enabled (default for **Development** Editor 
 **Run from repo root (log + matrix JSON for LLM workflows):**
 
 ```powershell
-.\run-unreal-ai-tests.ps1
-# optional: .\run-unreal-ai-tests.ps1 -Build
-# optional: .\run-unreal-ai-tests.ps1 -MatrixFilter blueprint
+.\tests\run-unreal-ai-tests.ps1
+# optional: .\tests\run-unreal-ai-tests.ps1 -Build
+# optional: .\tests\run-unreal-ai-tests.ps1 -MatrixFilter blueprint
 ```
 
 Artifacts: [`tests/out/editor-last.log`](../tests/out/editor-last.log), [`tests/out/last-matrix.json`](../tests/out/last-matrix.json) (copy of the Saved report). See [`tests/README.md`](../tests/README.md).

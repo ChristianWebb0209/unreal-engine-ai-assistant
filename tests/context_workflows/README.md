@@ -3,6 +3,7 @@
 **Maintainer-only:** multi-turn harness material for **internal** context-manager review—not a supported user workflow.
 
 Multi-turn **workflows** for headed Unreal Editor runs that reuse a **single thread id** across steps so `FUnrealAiContextService` state matches long chat sessions. Use with **`UNREAL_AI_HARNESS_DUMP_CONTEXT=1`** (or `-DumpContext` on the driver) to emit `context_window_*.txt` for qualitative review.
+For qualitative debugging of *why* items were added/dropped/truncated, also enable **`UNREAL_AI_CONTEXT_VERBOSE=1`** (or `-ContextVerbose`) to emit `context_build_trace_*.txt`.
 
 **Not CI.** Optional structural checks only. Prefer **`UNREAL_AI_LLM_FIXTURE` unset** for realistic behavior; use a fixture only for cheap plumbing checks (`-AllowFixture` on the script).
 
@@ -41,8 +42,8 @@ Bundle for review:
 python tests\bundle_context_workflow_review.py tests\out\context_runs\context_pilots\conv_memory_smoke
 ```
 
-Optional **snapshot without a full LLM turn** (after at least one turn has loaded the thread): editor console `UnrealAi.DumpContextWindow <ThreadGuid> [reason]` — see [docs/CONTEXT_HARNESS.md](../../docs/CONTEXT_HARNESS.md).
+Optional **snapshot without a full LLM turn** (after at least one turn has loaded the thread): editor console `UnrealAi.DumpContextWindow <ThreadGuid> [reason]` — see [`docs/AGENT_HARNESS_HANDOFF.md`](../../docs/AGENT_HARNESS_HANDOFF.md).
 
 ## Known gaps
 
-[docs/TOOLING_FOLLOWUPS.md](../../docs/TOOLING_FOLLOWUPS.md)
+[`docs/tool-goals.md`](../../docs/tool-goals.md)

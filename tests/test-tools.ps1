@@ -6,10 +6,10 @@
   -UseUnrealAutomation: Unreal Editor automation test (HeadlessPromptToolRouting).
 
   Usage:
-    .\test-tools.ps1
-    .\test-tools.ps1 -Llm -LlmMax 82
-    .\test-tools.ps1 -UseUnrealAutomation
-    .\test-tools.ps1 -UseUnrealAutomation -Headed
+    .\tests\test-tools.ps1
+    .\tests\test-tools.ps1 -Llm -LlmMax 82
+    .\tests\test-tools.ps1 -UseUnrealAutomation
+    .\tests\test-tools.ps1 -UseUnrealAutomation -Headed
 
   -Headed: use UnrealEditor.exe (visible window) instead of UnrealEditor-Cmd.exe.
 
@@ -20,7 +20,7 @@ param(
     [switch]$Llm,
     [int]$LlmMax = 5,
     [switch]$UseUnrealAutomation,
-    [string]$EngineRoot = $(if ($env:UE_ENGINE_ROOT) { $env:UE_ENGINE_ROOT } else { 'C:\Program Files\Epic Games\UE_5.7' }),
+    [string]$EngineRoot = '',
     [string]$TestFilter = 'UnrealAiEditor.Tools.HeadlessPromptToolRouting',
     [switch]$NullRhi,
     [switch]$Headed,
@@ -29,7 +29,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ProjectRoot = $PSScriptRoot
+
+. (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\Import-RepoDotenv.ps1')
+Import-RepoDotenv -RepoRoot (Split-Path -Parent $PSScriptRoot)
+if ([string]::IsNullOrWhiteSpace($EngineRoot)) {
+    $EngineRoot = if ($env:UE_ENGINE_ROOT) { $env:UE_ENGINE_ROOT } else { 'C:\Program Files\Epic Games\UE_5.7' }
+}
+
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
 $UProject = Join-Path $ProjectRoot 'blank.uproject'
 $EditorCmd = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
 $EditorExe = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor.exe'

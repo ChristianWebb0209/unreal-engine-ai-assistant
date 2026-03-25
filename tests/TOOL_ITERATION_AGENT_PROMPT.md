@@ -28,9 +28,9 @@ Optional: run `python tests/summarize_tool_matrix.py` (or `python tests/summariz
 5. Build: `.\build-editor.ps1 -Headless`  
    If the plugin DLL is locked: `.\build-editor.ps1 -Restart -Headless`
 6. Run tests (the script **prints a heartbeat every 30s** — long silence is normal; matrix runs are slow):  
-   - Matrix-focused: `.\run-unreal-ai-tests.ps1 -CatalogMatrixOnly -Summarize`  
-   - Headed (visible editor): `.\run-unreal-ai-tests.ps1 -Headed`  
-   - Full plugin tests: `.\run-unreal-ai-tests.ps1` (default filter runs every automation test)  
+   - Matrix-focused: `.\tests\run-unreal-ai-tests.ps1 -CatalogMatrixOnly -Summarize`
+   - Headed (visible editor): `.\tests\run-unreal-ai-tests.ps1 -Headed`
+   - Full plugin tests: `.\tests\run-unreal-ai-tests.ps1` (default filter runs every automation test)
    - With summary: add `-Summarize`  
    Chromium / CEF lines in the console are usually harmless.
 7. Re-read `tests/out/last-matrix.json` and repeat until clean.
@@ -54,7 +54,7 @@ After each run, the script copies the **newest** `Saved/Logs/*.log` file to **`t
 
 **Caveat:** The log file is the **most recently modified** `.log` under `Saved/Logs`. If another process wrote a newer log, `editor-last.log` might not be the matrix run—avoid parallel editors when capturing.
 
-**Strict matrix gate:** Use `.\run-unreal-ai-tests.ps1 -Headed -Summarize` so Python prints a short matrix summary; `python tests\summarize_tool_matrix.py --strict` fails if any tool row is `bOk=false`, not only contract violations.
+**Strict matrix gate:** Use `.\tests\run-unreal-ai-tests.ps1 -Headed -Summarize` so Python prints a short matrix summary; `python tests\summarize_tool_matrix.py --strict` fails if any tool row is `bOk=false`, not only contract violations.
 
 ## Commands (cheat sheet)
 
@@ -64,10 +64,10 @@ After each run, the script copies the **newest** `Saved/Logs/*.log` file to **`t
 # If UnrealEditor.exe has the DLL locked:
 # .\build-editor.ps1 -Restart -Headless
 
-.\run-unreal-ai-tests.ps1 -Headed -Summarize
+.\tests\run-unreal-ai-tests.ps1 -Headed -Summarize
 
 # JSON-only changes (catalog/fixtures): skip build, still run tests
-.\run-unreal-ai-tests.ps1 -Headed -Summarize
+.\tests\run-unreal-ai-tests.ps1 -Headed -Summarize
 
 python tests\summarize_tool_matrix.py
 python tests\summarize_tool_matrix.py --strict
@@ -76,7 +76,7 @@ python tests\summarize_tool_matrix.py --strict
 **Filter** only tools whose id contains a substring (faster iteration):
 
 ```powershell
-.\run-unreal-ai-tests.ps1 -Headed -MatrixFilter actor
+.\tests\run-unreal-ai-tests.ps1 -Headed -MatrixFilter actor
 ```
 
 **In-editor without relaunching the EXE:** open **Window → Developer Tools → Output Log**, run:
@@ -96,8 +96,8 @@ Then copy `Saved/UnrealAiEditor/Automation/tool_matrix_last.json` or compare wit
 **Static + LLM routing only** (does not execute tools in Unreal):
 
 ```powershell
-.\test-tools.ps1
-.\test-tools.ps1 -Llm -LlmMax 10
+.\tests\test-tools.ps1
+.\tests\test-tools.ps1 -Llm -LlmMax 10
 ```
 
 ## Non-goals

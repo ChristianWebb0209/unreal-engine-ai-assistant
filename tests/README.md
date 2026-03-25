@@ -9,21 +9,21 @@ This folder holds **fixtures** and **captured output** for plugin automation. C+
 ## Run from the repo root (recommended)
 
 ```powershell
-.\run-unreal-ai-tests.ps1
+.\tests\run-unreal-ai-tests.ps1
 ```
 
 **It is probably not stuck.** The script waits for Unreal to exit and prints a heartbeat every 30s. The default `UnrealAiEditor` filter runs **all** plugin automation tests (slow). The matrix test alone invokes **every** catalog tool and can take **10–30+ minutes**. Random `Chromium` / `google_update` lines are normal noise.
 
 Optional:
 
-- **Build first:** `.\run-unreal-ai-tests.ps1 -Build`
-- **Engine path:** `$env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'` or `.\run-unreal-ai-tests.ps1 -EngineRoot 'D:\Epic\UE_5.7'`
-- **Matrix only (skip harness / other tests):** `.\run-unreal-ai-tests.ps1 -CatalogMatrixOnly` — equivalent to `-TestFilter UnrealAiEditor.Tools.CatalogMatrix` (still slow because every tool runs).
-- **Automation filter:** `.\run-unreal-ai-tests.ps1 -TestFilter UnrealAiEditor` (default)
-- **Only matrix tools matching a substring:** `.\run-unreal-ai-tests.ps1 -MatrixFilter blueprint` (passes `-UnrealAiToolMatrixFilter=blueprint` to the editor)
-- **Headed editor (visible window):** `.\run-unreal-ai-tests.ps1 -Headed` — uses `UnrealEditor.exe` instead of `UnrealEditor-Cmd.exe`; same automation (`ExecCmds` … `Quit`).
-- **Allow blocking dialogs:** `.\run-unreal-ai-tests.ps1 -AllowDialogs` — omits `-unattended` (can hang if a dialog waits; useful for debugging).
-- **Human/LLM-friendly matrix summary:** `.\run-unreal-ai-tests.ps1 -Summarize` — runs `tests/summarize_tool_matrix.py` on `tests/out/last-matrix.json`.
+- **Build first:** `.\tests\run-unreal-ai-tests.ps1 -Build`
+- **Engine path:** `$env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'` or `.\tests\run-unreal-ai-tests.ps1 -EngineRoot 'D:\Epic\UE_5.7'`
+- **Matrix only (skip harness / other tests):** `.\tests\run-unreal-ai-tests.ps1 -CatalogMatrixOnly` — equivalent to `-TestFilter UnrealAiEditor.Tools.CatalogMatrix` (still slow because every tool runs).
+- **Automation filter:** `.\tests\run-unreal-ai-tests.ps1 -TestFilter UnrealAiEditor` (default)
+- **Only matrix tools matching a substring:** `.\tests\run-unreal-ai-tests.ps1 -MatrixFilter blueprint` (passes `-UnrealAiToolMatrixFilter=blueprint` to the editor)
+- **Headed editor (visible window):** `.\tests\run-unreal-ai-tests.ps1 -Headed` — uses `UnrealEditor.exe` instead of `UnrealEditor-Cmd.exe`; same automation (`ExecCmds` … `Quit`).
+- **Allow blocking dialogs:** `.\tests\run-unreal-ai-tests.ps1 -AllowDialogs` — omits `-unattended` (can hang if a dialog waits; useful for debugging).
+- **Human/LLM-friendly matrix summary:** `.\tests\run-unreal-ai-tests.ps1 -Summarize` — runs `tests/summarize_tool_matrix.py` on `tests/out/last-matrix.json`.
 
 Close **Unreal Editor** before `-Build` if the plugin DLL is locked.
 
@@ -31,11 +31,11 @@ Close **Unreal Editor** before `-Build` if the plugin DLL is locked.
 
 **Entry point:** **[`docs/AGENT_HARNESS_HANDOFF.md`](../docs/AGENT_HARNESS_HANDOFF.md)** — scripts, file map, iteration order, escalation (bigger errors; tool add/remove proposals).
 
-For **matrix-focused** copy-paste steps (read matrix → patch dispatch/catalog → rebuild → re-run), see **[TOOL_ITERATION_AGENT_PROMPT.md](TOOL_ITERATION_AGENT_PROMPT.md)**. That file includes headed runs, **batching edits before one build**, when rebuild is required vs JSON-only re-run, and **how to read `editor-last.log` for errors** alongside the matrix JSON. For **gameplay MVP gaps** (input, UMG, nav) vs catalog tools, see **[`docs/TOOLING_FOLLOWUPS.md`](../docs/TOOLING_FOLLOWUPS.md)**.
+For **matrix-focused** copy-paste steps (read matrix → patch dispatch/catalog → rebuild → re-run), see **[TOOL_ITERATION_AGENT_PROMPT.md](TOOL_ITERATION_AGENT_PROMPT.md)**. That file includes headed runs, **batching edits before one build**, when rebuild is required vs JSON-only re-run, and **how to read `editor-last.log` for errors** alongside the matrix JSON. For **gameplay MVP gaps** (input, UMG, nav) vs catalog tools, see **[`docs/tool-goals.md`](../docs/tool-goals.md)** (Known tooling gaps).
 
 ### Agent harness (full LLM + tools)
 
-End-to-end runs (same path as Agent Chat), `run.jsonl` artifacts, and deterministic LLM fixtures: **[`docs/AGENT_HARNESS_TESTING.md`](../docs/AGENT_HARNESS_TESTING.md)**. Validate JSONL with `python tests/assert_harness_run.py <run.jsonl>`. Headed console smoke: **`.\build-editor.ps1 -HeadedScenarioSmoke`** (see [`scripts/run-headed-scenario-smoke.ps1`](../scripts/run-headed-scenario-smoke.ps1)).
+End-to-end runs (same path as Agent Chat), `run.jsonl` artifacts, and deterministic LLM fixtures: **[`docs/AGENT_HARNESS_HANDOFF.md`](../docs/AGENT_HARNESS_HANDOFF.md)**. Validate JSONL with `python tests/assert_harness_run.py <run.jsonl>`. Headed console smoke: **`.\build-editor.ps1 -HeadedScenarioSmoke`** (see [`scripts/run-headed-scenario-smoke.ps1`](../scripts/run-headed-scenario-smoke.ps1)).
 
 ### Summarize matrix JSON only
 
@@ -77,12 +77,12 @@ Place `tests/fixtures/<tool_id>.json` with a JSON object of arguments. The catal
 ## Tool catalog routing (Python)
 
 ```powershell
-.\test-tools.ps1
+.\tests\test-tools.ps1
 ```
 
 Uses `tests/tool_catalog_routing_check.py` (static routing; optional `-Llm` for API tool-name checks). For Unreal automation instead:
 
 ```powershell
-.\test-tools.ps1 -UseUnrealAutomation
-.\test-tools.ps1 -UseUnrealAutomation -Headed
+.\tests\test-tools.ps1 -UseUnrealAutomation
+.\tests\test-tools.ps1 -UseUnrealAutomation -Headed
 ```

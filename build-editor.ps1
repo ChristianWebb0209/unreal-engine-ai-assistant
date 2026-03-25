@@ -14,12 +14,12 @@
     .\build-editor.ps1 -AutomationTests
     .\build-editor.ps1 -AutomationTests -Headless
     .\build-editor.ps1 -GenerateProjectFiles
-    $env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\build-editor.ps1
+    Set UE_ENGINE_ROOT in repo .env or: $env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\build-editor.ps1
     .\build-editor.ps1 -SkipBlueprintFormatterSync   # offline / local formatter tree
     .\build-editor.ps1 -HeadedScenarioSmoke -SkipBlueprintFormatterSync
       # headed UnrealEditor: RunCatalogMatrix + two UnrealAi.RunAgentTurn console scenarios (see scripts\run-headed-scenario-smoke.ps1)
-    # Live headed qualitative suite (real API, manifest-driven): scripts\run-headed-live-scenarios.ps1 — docs\LIVE_HARNESS.md
-    # Context manager multi-turn workflows: scripts\run-headed-context-workflows.ps1 — docs\CONTEXT_HARNESS.md
+    # Live headed qualitative suite (real API, manifest-driven): scripts\run-headed-live-scenarios.ps1 — docs\AGENT_HARNESS_HANDOFF.md
+    # Context manager multi-turn workflows: scripts\run-headed-context-workflows.ps1 — docs\AGENT_HARNESS_HANDOFF.md
     # Full harness + iteration context for agents: docs\AGENT_HARNESS_HANDOFF.md
 
   Each build syncs Plugins\UnrealBlueprintFormatter from git (clone or pull --ff-only) unless skipped.
@@ -37,7 +37,7 @@
 [CmdletBinding()]
 param(
     [switch]$GenerateProjectFiles,
-    [string]$EngineRoot = $(if ($env:UE_ENGINE_ROOT) { $env:UE_ENGINE_ROOT } else { 'C:\Program Files\Epic Games\UE_5.7' }),
+    [string]$EngineRoot = '',
     [switch]$Headless,
     [switch]$Restart,
     [switch]$AutomationTests,
@@ -67,6 +67,13 @@ foreach ($r in $RemainingArguments) {
 }
 
 $ErrorActionPreference = 'Stop'
+
+. (Join-Path $PSScriptRoot 'scripts\Import-RepoDotenv.ps1')
+Import-RepoDotenv -RepoRoot $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($EngineRoot)) {
+    $EngineRoot = if ($env:UE_ENGINE_ROOT) { $env:UE_ENGINE_ROOT } else { 'C:\Program Files\Epic Games\UE_5.7' }
+}
+
 $ProjectRoot = $PSScriptRoot
 $UProject = Join-Path $ProjectRoot 'blank.uproject'
 
