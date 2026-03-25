@@ -1,4 +1,4 @@
-# Tracked at repo root: .gitignore, README.md, docs/, Plugins/ (plugin + Blank module sources).
+# Tracked at repo root: .gitignore, README.md, docs/, scripts/, Plugins/ (plugin + Blank module sources).
 # Exception: UnrealBlueprintFormatter is developed for a separate repo — see docs/UnrealBlueprintFormatter-remaining-todo.md
 # Other root paths are listed explicitly — no negation patterns (!).
 
@@ -16,7 +16,6 @@
 /PRD.md
 /Saved/
 /Source/
-/scripts/
 /Build/
 
 # Visual Studio / Xcode
@@ -44,6 +43,11 @@ Plugins/**/*.opensdf
 Plugins/**/*.sdf
 Plugins/**/*.suo
 Plugins/**/*.VC.db
+
+# Secrets — never commit API keys or local env files
+.env
+.env.*
+!.env.example
 
 # OS
 .DS_Store
