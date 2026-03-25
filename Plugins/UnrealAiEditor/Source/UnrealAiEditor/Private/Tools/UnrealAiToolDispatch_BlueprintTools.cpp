@@ -90,6 +90,19 @@ namespace UnrealAiBlueprintToolsPriv
 		FString ParentClassPath;
 		/** When true, run formatter after apply if all IR node positions are zero (requires UnrealBlueprintFormatter). */
 		bool bAutoLayout = true;
+		/** create_new | append_to_existing — empty uses default (append on ubergraph, create_new on function/macro graphs). */
+		FString MergePolicy;
+		/** ir_nodes | full_graph — ir_nodes layouts only IR-touched nodes; full_graph runs LayoutEntireGraph on the target graph. */
+		FString LayoutScope;
+	};
+
+	struct FEventMergePlan
+	{
+		bool bMerged = false;
+		UK2Node_Event* ChosenEvent = nullptr;
+		UEdGraphNode* TailNode = nullptr;
+		FName MemberName = NAME_None;
+		int32 DuplicateAnchors = 0;
 	};
 
 	/**
@@ -490,6 +503,37 @@ namespace UnrealAiBlueprintToolsPriv
 			OutIr.bAutoLayout = AutoLayout;
 		}
 
+		Args->TryGetStringField(TEXT("merge_policy"), OutIr.MergePolicy);
+		OutIr.MergePolicy.TrimStartAndEndInline();
+		if (!OutIr.MergePolicy.IsEmpty()
+			&& !OutIr.MergePolicy.Equals(TEXT("create_new"), ESearchCase::IgnoreCase)
+			&& !OutIr.MergePolicy.Equals(TEXT("append_to_existing"), ESearchCase::IgnoreCase))
+		{
+			AddError(
+				OutErrors,
+				TEXT("invalid_value"),
+				TEXT("$.merge_policy"),
+				TEXT("merge_policy must be create_new or append_to_existing"),
+				TEXT("Omit merge_policy to use defaults (append on EventGraph, create_new on function graphs)"));
+		}
+
+		Args->TryGetStringField(TEXT("layout_scope"), OutIr.LayoutScope);
+		OutIr.LayoutScope.TrimStartAndEndInline();
+		if (OutIr.LayoutScope.IsEmpty())
+		{
+			OutIr.LayoutScope = TEXT("ir_nodes");
+		}
+		if (!OutIr.LayoutScope.Equals(TEXT("ir_nodes"), ESearchCase::IgnoreCase)
+			&& !OutIr.LayoutScope.Equals(TEXT("full_graph"), ESearchCase::IgnoreCase))
+		{
+			AddError(
+				OutErrors,
+				TEXT("invalid_value"),
+				TEXT("$.layout_scope"),
+				TEXT("layout_scope must be ir_nodes or full_graph"),
+				TEXT("ir_nodes: layout only nodes from this IR; full_graph: run formatter on the whole graph"));
+		}
+
 		return OutErrors.Num() == 0;
 	}
 
@@ -554,6 +598,12 @@ namespace UnrealAiBlueprintToolsPriv
 			if (Mn == FName(TEXT("ReceiveBeginPlay")))
 			{
 				OutOp = TEXT("event_begin_play");
+				OutObj->SetStringField(TEXT("op"), OutOp);
+				return;
+			}
+			if (Mn == FName(TEXT("ReceiveTick")))
+			{
+				OutOp = TEXT("event_tick");
 				OutObj->SetStringField(TEXT("op"), OutOp);
 				return;
 			}
@@ -675,6 +725,157 @@ namespace UnrealAiBlueprintToolsPriv
 		return P;
 	}
 
+	static bool IsUbergraph(UBlueprint* BP, UEdGraph* Graph)
+	{
+		if (!BP || !Graph)
+		{
+			return false;
+		}
+		for (const TObjectPtr<UEdGraph>& G : BP->UbergraphPages)
+		{
+			if (G.Get() == Graph)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static FString ResolveEffectiveMergePolicy(const FBlueprintIr& Ir, UBlueprint* BP, UEdGraph* Graph)
+	{
+		if (!Ir.MergePolicy.IsEmpty())
+		{
+			return Ir.MergePolicy;
+		}
+		return IsUbergraph(BP, Graph) ? TEXT("append_to_existing") : TEXT("create_new");
+	}
+
+	static bool IsBuiltinEventOp(const FString& OpLower, FName& OutMember)
+	{
+		if (OpLower == TEXT("event_begin_play"))
+		{
+			OutMember = FName(TEXT("ReceiveBeginPlay"));
+			return true;
+		}
+		if (OpLower == TEXT("event_tick"))
+		{
+			OutMember = FName(TEXT("ReceiveTick"));
+			return true;
+		}
+		return false;
+	}
+
+	static void CollectEventsByMember(UEdGraph* Graph, FName MemberName, TArray<UK2Node_Event*>& Out)
+	{
+		Out.Reset();
+		if (!Graph)
+		{
+			return;
+		}
+		for (UEdGraphNode* N : Graph->Nodes)
+		{
+			UK2Node_Event* Ev = Cast<UK2Node_Event>(N);
+			if (!Ev || Ev->EventReference.GetMemberName() != MemberName)
+			{
+				continue;
+			}
+			Out.Add(Ev);
+		}
+	}
+
+	static void SortEventsDeterministic(TArray<UK2Node_Event*>& Arr)
+	{
+		Arr.Sort([](const UK2Node_Event& A, const UK2Node_Event& B) {
+			if (A.NodePosY != B.NodePosY)
+			{
+				return A.NodePosY < B.NodePosY;
+			}
+			if (A.NodePosX != B.NodePosX)
+			{
+				return A.NodePosX < B.NodePosX;
+			}
+			return A.NodeGuid < B.NodeGuid;
+		});
+	}
+
+	static UEdGraphPin* FindPrimaryExecForwardOutPin(UEdGraphNode* N)
+	{
+		if (!N)
+		{
+			return nullptr;
+		}
+		if (UK2Node_Event* Ev = Cast<UK2Node_Event>(N))
+		{
+			return Ev->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output);
+		}
+		if (UK2Node_CustomEvent* Ce = Cast<UK2Node_CustomEvent>(N))
+		{
+			return Ce->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output);
+		}
+		if (UK2Node_CallFunction* Cf = Cast<UK2Node_CallFunction>(N))
+		{
+			if (UFunction* Fn = Cf->GetTargetFunction())
+			{
+				if (Fn->GetName() == TEXT("Delay"))
+				{
+					return Cf->FindPin(TEXT("Completed"), EGPD_Output);
+				}
+			}
+			return Cf->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output);
+		}
+		if (UK2Node_IfThenElse* Br = Cast<UK2Node_IfThenElse>(N))
+		{
+			return Br->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output);
+		}
+		if (UK2Node_ExecutionSequence* Seq = Cast<UK2Node_ExecutionSequence>(N))
+		{
+			if (UEdGraphPin* P = Seq->FindPin(TEXT("Then_0"), EGPD_Output))
+			{
+				return P;
+			}
+			for (UEdGraphPin* P : Seq->Pins)
+			{
+				if (P && P->Direction == EGPD_Output && P->PinName.ToString().StartsWith(TEXT("Then")))
+				{
+					return P;
+				}
+			}
+		}
+		return nullptr;
+	}
+
+	static UEdGraphNode* FindExecChainTailFromEvent(UK2Node_Event* Ev, TArray<FString>& Warnings)
+	{
+		if (!Ev)
+		{
+			return nullptr;
+		}
+		UEdGraphNode* Cur = Ev;
+		TSet<UEdGraphNode*> Visited;
+		int32 Guard = 0;
+		while (Cur && Guard++ < 4096)
+		{
+			if (Visited.Contains(Cur))
+			{
+				Warnings.Add(TEXT("exec_tail_walk_cycle"));
+				return Cur;
+			}
+			Visited.Add(Cur);
+			UEdGraphPin* OutExec = FindPrimaryExecForwardOutPin(Cur);
+			if (!OutExec || OutExec->LinkedTo.Num() == 0)
+			{
+				return Cur;
+			}
+			UEdGraphPin* NextIn = OutExec->LinkedTo[0];
+			Cur = NextIn ? NextIn->GetOwningNode() : nullptr;
+		}
+		if (Guard >= 4096)
+		{
+			Warnings.Add(TEXT("exec_tail_walk_limit"));
+		}
+		return Cur;
+	}
+
 	static UEdGraphNode* CreateNodeFromDecl(UBlueprint* BP, UEdGraph* Graph, const FIrNodeDecl& D, TArray<FIrError>& Errors)
 	{
 		if (!BP || !Graph)
@@ -689,6 +890,19 @@ namespace UnrealAiBlueprintToolsPriv
 		{
 			UK2Node_Event* N = NewObject<UK2Node_Event>(Graph);
 			N->EventReference.SetExternalMember(FName(TEXT("ReceiveBeginPlay")), AActor::StaticClass());
+			N->bOverrideFunction = true;
+			Graph->AddNode(N, true, false);
+			N->NodePosX = D.X;
+			N->NodePosY = D.Y;
+			N->CreateNewGuid();
+			N->PostPlacedNewNode();
+			N->AllocateDefaultPins();
+			Created = N;
+		}
+		else if (Op == TEXT("event_tick"))
+		{
+			UK2Node_Event* N = NewObject<UK2Node_Event>(Graph);
+			N->EventReference.SetExternalMember(FName(TEXT("ReceiveTick")), AActor::StaticClass());
 			N->bOverrideFunction = true;
 			Graph->AddNode(N, true, false);
 			N->NodePosX = D.X;
@@ -854,7 +1068,7 @@ namespace UnrealAiBlueprintToolsPriv
 				TEXT("unsupported_op"),
 				FString::Printf(TEXT("$.nodes[%s].op"), *D.NodeId),
 				FString::Printf(TEXT("Unsupported op '%s'"), *D.Op),
-				TEXT("Supported ops: event_begin_play, custom_event, branch, sequence, call_function, delay, get_variable, set_variable, dynamic_cast"));
+				TEXT("Supported ops: event_begin_play, event_tick, custom_event, branch, sequence, call_function, delay, get_variable, set_variable, dynamic_cast"));
 			return nullptr;
 		}
 
@@ -1123,6 +1337,59 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 		FBlueprintEditorUtils::AddMemberVariable(BP, FName(*Var.Name), ParsePinType(Var.Type));
 	}
 
+	const FString EffectiveMergePolicy = ResolveEffectiveMergePolicy(Ir, BP, Graph);
+	TMap<FString, FEventMergePlan> MergePlans;
+	TArray<FString> MergeWarnings;
+
+	if (EffectiveMergePolicy.Equals(TEXT("append_to_existing"), ESearchCase::IgnoreCase))
+	{
+		TSet<FName> IrMergedMembers;
+		for (const FIrNodeDecl& D : Ir.Nodes)
+		{
+			const FString Op = D.Op.ToLower();
+			FName MemberName;
+			if (!IsBuiltinEventOp(Op, MemberName))
+			{
+				continue;
+			}
+			TArray<UK2Node_Event*> Matches;
+			CollectEventsByMember(Graph, MemberName, Matches);
+			SortEventsDeterministic(Matches);
+			if (Matches.Num() == 0)
+			{
+				continue;
+			}
+			if (IrMergedMembers.Contains(MemberName))
+			{
+				MergeWarnings.Add(FString::Printf(
+					TEXT("append_skipped_duplicate_ir_event_op:%s:%s"),
+					*D.NodeId,
+					*MemberName.ToString()));
+				continue;
+			}
+			IrMergedMembers.Add(MemberName);
+
+			FEventMergePlan Plan;
+			Plan.bMerged = true;
+			Plan.ChosenEvent = Matches[0];
+			Plan.MemberName = MemberName;
+			Plan.DuplicateAnchors = FMath::Max(0, Matches.Num() - 1);
+			Plan.TailNode = FindExecChainTailFromEvent(Plan.ChosenEvent, MergeWarnings);
+			if (!Plan.TailNode)
+			{
+				Plan.TailNode = Plan.ChosenEvent;
+			}
+			MergePlans.Add(D.NodeId, MoveTemp(Plan));
+			if (Matches.Num() > 1)
+			{
+				MergeWarnings.Add(FString::Printf(
+					TEXT("duplicate_event_anchors_in_graph:%s:%d"),
+					*MemberName.ToString(),
+					Matches.Num()));
+			}
+		}
+	}
+
 	TMap<FString, UEdGraphNode*> NodeById;
 	TArray<FIrError> BuildErrors;
 	for (const FIrNodeDecl& D : Ir.Nodes)
@@ -1136,6 +1403,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 				TEXT("node_id must be unique"),
 				TEXT(""));
 			continue;
+		}
+		if (const FEventMergePlan* Plan = MergePlans.Find(D.NodeId))
+		{
+			if (Plan->bMerged && Plan->ChosenEvent)
+			{
+				NodeById.Add(D.NodeId, Plan->ChosenEvent);
+				continue;
+			}
 		}
 		if (UEdGraphNode* N = CreateNodeFromDecl(BP, Graph, D, BuildErrors))
 		{
@@ -1201,6 +1476,17 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 		}
 		FromPinName = NormalizeBlueprintIrPinToken(FromPinName);
 		ToPinName = NormalizeBlueprintIrPinToken(ToPinName);
+		if (const FEventMergePlan* MergeFrom = MergePlans.Find(FromNodeId))
+		{
+			if (MergeFrom->bMerged && MergeFrom->TailNode)
+			{
+				const FString ThenStr = UEdGraphSchema_K2::PN_Then.ToString();
+				if (FromPinName.Equals(ThenStr, ESearchCase::IgnoreCase))
+				{
+					FromNode = MergeFrom->TailNode;
+				}
+			}
+		}
 		UEdGraphPin* A = FindPinByName(FromNode, FromPinName);
 		UEdGraphPin* B = FindPinByName(ToNode, ToPinName);
 		if (!A || !B)
@@ -1246,8 +1532,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 		LayoutHints.Add(MoveTemp(H));
 	}
 	UnrealAiBlueprintFormatterBridge::EnsureFormatterModuleLoaded(nullptr);
-	const FUnrealBlueprintGraphFormatResult FormatResult =
-		UnrealAiBlueprintFormatterBridge::TryLayoutAfterAiIrApply(Graph, MaterializedNodes, LayoutHints, Ir.bAutoLayout);
+	const bool bFullGraphLayout = Ir.LayoutScope.Equals(TEXT("full_graph"), ESearchCase::IgnoreCase);
+	FUnrealBlueprintGraphFormatResult FormatResult;
+	if (Ir.bAutoLayout)
+	{
+		FormatResult = bFullGraphLayout
+			? UnrealAiBlueprintFormatterBridge::TryLayoutEntireGraph(Graph, true)
+			: UnrealAiBlueprintFormatterBridge::TryLayoutAfterAiIrApply(Graph, MaterializedNodes, LayoutHints, true);
+	}
 	const bool bFormatterAvailable = UnrealAiBlueprintFormatterBridge::IsFormatterModuleReady();
 	const bool bLayoutApplied = FormatResult.NodesPositioned > 0;
 
@@ -1262,6 +1554,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 	O->SetNumberField(TEXT("link_count"), static_cast<double>(Ir.Links.Num()));
 	O->SetNumberField(TEXT("blueprint_status"), static_cast<double>(static_cast<int32>(BP->Status)));
 	O->SetBoolField(TEXT("created_blueprint"), bCreatedBlueprint);
+	O->SetStringField(TEXT("merge_policy_used"), EffectiveMergePolicy);
+	O->SetStringField(TEXT("layout_scope_used"), Ir.LayoutScope);
 	O->SetBoolField(TEXT("formatter_available"), bFormatterAvailable);
 	O->SetBoolField(TEXT("layout_applied"), bLayoutApplied);
 	O->SetBoolField(TEXT("auto_layout_requested"), Ir.bAutoLayout);
@@ -1279,6 +1573,32 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 		}
 		O->SetArrayField(TEXT("layout_warnings"), WarnArr);
 	}
+	{
+		TArray<TSharedPtr<FJsonValue>> MergeWarnJson;
+		for (const FString& W : MergeWarnings)
+		{
+			MergeWarnJson.Add(MakeShareable(new FJsonValueString(W)));
+		}
+		if (MergeWarnJson.Num() > 0)
+		{
+			O->SetArrayField(TEXT("merge_warnings"), MergeWarnJson);
+		}
+	}
+	{
+		TArray<TSharedPtr<FJsonValue>> AnchorsJson;
+		for (const auto& Pair : MergePlans)
+		{
+			if (Pair.Value.bMerged && Pair.Value.ChosenEvent)
+			{
+				AnchorsJson.Add(MakeShareable(new FJsonValueString(
+					FString::Printf(TEXT("%s:%s"), *Pair.Key, *Pair.Value.MemberName.ToString()))));
+			}
+		}
+		if (AnchorsJson.Num() > 0)
+		{
+			O->SetArrayField(TEXT("anchors_reused"), AnchorsJson);
+		}
+	}
 	const FString ToolMarkdown = FString::Printf(
 		TEXT("### Blueprint IR apply\n- Nodes created: %d\n- Links created: %d\n- Blueprint status: %d\n"),
 		NodeById.Num(),
@@ -1287,6 +1607,72 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 	return UnrealAiToolJson::OkWithEditorPresentation(
 		O,
 		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Ir.BlueprintPath, Ir.GraphName, ToolMarkdown));
+}
+
+FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintFormatGraph(const TSharedPtr<FJsonObject>& Args)
+{
+	using namespace UnrealAiBlueprintToolsPriv;
+	FString Path;
+	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("blueprint_path is required"));
+	}
+	FString GraphName;
+	Args->TryGetStringField(TEXT("graph_name"), GraphName);
+	NormalizeBlueprintObjectPath(Path);
+	UBlueprint* BP = LoadBlueprint(Path);
+	if (!BP)
+	{
+		return UnrealAiToolJson::Error(TEXT("Could not load Blueprint"));
+	}
+	UEdGraph* Graph = nullptr;
+	if (!GraphName.IsEmpty())
+	{
+		Graph = FindGraphByName(BP, GraphName);
+	}
+	else
+	{
+		Graph = BP->UbergraphPages.Num() > 0 ? BP->UbergraphPages[0].Get() : nullptr;
+	}
+	if (!Graph)
+	{
+		return UnrealAiToolJson::Error(TEXT("Graph not found"));
+	}
+
+	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnBpFormatGraph", "Unreal AI: format Blueprint graph"));
+	BP->Modify();
+	Graph->Modify();
+
+	UnrealAiBlueprintFormatterBridge::EnsureFormatterModuleLoaded(nullptr);
+	const bool bFmt = UnrealAiBlueprintFormatterBridge::IsFormatterModuleReady();
+	const FUnrealBlueprintGraphFormatResult FormatResult = UnrealAiBlueprintFormatterBridge::TryLayoutEntireGraph(Graph, true);
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetBoolField(TEXT("ok"), true);
+	O->SetStringField(TEXT("blueprint_path"), Path);
+	O->SetStringField(TEXT("graph_name"), Graph->GetName());
+	O->SetBoolField(TEXT("formatter_available"), bFmt);
+	O->SetBoolField(TEXT("layout_applied"), FormatResult.NodesPositioned > 0);
+	O->SetNumberField(TEXT("layout_nodes_positioned"), static_cast<double>(FormatResult.NodesPositioned));
+	if (!bFmt)
+	{
+		O->SetStringField(TEXT("formatter_hint"), UnrealAiBlueprintFormatterBridge::FormatterInstallHint());
+	}
+	if (FormatResult.Warnings.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> WarnArr;
+		for (const FString& W : FormatResult.Warnings)
+		{
+			WarnArr.Add(MakeShareable(new FJsonValueString(W)));
+		}
+		O->SetArrayField(TEXT("layout_warnings"), WarnArr);
+	}
+	const FString ToolMarkdown = FString::Printf(TEXT("### Blueprint format graph\n- Graph: **%s**\n"), *Graph->GetName());
+	return UnrealAiToolJson::OkWithEditorPresentation(
+		O,
+		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Path, Graph->GetName(), ToolMarkdown));
 }
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGetGraphSummary(const TSharedPtr<FJsonObject>& Args)

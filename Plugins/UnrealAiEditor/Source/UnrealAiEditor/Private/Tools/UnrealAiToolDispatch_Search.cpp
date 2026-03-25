@@ -122,7 +122,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 	FString Query;
 	if (!Args->TryGetStringField(TEXT("query"), Query) || Query.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("query is required"));
+		return UnrealAiToolJson::Error(TEXT("scene_fuzzy_search: non-empty query string is required."));
 	}
 	int32 MaxResults = 50;
 	double MR = 0.0;
@@ -135,12 +135,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 
 	if (!GEditor)
 	{
-		return UnrealAiToolJson::Error(TEXT("GEditor not available"));
+		return UnrealAiToolJson::Error(TEXT("scene_fuzzy_search: Unreal Editor API unavailable (GEditor is null)."));
 	}
 	UWorld* World = GEditor->GetEditorWorldContext().World();
 	if (!World)
 	{
-		return UnrealAiToolJson::Error(TEXT("No editor world"));
+		return UnrealAiToolJson::Error(TEXT("scene_fuzzy_search: no editor world loaded; open a level in the editor."));
 	}
 
 	struct FHit
@@ -249,7 +249,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 	FString Query;
 	if (!Args->TryGetStringField(TEXT("query"), Query) || Query.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("query is required"));
+		return UnrealAiToolJson::Error(TEXT("asset_index_fuzzy_search: non-empty query string is required."));
 	}
 	FString PathPrefix(TEXT("/Game"));
 	Args->TryGetStringField(TEXT("path_prefix"), PathPrefix);
@@ -356,7 +356,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SourceSearchFuzzy(const TSharedPt
 	FString Query;
 	if (!Args->TryGetStringField(TEXT("query"), Query) || Query.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("query is required"));
+		return UnrealAiToolJson::Error(TEXT("source_search_symbol: non-empty query string is required."));
 	}
 	FString Glob;
 	Args->TryGetStringField(TEXT("glob"), Glob);

@@ -171,6 +171,36 @@ bool FUnrealAiBlueprintApplyIrContractTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("blueprint_apply_ir unsupported op: has status"), O->HasTypedField<EJson::String>(TEXT("status")));
 	}
 
+	// Invalid merge_policy should fail parse (invalid_ir) before asset load.
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/__unreal_ai_missing_bp__.__unreal_ai_missing_bp__"));
+		Args->SetStringField(TEXT("merge_policy"), TEXT("not_a_real_policy"));
+		TArray<TSharedPtr<FJsonValue>> Nodes;
+		{
+			TSharedPtr<FJsonObject> N = MakeShared<FJsonObject>();
+			N->SetStringField(TEXT("node_id"), TEXT("n1"));
+			N->SetStringField(TEXT("op"), TEXT("event_begin_play"));
+			Nodes.Add(MakeShareable(new FJsonValueObject(N.ToSharedRef())));
+		}
+		Args->SetArrayField(TEXT("nodes"), Nodes);
+
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_apply_ir"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_apply_ir invalid merge_policy: bOk"), R.bOk);
+		TSharedPtr<FJsonObject> O;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
+		TestTrue(TEXT("blueprint_apply_ir invalid merge_policy: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+		FString Status;
+		TestTrue(TEXT("blueprint_apply_ir invalid merge_policy: status"), O->TryGetStringField(TEXT("status"), Status));
+		TestEqual(TEXT("blueprint_apply_ir invalid merge_policy: status value"), Status, FString(TEXT("invalid_ir")));
+	}
+
 	return true;
 }
 
@@ -219,6 +249,17 @@ bool FUnrealAiGenericAssetToolsContractTest::RunTest(const FString& Parameters)
 			FString(),
 			FString());
 		TestFalse(TEXT("blueprint_export_ir missing blueprint_path: bOk"), R.bOk);
+	}
+
+	{
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_format_graph"),
+			MakeShared<FJsonObject>(),
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_format_graph missing blueprint_path: bOk"), R.bOk);
 	}
 
 	return true;

@@ -7,7 +7,7 @@ Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `orchestrate`. Follow **
 ## Mode: Ask (`ask`)
 
 - **No mutating tools** (disk, scene, editor UI/navigation, compile, PIE, commands) unless the product allows a narrow exception.
-- **Read-only** tools OK when they improve accuracy.
+- **Read-only** tools are encouraged when they reduce hallucinated paths or stale assumptions (`editor_get_selection`, searches, snapshots).
 - You may plan in prose and emit **`unreal_ai.todo_plan`** when complexity policy applies—**do not** execute mutating steps yourself in Ask.
 
 ---
@@ -15,9 +15,10 @@ Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `orchestrate`. Follow **
 ## Mode: Agent (`agent`)
 
 - **Primary execution mode:** loop read → act → observe until done, blocked, or round cap.
-- Use standard tool set for direct implementation in a single model thread.
+- Use the standard tool set for direct implementation in a single model thread.
 - When the user tells you **which** tool to run, run **that** tool (minimal args ok). When they only state a goal, prefer read/search first, then act.
 - When complexity gate applies, emit **`unreal_ai.todo_plan`** via **`agent_emit_todo_plan`** before bulk or destructive work.
+- Prefer **one tool batch per turn** that moves the task forward—avoid redundant duplicate reads of the same snapshot unless the editor state changed.
 
 ---
 

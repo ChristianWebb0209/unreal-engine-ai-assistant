@@ -967,7 +967,7 @@
     },
     {
       "tool_id": "blueprint_compile",
-      "summary": "Compile a Blueprint and return diagnostics.",
+      "summary": "Compile a Blueprint and return diagnostics. Use format_graphs to run UnrealBlueprintFormatter on script graphs before compile when graphs should be laid out.",
       "category": "blueprints",
       "tags": [
         "blueprint"
@@ -1016,7 +1016,7 @@
     },
     {
       "tool_id": "blueprint_apply_ir",
-      "summary": "Apply compact Blueprint IR and materialize/wire EventGraph nodes.",
+      "summary": "Apply compact Blueprint IR and materialize/wire EventGraph nodes. Primary tool for gameplay logic (overlap, timers, variables, calls). Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Not for UMG Designer layout.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -1057,6 +1057,22 @@
             "type": "boolean",
             "description": "After success, open this Blueprint and focus graph_name when set."
           },
+          "merge_policy": {
+            "type": "string",
+            "enum": [
+              "create_new",
+              "append_to_existing"
+            ],
+            "description": "How to combine with existing graphs. append_to_existing: reuse the first matching ReceiveBeginPlay/ReceiveTick (etc.) in the target graph and wire new exec from the exec tail (warns on duplicate anchors). create_new: always spawn IR nodes. Default: append_to_existing on ubergraph EventGraph, create_new on function/macro graphs."
+          },
+          "layout_scope": {
+            "type": "string",
+            "enum": [
+              "ir_nodes",
+              "full_graph"
+            ],
+            "description": "When auto_layout is true: ir_nodes runs formatter on IR materialized nodes only; full_graph runs LayoutEntireGraph on the whole target graph. Default ir_nodes."
+          },
           "auto_layout": {
             "type": "boolean",
             "description": "When true (default), run Unreal Blueprint Formatter after wiring when every IR node has x,y at 0. Requires the UnrealBlueprintFormatter plugin; if missing, apply still succeeds and formatter_hint explains how to enable it."
@@ -1093,6 +1109,8 @@
                   "type": "string",
                   "enum": [
                     "event_begin_play",
+                    "event_tick",
+                    "custom_event",
                     "branch",
                     "sequence",
                     "call_function",
@@ -1182,6 +1200,55 @@
         "graph_not_found",
         "apply_failed"
       ],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "blueprint_format_graph",
+      "summary": "Run Unreal Blueprint Formatter LayoutEntireGraph on a Blueprint script graph (readability pass). Requires UnrealBlueprintFormatter; no-op with formatter_hint if missing.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "layout",
+        "graph"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true,
+        "orchestrate": true
+      },
+      "context_selector": {
+        "priority": 67,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string"
+          },
+          "graph_name": {
+            "type": "string",
+            "description": "Optional; default is the first ubergraph page."
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open this Blueprint and focus the graph when set."
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "FUnrealBlueprintGraphFormatService::LayoutEntireGraph",
+      "threading": "game_thread",
+      "failure_modes": [],
       "doc_links": [],
       "status": "research"
     },
@@ -1526,7 +1593,7 @@
     },
     {
       "tool_id": "editor_get_selection",
-      "summary": "List currently selected actors.",
+      "summary": "Return the current editor actor selection (paths and labels); may be empty. Use when the user asks what is selected or before transforms that depend on selection.",
       "category": "selection_framing",
       "tags": [
         "selection",
@@ -1549,7 +1616,8 @@
         "additionalProperties": false,
         "properties": {
           "include_non_actor": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Reserved for future non-actor UObject selection rows; currently ignored—only selected AActors are returned."
           }
         },
         "required": []
@@ -1653,7 +1721,7 @@
     },
     {
       "tool_id": "editor_state_snapshot_read",
-      "summary": "Deterministic editor/world snapshot JSON.",
+      "summary": "Read a deterministic editor/world snapshot (JSON). Use when context may be stale or before risky edits; optional asset/viewport slices via flags.",
       "category": "diagnostics_logs",
       "tags": [
         "context",
@@ -1676,10 +1744,12 @@
         "additionalProperties": false,
         "properties": {
           "include_assets": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "If true, include summarized asset/Content Browser context when implemented."
           },
           "include_viewport": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "If true, include viewport/camera hints when implemented."
           }
         },
         "required": []
@@ -2245,7 +2315,7 @@
     },
     {
       "tool_id": "pie_start",
-      "summary": "Start Play-In-Editor.",
+      "summary": "Start Play-In-Editor. Required arg mode: \"viewport\" | \"standalone\". Use after gameplay/Blueprint changes to validate behavior; pair with pie_stop when finished.",
       "category": "pie_play",
       "tags": [
         "pie"
@@ -2271,7 +2341,8 @@
             "enum": [
               "viewport",
               "standalone"
-            ]
+            ],
+            "description": "viewport = PIE in active editor viewport; standalone = separate process when supported."
           }
         },
         "required": [
@@ -2666,7 +2737,7 @@
     },
     {
       "tool_id": "scene_fuzzy_search",
-      "summary": "Fuzzy-search actors in the current editor level (like Cursor quick-search): matches actor labels, actor names, class names, object paths, and actor tags even when the query is approximate or slightly wrong. Use to find walls, lights, meshes, etc. without exact names.",
+      "summary": "Fuzzy-search actors in the current editor world/level (not Content Browser assets): matches labels, names, class names, object paths, and tags. Use to find lights, meshes, volumes, etc. when spelling may be wrong. Requires a loaded level.",
       "category": "world_actors",
       "tags": [
         "actor",
@@ -3465,7 +3536,7 @@
     },
     {
       "tool_id": "asset_create",
-      "summary": "Create a new asset under /Game via IAssetTools (class + optional UFactory). Enables broad asset-type coverage when combined with asset_apply_properties.",
+      "summary": "Create a new asset under /Game via IAssetTools (asset_class path + optional factory_class). Use for Blueprints, materials, sounds, Widget BPs, SaveGame subclasses, etc.; combine with asset_apply_properties. Creating the asset does not wire level or input.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -3740,7 +3811,7 @@
     },
     {
       "tool_id": "blueprint_export_ir",
-      "summary": "Serialize Blueprint graph nodes/links/defaults to blueprint_apply_ir-style JSON (lossy for unknown node types).",
+      "summary": "Read-only: export Blueprint graph IR (nodes, links, defaults) as JSON compatible with blueprint_apply_ir; unknown nodes export as hints—pair with blueprint_compile after edits.",
       "category": "blueprints",
       "tags": [
         "blueprint",

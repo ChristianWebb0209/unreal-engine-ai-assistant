@@ -2,6 +2,8 @@
 <#
   Run Unreal Editor automation tests for UnrealAiEditor (blank.uproject), capture logs + tool matrix JSON.
 
+  Agent handoff (prompts, harness, escalation): docs\AGENT_HARNESS_HANDOFF.md
+
   Usage (from repo root):
     .\run-unreal-ai-tests.ps1
     .\run-unreal-ai-tests.ps1 -Build
@@ -20,8 +22,8 @@
   Close Unreal Editor before -Build if UnrealAiEditor.dll is locked.
 
   Outputs (for LLM iteration):
-    tests\out\editor-last.log   — newest Saved\Logs\*.log after the run
-    tests\out\last-matrix.json — copy of Saved\UnrealAiEditor\Automation\tool_matrix_last.json (if produced)
+    tests\out\editor-last.log   - newest Saved\Logs\*.log after the run
+    tests\out\last-matrix.json - copy of Saved\UnrealAiEditor\Automation\tool_matrix_last.json (if produced)
 
   In-editor (no relaunch): open Output Log and run `UnrealAi.RunCatalogMatrix` (optional filter substring).
 
@@ -30,7 +32,7 @@
   faster matrix-only run, or watch Saved\Logs\*.log while waiting.
 
   -CatalogMatrixOnly: same as -TestFilter UnrealAiEditor.Tools.CatalogMatrix (skips harness/unit tests; still
-                     invokes every catalog tool in the matrix — can be 10–30+ minutes).
+                     invokes every catalog tool in the matrix - can be 10-30+ minutes).
 #>
 [CmdletBinding()]
 param(
@@ -61,7 +63,7 @@ $LogOut = Join-Path $TestsOutDir 'editor-last.log'
 $SummarizePy = Join-Path $ProjectRoot 'tests\summarize_tool_matrix.py'
 
 if (-not (Test-Path $UProject)) {
-    Write-Error "Project file not found: $UProject"
+    Write-Error ('Project file not found: ' + $UProject)
 }
 
 if (-not (Test-Path $TestsOutDir)) {
@@ -80,7 +82,7 @@ if ($Build) {
 $EditorBinary = if ($Headed) { $EditorExe } else { $EditorCmd }
 if (-not (Test-Path $EditorBinary)) {
     $exeName = if ($Headed) { 'UnrealEditor.exe' } else { 'UnrealEditor-Cmd.exe' }
-    Write-Error "$exeName not found: $EditorBinary`nSet UE_ENGINE_ROOT or pass -EngineRoot."
+    Write-Error ($exeName + ' not found: ' + $EditorBinary + "`nSet UE_ENGINE_ROOT or pass -EngineRoot.")
 }
 
 try {
@@ -121,25 +123,25 @@ if ($Headed) {
 }
 Write-Host "  Args: $($CmdArgs -join ' ')" -ForegroundColor DarkGray
 Write-Host ''
-Write-Host '  The editor does not stream progress to this terminal. Startup + tests can take 5–30+ minutes' -ForegroundColor Yellow
-Write-Host '  (full UnrealAiEditor filter runs every automation test; CatalogMatrix alone calls every tool).' -ForegroundColor Yellow
-Write-Host "  Live log: $logsDir — watch the newest .log, or use -CatalogMatrixOnly for matrix test only." -ForegroundColor DarkGray
-Write-Host '  Harmless Chromium/CEF lines may appear in the console.' -ForegroundColor DarkGray
+Write-Host "  The editor does not stream progress to this terminal. Startup + tests can take 5-30+ minutes" -ForegroundColor Yellow
+Write-Host "  (full UnrealAiEditor filter runs every automation test; CatalogMatrix alone calls every tool)." -ForegroundColor Yellow
+Write-Host "  Live log: $logsDir - watch the newest .log, or use -CatalogMatrixOnly for matrix test only." -ForegroundColor DarkGray
+Write-Host "  Harmless Chromium/CEF lines may appear in the console." -ForegroundColor DarkGray
 Write-Host ''
 
 $t0 = Get-Date
 $p = Start-Process -FilePath $EditorBinary -ArgumentList $CmdArgs -WorkingDirectory $ProjectRoot -PassThru -NoNewWindow
 if (-not $p) {
-    Write-Error "Failed to start Unreal Editor process."
+    Write-Error 'Failed to start Unreal Editor process.'
 }
 while (-not $p.HasExited) {
     Start-Sleep -Seconds 30
     $sec = [int]((Get-Date) - $t0).TotalSeconds
     $min = [math]::Floor($sec / 60)
     $srem = $sec % 60
-    Write-Host "[run-unreal-ai-tests] Editor still running (${min}m ${srem}s, PID $($p.Id))..." -ForegroundColor DarkGray
+    Write-Host ('[run-unreal-ai-tests] Editor still running ({0} min {1} sec, PID {2})...' -f $min, $srem, $p.Id) -ForegroundColor DarkGray
     if ($sec -gt 7200) {
-        Write-Warning 'Over 2 hours elapsed — if the editor is not actually running, kill the process and check Saved\Logs.'
+        Write-Warning 'Over 2 hours elapsed - if the editor is not actually running, kill the process and check Saved/Logs.'
     }
 }
 $procExit = $p.ExitCode
@@ -157,7 +159,7 @@ try {
     }
 } catch {
     $failLogParse = $true
-    Write-Warning "Could not copy editor log: $_"
+    Write-Warning ('Could not copy editor log: ' + $_)
 }
 
 $failCountFromLog = 0
@@ -179,10 +181,10 @@ if (Test-Path $MatrixSaved) {
 # --- Summary (stdout): easy for LLMs to grep ---
 Write-Host ''
 Write-Host '--- Unreal AI test run summary ---' -ForegroundColor Cyan
-Write-Host "ProcessExitCode: $procExit"
-Write-Host "Log:             $LogOut"
-Write-Host "Matrix JSON:     $MatrixOut"
-Write-Host "Result=Fail hits in log: $failCountFromLog"
+Write-Host ('ProcessExitCode: ' + $procExit)
+Write-Host ('Log:             ' + $LogOut)
+Write-Host ('Matrix JSON:     ' + $MatrixOut)
+Write-Host ('Result=Fail hits in log: ' + $failCountFromLog)
 if ($failLogParse) {
     Write-Host 'Log copy warning: see stderr above' -ForegroundColor Yellow
 }
@@ -192,7 +194,7 @@ if (Test-Path $MatrixOut) {
     try {
         $j = Get-Content -LiteralPath $MatrixOut -Raw | ConvertFrom-Json
         $contractViolations = $j.summary.contract_violations
-        Write-Host "Matrix summary.contract_violations: $contractViolations"
+        Write-Host ('Matrix summary.contract_violations: ' + $contractViolations)
     } catch {
         Write-Host 'Matrix JSON: could not parse summary (file still copied)' -ForegroundColor Yellow
     }
@@ -203,12 +205,12 @@ if (Test-Path $MatrixOut) {
 $summarizeExit = 0
 if ($Summarize) {
     if (-not (Test-Path -LiteralPath $SummarizePy)) {
-        Write-Warning "Summarize script not found: $SummarizePy"
+        Write-Warning ('Summarize script not found: ' + $SummarizePy)
     } elseif (-not (Get-Command python -ErrorAction SilentlyContinue)) {
         Write-Warning 'python not on PATH; skipping -Summarize'
     } else {
         Write-Host ''
-        Write-Host '--- summarize_tool_matrix (stdout) ---' -ForegroundColor Cyan
+        Write-Host '--- summarize_tool_matrix stdout ---' -ForegroundColor Cyan
         & python $SummarizePy --matrix $MatrixOut
         $summarizeExit = $LASTEXITCODE
     }
@@ -225,5 +227,9 @@ if ($procExit -ne 0) {
     $finalExit = $summarizeExit
 }
 
-Write-Host "FinalExitCode: $finalExit" -ForegroundColor $(if ($finalExit -eq 0) { 'Green' } else { 'Red' })
+if ($finalExit -eq 0) {
+    Write-Host ('FinalExitCode: ' + $finalExit) -ForegroundColor Green
+} else {
+    Write-Host ('FinalExitCode: ' + $finalExit) -ForegroundColor Red
+}
 exit $finalExit

@@ -2,17 +2,22 @@
 
 - **Only** tools in the current request. IDs **snake_case** (e.g. `editor_get_selection`).
 - **Explicit tool id:** If the user names a specific tool (quoted id, `` `tool_id` ``, or “call tool **x**”), **call that exact tool** in this assistant turn. Use `{}` or the smallest valid argument object when arguments are unknown—**do not** swap in `scene_fuzzy_search`, `editor_get_selection`, or other discovery helpers unless the user only asked to search or inspect.
+- **Selection vs scene:** `editor_get_selection` answers **what is selected in the editor right now** (may be empty). `scene_fuzzy_search` searches **all actors in the loaded level** by label/name/class/path/tags—use it when the user asks to *find* actors by topic, not only what is selected.
 - **Read first** when the user did **not** name a tool: `scene_fuzzy_search`, `asset_index_fuzzy_search`, `source_search_symbol`, `asset_registry_query`, `editor_state_snapshot_read`.
 - **Generic asset authoring (most `UObject` / DataAsset / config-like assets under `/Game`):** prefer **`asset_export_properties`** → **`asset_apply_properties`** before bespoke subsystem tools. Create with **`asset_create`** (`package_path`, `asset_name`, `asset_class`, optional `factory_class`). Dependencies: **`asset_get_dependencies`**, referencers: **`asset_find_referencers`**. Level Sequence shortcut: **`level_sequence_create_asset`**.
 - **One call, one purpose**; avoid redundant snapshots if the last result already answers.
-- **Params:** fill required; omit unknown optionals—**never invent**.
-- Editor tools run on the **game thread**; compiles/saves can take time.
+- **Params:** fill required; omit unknown optionals—**never invent** plausible paths or GUIDs.
+- Editor tools run on the **game thread**; Blueprint compiles, saves, and PIE transitions can take noticeable time—do not assume instant completion.
 
 **Route:** actors/level → `scene_fuzzy_search`. `/Game` assets → `asset_index_fuzzy_search` + `path_prefix`. C++/Config/Source text → `source_search_symbol` (not `/Game`).
 
 **After each result:** one short line on what changed or what you learned. On error: read it, change args or strategy—**no** identical retry.
 
 **Side-effect order** (only when no tool id was named): read/search → small reversible edits → destructive/wide. **Skip this preamble** when the user named a specific tool.
+
+## MVP gameplay (characters, pickups, UI, PIE)
+
+For **gameplay Blueprint** work (movement, overlap, timers, health, spawners), read **`10-mvp-gameplay-and-tooling.md`** and `docs/tool-goals.md`. Prefer **`blueprint_export_ir` → `blueprint_apply_ir` → `blueprint_compile`** (set **`format_graphs: true`** on compile when every script graph should get a formatter pass), **`asset_create` + `asset_apply_properties`**, then **`pie_start`** / **`pie_stop`** to verify. Empty `{}` in automated tests often yields `ok:false` on write tools until required paths are filled — use search/selection tools first.
 
 ## Editor focus (`focused`)
 
@@ -23,12 +28,36 @@
 
 - Successful tools may attach **`EditorPresentation`**: markdown, **clickable asset links**, and optional **PNG thumbnail** (e.g. Blueprint graphs via `MakeBlueprintToolNote`). This payload is **not** sent to the LLM; it appears in the chat tool card. Blueprint **compile**, **apply IR**, **export IR**, **graph summary**, **open graph**, and **add variable** include Blueprint notes with thumbnail when capture succeeds.
 
-## Blueprint IR (complex graph builds)
+## Blueprint IR + Unreal Blueprint Formatter (graph plugin)
 
-- **Introspect:** **`blueprint_export_ir`** returns `ir` suitable as a starting point for `blueprint_apply_ir` (unknown nodes export as `op: unknown`; treat as read-only hints). Prefer **`blueprint_compile`** after edits for structured `compiler_messages[]`.
-- For large Blueprint generation, prefer **`blueprint_apply_ir`** over many tiny node-edit calls.
+Unreal AI Editor is built to use **`UnrealBlueprintFormatter`** as shipped: it is an **enabled plugin dependency** and the AI module **links** the formatter module. From this repo’s root, **`.\build-editor.ps1`** **clones or `git pull --ff-only`** the formatter into `Plugins/UnrealBlueprintFormatter` before building (see repo **`docs/UnrealBlueprintFormatter-dependency.md`**). Use **`-SkipBlueprintFormatterSync`** or **`UE_SKIP_BLUEPRINT_FORMATTER_SYNC=1`** only when you intentionally manage that folder yourself.
+
+### Read / write loop
+
+- **Introspect:** **`blueprint_export_ir`** returns `ir` you can round-trip through **`blueprint_apply_ir`** (unknown nodes export as `op: unknown`; treat as read-only hints). Prefer **`blueprint_compile`** after edits for structured `compiler_messages[]`.
+- For large Blueprint work, prefer **`blueprint_apply_ir`** over many small ad-hoc edits.
 - Emit compact deterministic IR JSON: `blueprint_path`, optional `graph_name` (`EventGraph` default), `variables[]`, `nodes[]`, `links[]`, `defaults[]`. If the asset does not exist yet, set **`create_if_missing`**: `true` (optional **`parent_class`** defaults to `/Script/Engine.Actor`; path must be under `/Game`).
-- Node references must be stable `node_id`; links must be `node_id.pin`.
-- Use explicit ops only: `event_begin_play`, `custom_event`, `branch`, `sequence`, `call_function`, `delay`, `get_variable`, `set_variable`, `dynamic_cast`.
-- For `call_function`, always provide `class_path` + `function_name`.
-- If apply fails with structured `errors[]`, patch only the failing IR fields and retry once.
+
+### Merge policy (EventGraph, Tick, BeginPlay)
+
+- **`merge_policy`:** `create_new` always spawns new event nodes from IR. **`append_to_existing`** (default on **ubergraph** `EventGraph`) reuses the first matching **`ReceiveBeginPlay`** / **`ReceiveTick`** already in the graph, maps your IR `node_id` to that node, and wires new exec from the **exec tail** (follow `Then` / latent completion pins such as **`Completed`** on **`Delay`**). It warns when multiple matching events exist or when IR repeats the same builtin event op twice. On **function/macro** graphs the default is **`create_new`**.
+- Use **`event_tick`** and **`event_begin_play`** in IR so the merger can anchor correctly; do not invent duplicate top-level events for the same builtin when using **`append_to_existing`**.
+
+### Layout: `auto_layout`, `layout_scope`, `blueprint_format_graph`, `format_graphs`
+
+- **`auto_layout`** (default **`true`**): after wiring, runs the formatter when **every IR node has `x,y` at 0** (non-zero positions are left as author intent). If the formatter module is not usable, **`blueprint_apply_ir`** still applies IR; read **`formatter_hint`** / **`formatter_available`** in the result.
+- **`layout_scope`** (when **`auto_layout`** is on): **`ir_nodes`** (default) lays out only IR-touched nodes; **`full_graph`** calls **`LayoutEntireGraph`** on the whole target graph—use when the graph is messy outside your IR patch.
+- **`blueprint_format_graph`:** readability-only pass: **`LayoutEntireGraph`** on a chosen script graph (`blueprint_path`, optional `graph_name`). Use after manual edits or when you did not want **`layout_scope: full_graph`** on apply.
+- **`blueprint_compile`** accepts **`format_graphs: true`**: runs the formatter on **all** non-empty ubergraph, function, and macro graphs **before** compile—good after large multi-graph changes so you do not call **`blueprint_format_graph`** once per graph.
+
+### Result fields to respect
+
+- Successful apply returns **`merge_policy_used`**, **`anchors_reused[]`**, optional **`merge_warnings[]`**, **`layout_applied`**, **`layout_scope_used`**, and formatter status fields when present.
+- If apply fails with structured **`errors[]`**, patch only the failing IR fields and retry once.
+
+### IR shape
+
+- Node references must be stable **`node_id`**; links must be **`node_id.pin`**.
+- Ops: `event_begin_play`, **`event_tick`**, `custom_event`, `branch`, `sequence`, `call_function`, `delay`, `get_variable`, `set_variable`, `dynamic_cast`.
+- For **`call_function`**, always provide **`class_path`** + **`function_name`**.
+- **Packaging:** editor tools operate on the **project workspace**; packaging, staging, and platform cook steps are **out of scope** for this catalog unless a dedicated tool exists—direct the user to **Platforms** / **Project Launcher** when they ask for shipping builds.

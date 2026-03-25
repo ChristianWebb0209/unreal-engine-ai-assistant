@@ -7,6 +7,7 @@
 #include "Backend/FUnrealAiUsageTracker.h"
 #include "Context/FUnrealAiContextService.h"
 #include "Harness/FUnrealAiAgentHarness.h"
+#include "Harness/FUnrealAiLlmTransportFixture.h"
 #include "Harness/FUnrealAiLlmTransportStub.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Harness/IUnrealAiAgentHarness.h"
@@ -15,6 +16,8 @@
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Transport/FOpenAiCompatibleHttpTransport.h"
 #include "Pricing/FUnrealAiModelPricingCatalog.h"
+#include "HAL/PlatformMisc.h"
+#include "Misc/Paths.h"
 
 FUnrealAiBackendRegistry::FUnrealAiBackendRegistry()
 {
@@ -40,6 +43,23 @@ FUnrealAiBackendRegistry::~FUnrealAiBackendRegistry() = default;
 
 void FUnrealAiBackendRegistry::RefreshActiveLlmTransport()
 {
+	const FString FixtureEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_LLM_FIXTURE"));
+	if (!FixtureEnv.IsEmpty())
+	{
+		FString FullPath = FixtureEnv;
+		if (FPaths::IsRelative(FullPath))
+		{
+			FullPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir(), FullPath);
+		}
+		if (!FixtureTransport.IsValid() || FixtureTransport->GetFixturePath() != FullPath)
+		{
+			FixtureTransport = MakeShared<FUnrealAiLlmTransportFixture>(FullPath);
+		}
+		ActiveLlmTransport = FixtureTransport;
+		return;
+	}
+	FixtureTransport.Reset();
+
 	ActiveLlmTransport = ModelProfiles->HasAnyConfiguredApiKey()
 		? StaticCastSharedPtr<ILlmTransport>(HttpTransport)
 		: StaticCastSharedPtr<ILlmTransport>(StubTransport);

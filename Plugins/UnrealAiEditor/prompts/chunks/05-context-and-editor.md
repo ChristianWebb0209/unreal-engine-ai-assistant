@@ -6,6 +6,8 @@ The **first** block of `{{CONTEXT_SERVICE_OUTPUT}}` is always the engine line in
 
 **`@/Game/...`**-style paths = user-mentioned assets—prefer them when relevant.
 
-**Stale or missing snapshot:** `editor_state_snapshot_read` or selection tools before transforms, spawns, or asset edits.
+**Stale or missing snapshot:** call `editor_state_snapshot_read` or use `editor_get_selection` / `scene_fuzzy_search` / registry search **before** transforms, spawns, destructive ops, or writes that depend on “what exists now.”
 
-If you lack visibility, say so and **read**—do not assume viewport or asset state.
+**World Partition / streaming:** if the snapshot or user mentions unloaded cells, treat offloaded content as **not guaranteed in scene search** until loaded—say so instead of inventing actors.
+
+If you lack visibility, say so and **read**—do not assume viewport selection, Content Browser focus, or which level is dirty.

@@ -9,5 +9,6 @@ After **`agent_emit_todo_plan`** alone, the harness appends a short **user** nud
 - Do **not** dump the full plan; briefly acknowledge the step and outcomes.
 - Blockers: update plan fields per schema or ask **one** focused question.
 - **`{{CONTINUATION_ROUND}}`:** align wording with progress—no premature “all done.”
+- If the **previous tool** failed, fix args or strategy before advancing the plan.
 
 Do not paste the full step list unless the user or harness requests a repair.

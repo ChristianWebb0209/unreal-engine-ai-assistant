@@ -15,6 +15,14 @@
     .\build-editor.ps1 -AutomationTests -Headless
     .\build-editor.ps1 -GenerateProjectFiles
     $env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\build-editor.ps1
+    .\build-editor.ps1 -SkipBlueprintFormatterSync   # offline / local formatter tree
+    .\build-editor.ps1 -HeadedScenarioSmoke -SkipBlueprintFormatterSync
+      # headed UnrealEditor: RunCatalogMatrix + two UnrealAi.RunAgentTurn console scenarios (see scripts\run-headed-scenario-smoke.ps1)
+    # Live headed qualitative suite (real API, manifest-driven): scripts\run-headed-live-scenarios.ps1 — docs\LIVE_HARNESS.md
+    # Context manager multi-turn workflows: scripts\run-headed-context-workflows.ps1 — docs\CONTEXT_HARNESS.md
+    # Full harness + iteration context for agents: docs\AGENT_HARNESS_HANDOFF.md
+
+  Each build syncs Plugins\UnrealBlueprintFormatter from git (clone or pull --ff-only) unless skipped.
 
   If execution is blocked:
     powershell -ExecutionPolicy Bypass -File .\build-editor.ps1
@@ -33,6 +41,9 @@ param(
     [switch]$Headless,
     [switch]$Restart,
     [switch]$AutomationTests,
+    [switch]$HeadedScenarioSmoke,
+    [switch]$SkipBlueprintFormatterSync,
+    [string]$BlueprintFormatterRepoUrl = 'https://github.com/ChristianWebb0209/unreal-engine-blueprint-plugin.git',
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$RemainingArguments
 )
@@ -47,11 +58,61 @@ foreach ($r in $RemainingArguments) {
     if ($r -eq '--restart' -or $r -eq '-restart') {
         $Restart = $true
     }
+    if ($r -eq '--SkipBlueprintFormatterSync' -or $r -eq '-SkipBlueprintFormatterSync') {
+        $SkipBlueprintFormatterSync = $true
+    }
+    if ($r -eq '--HeadedScenarioSmoke' -or $r -eq '-HeadedScenarioSmoke') {
+        $HeadedScenarioSmoke = $true
+    }
 }
 
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = $PSScriptRoot
 $UProject = Join-Path $ProjectRoot 'blank.uproject'
+
+function Sync-UnrealBlueprintFormatterPlugin {
+    param(
+        [string]$RepoRoot,
+        [string]$RepoUrl,
+        [switch]$Skip
+    )
+    if ($Skip) {
+        Write-Host 'Skipping UnrealBlueprintFormatter git sync (-SkipBlueprintFormatterSync).' -ForegroundColor Yellow
+        return
+    }
+    if ($env:UE_SKIP_BLUEPRINT_FORMATTER_SYNC -eq '1' -or $env:UE_SKIP_BLUEPRINT_FORMATTER_SYNC -eq 'true') {
+        Write-Host 'Skipping UnrealBlueprintFormatter git sync (UE_SKIP_BLUEPRINT_FORMATTER_SYNC).' -ForegroundColor Yellow
+        return
+    }
+    $gitExe = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $gitExe) {
+        Write-Error "git is not on PATH; cannot sync Plugins\UnrealBlueprintFormatter. Install Git or use -SkipBlueprintFormatterSync."
+    }
+    $Dest = Join-Path $RepoRoot 'Plugins\UnrealBlueprintFormatter'
+    if (Test-Path (Join-Path $Dest '.git')) {
+        Write-Host 'Updating UnrealBlueprintFormatter (git pull --ff-only)...' -ForegroundColor Cyan
+        Push-Location $Dest
+        try {
+            & git pull --ff-only
+        } finally {
+            Pop-Location
+        }
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+        return
+    }
+    if (Test-Path $Dest) {
+        Write-Error "Plugins\UnrealBlueprintFormatter exists but is not a git clone (missing .git). Remove or rename that folder, then run build again so the repository can be cloned."
+    }
+    Write-Host "Cloning UnrealBlueprintFormatter into Plugins (first run)..." -ForegroundColor Cyan
+    & git clone $RepoUrl $Dest
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
+Sync-UnrealBlueprintFormatterPlugin -RepoRoot $ProjectRoot -RepoUrl $BlueprintFormatterRepoUrl -Skip:$SkipBlueprintFormatterSync
 $BuildBat = Join-Path $EngineRoot 'Engine\Build\BatchFiles\Build.bat'
 $EditorExe = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor.exe'
 $EditorCmdExe = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
@@ -95,14 +156,34 @@ if ($BuildExit -ne 0) {
     exit $BuildExit
 }
 
+if ($HeadedScenarioSmoke) {
+    $SmokeScript = Join-Path $ProjectRoot 'scripts\run-headed-scenario-smoke.ps1'
+    if (-not (Test-Path $SmokeScript)) {
+        Write-Error "Missing headed scenario script: $SmokeScript"
+    }
+    Write-Host 'Running headed console scenarios (UnrealEditor.exe, real RHI)...' -ForegroundColor Cyan
+    & $SmokeScript -EngineRoot $EngineRoot
+    exit $LASTEXITCODE
+}
+
 if ($AutomationTests) {
     if (-not (Test-Path $EditorCmdExe)) {
         Write-Error "UnrealEditor-Cmd.exe not found: $EditorCmdExe`nSet UE_ENGINE_ROOT or pass -EngineRoot."
     }
     Write-Host "Running UnrealAiEditor.Tools automation (headless)..." -ForegroundColor Cyan
-    & $EditorCmdExe $UProject -unattended -nop4 -NoSplash -nullrhi -nosound `
-        -ExecCmds="Automation RunTests UnrealAiEditor.Tools;Quit" `
-        -log
+    # UnrealEditor-Cmd must receive `-ExecCmds=Automation RunTests …;Quit` as a *single* argv token.
+    # PowerShell's `-ExecCmds="…"` form can split the value; use a splatted argument list instead.
+    $AutomationCmdArgs = @(
+        "`"$UProject`"",
+        '-unattended',
+        '-nop4',
+        '-NoSplash',
+        '-nullrhi',
+        '-nosound',
+        '-ExecCmds=Automation RunTests UnrealAiEditor.Tools;Quit',
+        '-log'
+    )
+    & $EditorCmdExe @AutomationCmdArgs
     $TestExit = $LASTEXITCODE
     if ($TestExit -ne 0) {
         Write-Error "Automation tests failed (exit $TestExit)."

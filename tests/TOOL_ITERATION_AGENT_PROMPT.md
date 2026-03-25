@@ -1,3 +1,5 @@
+**Read first:** [`docs/AGENT_HARNESS_HANDOFF.md`](../docs/AGENT_HARNESS_HANDOFF.md) — full harness context, scripts, escalation, and when to propose adding/removing tools. This file focuses on the **catalog matrix** iteration loop.
+
 ## Mission
 
 1. **Server-side first:** Prefer fixing behavior in C++ dispatch (`UnrealAiToolDispatch*.cpp`) and clarifying **`UnrealAiToolCatalog.json`** parameter schemas and descriptions. Do **not** rely on changing only the chat system prompt as the primary fix.

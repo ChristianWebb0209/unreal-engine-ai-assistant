@@ -163,6 +163,34 @@ FUnrealBlueprintGraphFormatResult UnrealAiBlueprintFormatterBridge::TryLayoutAft
 	return FUnrealBlueprintGraphFormatService::LayoutAfterAiIrApply(Graph, MaterializedNodes, Hints);
 }
 
+FUnrealBlueprintGraphFormatResult UnrealAiBlueprintFormatterBridge::TryLayoutEntireGraph(UEdGraph* Graph, bool bWanted)
+{
+	FUnrealBlueprintGraphFormatResult R;
+	if (!bWanted || !Graph)
+	{
+		return R;
+	}
+	FString Hint;
+	if (!EnsureFormatterModuleLoaded(&Hint))
+	{
+		if (!Hint.IsEmpty())
+		{
+			R.Warnings.Add(MoveTemp(Hint));
+		}
+		return R;
+	}
+	FUnrealBlueprintGraphFormatService::LayoutEntireGraph(Graph);
+	R.NodesPositioned = 0;
+	for (UEdGraphNode* N : Graph->Nodes)
+	{
+		if (N)
+		{
+			++R.NodesPositioned;
+		}
+	}
+	return R;
+}
+
 int32 UnrealAiBlueprintFormatterBridge::TryLayoutAllScriptGraphs(UBlueprint* BP)
 {
 	if (!BP)

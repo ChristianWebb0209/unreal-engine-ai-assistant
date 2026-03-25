@@ -43,6 +43,9 @@ namespace UnrealAiBlueprintFormatterBridge
 		const TArray<FUnrealBlueprintIrNodeLayoutHint>& Hints,
 		bool bWanted);
 
+	/** Layout every node in a single graph (full-graph pass). */
+	FUnrealBlueprintGraphFormatResult TryLayoutEntireGraph(UEdGraph* Graph, bool bWanted);
+
 	/**
 	 * Layout ubergraph + function + macro graphs (non-empty). Returns count of graphs passed to LayoutEntireGraph.
 	 * 0 if formatter unavailable or BP null.

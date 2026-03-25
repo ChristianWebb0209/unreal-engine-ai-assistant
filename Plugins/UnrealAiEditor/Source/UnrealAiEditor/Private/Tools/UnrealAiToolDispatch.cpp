@@ -266,6 +266,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_BlueprintApplyIr(A);
 	}
+	if (ToolId == TEXT("blueprint_format_graph"))
+	{
+		return UnrealAiDispatch_BlueprintFormatGraph(A);
+	}
 	if (ToolId == TEXT("blueprint_get_graph_summary"))
 	{
 		return UnrealAiDispatch_BlueprintGetGraphSummary(A);

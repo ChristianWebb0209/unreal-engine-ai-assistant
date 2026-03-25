@@ -15,12 +15,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_EditorGetSelection(const TSharedP
 	(void)Args;
 	if (!GEditor)
 	{
-		return UnrealAiToolJson::Error(TEXT("GEditor not available"));
+		return UnrealAiToolJson::Error(TEXT("editor_get_selection: Unreal Editor API unavailable (GEditor is null)."));
 	}
 	USelection* Sel = GEditor->GetSelectedActors();
 	if (!Sel)
 	{
-		return UnrealAiToolJson::Error(TEXT("No selection object"));
+		return UnrealAiToolJson::Error(TEXT("editor_get_selection: actor selection object unavailable."));
 	}
 	TArray<TSharedPtr<FJsonValue>> Paths;
 	TArray<TSharedPtr<FJsonValue>> Labels;
@@ -34,6 +34,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_EditorGetSelection(const TSharedP
 	}
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
+	O->SetStringField(TEXT("tool"), TEXT("editor_get_selection"));
 	O->SetArrayField(TEXT("actor_paths"), Paths);
 	O->SetArrayField(TEXT("labels"), Labels);
 	O->SetNumberField(TEXT("count"), static_cast<double>(Paths.Num()));
@@ -49,7 +50,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_EditorSetSelection(const TSharedP
 	}
 	if (!GEditor)
 	{
-		return UnrealAiToolJson::Error(TEXT("GEditor not available"));
+		return UnrealAiToolJson::Error(TEXT("editor_set_selection: Unreal Editor API unavailable (GEditor is null)."));
 	}
 	bool bAdditive = false;
 	Args->TryGetBoolField(TEXT("additive"), bAdditive);

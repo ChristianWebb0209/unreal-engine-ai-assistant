@@ -162,6 +162,7 @@ FString UnrealAiPromptBuilder::BuildSystemDeveloperContent(const FUnrealAiPrompt
 	AppendChunk(TEXT("03-complexity-and-todo-plan.md"));
 	AppendChunk(TEXT("04-tool-calling-contract.md"));
 	AppendChunk(TEXT("05-context-and-editor.md"));
+	AppendChunk(TEXT("10-mvp-gameplay-and-tooling.md"));
 	if (Params.bIncludeExecutionSubturnChunk)
 	{
 		AppendChunk(TEXT("06-execution-subturn.md"));

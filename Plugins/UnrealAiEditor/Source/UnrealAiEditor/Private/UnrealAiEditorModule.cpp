@@ -46,16 +46,23 @@
 #include "WorkspaceMenuStructureModule.h"
 #include "Containers/Ticker.h"
 #include "Framework/Application/SlateApplication.h"
+#include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
+#include "HAL/PlatformMisc.h"
 #include "Misc/Paths.h"
 #include "Tools/UnrealAiToolCatalogMatrixRunner.h"
 #include "Tools/UnrealAiBlueprintFormatterBridge.h"
+#include "Harness/UnrealAiHarnessScenarioRunner.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
 static FUnrealAiEditorModule* GUnrealAiModule = nullptr;
 
 static IConsoleObject* GUnrealAiCatalogMatrixConsole = nullptr;
+static IConsoleObject* GUnrealAiRunAgentTurnConsole = nullptr;
+static IConsoleObject* GUnrealAiDumpContextWindowConsole = nullptr;
 
 static void RegisterUnrealAiEditorKeyBindings()
 {
@@ -138,10 +145,155 @@ void FUnrealAiEditorModule::StartupModule()
 				*OutPath);
 		}),
 		ECVF_Default);
+
+	GUnrealAiRunAgentTurnConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.RunAgentTurn"),
+		TEXT("Run one agent harness turn (same path as Agent Chat). Args: <MessageFilePath> [ThreadGuid] [agent|ask|orchestrate] [OutputDir] [dumpcontext|nodump]. Writes Saved/UnrealAiEditor/HarnessRuns/<ts>/run.jsonl and optional context_window_*.txt. Set UNREAL_AI_HARNESS_DUMP_CONTEXT=1 to dump context after each tool (overridable by 5th arg). Set UNREAL_AI_LLM_FIXTURE to tests/harness_llm_fixture.example.json for deterministic LLM."),
+		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		{
+			if (Args.Num() < 1)
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.RunAgentTurn: first arg must be a UTF-8 text file with the user message"));
+				return;
+			}
+			FString Msg;
+			if (!FFileHelper::LoadFileToString(Msg, *Args[0]))
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.RunAgentTurn: could not read %s"), *Args[0]);
+				return;
+			}
+			const FString ThreadId = (Args.Num() > 1)
+				? Args[1]
+				: FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens);
+			EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Agent;
+			if (Args.Num() > 2)
+			{
+				if (Args[2].Equals(TEXT("ask"), ESearchCase::IgnoreCase))
+				{
+					Mode = EUnrealAiAgentMode::Ask;
+				}
+				else if (Args[2].Equals(TEXT("orchestrate"), ESearchCase::IgnoreCase))
+				{
+					Mode = EUnrealAiAgentMode::Orchestrate;
+				}
+			}
+			const FString OutDir = (Args.Num() > 3) ? Args[3] : FString();
+			bool bDumpContextAfterEachTool = false;
+			{
+				const FString EnvDump = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_DUMP_CONTEXT"));
+				if (EnvDump.Equals(TEXT("1"), ESearchCase::IgnoreCase)
+					|| EnvDump.Equals(TEXT("true"), ESearchCase::IgnoreCase)
+					|| EnvDump.Equals(TEXT("yes"), ESearchCase::IgnoreCase))
+				{
+					bDumpContextAfterEachTool = true;
+				}
+			}
+			if (Args.Num() > 4)
+			{
+				if (Args[4].Equals(TEXT("dumpcontext"), ESearchCase::IgnoreCase))
+				{
+					bDumpContextAfterEachTool = true;
+				}
+				else if (Args[4].Equals(TEXT("nodump"), ESearchCase::IgnoreCase))
+				{
+					bDumpContextAfterEachTool = false;
+				}
+			}
+			FString Jsonl;
+			FString RunDir;
+			bool bSucc = false;
+			FString Err;
+			const bool bRan = UnrealAiHarnessScenarioRunner::RunAgentTurnSync(
+				Msg,
+				ThreadId,
+				Mode,
+				OutDir,
+				Jsonl,
+				RunDir,
+				bSucc,
+				Err,
+				bDumpContextAfterEachTool);
+			UE_LOG(LogTemp, Display, TEXT("UnrealAi.RunAgentTurn: completed=%s harness_ok=%s dump_context=%s dir=%s jsonl=%s err=%s"),
+				bRan ? TEXT("yes") : TEXT("no"),
+				bSucc ? TEXT("yes") : TEXT("no"),
+				bDumpContextAfterEachTool ? TEXT("yes") : TEXT("no"),
+				*RunDir,
+				*Jsonl,
+				*Err);
+		}),
+		ECVF_Default);
+
+	GUnrealAiDumpContextWindowConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.DumpContextWindow"),
+		TEXT("Write built context block for a thread without running the LLM. Args: <ThreadGuid> [reason_slug]. Output: Saved/UnrealAiEditor/ContextSnapshots/<reason>_<utc_ts>.txt. Call LoadOrCreate implicitly; refreshes editor snapshot first."),
+		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		{
+			if (Args.Num() < 1 || Args[0].IsEmpty())
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.DumpContextWindow: first arg must be thread GUID (digits-with-hyphens)"));
+				return;
+			}
+			const TSharedPtr<FUnrealAiBackendRegistry> Reg = FUnrealAiEditorModule::GetBackendRegistry();
+			if (!Reg.IsValid())
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.DumpContextWindow: backend registry not available"));
+				return;
+			}
+			IAgentContextService* Ctx = Reg->GetContextService();
+			if (!Ctx)
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.DumpContextWindow: context service not available"));
+				return;
+			}
+			FString Reason = (Args.Num() > 1 && !Args[1].IsEmpty()) ? Args[1] : FString(TEXT("manual"));
+			for (int32 i = 0; i < Reason.Len(); ++i)
+			{
+				TCHAR& C = Reason[i];
+				if (!FChar::IsAlnum(C) && C != TEXT('_') && C != TEXT('-'))
+				{
+					C = TEXT('_');
+				}
+			}
+			const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+			const FString& ThreadId = Args[0];
+			Ctx->LoadOrCreate(ProjectId, ThreadId);
+			Ctx->RefreshEditorSnapshotFromEngine();
+			FAgentContextBuildOptions Opt;
+			Opt.Mode = EUnrealAiAgentMode::Agent;
+			const FAgentContextBuildResult Built = Ctx->BuildContextWindow(Opt);
+			const FString Ts = FDateTime::UtcNow().ToString(TEXT("%Y%m%d_%H%M%S"));
+			const FString OutDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAiEditor/ContextSnapshots"));
+			IFileManager::Get().MakeDirectory(*OutDir, true);
+			const FString OutPath = FPaths::Combine(OutDir, FString::Printf(TEXT("%s_%s.txt"), *Reason, *Ts));
+			if (!FFileHelper::SaveStringToFile(Built.ContextBlock, *OutPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.DumpContextWindow: failed to write %s"), *OutPath);
+				return;
+			}
+			UE_LOG(LogTemp, Display, TEXT("UnrealAi.DumpContextWindow: wrote %s (chars=%d warnings=%d)"),
+				*OutPath,
+				Built.ContextBlock.Len(),
+				Built.Warnings.Num());
+			for (const FString& W : Built.Warnings)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("UnrealAi.DumpContextWindow: %s"), *W);
+			}
+		}),
+		ECVF_Default);
 }
 
 void FUnrealAiEditorModule::ShutdownModule()
 {
+	if (GUnrealAiDumpContextWindowConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiDumpContextWindowConsole);
+		GUnrealAiDumpContextWindowConsole = nullptr;
+	}
+	if (GUnrealAiRunAgentTurnConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiRunAgentTurnConsole);
+		GUnrealAiRunAgentTurnConsole = nullptr;
+	}
 	if (GUnrealAiCatalogMatrixConsole)
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiCatalogMatrixConsole);

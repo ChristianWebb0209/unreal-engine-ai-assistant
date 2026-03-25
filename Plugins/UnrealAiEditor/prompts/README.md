@@ -1,5 +1,7 @@
 # Composable LLM prompt chunks (Unreal AI Editor)
 
+**Harness iteration handoff (scripts, catalog, when to escalate):** [`docs/AGENT_HARNESS_HANDOFF.md`](../../../docs/AGENT_HARNESS_HANDOFF.md)
+
 **Location:** `Plugins/UnrealAiEditor/prompts/` (this plugin).
 
 This folder holds **semantic fragments** the harness assembles into **system** and **developer** messages. The canonical machine-readable tool definitions live in [`Resources/UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json); narrative specs in the repo docs: [`tool-registry.md`](../../../docs/tool-registry.md), context + planning: [`context-management.md`](../../../docs/context-management.md).
@@ -18,8 +20,9 @@ This folder holds **semantic fragments** the harness assembles into **system** a
 | [`chunks/01-identity.md`](chunks/01-identity.md) | ✓ | ✓ | ✓ | Base role + Unreal editor scope. |
 | [`chunks/02-operating-modes.md`](chunks/02-operating-modes.md) | inject **Ask** only | inject **Fast** only | inject **Agent** only | Shared preamble + one `## Mode:` block (`UnrealAiPromptBuilder::ExtractOperatingModeSection`). |
 | [`chunks/03-complexity-and-todo-plan.md`](chunks/03-complexity-and-todo-plan.md) | ✓ (plan allowed; no mutating tools) | ✓ | ✓ | Always append `{{COMPLEXITY_BLOCK}}` from assessor. |
-| [`chunks/04-tool-calling-contract.md`](chunks/04-tool-calling-contract.md) | ✓ (read tools only) | ✓ | ✓ | General tool discipline. |
+| [`chunks/04-tool-calling-contract.md`](chunks/04-tool-calling-contract.md) | ✓ (read tools only) | ✓ | ✓ | General tool discipline; Blueprint IR + **UnrealBlueprintFormatter** (`merge_policy`, `layout_scope`, `blueprint_format_graph`, `format_graphs`). |
 | [`chunks/05-context-and-editor.md`](chunks/05-context-and-editor.md) | ✓ | ✓ | ✓ | Attachments, snapshot, `@` mentions. |
+| [`chunks/10-mvp-gameplay-and-tooling.md`](chunks/10-mvp-gameplay-and-tooling.md) | ✓ | ✓ | ✓ | MVP gameplay flows, PIE, matrix `ok:false` semantics (`UnrealAiPromptBuilder` after `05`). |
 | [`chunks/06-execution-subturn.md`](chunks/06-execution-subturn.md) | when `activeTodoPlan` | same | same | Only when harness is in plan execution (summary + pointer). |
 | [`chunks/07-safety-banned.md`](chunks/07-safety-banned.md) | ✓ | ✓ | ✓ | Permissions, destructive confirms, banned tools. |
 | [`chunks/08-output-style.md`](chunks/08-output-style.md) | ✓ | ✓ | ✓ | Markdown, no fake chain-of-thought. |
@@ -41,10 +44,11 @@ The editor builds the system/developer string at LLM time:
 1. `01-identity`
 2. Mode slice from `02-operating-modes`
 3. `03` + filled complexity lines
-4. `04`, `05`, `07`, `08`
+4. `04`, `05`, `10`
 5. If executing a stored plan: `06`
-6. If Agent mode and workers enabled: `09`
-7. Optional **`StaticSystemPrefix`** from context prepended when set (`SystemOrDeveloperBlock`). **`{{CONTEXT_SERVICE_OUTPUT}}`** is substituted inside chunks `03` / `05` from `BuildContextWindow`’s `ContextBlock`.
+6. `07`, `08`
+7. If Agent mode and workers enabled: `09`
+8. Optional **`StaticSystemPrefix`** from context prepended when set (`SystemOrDeveloperBlock`). **`{{CONTEXT_SERVICE_OUTPUT}}`** is substituted inside chunks `03` / `05` from `BuildContextWindow`’s `ContextBlock`.
 
 **Tools array:** Built from the catalog by mode (`BuildOpenAiToolsJsonForMode`); optional **narrow packs** per task—see [`tools/by-category.md`](tools/by-category.md) for human-readable grouping and [`tools/core-pack.md`](tools/core-pack.md) for default “always in core” IDs.
 

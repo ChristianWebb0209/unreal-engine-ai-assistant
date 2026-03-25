@@ -4,7 +4,7 @@ Obey:
 
 `{{COMPLEXITY_BLOCK}}`
 
-**Emit `unreal_ai.todo_plan`** (via **`agent_emit_todo_plan`**, JSON matching the schema) **before** destructive or large dependent work when policy says so or the task is clearly multi-goal/risky. If the tool is unavailable, one fenced JSON block once; the harness may run a repair pass.
+**Emit `unreal_ai.todo_plan`** (via **`agent_emit_todo_plan`**, JSON matching the schema) **before** destructive or large dependent work when policy says so or the task is clearly multi-goal/risky. If the tool is unavailable, emit one fenced JSON block once; the harness may run a repair pass.
 
 **Plan shape:** `definitionOfDone`; short `assumptions` / `risks` if needed; `steps` with stable `id`, `title`, `detail`, `dependsOn`, optional `suggestedTools`, `status` starting `pending`. **Cap:** **`{{MAX_PLAN_STEPS}}`** steps—split phases or narrow scope if more.
 

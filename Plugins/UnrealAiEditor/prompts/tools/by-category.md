@@ -44,7 +44,10 @@ Derived from `UnrealAiToolCatalog.json`. **modes** = ask / fast / agent booleans
 | tool_id | Summary | permission | status | modes |
 |---------|---------|------------|--------|-------|
 | `blueprint_add_variable` | Add member variable to Blueprint. | write | future | ask=False fast=True agent=True |
-| `blueprint_compile` | Compile a Blueprint and return diagnostics. | write | research | ask=False fast=True agent=True |
+| `blueprint_apply_ir` | Apply compact Blueprint IR and materialize/wire EventGraph nodes; merge_policy, event_tick, auto_layout, layout_scope; pair with blueprint_compile. | write | research | ask=False fast=True agent=True |
+| `blueprint_compile` | Compile a Blueprint and return diagnostics; optional format_graphs runs Unreal Blueprint Formatter on script graphs before compile. | write | research | ask=False fast=True agent=True |
+| `blueprint_export_ir` | Serialize graph to blueprint_apply_ir-style JSON (lossy for unknown nodes). | read | implemented | ask=True fast=True agent=True |
+| `blueprint_format_graph` | LayoutEntireGraph readability pass on a script graph; requires UnrealBlueprintFormatter. | write | research | ask=False fast=True agent=True |
 | `blueprint_get_graph_summary` | Export bounded summary of a Blueprint graph. | read | research | ask=True fast=True agent=True |
 | `blueprint_open_graph_tab` | Open Blueprint editor focused on a graph. | write | research | ask=False fast=True agent=True |
 
