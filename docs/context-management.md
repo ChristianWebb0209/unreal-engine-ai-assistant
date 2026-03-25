@@ -2,7 +2,7 @@
 
 This document is the **single source of truth** for how the Unreal AI Editor plugin **assembles, budgets, persists, and injects** editor-side context into LLM requests. It also covers **planning artifacts** (complexity signal, todo plans, orchestrate DAG state) that live in the same persistence layer.
 
-**Related (not duplicated here):** harness iteration and scripts in [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md); console testing in [`AGENT_HARNESS_TESTING.md`](AGENT_HARNESS_TESTING.md). Chat UI rendering is in [`chat-renderer.md`](chat-renderer.md).
+**Related (not duplicated here):** harness iteration and scripts in [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md). Chat UI rendering is in [`chat-renderer.md`](chat-renderer.md).
 
 ---
 

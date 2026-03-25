@@ -1,207 +1,41 @@
-# Tool Goals
+# Tool goals (MVP qualitative scenarios)
 
-These are a list of prompts, and a qualitative description of what the result should be. For our MVP, we expect that the AI assistant can perform ALL of these tasks.
+Tool-goals are the qualitative “what good looks like” targets that drive the live headed harness and context workflows.
 
-**Blueprint implementation:** Prefer **`blueprint_export_ir`** → **`blueprint_apply_ir`** (with **`merge_policy`** / **`event_tick`** / **`event_begin_play`** as needed, **`auto_layout`** and **`layout_scope`** for **UnrealBlueprintFormatter**) → **`blueprint_compile`** (optionally **`format_graphs: true`**), or **`blueprint_format_graph`** for a single-graph layout pass. See **`Plugins/UnrealAiEditor/prompts/chunks/04-tool-calling-contract.md`** and **`docs/UnrealBlueprintFormatter-dependency.md`**.
-
----
-
-## Tasks:
-
-### Task 1: Build a simple collectible coin
-**Prompt:**  
-Build a simple scene with a coin object that rotates around and hovers up and down. When it collides with anything, it disappears and plays a sound.
-
-**Expected Result:**  
-- A static mesh representing a coin is added to the scene  
-- A looping rotation animation is applied (likely via Tick or Timeline)  
-- A sinusoidal up/down hover motion is implemented  
-- Collision is enabled and triggers an overlap event  
-- On overlap:
-  - Coin is destroyed or hidden  
-  - A sound cue is played at the coin’s location  
+The runnable scenario prompts live under:
+- `tests/live_scenarios/` (manifest-driven, headed, real API)
+- `tests/context_workflows/` (multi-turn same thread, context manager review)
 
 ---
+## How this maps to tools
 
-### Task 2: Create a basic player character
-**Prompt:**  
-Create a controllable third-person character with WASD movement and mouse camera control.
+Implementation is driven by **catalog tools** (`Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json`), not by one-shot magic:
 
-**Expected Result:**  
-- A Character Blueprint is created  
-- Movement input bindings are set up (WASD)  
-- Camera is attached via a spring arm  
-- Mouse input controls camera rotation  
-- Character can move and rotate smoothly in the world  
+`search → asset/Blueprint edits → scene placement → PIE`
 
----
+Blueprint layout + merge preference:
+- Prefer `blueprint_export_ir` → `blueprint_apply_ir`
+- Use `merge_policy` / `event_tick` / `event_begin_play` as needed
+- Let `UnrealBlueprintFormatter` handle `auto_layout` / `layout_scope`
+- End with `blueprint_compile` (optionally `format_graphs: true`) or `blueprint_format_graph` for a single graph pass
 
-### Task 3: Add a door that opens on interaction
-**Prompt:**  
-Create a door that opens when the player presses “E” near it.
-
-**Expected Result:**  
-- A door actor with a mesh and collision box  
-- Player proximity detection via overlap  
-- Input binding for "E" key  
-- Smooth door rotation (timeline or interpolation)  
-- Door only opens when player is nearby  
+See: `Plugins/UnrealAiEditor/prompts/chunks/04-tool-calling-contract.md` and `docs/UnrealBlueprintFormatter.md`.
 
 ---
+## Known tooling gaps (not implemented in v1)
 
-### Task 4: Spawn enemies periodically
-**Prompt:**  
-Create a system that spawns an enemy every 5 seconds at a fixed location.
-
-**Expected Result:**  
-- A spawner actor is created  
-- Timer is configured to loop every 5 seconds  
-- Enemy Blueprint is spawned at defined transform  
-- Spawn logic is reusable and adjustable  
-
----
-
-### Task 5: Basic enemy AI chase behavior
-**Prompt:**  
-Make an enemy that follows the player when they are within a certain distance.
-
-**Expected Result:**  
-- AI controller or simple movement logic  
-- Distance check between enemy and player  
-- Navigation system used for pathfinding  
-- Enemy moves toward player when in range  
-- Stops or idles when out of range  
+- Input / mapping: no first-class tools for Enhanced Input / `DefaultInput.ini`; workarounds are fragile config edits or manual editor setup.
+- UMG / Widget Designer: no widget-specific IR/layout export/apply; HUD-like UI likely remains “manual UMG” until widget IR exists.
+- Animation: `animation_blueprint_get_graph_summary` exists, but there is no symmetric apply tool for AnimBP graphs (AnimNotifies often need this).
+- AI / Navigation: no dedicated tools for NavMesh building / Behavior Trees / Blackboards.
+- Level Sequence: tools can open assets, but not yet author tracks/bindings/keyframes programmatically at scale.
+- SaveGame: no `save_game_slot` / `load_game_slot` wrappers; agents must use asset + Blueprint IR/ops directly.
+- Editor vs PIE physics: `physics_impulse_actor` is PIE-oriented; editor physics workflows need separate semantics/UX clarity.
+- Matrix signal vs failure: catalog matrix calls many tools with `{}` and may return `ok:false` as a normal contract outcome; treat this as expected unless schema/validation is actually wrong.
 
 ---
+## References
 
-### Task 6: Add a health system
-**Prompt:**  
-Implement a health system for the player that decreases when hit and triggers death at 0.
+- `tests/live_scenarios/README.md`
+- `tests/context_workflows/README.md`
 
-**Expected Result:**  
-- Health variable added to player  
-- Function to apply damage  
-- Health clamps between 0 and max  
-- Death event triggered at 0  
-- Optional UI update hook  
-
----
-
-### Task 7: Create a UI health bar
-**Prompt:**  
-Display the player’s health as a UI bar that updates in real time.
-
-**Expected Result:**  
-- Widget Blueprint created  
-- Progress bar bound to player health  
-- Widget added to viewport  
-- Updates dynamically when health changes  
-
----
-
-### Task 8: Add a pickup that increases health
-**Prompt:**  
-Create a health pickup that restores player health when collected.
-
-**Expected Result:**  
-- Pickup actor with mesh and collision  
-- On overlap, increases player health  
-- Value is configurable  
-- Pickup is destroyed after use  
-- Optional sound or visual effect  
-
----
-
-### Task 9: Create a simple day-night cycle
-**Prompt:**  
-Implement a day-night cycle by rotating the directional light over time.
-
-**Expected Result:**  
-- Directional light rotates continuously  
-- Speed is configurable  
-- Lighting changes realistically over time  
-- Optional skybox or atmosphere updates  
-
----
-
-### Task 10: Add sound effects to footsteps
-**Prompt:**  
-Play footstep sounds when the player walks.
-
-**Expected Result:**  
-- Animation notifies or movement checks trigger sound  
-- Sound cue plays at intervals while moving  
-- Stops when player is idle  
-- Optional variation in sound  
-
----
-
-### Task 11: Save and load player position
-**Prompt:**  
-Create a system to save and load the player’s position.
-
-**Expected Result:**  
-- SaveGame class created  
-- Player position stored on save  
-- Loaded correctly on game start or trigger  
-- Works consistently across sessions  
-
----
-
-### Task 12: Add a simple projectile weapon
-**Prompt:**  
-Give the player a weapon that shoots projectiles when clicking.
-
-**Expected Result:**  
-- Input binding for mouse click  
-- Projectile Blueprint created  
-- Projectile spawns at weapon or camera  
-- Moves forward with velocity  
-- Detects collision and applies effects  
-
----
-
-### Task 13: Create a minimap
-**Prompt:**  
-Add a minimap that shows the player’s position from a top-down view.
-
-**Expected Result:**  
-- SceneCaptureComponent2D used  
-- Render target displayed in UI  
-- Player icon visible and updates position  
-- Camera positioned above player  
-
----
-
-### Task 14: Add basic physics interaction
-**Prompt:**  
-Allow the player to push physics-enabled objects in the world.
-
-**Expected Result:**  
-- Physics simulation enabled on objects  
-- Collision properly configured  
-- Player movement applies force to objects  
-- Objects respond naturally  
-
----
-
-### Task 15: Implement a simple quest trigger
-**Prompt:**  
-Create a trigger zone that starts a quest when the player enters it.
-
-**Expected Result:**  
-- Trigger volume placed in level  
-- On overlap, quest state changes  
-- Event or UI notification fires  
-- Trigger only activates once or as configured  
-
----
-
-## Unreal AI Editor: tool coverage
-
-Implementation is driven by **catalog tools** (see `Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json`), not by magic one-shot actions. The assistant should chain **search → asset/Blueprint edits → scene placement → PIE**.
-
-- **Routing guide** (embedded in the product prompt): `Plugins/UnrealAiEditor/prompts/chunks/10-mvp-gameplay-and-tooling.md`
-- **Known structural gaps** (input bindings, full UMG layout, nav/AI depth): `docs/TOOLING_FOLLOWUPS.md`
-
----

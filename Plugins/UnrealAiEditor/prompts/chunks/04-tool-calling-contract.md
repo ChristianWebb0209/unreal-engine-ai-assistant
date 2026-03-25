@@ -30,7 +30,7 @@ For **gameplay Blueprint** work (movement, overlap, timers, health, spawners), r
 
 ## Blueprint IR + Unreal Blueprint Formatter (graph plugin)
 
-Unreal AI Editor is built to use **`UnrealBlueprintFormatter`** as shipped: it is an **enabled plugin dependency** and the AI module **links** the formatter module. From this repo’s root, **`.\build-editor.ps1`** **clones or `git pull --ff-only`** the formatter into `Plugins/UnrealBlueprintFormatter` before building (see repo **`docs/UnrealBlueprintFormatter-dependency.md`**). Use **`-SkipBlueprintFormatterSync`** or **`UE_SKIP_BLUEPRINT_FORMATTER_SYNC=1`** only when you intentionally manage that folder yourself.
+Unreal AI Editor is built to use **`UnrealBlueprintFormatter`** as shipped: it is an **enabled plugin dependency** and the AI module **links** the formatter module. From this repo’s root, **`.\build-editor.ps1`** **clones or `git pull --ff-only`** the formatter into `Plugins/UnrealBlueprintFormatter` before building (see repo **`docs/UnrealBlueprintFormatter.md`**). Use **`-SkipBlueprintFormatterSync`** or **`UE_SKIP_BLUEPRINT_FORMATTER_SYNC=1`** only when you intentionally manage that folder yourself.
 
 ### Read / write loop
 

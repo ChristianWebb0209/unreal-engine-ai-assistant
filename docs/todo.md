@@ -3,7 +3,7 @@
 ## Context Manager
 
 - Audit context manager and create testing harness to assert what gets added and removed from context at various steps.
-- **Harness (initial):** [docs/CONTEXT_HARNESS.md](docs/CONTEXT_HARNESS.md), `tests/context_workflows/`, `scripts/run-headed-context-workflows.ps1`, `tests/bundle_context_workflow_review.py`, console `UnrealAi.DumpContextWindow`.
+- **Harness (initial):** [docs/AGENT_HARNESS_HANDOFF.md](docs/AGENT_HARNESS_HANDOFF.md), `tests/context_workflows/`, `scripts/run-headed-context-workflows.ps1`, `tests/bundle_context_workflow_review.py`, console `UnrealAi.DumpContextWindow`.
 - - Use our harness for testing tooling as a model, and create scripts to let AIs run headed editor and view context at any point.
 - - Get agent to build a set of prompts, then run a full run through and build a QUALITIATIVE analysis of how our context manager is working.
 
@@ -21,7 +21,6 @@
 ## Plan / Orchestrate Mode
 
 - Probably rename orchestrate mode to plan mode
-- - We need to brainstorm, because it seems like maybe agent mode will be too weak, and the only way to do complex tasks will be with plan mode. Should we make agent mode able to make plans behind the scenes if it deems complexity high enough?
 - Maybe we should remove our existing complexity analysis, or at least do some tests to see if it is helping anything or just confusing the AI
 - DAG validation: does our DAG orchestration work with not allowing certain tasks to start until previous ones have been completed? Let's make some test cases for this.
 - Worker orchestration

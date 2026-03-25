@@ -86,7 +86,7 @@ Every tool below follows this schema (suitable for export to JSON for OpenAI/Ant
 
 ## Tier-1 MVP tools (viewport, capture, selection, UI)
 
-These align with [`PRD.md`](../PRD.md) §6 and are the first implementation wave. Each row is expanded in its domain section.
+These align with [`PRD.md`](PRD.md) §6 and are the first implementation wave. Each row is expanded in its domain section.
 
 | `tool_id` | Summary | Permission | Key UE surfaces |
 |-----------|---------|------------|-----------------|
@@ -657,7 +657,7 @@ These align with [`PRD.md`](../PRD.md) §6 and are the first implementation wave
 
 ## Blueprints & graph tooling
 
-**Layout + merge (append new logic to existing events like Tick instead of duplicating):** see [`PRD-blueprint-formatter.md`](PRD-blueprint-formatter.md). The **Unreal Blueprint Formatter** plugin (`Plugins/UnrealBlueprintFormatter/`, see [`UnrealBlueprintFormatter-dependency.md`](UnrealBlueprintFormatter-dependency.md)) supplies `FUnrealBlueprintGraphFormatService` for `auto_layout`, `layout_scope: full_graph`, and **`blueprint_format_graph`**.
+**Layout + merge (append new logic to existing events like Tick instead of duplicating):** see [`UnrealBlueprintFormatter.md`](UnrealBlueprintFormatter.md). The **Unreal Blueprint Formatter** plugin (`Plugins/UnrealBlueprintFormatter/`) supplies `FUnrealBlueprintGraphFormatService` for `auto_layout`, `layout_scope: full_graph`, and **`blueprint_format_graph`**.
 
 ### `blueprint_export_ir`
 
@@ -1035,7 +1035,7 @@ These align with [`PRD.md`](../PRD.md) §6 and are the first implementation wave
 | Field | Value |
 |-------|--------|
 | **summary** | Spawn a child agent run with isolated tool pack (Agent mode / Level B). |
-| **parameters** | Per [`agent-and-tool-requirements.md`](../agent-and-tool-requirements.md) §5.2: `goal`, `allowed_tools[]`, `budgets`, `output_schema`. |
+| **parameters** | Per [`agent-and-tool-requirements.md`](agent-and-tool-requirements.md) §5.2: `goal`, `allowed_tools[]`, `budgets`, `output_schema`. |
 | **returns** | `worker_run_id`. |
 | **side_effects** | orchestration |
 | **permission** | `exec` |
