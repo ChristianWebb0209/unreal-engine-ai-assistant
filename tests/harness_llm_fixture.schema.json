@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UnrealAiLlmTransportFixture",
+  "type": "object",
+  "required": ["responses"],
+  "properties": {
+    "responses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["events"],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "assistant_delta",
+                    "thinking_delta",
+                    "tool_calls",
+                    "finish",
+                    "error"
+                  ]
+                },
+                "text": { "type": "string" },
+                "calls": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": { "type": "string" },
+                      "name": { "type": "string" },
+                      "arguments": { "type": "string" }
+                    }
+                  }
+                },
+                "finish_reason": { "type": "string" },
+                "message": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

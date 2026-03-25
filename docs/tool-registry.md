@@ -7,7 +7,7 @@
 
 **This Markdown file** remains the **human-readable** narrative, Epic links, and engineering notes.
 
-**Related:** [`PRD.md`](../PRD.md) §6–7, [`agent-and-tool-requirements.md`](../agent-and-tool-requirements.md), [`context-management.md`](context-management.md).
+**Related:** [`context-management.md`](context-management.md), [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md), repo [`README.md`](../README.md).
 
 ---
 
@@ -15,7 +15,7 @@
 
 | Phase | What we did |
 |-------|----------------|
-| **Breadth** | Enumerated candidates from PRD §6–7, agent requirements, and common editor-agent patterns; merged overlaps. |
+| **Breadth** | Enumerated candidates from product requirements, common editor-agent patterns; merged overlaps. |
 | **Depth** | Mapped each tool to **Unreal modules/classes** and **game-thread** expectations; flagged **banned** or **future** items. |
 | **Docs** | Linked **Epic Developer Documentation** API pages where stable URLs exist; engine source remains authoritative for threading and deprecations. |
 
@@ -657,7 +657,39 @@ These align with [`PRD.md`](../PRD.md) §6 and are the first implementation wave
 
 ## Blueprints & graph tooling
 
-**Layout + merge (append new logic to existing events like Tick instead of duplicating):** see [`PRD-blueprint-formatter.md`](PRD-blueprint-formatter.md).
+**Layout + merge (append new logic to existing events like Tick instead of duplicating):** see [`PRD-blueprint-formatter.md`](PRD-blueprint-formatter.md). The **Unreal Blueprint Formatter** plugin (`Plugins/UnrealBlueprintFormatter/`, see [`UnrealBlueprintFormatter-dependency.md`](UnrealBlueprintFormatter-dependency.md)) supplies `FUnrealBlueprintGraphFormatService` for `auto_layout`, `layout_scope: full_graph`, and **`blueprint_format_graph`**.
+
+### `blueprint_export_ir`
+
+| Field | Value |
+|-------|--------|
+| **summary** | Lossy JSON export of a script graph (`nodes`, `links`, `defaults`) for round-trip with `blueprint_apply_ir`. |
+| **parameters** | `blueprint_path`, optional `graph_name`. |
+| **returns** | `ir` object; `event_tick` and `event_begin_play` ops for matching `UK2Node_Event` nodes. |
+| **side_effects** | none |
+| **permission** | `read` |
+| **status** | `implemented` |
+
+### `blueprint_apply_ir`
+
+| Field | Value |
+|-------|--------|
+| **summary** | Materialize IR nodes and wire links; optional **`merge_policy`** (`append_to_existing` / `create_new`), **`layout_scope`** (`ir_nodes` / `full_graph`), **`event_tick`** op. |
+| **returns** | `merge_policy_used`, `layout_scope_used`, `anchors_reused[]`, `merge_warnings[]`, `layout_applied`, `formatter_hint` (if layout skipped). |
+| **side_effects** | asset; compile at end of apply. |
+| **permission** | `write` |
+| **status** | `implemented` |
+
+### `blueprint_format_graph`
+
+| Field | Value |
+|-------|--------|
+| **summary** | Run full-graph formatter on one script graph (`LayoutEntireGraph`). |
+| **parameters** | `blueprint_path`, optional `graph_name` (defaults to first ubergraph). |
+| **returns** | `layout_applied`, `layout_nodes_positioned`, `formatter_available`. |
+| **side_effects** | asset |
+| **permission** | `write` |
+| **status** | `implemented` |
 
 ### `blueprint_compile`
 

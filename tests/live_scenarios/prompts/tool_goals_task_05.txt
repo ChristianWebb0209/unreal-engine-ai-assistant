@@ -1,0 +1,1 @@
+Make an enemy that follows the player when they are within a certain distance.

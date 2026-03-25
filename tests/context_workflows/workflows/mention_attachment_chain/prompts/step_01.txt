@@ -1,0 +1,1 @@
+I am working with blueprint @SimpleBlueprint. List its parent class name if you can determine it from the project; otherwise say what you need. Keep the reply short.

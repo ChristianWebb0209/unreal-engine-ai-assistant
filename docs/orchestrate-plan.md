@@ -1,8 +1,10 @@
 # Orchestrate mode — design plan
 
+**Status:** Design notes—verify **current** modes and harness behavior against the codebase and [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md).
+
 This document captures the **target** interaction model for Unreal AI Editor: what **Orchestrate** means, how it differs from **Agent**, how **Fast** is retired, and how execution maps to the existing harness (`FUnrealAiAgentHarness`), context service, tool catalog, and model caps (`maxAgentLlmRounds`, etc.).
 
-Related: [`agent-harness.md`](agent-harness.md), [`context-management.md`](context-management.md) §8.4, prompt chunk [`02-operating-modes.md`](../Plugins/UnrealAiEditor/prompts/chunks/02-operating-modes.md), [`09-orchestration-workers.md`](../Plugins/UnrealAiEditor/prompts/chunks/09-orchestration-workers.md).
+Related: [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md), [`context-management.md`](context-management.md) §8.4, prompt chunk [`02-operating-modes.md`](../Plugins/UnrealAiEditor/prompts/chunks/02-operating-modes.md), [`09-orchestration-workers.md`](../Plugins/UnrealAiEditor/prompts/chunks/09-orchestration-workers.md).
 
 ---
 
@@ -90,7 +92,7 @@ A **subagent** is a **scoped** harness run:
 - **Own thread id** (e.g. `<parent_thread>_orch_<nodeId>`).
 - **Narrow tool allowlist** and **tighter instructions** from the node payload.
 - **Cap** on its own `maxAgentLlmRounds` (could be lower than the parent’s).
-- **Returns** a structured **worker result** (status, summary, errors, artifacts)—aligned with `FUnrealAiWorkerResult` / merge path in [`agent-harness.md`](agent-harness.md).
+- **Returns** a structured **worker result** (status, summary, errors, artifacts)—aligned with `FUnrealAiWorkerResult` / merge path in the harness sources (see [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md)).
 
 True **parallel** subagents are the differentiator from plain **Agent** mode (single thread).
 

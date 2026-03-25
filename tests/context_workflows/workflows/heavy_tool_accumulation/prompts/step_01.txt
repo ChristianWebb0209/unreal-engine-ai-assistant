@@ -1,0 +1,1 @@
+Map the project's Blueprint assets under /Game: use search/list tools as needed. Summarize how many you found and name two. Prefer concise tool use.

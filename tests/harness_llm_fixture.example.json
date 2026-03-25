@@ -1,0 +1,16 @@
+{
+  "responses": [
+    {
+      "events": [
+        {
+          "type": "assistant_delta",
+          "text": "Hello from fixture."
+        },
+        {
+          "type": "finish",
+          "finish_reason": "stop"
+        }
+      ]
+    }
+  ]
+}

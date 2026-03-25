@@ -1,0 +1,1 @@
+Implement a health system for the player that decreases when hit and triggers death at 0.

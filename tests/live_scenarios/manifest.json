@@ -1,0 +1,126 @@
+{
+  "suite_id": "tool_goals",
+  "description": "MVP gameplay prompts from docs/tool-goals.md (live headed qualitative tier; not CI asserts).",
+  "scenarios": [
+    {
+      "id": "task_01_collectible_coin",
+      "source_task": "tool-goals:task_1",
+      "message_file": "prompts/tool_goals_task_01.txt",
+      "mode": "agent",
+      "tags": ["gameplay", "physics"],
+      "expected_tools_hint": ["blueprint_create", "blueprint_compile"]
+    },
+    {
+      "id": "task_02_player_character",
+      "source_task": "tool-goals:task_2",
+      "message_file": "prompts/tool_goals_task_02.txt",
+      "mode": "agent",
+      "tags": ["character", "input"],
+      "expected_tools_hint": ["blueprint_create", "blueprint_compile"]
+    },
+    {
+      "id": "task_03_door_interaction",
+      "source_task": "tool-goals:task_3",
+      "message_file": "prompts/tool_goals_task_03.txt",
+      "mode": "agent",
+      "tags": ["interaction", "input"],
+      "expected_tools_hint": []
+    },
+    {
+      "id": "task_04_spawn_enemies",
+      "source_task": "tool-goals:task_4",
+      "message_file": "prompts/tool_goals_task_04.txt",
+      "mode": "agent",
+      "tags": ["spawner", "timer"],
+      "expected_tools_hint": []
+    },
+    {
+      "id": "task_05_enemy_chase",
+      "source_task": "tool-goals:task_5",
+      "message_file": "prompts/tool_goals_task_05.txt",
+      "mode": "agent",
+      "tags": ["ai", "navigation"],
+      "expected_tools_hint": []
+    },
+    {
+      "id": "task_06_health_system",
+      "source_task": "tool-goals:task_6",
+      "message_file": "prompts/tool_goals_task_06.txt",
+      "mode": "agent",
+      "tags": ["gameplay"],
+      "expected_tools_hint": []
+    },
+    {
+      "id": "task_07_ui_health_bar",
+      "source_task": "tool-goals:task_7",
+      "message_file": "prompts/tool_goals_task_07.txt",
+      "mode": "agent",
+      "tags": ["ui", "widget"],
+      "expected_tools_hint": []
+    },
+    {
+      "id": "task_08_health_pickup",
+      "source_task": "tool-goals:task_8",
+      "message_file": "prompts/tool_goals_task_08.txt",
+      "mode": "agent",
+      "tags": ["pickup"],
+      "expected_tools_hint": []
+    },
+    {
+      "id": "task_09_day_night",
+      "source_task": "tool-goals:task_9",
+      "message_file": "prompts/tool_goals_task_09.txt",
+      "mode": "agent",
+      "tags": ["lighting"],
+      "expected_tools_hint": []
+    },
+    {
+      "id": "task_10_footsteps",
+      "source_task": "tool-goals:task_10",
+      "message_file": "prompts/tool_goals_task_10.txt",
+      "mode": "agent",
+      "tags": ["audio", "animation"],
+      "expected_tools_hint": []
+    },
+    {
+      "id": "task_11_save_load_position",
+      "source_task": "tool-goals:task_11",
+      "message_file": "prompts/tool_goals_task_11.txt",
+      "mode": "agent",
+      "tags": ["savegame"],
+      "expected_tools_hint": []
+    },
+    {
+      "id": "task_12_projectile_weapon",
+      "source_task": "tool-goals:task_12",
+      "message_file": "prompts/tool_goals_task_12.txt",
+      "mode": "agent",
+      "tags": ["combat"],
+      "expected_tools_hint": []
+    },
+    {
+      "id": "task_13_minimap",
+      "source_task": "tool-goals:task_13",
+      "message_file": "prompts/tool_goals_task_13.txt",
+      "mode": "agent",
+      "tags": ["ui", "scene_capture"],
+      "expected_tools_hint": []
+    },
+    {
+      "id": "task_14_physics_push",
+      "source_task": "tool-goals:task_14",
+      "message_file": "prompts/tool_goals_task_14.txt",
+      "mode": "agent",
+      "tags": ["physics"],
+      "expected_tools_hint": []
+    },
+    {
+      "id": "task_15_quest_trigger",
+      "source_task": "tool-goals:task_15",
+      "message_file": "prompts/tool_goals_task_15.txt",
+      "mode": "agent",
+      "tags": ["level", "trigger"],
+      "expected_tools_hint": []
+    }
+  ]
+}

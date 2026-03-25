@@ -1,5 +1,9 @@
 # Unreal AI Editor — automated tests
 
+**Audience:** This folder is **for maintainers only**—fixtures, harness drivers, and qualitative scenario packs used to **fine-tune** prompts, the tool catalog, and dispatch. It is **not** part of the supported end-user product; plugin users do not need to run these scripts.
+
+**Primary handoff (prompts, tools, harness, when to escalate): [../docs/AGENT_HARNESS_HANDOFF.md](../docs/AGENT_HARNESS_HANDOFF.md)**
+
 This folder holds **fixtures** and **captured output** for plugin automation. C++ tests live in the `UnrealAiEditor` module (`Private/Tests/`, `*AutomationTests.cpp`).
 
 ## Run from the repo root (recommended)
@@ -25,7 +29,13 @@ Close **Unreal Editor** before `-Build` if the plugin DLL is locked.
 
 ### LLM iteration prompt
 
-For a documented loop (read matrix → patch dispatch/catalog → rebuild → re-run), see **[TOOL_ITERATION_AGENT_PROMPT.md](TOOL_ITERATION_AGENT_PROMPT.md)**. That file includes **copy-paste agent instructions**: headed runs, **batching edits before one build**, when rebuild is required vs JSON-only re-run, and **how to read `editor-last.log` for errors** alongside the matrix JSON.
+**Entry point:** **[`docs/AGENT_HARNESS_HANDOFF.md`](../docs/AGENT_HARNESS_HANDOFF.md)** — scripts, file map, iteration order, escalation (bigger errors; tool add/remove proposals).
+
+For **matrix-focused** copy-paste steps (read matrix → patch dispatch/catalog → rebuild → re-run), see **[TOOL_ITERATION_AGENT_PROMPT.md](TOOL_ITERATION_AGENT_PROMPT.md)**. That file includes headed runs, **batching edits before one build**, when rebuild is required vs JSON-only re-run, and **how to read `editor-last.log` for errors** alongside the matrix JSON. For **gameplay MVP gaps** (input, UMG, nav) vs catalog tools, see **[`docs/TOOLING_FOLLOWUPS.md`](../docs/TOOLING_FOLLOWUPS.md)**.
+
+### Agent harness (full LLM + tools)
+
+End-to-end runs (same path as Agent Chat), `run.jsonl` artifacts, and deterministic LLM fixtures: **[`docs/AGENT_HARNESS_TESTING.md`](../docs/AGENT_HARNESS_TESTING.md)**. Validate JSONL with `python tests/assert_harness_run.py <run.jsonl>`. Headed console smoke: **`.\build-editor.ps1 -HeadedScenarioSmoke`** (see [`scripts/run-headed-scenario-smoke.ps1`](../scripts/run-headed-scenario-smoke.ps1)).
 
 ### Summarize matrix JSON only
 

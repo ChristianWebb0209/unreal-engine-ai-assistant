@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "suite_id": "context_pilots",
+  "workflow_id": "heavy_tool_accumulation",
+  "description": "Two turns encouraging multiple editor/search/blueprint tools to observe tool-result accumulation and any truncation in context_window dumps.",
+  "thread_strategy": "reuse_guid",
+  "default_mode": "agent",
+  "steps": [
+    {
+      "id": "map_project_blueprints",
+      "message_file": "prompts/step_01.txt",
+      "notes": "Nudges catalog/search/blueprint tools.",
+      "tags": ["truncation", "tool_results"]
+    },
+    {
+      "id": "follow_on_prior_results",
+      "message_file": "prompts/step_02.txt",
+      "expect_context_hints": "Compare context_window_run_finished.txt between steps for growth/trim of tool result blocks.",
+      "tags": ["truncation", "tool_results"]
+    }
+  ]
+}

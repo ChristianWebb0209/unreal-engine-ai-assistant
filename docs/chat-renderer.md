@@ -26,5 +26,5 @@ Slate UI that renders **transcript blocks** (user, thinking, assistant, tools, t
 
 ## Related
 
-- [`agent-harness.md`](agent-harness.md) — harness and `conversation.json`.
+- [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md) — harness iteration entry; [`AGENT_HARNESS_TESTING.md`](AGENT_HARNESS_TESTING.md) — console runs and `run.jsonl`.
 - [`context-management.md`](context-management.md) — planning artifacts; continuation UX aligns with harness events below.

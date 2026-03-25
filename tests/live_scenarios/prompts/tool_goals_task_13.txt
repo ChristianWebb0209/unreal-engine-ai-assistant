@@ -1,0 +1,1 @@
+Add a minimap that shows the player's position from a top-down view.

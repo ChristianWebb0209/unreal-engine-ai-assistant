@@ -1,0 +1,1 @@
+Build a simple scene with a coin object that rotates around and hovers up and down. When it collides with anything, it disappears and plays a sound.

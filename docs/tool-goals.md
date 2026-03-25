@@ -2,6 +2,8 @@
 
 These are a list of prompts, and a qualitative description of what the result should be. For our MVP, we expect that the AI assistant can perform ALL of these tasks.
 
+**Blueprint implementation:** Prefer **`blueprint_export_ir`** → **`blueprint_apply_ir`** (with **`merge_policy`** / **`event_tick`** / **`event_begin_play`** as needed, **`auto_layout`** and **`layout_scope`** for **UnrealBlueprintFormatter**) → **`blueprint_compile`** (optionally **`format_graphs: true`**), or **`blueprint_format_graph`** for a single-graph layout pass. See **`Plugins/UnrealAiEditor/prompts/chunks/04-tool-calling-contract.md`** and **`docs/UnrealBlueprintFormatter-dependency.md`**.
+
 ---
 
 ## Tasks:
@@ -192,5 +194,14 @@ Create a trigger zone that starts a quest when the player enters it.
 - On overlap, quest state changes  
 - Event or UI notification fires  
 - Trigger only activates once or as configured  
+
+---
+
+## Unreal AI Editor: tool coverage
+
+Implementation is driven by **catalog tools** (see `Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json`), not by magic one-shot actions. The assistant should chain **search → asset/Blueprint edits → scene placement → PIE**.
+
+- **Routing guide** (embedded in the product prompt): `Plugins/UnrealAiEditor/prompts/chunks/10-mvp-gameplay-and-tooling.md`
+- **Known structural gaps** (input bindings, full UMG layout, nav/AI depth): `docs/TOOLING_FOLLOWUPS.md`
 
 ---

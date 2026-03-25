@@ -1,8 +1,8 @@
 # PRD: Blueprint formatter & graph merge service
 
-**Status:** Draft  
+**Status:** Active — layout (formatter plugin) + merge v1 (`merge_policy`, `event_tick`, exec-tail walk) implemented in Unreal AI Editor; see §5–6.  
 **Owner:** Unreal AI Editor plugin  
-**Related:** [`agent-harness.md`](agent-harness.md), `UnrealAiToolDispatch_BlueprintTools.cpp` (`blueprint_export_ir`, `blueprint_apply_ir`)
+**Related:** [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md), `UnrealAiToolDispatch_BlueprintTools.cpp` (`blueprint_export_ir`, `blueprint_apply_ir`)
 
 ---
 
@@ -77,8 +77,8 @@ Previously proposed name (superseded for layout-only milestone):
 
 Stages **A–C** may be called from:
 
-- `blueprint_apply_ir` (after nodes/links are applied, or **before** link phase if anchor resolution must influence which nodes are created — see §6).
-- Future: `blueprint_format_graph` tool (optional).
+- `blueprint_apply_ir` (merge planning before node creation for builtin events; link phase uses tail remap).
+- `blueprint_format_graph` tool (full-graph layout; optional).
 
 **Dependency:** Formatter uses only `UObject` / graph APIs (`UEdGraph`, `UK2Node_Event`, `UEdGraphSchema_K2`, etc.), not Slate.
 

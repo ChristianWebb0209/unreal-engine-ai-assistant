@@ -1,0 +1,1 @@
+Create a system that spawns an enemy every 5 seconds at a fixed location.

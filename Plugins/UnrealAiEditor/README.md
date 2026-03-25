@@ -1,6 +1,6 @@
 # Unreal AI Editor (Editor Plugin Shell)
 
-**Unreal AI Editor** — in-editor AI assistant for Unreal Engine **5.7+** **Editor**. Core behavior ships in-plugin (UI, persistence, tool execution, LLM connectors). **MVP:** no product server or hosted backend — see [`PRD.md`](../../PRD.md) §2.3–§2.5 and the [repo `README.md`](../../README.md) for positioning (free vs. commercial assistants).
+**Unreal AI Editor** — in-editor AI assistant for Unreal Engine **5.7+** **Editor**. Core behavior ships in-plugin (UI, persistence, tool execution, LLM connectors). **MVP:** no product server or hosted backend — see the [repo `README.md`](../../README.md) for positioning and [`docs/README.md`](../../docs/README.md) for documentation index.
 
 ## What is implemented
 
@@ -12,7 +12,8 @@
 - **AI Settings** (`Window → Unreal AI → AI Settings`): `plugin_settings.json` (v4: nested **API key sections** with unlimited models each), per-model caps including **`maxAgentLlmRounds`** (max tool↔LLM iterations per send, default 16), company presets + hints, session **usage** per model + rough **USD** estimates when a bundled [Litellm](https://github.com/BerriAI/litellm) `model_prices_and_context_window.json` row matches your model id (`Resources/ModelPricing/`). Cumulative usage in `settings/usage_stats.json`. **Test connection**, **Save** → persistence / LLM reload.
 - **Project Settings → Plugins → Unreal AI Editor**: `UUnrealAiEditorSettings` (default agent, auto connect, verbose logging, OpenRouter fields).
 - **In-module stubs** (`Private/Backend/` — not a separate server process): persistence (writes under `%LOCALAPPDATA%\UnrealAiEditor\` on Windows), chat service (fake stream), model connector (delayed success).
-- **Tool catalog + execution:** [`Resources/UnrealAiToolCatalog.json`](Resources/UnrealAiToolCatalog.json) — single JSON (`meta` + `tools[]`). **`FUnrealAiToolExecutionHost`** (`Private/Tools/`) implements `IToolExecutionHost::InvokeTool` and dispatches to UE5 handlers via `UnrealAiToolDispatch.cpp` and modular `UnrealAiToolDispatch_*.cpp` units (game thread). **Search:** `scene_fuzzy_search`, `asset_index_fuzzy_search`, `source_search_symbol` (`UnrealAiFuzzySearch.cpp`). **Blueprints:** `blueprint_compile`, `blueprint_export_ir`, `blueprint_apply_ir`, summaries, open graph, add variable. **Generic assets:** `asset_create`, `asset_export_properties`, `asset_apply_properties`, dependencies/referencers, and more—see catalog and router for the full set. Tools without a handler return a structured `not_implemented`.
+- **Tool catalog + execution:** [`Resources/UnrealAiToolCatalog.json`](Resources/UnrealAiToolCatalog.json) — single JSON (`meta` + `tools[]`). **`FUnrealAiToolExecutionHost`** (`Private/Tools/`) implements `IToolExecutionHost::InvokeTool` and dispatches to UE5 handlers via `UnrealAiToolDispatch.cpp` and modular `UnrealAiToolDispatch_*.cpp` units (game thread). **Search:** `scene_fuzzy_search`, `asset_index_fuzzy_search`, `source_search_symbol` (`UnrealAiFuzzySearch.cpp`). **Blueprints:** `blueprint_compile`, `blueprint_export_ir`, `blueprint_apply_ir` (merge_policy / event_tick / layout_scope), `blueprint_format_graph`, summaries, open graph, add variable. **Generic assets:** `asset_create`, `asset_export_properties`, `asset_apply_properties`, dependencies/referencers, and more—see catalog and router for the full set. Tools without a handler return a structured `not_implemented`.
+- **Unreal Blueprint Formatter:** `UnrealAiEditor.uplugin` lists **`UnrealBlueprintFormatter`** as an enabled plugin dependency and `UnrealAiEditor.Build.cs` links the module. **`.\build-editor.ps1`** syncs the canonical repo into `Plugins/UnrealBlueprintFormatter/` (clone or `git pull --ff-only`) before each build; see [`docs/UnrealBlueprintFormatter-dependency.md`](../../docs/UnrealBlueprintFormatter-dependency.md). Opt out with **`-SkipBlueprintFormatterSync`** / **`UE_SKIP_BLUEPRINT_FORMATTER_SYNC`**. AI prompts in `prompts/chunks/04-tool-calling-contract.md` describe **`merge_policy`**, **`layout_scope`**, **`blueprint_format_graph`**, and **`blueprint_compile`**’s **`format_graphs`** flag so agents use the formatter end-to-end.
 
 ## Install into a UE project
 
@@ -31,6 +32,10 @@
 3. **Window → Unreal AI → AI Settings** → **Save** — confirm `%LOCALAPPDATA%\UnrealAiEditor\settings\plugin_settings.json` exists (Windows).
 4. **Edit → Project Settings → Plugins → Unreal AI Editor** — fields visible and save to config.
 
+## Harness testing & agent handoff
+
+**Single doc for prompts, catalog, dispatch, scripts, and escalation:** [`docs/AGENT_HARNESS_HANDOFF.md`](../../docs/AGENT_HARNESS_HANDOFF.md). Use it when onboarding a new agent or a fresh iteration thread. **Details:** [`docs/AGENT_HARNESS_TESTING.md`](../../docs/AGENT_HARNESS_TESTING.md) (console commands, fixtures, `run.jsonl`). **Headed smoke** (visible editor + matrix + two `UnrealAi.RunAgentTurn` scenarios): `.\build-editor.ps1 -HeadedScenarioSmoke` from repo root.
+
 ## Automation tests (Editor, dev builds)
 
 When `WITH_DEV_AUTOMATION_TESTS` is enabled (default for **Development** Editor targets), the module registers Session Frontend tests:
@@ -40,6 +45,7 @@ When `WITH_DEV_AUTOMATION_TESTS` is enabled (default for **Development** Editor 
 | `UnrealAiEditor.Tools.JsonHelpers` | `UnrealAiToolJson::Ok` / `Error` round-trip (shared JSON contract for all tools). |
 | `UnrealAiEditor.Tools.DispatchEditorSmoke` | Router returns structured `not_implemented` for unknown IDs; `editor_get_selection` reaches `GEditor` and returns `actor_paths` / `labels` / `count`. |
 | `UnrealAiEditor.Tools.CatalogMatrix` | Every catalog tool ID: dispatch with `{}` or `tests/fixtures/<tool_id>.json`; asserts non-empty, parseable JSON with `ok` / `status` / `error`; writes `Saved/UnrealAiEditor/Automation/tool_matrix_last.json`. |
+| `UnrealAiEditor.Tools.BlueprintApplyIrContract` | `blueprint_apply_ir` invalid IR and invalid `merge_policy`; `blueprint_format_graph` missing path. |
 | `UnrealAiEditor.Harness.*` | Orchestrator merge, DAG parse/validation (see `UnrealAiAgentHarnessAutomationTests.cpp`). |
 
 **Run from repo root (log + matrix JSON for LLM workflows):**

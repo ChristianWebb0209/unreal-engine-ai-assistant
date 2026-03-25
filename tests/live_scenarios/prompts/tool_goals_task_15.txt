@@ -1,0 +1,1 @@
+Create a trigger zone that starts a quest when the player enters it.
