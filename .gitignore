@@ -1,8 +1,7 @@
-# Tracked at repo root: .gitignore, README.md, docs/, scripts/, Plugins/ (plugin + Blank module sources).
-# Exception: UnrealBlueprintFormatter is developed for a separate repo — see docs/UnrealBlueprintFormatter-remaining-todo.md
-# Other root paths are listed explicitly — no negation patterns (!).
+# Policy: version only plugin sources under Plugins/UnrealAiEditor plus repo docs/scripts/tests/README.
+# Never commit engine outputs, local game project trees (Blank), or sibling plugins in Plugins/.
 
-# --- Repo root (everything except README.md, docs/, Plugins/) ---
+# --- Repo root (Blank / UE project — local only) ---
 /.vs/
 /.vsconfig
 /agent-and-tool-requirements.md
@@ -27,11 +26,12 @@
 *.xcodeproj
 *.xcworkspace
 
-# Standalone Blueprint Formatter plugin (own repo later; keep local copy untracked here).
-# UnrealAiEditor declares this plugin as a dependency — you need it on disk to compile/run AI Blueprint tools.
-Plugins/UnrealBlueprintFormatter/
+# Only UnrealAiEditor is part of this repo; other folders under Plugins/ (e.g. UnrealBlueprintFormatter) stay local.
+/Plugins/*
+!/Plugins/UnrealAiEditor/
+!/Plugins/UnrealAiEditor/**
 
-# --- UnrealAiEditor plugin: generated / local build outputs (sources stay tracked) ---
+# --- Plugins: generated / local build outputs ---
 Plugins/**/Intermediate/
 Plugins/**/Binaries/
 Plugins/**/Saved/
@@ -43,6 +43,17 @@ Plugins/**/*.opensdf
 Plugins/**/*.sdf
 Plugins/**/*.suo
 Plugins/**/*.VC.db
+Plugins/**/*.VC.db-*
+Plugins/**/*.opendb
+
+# Visual Studio / Rider / general IDE noise (outside ignored project trees)
+*.VC.db-*
+*.opendb
+*.user
+*.userosscache
+*.rsuser
+.idea/
+*.DotSettings.user
 
 # Secrets — never commit API keys or local env files
 .env

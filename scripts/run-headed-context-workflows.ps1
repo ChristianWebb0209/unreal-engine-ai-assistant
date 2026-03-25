@@ -84,23 +84,37 @@ function Copy-LatestHarnessToDir {
     return $true
 }
 
+function Escape-Win32QuotedArgContent {
+    param([string]$Text)
+    if ($null -eq $Text) { return '' }
+    return $Text.Replace('"', '""')
+}
+
 function Invoke-HeadedEditor {
     param([string]$ExecCmds)
-    $ArgList = @(
-        "`"$UProject`"",
-        '-unattended',
-        '-nop4',
-        '-NoSplash',
-        "-ExecCmds=$ExecCmds",
-        '-log'
-    )
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $EditorExe
+    $psi.WorkingDirectory = $ProjectRoot
+    $psi.UseShellExecute = $false
+    $upEsc = Escape-Win32QuotedArgContent $UProject
+    $ecEsc = Escape-Win32QuotedArgContent $ExecCmds
+    $psi.Arguments = '"' + $upEsc + '" -unattended -nop4 -NoSplash -ExecCmds="' + $ecEsc + '" -log'
+
+    $run = {
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        if (-not $proc) {
+            Write-Error "Failed to start UnrealEditor: $EditorExe"
+        }
+        $proc.WaitForExit()
+        Write-Host "  UnrealEditor exit: $($proc.ExitCode)" -ForegroundColor $(if ($proc.ExitCode -eq 0) { 'Green' } else { 'Yellow' })
+        return $proc.ExitCode
+    }
+
     if ($DumpContext) {
         $prevDump = $env:UNREAL_AI_HARNESS_DUMP_CONTEXT
         $env:UNREAL_AI_HARNESS_DUMP_CONTEXT = '1'
         try {
-            $p = Start-Process -FilePath $EditorExe -ArgumentList $ArgList -WorkingDirectory $ProjectRoot -PassThru -Wait
-            Write-Host "  UnrealEditor exit: $($p.ExitCode)" -ForegroundColor $(if ($p.ExitCode -eq 0) { 'Green' } else { 'Yellow' })
-            return $p.ExitCode
+            return & $run
         }
         finally {
             if ($null -ne $prevDump -and $prevDump -ne '') {
@@ -112,9 +126,7 @@ function Invoke-HeadedEditor {
         }
     }
     else {
-        $p = Start-Process -FilePath $EditorExe -ArgumentList $ArgList -WorkingDirectory $ProjectRoot -PassThru -Wait
-        Write-Host "  UnrealEditor exit: $($p.ExitCode)" -ForegroundColor $(if ($p.ExitCode -eq 0) { 'Green' } else { 'Yellow' })
-        return $p.ExitCode
+        return & $run
     }
 }
 
@@ -125,8 +137,12 @@ function Build-RunAgentTurnWithThread {
         [string]$Mode
     )
     $p = ($MsgAbs -replace '\\', '/')
+    if ($p -match '\s') {
+        Write-Error "Message path must not contain spaces for -ExecCmds (got: $p). Move prompts or use a short path."
+    }
     $m = if ($Mode) { $Mode.ToLowerInvariant() } else { 'agent' }
-    return "UnrealAi.RunAgentTurn ""$p"" $ThreadGuid $m"
+    # No quotes around path: nested quotes break UE's -ExecCmds= parsing (see docs/AGENT_HARNESS_HANDOFF.md).
+    return "UnrealAi.RunAgentTurn $p $ThreadGuid $m"
 }
 
 function Resolve-WorkflowPath {

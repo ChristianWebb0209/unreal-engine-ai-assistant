@@ -61,16 +61,21 @@ $ExecCmds = ($Parts -join ';')
 Write-Host "Headed scenario smoke: $ExecCmds" -ForegroundColor Cyan
 Write-Host "UNREAL_AI_LLM_FIXTURE=$($env:UNREAL_AI_LLM_FIXTURE)" -ForegroundColor DarkGray
 
-$ArgList = @(
-    "`"$UProject`"",
-    '-unattended',
-    '-nop4',
-    '-NoSplash',
-    "-ExecCmds=$ExecCmds",
-    '-log'
-)
+function Escape-Win32QuotedArgContent {
+    param([string]$Text)
+    if ($null -eq $Text) { return '' }
+    return $Text.Replace('"', '""')
+}
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = $EditorExe
+$psi.WorkingDirectory = $ProjectRoot
+$psi.UseShellExecute = $false
+$upEsc = Escape-Win32QuotedArgContent $UProject
+$ecEsc = Escape-Win32QuotedArgContent $ExecCmds
+$psi.Arguments = '"' + $upEsc + '" -unattended -nop4 -NoSplash -ExecCmds="' + $ecEsc + '" -log'
 
-$p = Start-Process -FilePath $EditorExe -ArgumentList $ArgList -WorkingDirectory $ProjectRoot -PassThru -Wait
+$p = [System.Diagnostics.Process]::Start($psi)
+$p.WaitForExit()
 Write-Host "UnrealEditor exit code: $($p.ExitCode)" -ForegroundColor $(if ($p.ExitCode -eq 0) { 'Green' } else { 'Yellow' })
 
 $runsRoot = Join-Path $ProjectRoot 'Saved\UnrealAiEditor\HarnessRuns'

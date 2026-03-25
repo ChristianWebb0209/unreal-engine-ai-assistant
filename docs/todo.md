@@ -38,3 +38,6 @@
 - "Asset Fetcher" setting. When toggled, it will enable a tool (which corresponds with a service) that will interface with FAB or some other asset library to allow LLM to get free fairuse assets, import them into project, and wire them up.
 - - This will be super hard because FAB doesn't expose a lot of useful APIs for us to use. We may have to do a hybrid approach, where our assistant will open a FAB instance and listen for what the user selects, then try to make use of whatever the user imports.
 - Stage changes before making them. Add checkpoints and reverting capabilities.
+- Unreal docs RAG
+- Unreal forums RAG
+- Support for other versions, ideally all 5.x verisions. Currently this only works for 5.7.

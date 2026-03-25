@@ -106,16 +106,17 @@ function Build-RunAgentTurnExec {
         [string]$MsgAbs,
         [string]$Mode
     )
-    # UE -ExecCmds splits on spaces; the message path must be quoted so it stays one console arg.
-    # Use PowerShell doubled quotes ("") inside a double-quoted string — backtick-escaped quotes were
-    # lost when Start-Process built the argv, producing Cmd: UnrealAi.RunAgentTurn with no file.
     $p = ($MsgAbs -replace '\\', '/')
+    if ($p -match '\s') {
+        Write-Error "Message path must not contain spaces for -ExecCmds (got: $p)."
+    }
     $m = if ($Mode) { $Mode.ToLowerInvariant() } else { 'agent' }
+    # No quotes around path: nested quotes inside -ExecCmds="..." break UE parsing (swallows args; -log may merge into ExecCmds).
     if ($m -eq 'agent') {
-        return "UnrealAi.RunAgentTurn ""$p"""
+        return "UnrealAi.RunAgentTurn $p"
     }
     $g = [guid]::NewGuid().ToString()
-    return "UnrealAi.RunAgentTurn ""$p"" $g $m"
+    return "UnrealAi.RunAgentTurn $p $g $m"
 }
 
 if ($DryRun) {
@@ -132,23 +133,39 @@ if ($DryRun) {
 
 $runsRoot = Join-Path $ProjectRoot 'Saved\UnrealAiEditor\HarnessRuns'
 
+function Escape-Win32QuotedArgContent {
+    param([string]$Text)
+    if ($null -eq $Text) { return '' }
+    return $Text.Replace('"', '""')
+}
+
 function Invoke-HeadedEditor {
     param([string]$ExecCmds)
-    $ArgList = @(
-        "`"$UProject`"",
-        '-unattended',
-        '-nop4',
-        '-NoSplash',
-        "-ExecCmds=$ExecCmds",
-        '-log'
-    )
+    # Start-Process -ArgumentList drops embedded quotes inside -ExecCmds=...; build ProcessStartInfo.Arguments
+    # explicitly (Win32: a double quote inside a quoted argument is escaped as "").
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $EditorExe
+    $psi.WorkingDirectory = $ProjectRoot
+    $psi.UseShellExecute = $false
+    $upEsc = Escape-Win32QuotedArgContent $UProject
+    $ecEsc = Escape-Win32QuotedArgContent $ExecCmds
+    $psi.Arguments = '"' + $upEsc + '" -unattended -nop4 -NoSplash -ExecCmds="' + $ecEsc + '" -log'
+
+    $run = {
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        if (-not $proc) {
+            Write-Error "Failed to start UnrealEditor: $EditorExe"
+        }
+        $proc.WaitForExit()
+        Write-Host "UnrealEditor exit code: $($proc.ExitCode)" -ForegroundColor $(if ($proc.ExitCode -eq 0) { 'Green' } else { 'Yellow' })
+        return $proc.ExitCode
+    }
+
     if ($DumpContext) {
         $prevDump = $env:UNREAL_AI_HARNESS_DUMP_CONTEXT
         $env:UNREAL_AI_HARNESS_DUMP_CONTEXT = '1'
         try {
-            $p = Start-Process -FilePath $EditorExe -ArgumentList $ArgList -WorkingDirectory $ProjectRoot -PassThru -Wait
-            Write-Host "UnrealEditor exit code: $($p.ExitCode)" -ForegroundColor $(if ($p.ExitCode -eq 0) { 'Green' } else { 'Yellow' })
-            return $p.ExitCode
+            return & $run
         }
         finally {
             if ($null -ne $prevDump -and $prevDump -ne '') {
@@ -160,9 +177,7 @@ function Invoke-HeadedEditor {
         }
     }
     else {
-        $p = Start-Process -FilePath $EditorExe -ArgumentList $ArgList -WorkingDirectory $ProjectRoot -PassThru -Wait
-        Write-Host "UnrealEditor exit code: $($p.ExitCode)" -ForegroundColor $(if ($p.ExitCode -eq 0) { 'Green' } else { 'Yellow' })
-        return $p.ExitCode
+        return & $run
     }
 }
 
