@@ -1,0 +1,23 @@
+Build a simple scene composition exercise with actor placement and hierarchy.
+
+Hard requirements:
+- Spawn at least 3 actors from verified classes.
+- Set transforms for all spawned actors.
+- Attach one actor to another (parent/child relationship).
+- Toggle visibility on one actor, then restore it.
+- Move all spawned actors into a named outliner folder.
+
+Completion criteria:
+- Final summary lists every spawned actor path and the parent/child relationship used.
+- All operations must be reversible and end in a valid editor state.
+
+Execution order (do not skip):
+1. Spawn >= 3 actors and set transforms for each (exactly once per actor unless you detect a tool failure).
+2. After transforms are set, call `actor_attach_to` once to create the parent/child relationship.
+3. Then toggle visibility on one actor and restore it (once each).
+4. Move all spawned actors into a named outliner folder with `outliner_folder_move`.
+5. End with the final summary (all actor paths + the parent/child used).
+
+No-repeat rules:
+- If an actor already has a transform set successfully this run, do not call `actor_set_transform` again for it; proceed to `actor_attach_to` / visibility / outliner steps.
+- If you cannot find required actor paths, run discovery/selection tools first; do not keep re-setting transforms.

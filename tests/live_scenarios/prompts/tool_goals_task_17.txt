@@ -1,0 +1,12 @@
+Create a small "target dummy" prop workflow that exercises generic asset/property tools.
+
+Hard requirements:
+- Preflight with asset search to find an existing mesh/material first.
+- Create a new actor or data-bearing asset under `/Game/AIHarness/Task17/`.
+- Use export/apply properties (or equivalent generic asset mutation tools) at least once.
+- Open the created asset/editor and sync Content Browser to it.
+- Save packages and report the saved paths.
+
+Completion criteria:
+- At least one new `/Game/AIHarness/Task17/*` asset exists and compiles/saves cleanly.
+- Final summary includes created path(s), properties changed, and tools used.

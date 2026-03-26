@@ -1,0 +1,20 @@
+Run a minimal PIE + diagnostics smoke test for current level state.
+
+Hard requirements:
+- Check PIE status before starting.
+- Start PIE, wait for ready status, then stop PIE.
+- Execute at least one safe allow-listed console command (for example a `stat` command) if available.
+- Read recent message log / diagnostics output if available.
+
+Completion criteria:
+- Final report includes PIE start/stop status transitions and any diagnostic lines captured.
+- If PIE tools are unavailable, explicitly mark blocked and continue with diagnostics tools.
+
+Execution order (do not skip):
+1. Call `pie_status`, then `pie_start`, then `pie_status` until ready is confirmed (at most 2 status checks total).
+2. Call `pie_stop` and then call `pie_status` one final time to confirm stopped.
+3. After the console command call, immediately call `engine_message_log_read` and include any captured diagnostic lines.
+
+No-repeat rules:
+- Do not spam `pie_status` more than the bounded checks above once start/stop transitions are observed.
+- Do not repeat `console_command`; if it fails, mark blocked and stop attempting console commands for this run.

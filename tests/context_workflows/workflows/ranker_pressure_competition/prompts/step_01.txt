@@ -1,0 +1,9 @@
+Run a broad editor+project audit and keep all findings concise:
+
+1) Read editor state snapshot.
+2) Run scene/world searches for common gameplay actors.
+3) Run asset index fuzzy searches across blueprint/material/texture categories.
+4) Run source symbol searches for context-related terms.
+5) Open one likely relevant asset editor if found.
+
+Return a compact bullet summary and continue until your audit is complete.

@@ -40,6 +40,12 @@ Bundle for review:
 
 ```powershell
 python tests\bundle_context_workflow_review.py tests\out\context_runs\context_pilots\conv_memory_smoke
+
+Bundle output now includes ranking metrics split by invocation reason:
+
+- `request_build` headline metrics (authoritative for tuning),
+- all-invocations diagnostics (includes harness dump builds),
+- optional expected drop-reason checks via `steps[].expected_drop_reasons` in `workflow.json`.
 ```
 
 Optional **snapshot without a full LLM turn** (after at least one turn has loaded the thread): editor console `UnrealAi.DumpContextWindow <ThreadGuid> [reason]` — see [`docs/AGENT_HARNESS_HANDOFF.md`](../../docs/AGENT_HARNESS_HANDOFF.md).

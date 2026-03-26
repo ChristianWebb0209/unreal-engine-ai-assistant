@@ -1,0 +1,13 @@
+Exercise project file tools with a safe text edit.
+
+Hard requirements:
+- Read `README.md` and one additional docs file.
+- Create or update a small note file at `docs/harness-task20-note.md` with:
+  - timestamp
+  - short summary of what tools were available in this run
+- Re-read the note file to verify contents after write.
+- Do not modify C++ source files in this task.
+
+Completion criteria:
+- Read + write + re-read succeeded with concrete file paths.
+- Final output includes one quoted line from each read file.

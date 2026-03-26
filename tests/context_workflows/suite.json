@@ -5,6 +5,7 @@
   "workflows": [
     "workflows/conv_memory_smoke/workflow.json",
     "workflows/mention_attachment_chain/workflow.json",
-    "workflows/heavy_tool_accumulation/workflow.json"
+    "workflows/heavy_tool_accumulation/workflow.json",
+    "workflows/ranker_pressure_competition/workflow.json"
   ]
 }

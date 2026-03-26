@@ -1,0 +1,13 @@
+Run a planning/orchestration discipline check on a medium-size editor task.
+
+Hard requirements:
+- Start by producing a concise TODO/plan structure before major edits.
+- If orchestrate/worker tools are available, use them in a minimal safe way; otherwise continue in single-agent mode and clearly note "workers unavailable".
+- Execute at least 3 plan steps and track completion state.
+- Keep edits limited to `/Game/AIHarness/Task26/` or docs notes.
+
+Completion criteria:
+- Final response contains:
+  - initial plan
+  - completed steps
+  - any blocked steps with reason.
