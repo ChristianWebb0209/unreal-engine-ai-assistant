@@ -54,6 +54,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	Opt.Mode = Request.Mode;
 	Opt.UserMessageForComplexity = Request.UserText;
 	Opt.bModelSupportsImages = Caps.bSupportsImages;
+	Opt.ContextBuildInvocationReason = TEXT("request_build");
 	const FAgentContextBuildResult Built = ContextService->BuildContextWindow(Opt);
 	OutContextUserMessages = Built.UserVisibleMessages;
 

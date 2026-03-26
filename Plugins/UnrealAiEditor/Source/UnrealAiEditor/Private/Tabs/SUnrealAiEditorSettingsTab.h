@@ -82,6 +82,11 @@ private:
 	FReply OnSettingsSegmentClicked(int32 Index);
 	FReply OnChatHistoryRefreshClicked();
 	void RebuildChatHistoryListUi();
+	FReply OnMemoriesRefreshClicked();
+	void RebuildMemoryListUi();
+	void SelectMemoryById(const FString& MemoryId);
+	bool LoadMemorySettingsFromRoot(const TSharedPtr<FJsonObject>& Root);
+	void WriteMemorySettingsToRoot(TSharedPtr<FJsonObject>& Root) const;
 
 	void SyncChatAppearanceWidgetsFromSettings();
 	void CommitUserChatBubbleComponent(int32 ChannelIndex, float Value);
@@ -103,10 +108,25 @@ private:
 	TSharedPtr<SVerticalBox> SectionsVBox;
 	TSharedPtr<SWidgetSwitcher> SettingsMainSwitcher;
 	TSharedPtr<SVerticalBox> ChatHistoryListVBox;
+	TSharedPtr<SVerticalBox> MemoryListVBox;
+	TSharedPtr<SEditableTextBox> MemorySearchBox;
+	TSharedPtr<SEditableTextBox> MemorySelectedTitleBox;
+	TSharedPtr<SEditableTextBox> MemorySelectedDescriptionBox;
+	TSharedPtr<SEditableTextBox> MemorySelectedBodyBox;
+	TSharedPtr<SEditableTextBox> MemoryMaxItemsBox;
+	TSharedPtr<SEditableTextBox> MemoryMinConfidenceBox;
+	TSharedPtr<SEditableTextBox> MemoryRetentionDaysBox;
+	TSharedPtr<STextBlock> MemoryGenerationStatusBlock;
 	TSharedPtr<STextBlock> UsageSummaryBlock;
 
 	TArray<TSharedPtr<FString>> CompanyPresetOptions;
 	TArray<FDynSectionRow> SectionRows;
+	FString SelectedMemoryId;
+	bool bMemoryEnabled = true;
+	bool bMemoryAutoExtract = true;
+	FString MemoryMaxItemsStr = TEXT("500");
+	FString MemoryMinConfidenceStr = TEXT("0.55");
+	FString MemoryRetentionDaysStr = TEXT("30");
 
 	FText StatusText;
 };

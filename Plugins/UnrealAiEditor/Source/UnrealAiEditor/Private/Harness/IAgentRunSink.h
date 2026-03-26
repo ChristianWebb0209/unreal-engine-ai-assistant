@@ -37,5 +37,7 @@ public:
 	virtual void OnRunContinuation(int32 PhaseIndex, int32 TotalPhasesHint) = 0;
 	/** Structured todo plan from tool or harness (JSON body). */
 	virtual void OnTodoPlanEmitted(const FString& Title, const FString& PlanJson) = 0;
+	/** Planning-policy runtime signal for observability (agent mode heuristics/escalation). */
+	virtual void OnPlanningDecision(const FString& ModeUsed, const TArray<FString>& TriggerReasons, int32 ReplanCount, int32 QueueStepsPending) {}
 	virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) = 0;
 };

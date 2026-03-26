@@ -11,6 +11,8 @@
 #include "Dom/JsonValue.h"
 #include "Framework/Docking/TabManager.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
+#include "Memory/IUnrealAiMemoryService.h"
+#include "Memory/UnrealAiMemoryTypes.h"
 #include "Pricing/FUnrealAiModelPricingCatalog.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -355,6 +357,33 @@ namespace UnrealAiSettingsTabUtil
 	}
 }
 
+namespace
+{
+	static FString MemoryGenStateToString(const EUnrealAiMemoryGenerationState S)
+	{
+		switch (S)
+		{
+		case EUnrealAiMemoryGenerationState::Running: return TEXT("running");
+		case EUnrealAiMemoryGenerationState::Success: return TEXT("success");
+		case EUnrealAiMemoryGenerationState::Failed: return TEXT("failed");
+		default: return TEXT("idle");
+		}
+	}
+
+	static FString MemoryGenErrToString(const EUnrealAiMemoryGenerationErrorCode E)
+	{
+		switch (E)
+		{
+		case EUnrealAiMemoryGenerationErrorCode::MissingApiKey: return TEXT("missing_api_key");
+		case EUnrealAiMemoryGenerationErrorCode::ProviderUnavailable: return TEXT("provider_unavailable");
+		case EUnrealAiMemoryGenerationErrorCode::InvalidResponse: return TEXT("invalid_response");
+		case EUnrealAiMemoryGenerationErrorCode::RateLimited: return TEXT("rate_limited");
+		case EUnrealAiMemoryGenerationErrorCode::Unknown: return TEXT("unknown");
+		default: return TEXT("none");
+		}
+	}
+}
+
 void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 {
 	BackendRegistry = InArgs._BackendRegistry;
@@ -407,6 +436,15 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 								.OnClicked_Lambda([this]()
 								{
 									return OnSettingsSegmentClicked(1);
+								})
+						]
+						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(8.f, 0.f, 0.f, 0.f))
+						[
+							SNew(SButton)
+								.Text(LOCTEXT("SettingsMemories", "Memories"))
+								.OnClicked_Lambda([this]()
+								{
+									return OnSettingsSegmentClicked(2);
 								})
 						]
 					]
@@ -555,6 +593,145 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 								]
 							]
 						]
+						+ SWidgetSwitcher::Slot()
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+							[
+								SNew(STextBlock)
+									.AutoWrapText(true)
+									.Text(LOCTEXT(
+										"MemoriesHelp",
+										"Memories are local-first durable lessons. Use this panel to review, inspect, and delete records."))
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+							[
+								SAssignNew(MemoryGenerationStatusBlock, STextBlock)
+									.AutoWrapText(true)
+									.Text(LOCTEXT("MemoryGenStatusPlaceholder", "Memory generation status: loading..."))
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+							[
+								SNew(SGridPanel).FillColumn(1, 1.f)
+								+ SGridPanel::Slot(0, 0).Padding(4.f)
+								[
+									SNew(STextBlock).Text(LOCTEXT("MemoryEnabledLbl", "Enable memories"))
+								]
+								+ SGridPanel::Slot(1, 0).Padding(4.f)
+								[
+									SNew(SCheckBox)
+										.IsChecked_Lambda([this]() { return bMemoryEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+										.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+										{
+											bMemoryEnabled = (S == ECheckBoxState::Checked);
+											OnAnySettingsChanged(FText::GetEmpty());
+										})
+								]
+								+ SGridPanel::Slot(0, 1).Padding(4.f)
+								[
+									SNew(STextBlock).Text(LOCTEXT("MemoryAutoExtractLbl", "Auto extract"))
+								]
+								+ SGridPanel::Slot(1, 1).Padding(4.f)
+								[
+									SNew(SCheckBox)
+										.IsChecked_Lambda([this]() { return bMemoryAutoExtract ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+										.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+										{
+											bMemoryAutoExtract = (S == ECheckBoxState::Checked);
+											OnAnySettingsChanged(FText::GetEmpty());
+										})
+								]
+								+ SGridPanel::Slot(0, 2).Padding(4.f)
+								[
+									SNew(STextBlock).Text(LOCTEXT("MemoryMaxItemsLbl", "Max items"))
+								]
+								+ SGridPanel::Slot(1, 2).Padding(4.f)
+								[
+									SAssignNew(MemoryMaxItemsBox, SEditableTextBox)
+										.Text_Lambda([this]() { return FText::FromString(MemoryMaxItemsStr); })
+										.OnTextChanged_Lambda([this](const FText& T)
+										{
+											MemoryMaxItemsStr = T.ToString();
+											OnAnySettingsChanged(T);
+										})
+								]
+								+ SGridPanel::Slot(0, 3).Padding(4.f)
+								[
+									SNew(STextBlock).Text(LOCTEXT("MemoryMinConfidenceLbl", "Min confidence"))
+								]
+								+ SGridPanel::Slot(1, 3).Padding(4.f)
+								[
+									SAssignNew(MemoryMinConfidenceBox, SEditableTextBox)
+										.Text_Lambda([this]() { return FText::FromString(MemoryMinConfidenceStr); })
+										.OnTextChanged_Lambda([this](const FText& T)
+										{
+											MemoryMinConfidenceStr = T.ToString();
+											OnAnySettingsChanged(T);
+										})
+								]
+								+ SGridPanel::Slot(0, 4).Padding(4.f)
+								[
+									SNew(STextBlock).Text(LOCTEXT("MemoryRetentionLbl", "Retention days"))
+								]
+								+ SGridPanel::Slot(1, 4).Padding(4.f)
+								[
+									SAssignNew(MemoryRetentionDaysBox, SEditableTextBox)
+										.Text_Lambda([this]() { return FText::FromString(MemoryRetentionDaysStr); })
+										.OnTextChanged_Lambda([this](const FText& T)
+										{
+											MemoryRetentionDaysStr = T.ToString();
+											OnAnySettingsChanged(T);
+										})
+								]
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 8.f, 0.f, 8.f))
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+								[
+									SAssignNew(MemorySearchBox, SEditableTextBox)
+										.HintText(LOCTEXT("MemorySearchHint", "Search memory title/description/tags"))
+										.OnTextChanged_Lambda([this](const FText&)
+										{
+											RebuildMemoryListUi();
+										})
+								]
+								+ SHorizontalBox::Slot().AutoWidth()
+								[
+									SNew(SButton)
+										.Text(LOCTEXT("MemoriesRefresh", "Refresh"))
+										.OnClicked(this, &SUnrealAiEditorSettingsTab::OnMemoriesRefreshClicked)
+								]
+							]
+							+ SVerticalBox::Slot().FillHeight(1.f)
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot().FillWidth(1.f).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+								[
+									SNew(SScrollBox)
+									+ SScrollBox::Slot()
+									[
+										SAssignNew(MemoryListVBox, SVerticalBox)
+									]
+								]
+								+ SHorizontalBox::Slot().FillWidth(1.f)
+								[
+									SNew(SVerticalBox)
+									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 6.f))
+									[
+										SAssignNew(MemorySelectedTitleBox, SEditableTextBox).IsReadOnly(true)
+									]
+									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 6.f))
+									[
+										SAssignNew(MemorySelectedDescriptionBox, SEditableTextBox).IsReadOnly(true)
+									]
+									+ SVerticalBox::Slot().FillHeight(1.f)
+									[
+										SAssignNew(MemorySelectedBodyBox, SEditableTextBox).IsReadOnly(true)
+									]
+								]
+							]
+						]
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 16.f, 0.f, 0.f))
 					[
@@ -615,6 +792,10 @@ FReply SUnrealAiEditorSettingsTab::OnSettingsSegmentClicked(const int32 Index)
 	if (Index == 1)
 	{
 		RebuildChatHistoryListUi();
+	}
+	else if (Index == 2)
+	{
+		RebuildMemoryListUi();
 	}
 	return FReply::Handled();
 }
@@ -685,6 +866,180 @@ void SUnrealAiEditorSettingsTab::RebuildChatHistoryListUi()
 					.OnClicked_Lambda([ThreadId]()
 					{
 						FUnrealAiEditorModule::OpenAgentChatTabWithPersistedThread(ThreadId);
+						return FReply::Handled();
+					})
+			]
+		];
+	}
+}
+
+bool SUnrealAiEditorSettingsTab::LoadMemorySettingsFromRoot(const TSharedPtr<FJsonObject>& Root)
+{
+	bMemoryEnabled = true;
+	bMemoryAutoExtract = true;
+	MemoryMaxItemsStr = TEXT("500");
+	MemoryMinConfidenceStr = TEXT("0.55");
+	MemoryRetentionDaysStr = TEXT("30");
+	if (!Root.IsValid())
+	{
+		return false;
+	}
+	const TSharedPtr<FJsonObject>* MemoryObj = nullptr;
+	if (!Root->TryGetObjectField(TEXT("memory"), MemoryObj) || !MemoryObj || !(*MemoryObj).IsValid())
+	{
+		return false;
+	}
+	(*MemoryObj)->TryGetBoolField(TEXT("enabled"), bMemoryEnabled);
+	(*MemoryObj)->TryGetBoolField(TEXT("autoExtract"), bMemoryAutoExtract);
+	double Num = 0;
+	if ((*MemoryObj)->TryGetNumberField(TEXT("maxItems"), Num))
+	{
+		MemoryMaxItemsStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Num)));
+	}
+	if ((*MemoryObj)->TryGetNumberField(TEXT("minConfidence"), Num))
+	{
+		MemoryMinConfidenceStr = FString::Printf(TEXT("%.2f"), Num);
+	}
+	if ((*MemoryObj)->TryGetNumberField(TEXT("retentionDays"), Num))
+	{
+		MemoryRetentionDaysStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Num)));
+	}
+	return true;
+}
+
+void SUnrealAiEditorSettingsTab::WriteMemorySettingsToRoot(TSharedPtr<FJsonObject>& Root) const
+{
+	if (!Root.IsValid())
+	{
+		return;
+	}
+	TSharedPtr<FJsonObject> MemoryObj = MakeShared<FJsonObject>();
+	MemoryObj->SetBoolField(TEXT("enabled"), bMemoryEnabled);
+	MemoryObj->SetBoolField(TEXT("autoExtract"), bMemoryAutoExtract);
+	MemoryObj->SetNumberField(TEXT("maxItems"), FMath::Max(0, FCString::Atoi(*MemoryMaxItemsStr)));
+	MemoryObj->SetNumberField(TEXT("minConfidence"), FCString::Atof(*MemoryMinConfidenceStr));
+	MemoryObj->SetNumberField(TEXT("retentionDays"), FMath::Max(0, FCString::Atoi(*MemoryRetentionDaysStr)));
+	Root->SetObjectField(TEXT("memory"), MemoryObj);
+}
+
+FReply SUnrealAiEditorSettingsTab::OnMemoriesRefreshClicked()
+{
+	RebuildMemoryListUi();
+	return FReply::Handled();
+}
+
+void SUnrealAiEditorSettingsTab::SelectMemoryById(const FString& MemoryId)
+{
+	SelectedMemoryId = MemoryId;
+	if (!MemorySelectedTitleBox.IsValid() || !MemorySelectedDescriptionBox.IsValid() || !MemorySelectedBodyBox.IsValid())
+	{
+		return;
+	}
+	MemorySelectedTitleBox->SetText(FText::GetEmpty());
+	MemorySelectedDescriptionBox->SetText(FText::GetEmpty());
+	MemorySelectedBodyBox->SetText(FText::GetEmpty());
+	if (!BackendRegistry.IsValid())
+	{
+		return;
+	}
+	IUnrealAiMemoryService* MemoryService = BackendRegistry->GetMemoryService();
+	if (!MemoryService || MemoryId.IsEmpty())
+	{
+		return;
+	}
+	FUnrealAiMemoryRecord Record;
+	if (!MemoryService->GetMemory(MemoryId, Record))
+	{
+		return;
+	}
+	MemorySelectedTitleBox->SetText(FText::FromString(Record.Title));
+	MemorySelectedDescriptionBox->SetText(FText::FromString(Record.Description));
+	MemorySelectedBodyBox->SetText(FText::FromString(Record.Body));
+}
+
+void SUnrealAiEditorSettingsTab::RebuildMemoryListUi()
+{
+	if (!MemoryListVBox.IsValid())
+	{
+		return;
+	}
+	MemoryListVBox->ClearChildren();
+	if (!BackendRegistry.IsValid())
+	{
+		return;
+	}
+	IUnrealAiMemoryService* MemoryService = BackendRegistry->GetMemoryService();
+	if (!MemoryService)
+	{
+		if (MemoryGenerationStatusBlock.IsValid())
+		{
+			MemoryGenerationStatusBlock->SetText(LOCTEXT("MemoryGenStatusNoService", "Memory generation status: unavailable."));
+		}
+		return;
+	}
+	if (MemoryGenerationStatusBlock.IsValid())
+	{
+		const FUnrealAiMemoryGenerationStatus S = MemoryService->GetGenerationStatus();
+		const FString Attempt = S.LastAttemptAtUtc.GetTicks() > 0 ? S.LastAttemptAtUtc.ToString(TEXT("%Y-%m-%d %H:%M:%S UTC")) : TEXT("never");
+		const FString Success = S.LastSuccessAtUtc.GetTicks() > 0 ? S.LastSuccessAtUtc.ToString(TEXT("%Y-%m-%d %H:%M:%S UTC")) : TEXT("never");
+		FString Msg = FString::Printf(TEXT("Memory generation: %s (last attempt: %s, last success: %s, error: %s)"),
+			*MemoryGenStateToString(S.State),
+			*Attempt,
+			*Success,
+			*MemoryGenErrToString(S.ErrorCode));
+		if (!S.ErrorMessage.IsEmpty())
+		{
+			Msg += FString::Printf(TEXT(" - %s"), *S.ErrorMessage);
+		}
+		MemoryGenerationStatusBlock->SetText(FText::FromString(Msg));
+	}
+	TArray<FUnrealAiMemoryIndexRow> Rows;
+	MemoryService->ListMemories(Rows);
+	const FString Search = MemorySearchBox.IsValid() ? MemorySearchBox->GetText().ToString().ToLower() : FString();
+	for (const FUnrealAiMemoryIndexRow& Row : Rows)
+	{
+		const FString Hay = (Row.Title + TEXT(" ") + Row.Description + TEXT(" ") + FString::Join(Row.Tags, TEXT(" "))).ToLower();
+		if (!Search.IsEmpty() && !Hay.Contains(Search))
+		{
+			continue;
+		}
+		const FString Id = Row.Id;
+		const FString Label = FString::Printf(TEXT("%s  [%.2f]"), *Row.Title, Row.Confidence);
+		MemoryListVBox->AddSlot().AutoHeight().Padding(0.f, 2.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+			[
+				SNew(STextBlock).Text(FText::FromString(Label))
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+			[
+				SNew(SButton)
+					.Text(LOCTEXT("MemoryOpen", "Open"))
+					.OnClicked_Lambda([this, Id]()
+					{
+						SelectMemoryById(Id);
+						return FReply::Handled();
+					})
+			]
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				SNew(SButton)
+					.Text(LOCTEXT("MemoryDelete", "Delete"))
+					.OnClicked_Lambda([this, Id]()
+					{
+						if (BackendRegistry.IsValid())
+						{
+							if (IUnrealAiMemoryService* Svc = BackendRegistry->GetMemoryService())
+							{
+								Svc->DeleteMemory(Id);
+								if (SelectedMemoryId == Id)
+								{
+									SelectMemoryById(FString());
+								}
+								RebuildMemoryListUi();
+							}
+						}
 						return FReply::Handled();
 					})
 			]
@@ -919,6 +1274,7 @@ void SUnrealAiEditorSettingsTab::LoadSettingsIntoUi()
 	}
 
 	CachedSettingsRoot = UnrealAiSettingsTabUtil::CloneJsonObject(Root);
+	LoadMemorySettingsFromRoot(Root);
 
 	const TSharedPtr<FJsonObject>* ApiObj = nullptr;
 	if (Root->TryGetObjectField(TEXT("api"), ApiObj) && ApiObj->IsValid())
@@ -1547,6 +1903,7 @@ bool SUnrealAiEditorSettingsTab::BuildJsonFromUi(FString& OutJson, FString& OutE
 		Api->SetStringField(TEXT("defaultProviderId"), ApiDefaultProviderIdBox->GetText().ToString());
 	}
 	Root->SetObjectField(TEXT("api"), Api);
+	WriteMemorySettingsToRoot(Root);
 
 	TArray<TSharedPtr<FJsonValue>> SecArr;
 	for (const FDynSectionRow& Sec : SectionRows)

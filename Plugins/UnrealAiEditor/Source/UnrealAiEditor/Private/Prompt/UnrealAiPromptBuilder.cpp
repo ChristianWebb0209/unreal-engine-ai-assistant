@@ -104,7 +104,6 @@ namespace UnrealAiPromptBuilderPriv
 		const FUnrealAiPromptAssembleParams& P,
 		const FAgentContextBuildResult& B)
 	{
-		ReplaceAll(Doc, TEXT("{{COMPLEXITY_BLOCK}}"), B.ComplexityBlock.IsEmpty() ? TEXT("[Complexity]\n(not available)") : B.ComplexityBlock);
 		ReplaceAll(Doc, TEXT("{{CONTEXT_SERVICE_OUTPUT}}"), B.ContextBlock);
 		ReplaceAll(Doc, TEXT("{{AGENT_MODE}}"), UnrealAiPromptBuilderPriv::AgentModeString(P.Mode));
 		ReplaceAll(Doc, TEXT("{{MAX_PLAN_STEPS}}"), TEXT("12"));

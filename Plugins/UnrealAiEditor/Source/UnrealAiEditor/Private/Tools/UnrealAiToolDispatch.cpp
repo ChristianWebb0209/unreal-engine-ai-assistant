@@ -215,7 +215,87 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 
 	if (ToolId == TEXT("asset_delete"))
 	{
-		return UnrealAiDispatch_AssetDelete(A);
+		// Alias normalization: accept `object_path`/`path` as a single `object_paths[]` entry.
+		TSharedPtr<FJsonObject> Norm = MakeShared<FJsonObject>();
+		const TArray<TSharedPtr<FJsonValue>>* ObjPaths = nullptr;
+		if (A->TryGetArrayField(TEXT("object_paths"), ObjPaths) && ObjPaths && ObjPaths->Num() > 0)
+		{
+			Norm->SetArrayField(TEXT("object_paths"), *ObjPaths);
+		}
+		else
+		{
+			FString OnePath;
+			A->TryGetStringField(TEXT("object_path"), OnePath);
+			if (OnePath.IsEmpty())
+			{
+				A->TryGetStringField(TEXT("path"), OnePath);
+			}
+			if (OnePath.IsEmpty())
+			{
+				A->TryGetStringField(TEXT("asset_path"), OnePath);
+			}
+
+			if (!OnePath.IsEmpty())
+			{
+				TArray<TSharedPtr<FJsonValue>> Arr;
+				Arr.Add(MakeShared<FJsonValueString>(OnePath));
+				Norm->SetArrayField(TEXT("object_paths"), Arr);
+			}
+		}
+
+		// Preserve provided confirm when present; if missing, dispatcher treats it as false and returns a suggested call.
+		bool bConfirm = false;
+		if (A->TryGetBoolField(TEXT("confirm"), bConfirm))
+		{
+			Norm->SetBoolField(TEXT("confirm"), bConfirm);
+		}
+		return UnrealAiDispatch_AssetDelete(Norm);
+	}
+	if (ToolId == TEXT("asset_destroy"))
+	{
+		// Compatibility alias: normalize legacy asset_destroy shape into asset_delete.
+		TSharedPtr<FJsonObject> Norm = MakeShared<FJsonObject>();
+		bool bConfirm = false;
+		A->TryGetBoolField(TEXT("confirm"), bConfirm);
+		Norm->SetBoolField(TEXT("confirm"), bConfirm);
+		const TArray<TSharedPtr<FJsonValue>>* ObjPaths = nullptr;
+		if (A->TryGetArrayField(TEXT("object_paths"), ObjPaths) && ObjPaths && ObjPaths->Num() > 0)
+		{
+			Norm->SetArrayField(TEXT("object_paths"), *ObjPaths);
+		}
+		else
+		{
+			FString OnePath;
+			A->TryGetStringField(TEXT("object_path"), OnePath);
+			if (OnePath.IsEmpty())
+			{
+				A->TryGetStringField(TEXT("asset_path"), OnePath);
+			}
+			if (OnePath.IsEmpty())
+			{
+				A->TryGetStringField(TEXT("path"), OnePath);
+			}
+			if (!OnePath.IsEmpty())
+			{
+				TArray<TSharedPtr<FJsonValue>> Arr;
+				Arr.Add(MakeShared<FJsonValueString>(OnePath));
+				Norm->SetArrayField(TEXT("object_paths"), Arr);
+			}
+		}
+		const TArray<TSharedPtr<FJsonValue>>* NormPaths = nullptr;
+		if (!Norm->TryGetArrayField(TEXT("object_paths"), NormPaths) || !NormPaths || NormPaths->Num() == 0)
+		{
+			TSharedPtr<FJsonObject> Suggested = MakeShared<FJsonObject>();
+			TArray<TSharedPtr<FJsonValue>> SuggestedPaths;
+			SuggestedPaths.Add(MakeShared<FJsonValueString>(TEXT("/Game/Blueprints/MyBP.MyBP")));
+			Suggested->SetArrayField(TEXT("object_paths"), SuggestedPaths);
+			Suggested->SetBoolField(TEXT("confirm"), true);
+			return UnrealAiToolJson::ErrorWithSuggestedCall(
+				TEXT("asset_destroy is a compatibility alias. Use asset_delete with object_paths[] and confirm:true."),
+				TEXT("asset_delete"),
+				Suggested);
+		}
+		return UnrealAiDispatch_AssetDelete(Norm);
 	}
 	if (ToolId == TEXT("asset_duplicate"))
 	{

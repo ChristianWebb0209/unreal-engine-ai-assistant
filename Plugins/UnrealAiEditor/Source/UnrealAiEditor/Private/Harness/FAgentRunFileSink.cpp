@@ -4,6 +4,7 @@
 #include "Context/AgentContextFormat.h"
 #include "Context/IAgentContextService.h"
 #include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
@@ -56,6 +57,7 @@ void FAgentRunFileSink::MaybeDumpContextWindow(const TCHAR* Reason)
 	}
 	FAgentContextBuildOptions Opt;
 	Opt.Mode = EUnrealAiAgentMode::Agent;
+	Opt.ContextBuildInvocationReason = FString::Printf(TEXT("harness_dump_%s"), Reason);
 	{
 		const FString EnvVerbose = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_CONTEXT_VERBOSE"));
 		const bool bVerbose = EnvVerbose.Equals(TEXT("1"), ESearchCase::IgnoreCase)
@@ -67,6 +69,31 @@ void FAgentRunFileSink::MaybeDumpContextWindow(const TCHAR* Reason)
 	const FString BaseDir = FPaths::GetPath(JsonlPath);
 	const FString Base = BaseDir / FString::Printf(TEXT("context_window_%s.txt"), Reason);
 	FFileHelper::SaveStringToFile(Built.ContextBlock, *Base, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	{
+		TSharedPtr<FJsonObject> TraceJson = MakeShared<FJsonObject>();
+		TraceJson->SetStringField(TEXT("reason"), Reason);
+		TraceJson->SetStringField(TEXT("project_id"), ProjectId);
+		TraceJson->SetStringField(TEXT("thread_id"), ThreadId);
+		TraceJson->SetNumberField(TEXT("context_chars"), static_cast<double>(Built.ContextBlock.Len()));
+		TArray<TSharedPtr<FJsonValue>> WarningArr;
+		for (const FString& W : Built.Warnings)
+		{
+			WarningArr.Add(MakeShared<FJsonValueString>(W));
+		}
+		TraceJson->SetArrayField(TEXT("warnings"), WarningArr);
+		TArray<TSharedPtr<FJsonValue>> VerboseArr;
+		for (const FString& L : Built.VerboseTraceLines)
+		{
+			VerboseArr.Add(MakeShared<FJsonValueString>(L));
+		}
+		TraceJson->SetArrayField(TEXT("verbose_trace_lines"), VerboseArr);
+		FString TraceJsonStr;
+		const TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> JsonWriter =
+			TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&TraceJsonStr);
+		FJsonSerializer::Serialize(TraceJson.ToSharedRef(), JsonWriter);
+		const FString TraceJsonPath = BaseDir / FString::Printf(TEXT("context_build_trace_%s.json"), Reason);
+		FFileHelper::SaveStringToFile(TraceJsonStr + TEXT("\n"), *TraceJsonPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	}
 	if (Opt.bVerboseContextBuild && Built.VerboseTraceLines.Num() > 0)
 	{
 		const FString TracePath = BaseDir / FString::Printf(TEXT("context_build_trace_%s.txt"), Reason);
@@ -95,6 +122,7 @@ void FAgentRunFileSink::OnRunStarted(const FUnrealAiRunIds& Ids)
 	O->SetStringField(TEXT("type"), TEXT("run_started"));
 	O->SetStringField(TEXT("run_id"), Ids.RunId.ToString(EGuidFormats::DigitsWithHyphens));
 	AppendJsonObject(O);
+	MaybeDumpContextWindow(TEXT("run_started"));
 }
 
 void FAgentRunFileSink::OnContextUserMessages(const TArray<FString>& Messages)
@@ -172,6 +200,8 @@ void FAgentRunFileSink::OnRunContinuation(const int32 PhaseIndex, const int32 To
 	O->SetNumberField(TEXT("phase_index"), static_cast<double>(PhaseIndex));
 	O->SetNumberField(TEXT("total_phases_hint"), static_cast<double>(TotalPhasesHint));
 	AppendJsonObject(O);
+	const FString Reason = FString::Printf(TEXT("continuation_%d"), PhaseIndex);
+	MaybeDumpContextWindow(*Reason);
 }
 
 void FAgentRunFileSink::OnTodoPlanEmitted(const FString& Title, const FString& PlanJson)
@@ -180,6 +210,26 @@ void FAgentRunFileSink::OnTodoPlanEmitted(const FString& Title, const FString& P
 	O->SetStringField(TEXT("type"), TEXT("todo_plan"));
 	O->SetStringField(TEXT("title"), Title);
 	O->SetStringField(TEXT("plan_json"), PlanJson);
+	AppendJsonObject(O);
+}
+
+void FAgentRunFileSink::OnPlanningDecision(
+	const FString& ModeUsed,
+	const TArray<FString>& TriggerReasons,
+	const int32 ReplanCount,
+	const int32 QueueStepsPending)
+{
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetStringField(TEXT("type"), TEXT("planning_decision"));
+	O->SetStringField(TEXT("mode_used"), ModeUsed);
+	TArray<TSharedPtr<FJsonValue>> Reasons;
+	for (const FString& R : TriggerReasons)
+	{
+		Reasons.Add(MakeShared<FJsonValueString>(R));
+	}
+	O->SetArrayField(TEXT("trigger_reasons"), Reasons);
+	O->SetNumberField(TEXT("replan_count"), static_cast<double>(ReplanCount));
+	O->SetNumberField(TEXT("queue_steps_pending"), static_cast<double>(QueueStepsPending));
 	AppendJsonObject(O);
 }
 

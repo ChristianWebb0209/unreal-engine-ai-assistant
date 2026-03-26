@@ -1,15 +1,18 @@
 #include "Tools/UnrealAiToolDispatch_GenericAssets.h"
 
 #include "Tools/UnrealAiToolJson.h"
+#include "Tools/UnrealAiToolDispatch_ArgRepair.h"
 
 #include "AssetRegistry/AssetIdentifier.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
 #include "Dom/JsonValue.h"
+#include "Engine/Blueprint.h"
 #include "Factories/Factory.h"
 #include "IAssetTools.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
+#include "GameFramework/Actor.h"
 #include "UObject/UnrealType.h"
 #include "UObject/Class.h"
 #include "LevelSequence.h"
@@ -305,7 +308,21 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetCreate(const TSharedPtr<FJso
 		|| !Args->TryGetStringField(TEXT("asset_name"), AssetName) || AssetName.IsEmpty()
 		|| !Args->TryGetStringField(TEXT("asset_class"), ClassPath) || ClassPath.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("package_path, asset_name, and asset_class are required"));
+		if (ClassPath.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("class_path"), ClassPath);
+		}
+		if (PackagePath.IsEmpty() || AssetName.IsEmpty() || ClassPath.IsEmpty())
+		{
+			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+			SuggestedArgs->SetStringField(TEXT("package_path"), TEXT("/Game/Blueprints"));
+			SuggestedArgs->SetStringField(TEXT("asset_name"), TEXT("DoorBP"));
+			SuggestedArgs->SetStringField(TEXT("asset_class"), TEXT("/Script/Engine.Blueprint"));
+			return UnrealAiToolJson::ErrorWithSuggestedCall(
+				TEXT("package_path, asset_name, and asset_class are required (alias: class_path)."),
+				TEXT("asset_create"),
+				SuggestedArgs);
+		}
 	}
 	if (!IsUnderGameContentPackage(PackagePath))
 	{
@@ -320,7 +337,25 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetCreate(const TSharedPtr<FJso
 	}
 	if (!AssetClass || !AssetClass->IsChildOf(UObject::StaticClass()))
 	{
-		return UnrealAiToolJson::Error(TEXT("Could not resolve asset_class"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("package_path"), PackagePath.IsEmpty() ? TEXT("/Game") : PackagePath);
+		SuggestedArgs->SetStringField(TEXT("asset_name"), AssetName.IsEmpty() ? TEXT("NewAsset") : AssetName);
+		SuggestedArgs->SetStringField(TEXT("asset_class"), TEXT("/Script/Engine.Blueprint"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("Could not resolve asset_class. Use a native UClass path like /Script/Engine.Blueprint, /Script/Engine.Material, /Script/Engine.World, /Script/LevelSequence.LevelSequence, or /Script/Engine.Actor."),
+			TEXT("asset_create"),
+			SuggestedArgs);
+	}
+	if (AssetClass->IsChildOf(AActor::StaticClass()) && AssetClass != UBlueprint::StaticClass())
+	{
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("package_path"), PackagePath.IsEmpty() ? TEXT("/Game/Blueprints") : PackagePath);
+		SuggestedArgs->SetStringField(TEXT("asset_name"), AssetName.IsEmpty() ? TEXT("MyCharacterBP") : AssetName);
+		SuggestedArgs->SetStringField(TEXT("asset_class"), TEXT("/Script/Engine.Blueprint"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("asset_create expects an asset class (UObject type), not an actor gameplay class. For Character/Pawn gameplay assets, create a Blueprint asset (/Script/Engine.Blueprint) and set parent_class in blueprint_apply_ir."),
+			TEXT("asset_create"),
+			SuggestedArgs);
 	}
 
 	UFactory* Factory = nullptr;
@@ -350,13 +385,22 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetExportProperties(const TShar
 {
 	using namespace UnrealAiGenericAssets;
 	FString Path;
-	if (!Args->TryGetStringField(TEXT("object_path"), Path) || Path.IsEmpty())
 	{
-		Args->TryGetStringField(TEXT("path"), Path);
-	}
-	if (Path.IsEmpty())
-	{
-		return UnrealAiToolJson::Error(TEXT("object_path is required"));
+		const TArray<const TCHAR*> Aliases = { TEXT("path") };
+		if (!UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
+				Args,
+				TEXT("object_path"),
+				Aliases,
+				Path)
+			|| Path.IsEmpty())
+		{
+			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+			SuggestedArgs->SetStringField(TEXT("object_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
+			return UnrealAiToolJson::ErrorWithSuggestedCall(
+				TEXT("object_path is required (alias: path)."),
+				TEXT("asset_export_properties"),
+				SuggestedArgs);
+		}
 	}
 	FString Err;
 	UObject* Obj = LoadObjectInGame(Path, Err);

@@ -13,4 +13,5 @@ namespace UnrealAiToolJson
 	FUnrealAiToolInvocationResult Ok(const TSharedPtr<FJsonObject>& Payload);
 	FUnrealAiToolInvocationResult OkWithEditorPresentation(const TSharedPtr<FJsonObject>& Payload, const TSharedPtr<FUnrealAiToolEditorPresentation>& EditorPresentation);
 	FUnrealAiToolInvocationResult Error(const FString& Message);
+	FUnrealAiToolInvocationResult ErrorWithSuggestedCall(const FString& Message, const FString& ToolId, const TSharedPtr<FJsonObject>& SuggestedArguments);
 }

@@ -4,6 +4,7 @@
 
 #include "AssetRegistry/AssetIdentifier.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
 #include "AssetToolsModule.h"
 #include "FileHelpers.h"
 #include "IAssetTools.h"
@@ -12,31 +13,202 @@
 #include "ScopedTransaction.h"
 #include "UObject/SavePackage.h"
 #include "UObject/SoftObjectPath.h"
+#include "UObject/UObjectGlobals.h"
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_AssetSavePackages(const TSharedPtr<FJsonObject>& Args)
 {
-	const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-	if (!Args->TryGetArrayField(TEXT("package_paths"), Arr) || !Arr || Arr->Num() == 0)
+	// Accept object paths (preferred) and package/folder paths (compat).
+	// Examples:
+	// - object_path/object_paths: `/Game/X/Asset.Asset`
+	// - package_paths: `/Game/X/Asset` or `/Game/X/Folder/` (folder is expanded via Asset Registry)
+
+	TArray<FString> InputTokens;
+
+	// Prefer canonical object_paths if present.
 	{
-		return UnrealAiToolJson::Error(TEXT("package_paths array is required"));
+		const TArray<TSharedPtr<FJsonValue>>* ObjArr = nullptr;
+		if (Args->TryGetArrayField(TEXT("object_paths"), ObjArr) && ObjArr && ObjArr->Num() > 0)
+		{
+			for (const TSharedPtr<FJsonValue>& V : *ObjArr)
+			{
+				FString P;
+				if (V.IsValid() && V->TryGetString(P) && !P.IsEmpty())
+				{
+					InputTokens.Add(P);
+				}
+			}
+		}
+		else
+		{
+			FString ObjOne;
+			// object_path is canonical; `path` is ambiguous but tolerated as a fallback.
+			if (Args->TryGetStringField(TEXT("object_path"), ObjOne) && !ObjOne.IsEmpty())
+			{
+				InputTokens.Add(ObjOne);
+			}
+				else if (Args->TryGetStringField(TEXT("path"), ObjOne) && !ObjOne.IsEmpty())
+			{
+				InputTokens.Add(ObjOne);
+			}
+		}
 	}
-	TArray<UPackage*> Packages;
-	for (const TSharedPtr<FJsonValue>& V : *Arr)
+
+	// Add package_paths/package_path inputs (compat + folder expansion).
 	{
-		FString P;
-		if (!V.IsValid() || !V->TryGetString(P) || P.IsEmpty())
+		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+		if (Args->TryGetArrayField(TEXT("package_paths"), Arr) && Arr && Arr->Num() > 0)
+		{
+			for (const TSharedPtr<FJsonValue>& V : *Arr)
+			{
+				FString P;
+				if (V.IsValid() && V->TryGetString(P) && !P.IsEmpty())
+				{
+					InputTokens.Add(P);
+				}
+			}
+		}
+		else
+		{
+			// legacy aliases
+			if (!Args->TryGetArrayField(TEXT("packages"), Arr) || !Arr || Arr->Num() == 0)
+			{
+				FString P;
+				if (Args->TryGetStringField(TEXT("package_path"), P) && !P.IsEmpty())
+				{
+					InputTokens.Add(P);
+				}
+				else if (Args->TryGetStringField(TEXT("path"), P) && !P.IsEmpty())
+				{
+					InputTokens.Add(P);
+				}
+			}
+		}
+	}
+
+	auto MakeSuggestedArgs = [&]()
+	{
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		TArray<TSharedPtr<FJsonValue>> Suggested;
+		Suggested.Add(MakeShareable(new FJsonValueString(TEXT("/Game/Blueprints/MyBP.MyBP"))));
+		SuggestedArgs->SetArrayField(TEXT("object_paths"), Suggested);
+		return SuggestedArgs;
+	};
+
+	if (InputTokens.Num() == 0)
+	{
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("No package or object paths provided to asset_save_packages."),
+			TEXT("asset_save_packages"),
+			MakeSuggestedArgs());
+	}
+
+	auto StripObjectPathToPackageName = [&](const FString& In)->FString
+	{
+		FString S = In;
+		S.TrimStartAndEndInline();
+		int32 Colon = INDEX_NONE;
+		S.FindLastChar(TEXT(':'), Colon);
+		if (Colon != INDEX_NONE)
+		{
+			S = S.Left(Colon);
+		}
+		int32 Dot = INDEX_NONE;
+		S.FindLastChar(TEXT('.'), Dot);
+		if (Dot != INDEX_NONE)
+		{
+			S = S.Left(Dot);
+		}
+		return S;
+	};
+
+	TSet<FString> PackageNames;
+
+	// Expand folders via Asset Registry.
+	auto ExpandFolderToPackages = [&](const FString& FolderIn)
+	{
+		FString Folder = FolderIn;
+		Folder.TrimStartAndEndInline();
+		while (Folder.EndsWith(TEXT("/")))
+		{
+			Folder.LeftChopInline(1);
+		}
+		if (Folder.IsEmpty())
+		{
+			return;
+		}
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+		IAssetRegistry& AR = ARM.Get();
+		FARFilter Filter;
+		Filter.PackagePaths.Add(*Folder);
+		Filter.bRecursivePaths = true;
+		TArray<FAssetData> Assets;
+		AR.GetAssets(Filter, Assets);
+		for (const FAssetData& AD : Assets)
+		{
+			if (AD.PackageName.ToString().IsEmpty())
+			{
+				continue;
+			}
+			PackageNames.Add(AD.PackageName.ToString());
+		}
+	};
+
+	for (const FString& Token : InputTokens)
+	{
+		if (Token.IsEmpty())
 		{
 			continue;
 		}
-		if (UPackage* Pkg = FindPackage(nullptr, *P))
+		if (Token.EndsWith(TEXT("/")))
+		{
+			ExpandFolderToPackages(Token);
+			continue;
+		}
+		if (Token.Contains(TEXT(".")))
+		{
+			PackageNames.Add(StripObjectPathToPackageName(Token));
+		}
+		else
+		{
+			PackageNames.Add(Token);
+		}
+	}
+
+	if (PackageNames.Num() == 0)
+	{
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("No packages resolved for asset_save_packages input."),
+			TEXT("asset_save_packages"),
+			MakeSuggestedArgs());
+	}
+
+	TArray<UPackage*> Packages;
+	for (const FString& PkgName : PackageNames)
+	{
+		if (PkgName.IsEmpty())
+		{
+			continue;
+		}
+		UPackage* Pkg = FindPackage(nullptr, *PkgName);
+		if (!Pkg)
+		{
+			// Best-effort: if packages were dirtied/created but not loaded yet, load them.
+			Pkg = LoadPackage(nullptr, *PkgName);
+		}
+		if (Pkg)
 		{
 			Packages.Add(Pkg);
 		}
 	}
+
 	if (Packages.Num() == 0)
 	{
-		return UnrealAiToolJson::Error(TEXT("No packages resolved"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("No packages resolved for asset_save_packages input."),
+			TEXT("asset_save_packages"),
+			MakeSuggestedArgs());
 	}
+
 	const bool bSaved = UEditorLoadingAndSavingUtils::SavePackages(Packages, false);
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), bSaved);

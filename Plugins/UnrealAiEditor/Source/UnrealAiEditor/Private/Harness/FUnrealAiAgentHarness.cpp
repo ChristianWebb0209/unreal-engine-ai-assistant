@@ -14,6 +14,8 @@
 #include "Context/AgentContextTypes.h"
 #include "Backend/FUnrealAiUsageTracker.h"
 #include "Backend/IUnrealAiPersistence.h"
+#include "Memory/FUnrealAiMemoryCompactor.h"
+#include "Memory/IUnrealAiMemoryService.h"
 #include "HAL/PlatformMisc.h"
 #include "Harness/UnrealAiLlmInvocationService.h"
 #include "Misc/UnrealAiEditorModalMonitor.h"
@@ -135,6 +137,7 @@ namespace UnrealAiAgentHarnessPriv
 		TSharedPtr<ILlmTransport> Transport;
 		IToolExecutionHost* Tools = nullptr;
 		FUnrealAiUsageTracker* UsageTracker = nullptr;
+		IUnrealAiMemoryService* MemoryService = nullptr;
 		TUniquePtr<FUnrealAiConversationStore> Conv;
 
 		FUnrealAiTokenUsage UsageThisRound;
@@ -151,6 +154,15 @@ namespace UnrealAiAgentHarnessPriv
 
 		FString AssistantBuffer;
 		TArray<FUnrealAiToolCallSpec> PendingToolCalls;
+		FString LastToolFailureSignature;
+		int32 RepeatedToolFailureCount = 0;
+		TMap<FString, int32> ToolInvokeCountByName;
+		TMap<FString, int32> ToolInvokeCountBySignature;
+		// Counts repeated non-progress discovery/search results (e.g. empty low-confidence searches).
+		// Used to trigger replan-or-stop earlier than max rounds.
+		TMap<FString, int32> NonProgressEmptySearchCountByToolName;
+		int32 ReplanCount = 0;
+		int32 QueueStepsPending = 0;
 		bool bFinishSeen = false;
 		std::atomic<bool> bCancelled{false};
 		std::atomic<bool> bTerminal{false};
@@ -162,9 +174,18 @@ namespace UnrealAiAgentHarnessPriv
 		void Fail(const FString& Msg);
 		void Succeed();
 		void AccumulateRoundUsage();
+		void EmitPlanningDecision(const FString& ModeUsed, const TArray<FString>& TriggerReasons);
 
 		static constexpr int32 CharPerTokenApprox = 4;
 	};
+
+	void FAgentTurnRunner::EmitPlanningDecision(const FString& ModeUsed, const TArray<FString>& TriggerReasons)
+	{
+		if (Sink.IsValid())
+		{
+			Sink->OnPlanningDecision(ModeUsed, TriggerReasons, ReplanCount, QueueStepsPending);
+		}
+	}
 
 	void FAgentTurnRunner::Fail(const FString& Msg)
 	{
@@ -226,6 +247,24 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			Sink->OnRunFinished(true, FString());
 		}
+		if (MemoryService && Conv.IsValid())
+		{
+			FString ConversationForCompactor;
+			const TArray<FUnrealAiConversationMessage>& Ms = Conv->GetMessages();
+			const int32 Start = FMath::Max(0, Ms.Num() - 8);
+			for (int32 i = Start; i < Ms.Num(); ++i)
+			{
+				ConversationForCompactor += Ms[i].Role + TEXT(": ") + Ms[i].Content.Left(400) + TEXT("\n");
+			}
+			FUnrealAiMemoryCompactionInput CompactionInput;
+			CompactionInput.ProjectId = Request.ProjectId;
+			CompactionInput.ThreadId = Request.ThreadId;
+			CompactionInput.ConversationJson = ConversationForCompactor;
+			CompactionInput.bApiKeyConfigured = Profiles && Profiles->HasAnyConfiguredApiKey();
+			CompactionInput.bExpectProviderGeneration = true;
+			FUnrealAiMemoryCompactor Compactor(MemoryService);
+			Compactor.Run(CompactionInput, 1, 0.55f);
+		}
 		FUnrealAiEditorModalMonitor::NotifyAgentTurnEndedForSink(Sink);
 	}
 
@@ -280,9 +319,13 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			if (LlmRound >= EffectiveMaxLlmRounds)
 			{
+				const bool bHasRepeatValidationFailures = RepeatedToolFailureCount >= 2;
 				Fail(FString::Printf(
-					TEXT("Max tool/LLM rounds exceeded (%d). Increase \"Max agent LLM rounds\" in AI Settings."),
-					EffectiveMaxLlmRounds));
+					TEXT("Max tool/LLM rounds exceeded (%d). %sIncrease \"Max agent LLM rounds\" in AI Settings."),
+					EffectiveMaxLlmRounds,
+					bHasRepeatValidationFailures
+						? TEXT("Repeated tool validation failures were detected; provide a concise blocked summary with the last failing tool+args. ")
+						: TEXT("")));
 				return;
 			}
 			++LlmRound;
@@ -429,6 +472,17 @@ namespace UnrealAiAgentHarnessPriv
 		}
 		const bool bTodoPlanOnly = PendingToolCalls.Num() == 1
 			&& TodoPlanEffectiveName == TEXT("agent_emit_todo_plan");
+		const bool bAgentMode = Request.Mode == EUnrealAiAgentMode::Agent;
+		const int32 ToolBatchSize = PendingToolCalls.Num();
+		const bool bLargeBatch = bAgentMode && !bTodoPlanOnly && ToolBatchSize >= 4;
+		const bool bNearBudget = bAgentMode && !bTodoPlanOnly && (EffectiveMaxLlmRounds - LlmRound) <= 2;
+		const int32 MaxDirectToolsBeforeQueue = 3;
+		const int32 ToolsToExecute = (bLargeBatch && ToolBatchSize > MaxDirectToolsBeforeQueue)
+			? MaxDirectToolsBeforeQueue
+			: ToolBatchSize;
+		bool bDeferredQueue = false;
+		bool bRepeatedToolLoop = false;
+		bool bRepeatedEmptySearch = false;
 		int32 ToolSuccessCount = 0;
 		int32 ToolFailCount = 0;
 		FUnrealAiConversationMessage Am;
@@ -437,8 +491,19 @@ namespace UnrealAiAgentHarnessPriv
 		Am.ToolCalls = PendingToolCalls;
 		Conv->GetMessagesMutable().Add(Am);
 
-		for (const FUnrealAiToolCallSpec& Tc : PendingToolCalls)
+		for (int32 TcIdx = 0; TcIdx < PendingToolCalls.Num(); ++TcIdx)
 		{
+			const FUnrealAiToolCallSpec& Tc = PendingToolCalls[TcIdx];
+			if (TcIdx >= ToolsToExecute)
+			{
+				bDeferredQueue = true;
+				FUnrealAiConversationMessage Deferred;
+				Deferred.Role = TEXT("tool");
+				Deferred.ToolCallId = Tc.Id;
+				Deferred.Content = TEXT("{\"ok\":false,\"error\":\"deferred_by_harness_for_planning: tool batch exceeded fast-path budget; emit/update todo plan and continue by queued steps\"}");
+				Conv->GetMessagesMutable().Add(Deferred);
+				continue;
+			}
 			FString InvokeName;
 			FString InvokeArgs;
 			FString UnwrapErr;
@@ -465,9 +530,20 @@ namespace UnrealAiAgentHarnessPriv
 			{
 				Sink->OnToolCallStarted(InvokeName, Tc.Id, InvokeArgs);
 			}
+			const FString InvokeSignature = (InvokeName + TEXT("|") + InvokeArgs.Left(220)).ToLower();
+			const int32 NameCount = ToolInvokeCountByName.FindOrAdd(InvokeName) + 1;
+			ToolInvokeCountByName.FindOrAdd(InvokeName) = NameCount;
+			const int32 SigCount = ToolInvokeCountBySignature.FindOrAdd(InvokeSignature) + 1;
+			ToolInvokeCountBySignature.FindOrAdd(InvokeSignature) = SigCount;
+			const bool bRepeatSignature = bAgentMode && InvokeName != TEXT("agent_emit_todo_plan")
+				&& (SigCount >= 3 || NameCount >= 5);
 			const FUnrealAiToolInvocationResult Inv = Tools->InvokeTool(InvokeName, InvokeArgs, Tc.Id);
 			const FString DialogFootnote = FUnrealAiEditorModalMonitor::ConsumePendingToolDialogFootnote();
 			FString ModelToolContent = Inv.bOk ? Inv.ContentForModel : Inv.ErrorMessage;
+			if (bRepeatSignature && !Inv.bOk)
+			{
+				bRepeatedToolLoop = true;
+			}
 			if (!DialogFootnote.IsEmpty())
 			{
 				if (!ModelToolContent.IsEmpty())
@@ -477,13 +553,88 @@ namespace UnrealAiAgentHarnessPriv
 				ModelToolContent +=
 					FString::Printf(TEXT("[Editor blocking dialog during tool]: %s"), *DialogFootnote);
 			}
+
+			// Detect repeated non-progress discovery/search tool results.
+			// Tools can "succeed" while returning no actionable matches, causing round-cap loops.
+			if (Inv.bOk)
+			{
+				auto IsNonProgressEmptySearchResult = [&]()
+				{
+					if (InvokeName == TEXT("asset_index_fuzzy_search"))
+					{
+						const bool bLowConf =
+							ModelToolContent.Contains(TEXT("\"low_confidence\":true")) ||
+							ModelToolContent.Contains(TEXT("\"low_confidence\": true"));
+						const bool bEmptyMatches =
+							ModelToolContent.Contains(TEXT("\"matches\":[]")) ||
+							ModelToolContent.Contains(TEXT("\"matches\": []"));
+						const bool bCountZero =
+							ModelToolContent.Contains(TEXT("\"count\":0")) ||
+							ModelToolContent.Contains(TEXT("\"count\": 0"));
+						return bLowConf && (bEmptyMatches || bCountZero);
+					}
+
+					if (InvokeName == TEXT("scene_fuzzy_search"))
+					{
+						const bool bCountZero =
+							ModelToolContent.Contains(TEXT("\"count\":0")) ||
+							ModelToolContent.Contains(TEXT("\"count\": 0"));
+						return bCountZero;
+					}
+
+					if (InvokeName == TEXT("source_search_symbol"))
+					{
+						const bool bZeroFiles =
+							ModelToolContent.Contains(TEXT("\"files_considered\":0")) ||
+							ModelToolContent.Contains(TEXT("\"files_considered\": 0"));
+						const bool bZeroCandidates =
+							ModelToolContent.Contains(TEXT("\"path_candidates\":0")) ||
+							ModelToolContent.Contains(TEXT("\"path_candidates\": 0"));
+						const bool bEmptyPathMatches =
+							ModelToolContent.Contains(TEXT("\"path_matches\":[]")) ||
+							ModelToolContent.Contains(TEXT("\"path_matches\": []"));
+						return bZeroFiles || bZeroCandidates || bEmptyPathMatches;
+					}
+
+					return false;
+				};
+
+				if (IsNonProgressEmptySearchResult())
+				{
+					int32& C = NonProgressEmptySearchCountByToolName.FindOrAdd(InvokeName);
+					++C;
+					if (C >= 3)
+					{
+						bRepeatedEmptySearch = true;
+						bRepeatedToolLoop = true;
+					}
+				}
+				else
+				{
+					NonProgressEmptySearchCountByToolName.Remove(InvokeName);
+				}
+			}
 			if (Inv.bOk)
 			{
 				++ToolSuccessCount;
+				LastToolFailureSignature.Reset();
+				RepeatedToolFailureCount = 0;
 			}
 			else
 			{
 				++ToolFailCount;
+				// Repeated invalid call patterns should be detected by tool+args signature, not by the
+				// (potentially variable) error string content.
+				const FString FailureSig = InvokeSignature;
+				if (!FailureSig.IsEmpty() && FailureSig == LastToolFailureSignature)
+				{
+					++RepeatedToolFailureCount;
+				}
+				else
+				{
+					LastToolFailureSignature = FailureSig;
+					RepeatedToolFailureCount = 1;
+				}
 			}
 			if (Sink.IsValid())
 			{
@@ -496,6 +647,7 @@ namespace UnrealAiAgentHarnessPriv
 			}
 			if (InvokeName == TEXT("agent_emit_todo_plan") && Sink.IsValid())
 			{
+				++ReplanCount;
 				FString PlanTitle = TEXT("Plan");
 				TSharedPtr<FJsonObject> ArgsObj;
 				TSharedRef<TJsonReader<>> AR = TJsonReaderFactory<>::Create(InvokeArgs);
@@ -514,6 +666,83 @@ namespace UnrealAiAgentHarnessPriv
 			Tm.Content = ModelToolContent;
 			Conv->GetMessagesMutable().Add(Tm);
 		}
+		// Dynamic queue progress: when a stored plan exists and this round made progress,
+		// mark one pending todo step as done (best-effort coarse progress signal).
+		if (ContextService && bAgentMode && ToolSuccessCount > 0)
+		{
+			ContextService->LoadOrCreate(Request.ProjectId, Request.ThreadId);
+			if (const FAgentContextState* St = ContextService->GetState(Request.ProjectId, Request.ThreadId))
+			{
+				if (!St->ActiveTodoPlanJson.IsEmpty())
+				{
+					for (int32 i = 0; i < St->TodoStepsDone.Num(); ++i)
+					{
+						if (!St->TodoStepsDone[i])
+						{
+							ContextService->SetTodoStepDone(i, true);
+							break;
+						}
+					}
+					ContextService->SaveNow(Request.ProjectId, Request.ThreadId);
+				}
+			}
+		}
+		if (bDeferredQueue)
+		{
+			QueueStepsPending = FMath::Max(QueueStepsPending, ToolBatchSize - ToolsToExecute);
+		}
+		else
+		{
+			QueueStepsPending = FMath::Max(0, QueueStepsPending - ToolSuccessCount);
+		}
+		TArray<FString> TriggerReasons;
+		if (bLargeBatch)
+		{
+			TriggerReasons.Add(TEXT("many_tool_calls"));
+		}
+		if (bNearBudget)
+		{
+			TriggerReasons.Add(TEXT("budget_pressure"));
+		}
+		if (RepeatedToolFailureCount >= 2 || ToolFailCount >= 2)
+		{
+			TriggerReasons.Add(TEXT("repeated_tool_failures"));
+		}
+		if (bRepeatedToolLoop)
+		{
+			TriggerReasons.Add(TEXT("repeated_tool_loop"));
+		}
+		if (bRepeatedEmptySearch)
+		{
+			TriggerReasons.Add(TEXT("repeated_empty_search"));
+		}
+		if (bTodoPlanOnly)
+		{
+			TriggerReasons.Add(TEXT("explicit_todo_plan"));
+		}
+		if (TriggerReasons.Num() == 0)
+		{
+			TriggerReasons.Add(TEXT("act_now"));
+		}
+		EmitPlanningDecision(bTodoPlanOnly ? TEXT("explicit") : TEXT("implicit"), TriggerReasons);
+		const bool bRepeatedValidationLoop = RepeatedToolFailureCount >= 3;
+		if (bRepeatedValidationLoop && Request.Mode != EUnrealAiAgentMode::Ask)
+		{
+			FUnrealAiConversationMessage RepairNudge;
+			RepairNudge.Role = TEXT("user");
+			RepairNudge.Content = TEXT(
+				"[Harness] The same tool validation failure repeated multiple times. Repair-or-stop now: either call one corrected tool invocation with fixed arguments, or provide a concise blocked summary with the exact failing tool and required fields. Last failing pattern: ");
+			RepairNudge.Content += LastToolFailureSignature;
+			Conv->GetMessagesMutable().Add(RepairNudge);
+		}
+		if (bRepeatedToolLoop && Request.Mode == EUnrealAiAgentMode::Agent && !bTodoPlanOnly)
+		{
+			FUnrealAiConversationMessage LoopNudge;
+			LoopNudge.Role = TEXT("user");
+			LoopNudge.Content = TEXT(
+				"[Harness] Repeated tool loop detected. Replan-or-stop now: either emit one concise `agent_emit_todo_plan` for remaining work and continue from step 1, or provide a concise blocked summary with the exact blocker.");
+			Conv->GetMessagesMutable().Add(LoopNudge);
+		}
 		// The next round still runs (DispatchLlm below), but models often reply with text-only and end
 		// the run. A synthetic user line nudges execution when the only tool was the todo plan.
 		if (bTodoPlanOnly && Request.Mode != EUnrealAiAgentMode::Ask)
@@ -531,11 +760,23 @@ namespace UnrealAiAgentHarnessPriv
 			// the next model turn summarizes and ends instead of taking the next concrete action.
 			FUnrealAiConversationMessage Nudge;
 			Nudge.Role = TEXT("user");
-			Nudge.Content = FString::Printf(
-				TEXT("[Harness] Tool round complete (ok=%d, failed=%d). Continue executing the user's request. ")
-				TEXT("If the task is not complete, call the next tool now. Only finish when the requested scene/work is actually done or you are truly blocked."),
-				ToolSuccessCount,
-				ToolFailCount);
+			if (bDeferredQueue)
+			{
+				Nudge.Content = FString::Printf(
+					TEXT("[Harness] Tool round complete (ok=%d, failed=%d). Additional requested tools were deferred (%d) due to dynamic planning policy. ")
+					TEXT("Now emit/update a concise todo plan that queues remaining work, then execute the first pending step."),
+					ToolSuccessCount,
+					ToolFailCount,
+					ToolBatchSize - ToolsToExecute);
+			}
+			else
+			{
+				Nudge.Content = FString::Printf(
+					TEXT("[Harness] Tool round complete (ok=%d, failed=%d). Continue executing the user's request. ")
+					TEXT("If the task is not complete, call the next tool now. Only finish when the requested scene/work is actually done or you are truly blocked."),
+					ToolSuccessCount,
+					ToolFailCount);
+			}
 			Conv->GetMessagesMutable().Add(Nudge);
 		}
 		PendingToolCalls.Reset();
@@ -586,7 +827,8 @@ FUnrealAiAgentHarness::FUnrealAiAgentHarness(
 	FUnrealAiToolCatalog* InCatalog,
 	TSharedPtr<ILlmTransport> InTransport,
 	IToolExecutionHost* InToolHost,
-	FUnrealAiUsageTracker* InUsageTracker)
+	FUnrealAiUsageTracker* InUsageTracker,
+	IUnrealAiMemoryService* InMemoryService)
 	: Persistence(InPersistence)
 	, Context(InContext)
 	, Profiles(InProfiles)
@@ -594,6 +836,7 @@ FUnrealAiAgentHarness::FUnrealAiAgentHarness(
 	, Transport(MoveTemp(InTransport))
 	, ToolHost(InToolHost)
 	, UsageTracker(InUsageTracker)
+	, MemoryService(InMemoryService)
 {
 }
 
@@ -646,6 +889,7 @@ void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TS
 	Runner->Transport = Transport;
 	Runner->Tools = ToolHost;
 	Runner->UsageTracker = UsageTracker;
+	Runner->MemoryService = MemoryService;
 	Runner->AccumulatedUsage = FUnrealAiTokenUsage();
 	Runner->Conv = MakeUnique<FUnrealAiConversationStore>(Persistence);
 	Runner->Conv->LoadOrCreate(Request.ProjectId, Request.ThreadId);

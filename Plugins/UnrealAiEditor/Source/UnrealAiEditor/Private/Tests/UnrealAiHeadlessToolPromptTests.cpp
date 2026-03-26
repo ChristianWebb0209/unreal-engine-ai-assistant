@@ -127,7 +127,7 @@ namespace UnrealAiHeadlessToolPromptTestsPriv
 	public:
 		FHeadlessPromptToolService()
 			: Persistence(MakeUnique<FUnrealAiPersistenceStub>())
-			, Context(MakeUnique<FUnrealAiContextService>(Persistence.Get()))
+			, Context(MakeUnique<FUnrealAiContextService>(Persistence.Get(), nullptr))
 			, Profiles(MakeUnique<FUnrealAiModelProfileRegistry>(Persistence.Get()))
 		{
 			Catalog.LoadFromPlugin();

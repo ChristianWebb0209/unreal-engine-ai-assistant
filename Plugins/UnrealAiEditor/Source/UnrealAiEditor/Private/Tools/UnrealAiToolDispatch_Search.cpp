@@ -2,6 +2,7 @@
 
 #include "Tools/UnrealAiFuzzySearch.h"
 #include "Tools/UnrealAiToolJson.h"
+#include "Tools/UnrealAiToolDispatch_ArgRepair.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -11,6 +12,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "HAL/PlatformFilemanager.h"
+#include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -29,35 +31,70 @@ namespace UnrealAiToolDispatchSearchInternal
 			OutRoots.Add(C);
 		}
 		const FString PPlugins = FPaths::Combine(ProjectDir, TEXT("Plugins"));
-		if (!FPaths::DirectoryExists(PPlugins))
+		if (FPaths::DirectoryExists(PPlugins))
 		{
-			return;
-		}
-		TArray<FString> PluginNames;
-		IFileManager::Get().FindFiles(PluginNames, *PPlugins, false, true);
-		for (const FString& PluginName : PluginNames)
-		{
-			const FString Src = FPaths::Combine(PPlugins, PluginName, TEXT("Source"));
-			if (FPaths::DirectoryExists(Src))
+			TArray<FString> PluginNames;
+			IFileManager::Get().FindFiles(PluginNames, *PPlugins, false, true);
+			for (const FString& PluginName : PluginNames)
 			{
-				OutRoots.Add(Src);
+				const FString Src = FPaths::Combine(PPlugins, PluginName, TEXT("Source"));
+				if (FPaths::DirectoryExists(Src) && !OutRoots.Contains(Src))
+				{
+					OutRoots.Add(Src);
+				}
+			}
+			if (PluginNames.Num() == 0)
+			{
+				TArray<FString> PluginDirs;
+				IFileManager::Get().FindFilesRecursive(PluginDirs, *PPlugins, TEXT(""), false, true);
+				for (const FString& Dir : PluginDirs)
+				{
+					if (OutRoots.Contains(Dir))
+					{
+						continue;
+					}
+					FString Norm = Dir;
+					Norm.ReplaceInline(TEXT("\\"), TEXT("/"));
+					if (Norm.EndsWith(TEXT("/Source")))
+					{
+						OutRoots.Add(Dir);
+					}
+				}
 			}
 		}
-		if (PluginNames.Num() == 0)
+
+		// Fallback roots: even if ProjectDir is mis-resolved during harness runs,
+		// include this plugin's own Source/ (and Config/) and a limited set of engine plugin Source/ dirs.
 		{
-			TArray<FString> PluginDirs;
-			IFileManager::Get().FindFilesRecursive(PluginDirs, *PPlugins, TEXT(""), false, true);
-			for (const FString& Dir : PluginDirs)
+			const TSharedPtr<IPlugin> Plug = IPluginManager::Get().FindPlugin(TEXT("UnrealAiEditor"));
+			if (Plug.IsValid())
 			{
-				if (OutRoots.Contains(Dir))
+				const FString BaseDir = Plug->GetBaseDir();
+				const FString PSrc = FPaths::Combine(BaseDir, TEXT("Source"));
+				if (FPaths::DirectoryExists(PSrc) && !OutRoots.Contains(PSrc))
 				{
-					continue;
+					OutRoots.Add(PSrc);
 				}
-				FString Norm = Dir;
-				Norm.ReplaceInline(TEXT("\\"), TEXT("/"));
-				if (Norm.EndsWith(TEXT("/Source")))
+				const FString PCfg = FPaths::Combine(BaseDir, TEXT("Config"));
+				if (FPaths::DirectoryExists(PCfg) && !OutRoots.Contains(PCfg))
 				{
-					OutRoots.Add(Dir);
+					OutRoots.Add(PCfg);
+				}
+			}
+		}
+		{
+			const FString EPlugins = FPaths::EnginePluginsDir();
+			if (FPaths::DirectoryExists(EPlugins))
+			{
+				TArray<FString> EnginePluginNames;
+				IFileManager::Get().FindFiles(EnginePluginNames, *EPlugins, false, true);
+				for (const FString& PluginName : EnginePluginNames)
+				{
+					const FString Src = FPaths::Combine(EPlugins, PluginName, TEXT("Source"));
+					if (FPaths::DirectoryExists(Src) && !OutRoots.Contains(Src))
+					{
+						OutRoots.Add(Src);
+					}
 				}
 			}
 		}
@@ -122,7 +159,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 	FString Query;
 	if (!Args->TryGetStringField(TEXT("query"), Query) || Query.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("scene_fuzzy_search: non-empty query string is required."));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("query"), TEXT("PlayerStart"));
+		SuggestedArgs->SetNumberField(TEXT("max_results"), 20.0);
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("scene_fuzzy_search: non-empty query string is required."),
+			TEXT("scene_fuzzy_search"),
+			SuggestedArgs);
 	}
 	int32 MaxResults = 50;
 	double MR = 0.0;
@@ -153,6 +196,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 	};
 
 	TArray<FHit> Hits;
+	Hits.Reserve(256);
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
 		AActor* A = *It;
@@ -164,11 +208,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 		{
 			continue;
 		}
-		TArray<FString> Candidates;
-		Candidates.Add(A->GetActorLabel());
-		Candidates.Add(A->GetName());
-		Candidates.Add(A->GetClass()->GetName());
-		Candidates.Add(A->GetPathName());
 		FString TagsJoined;
 		for (const FName& Tg : A->Tags)
 		{
@@ -178,11 +217,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 			}
 			TagsJoined += Tg.ToString();
 		}
-		if (!TagsJoined.IsEmpty())
-		{
-			Candidates.Add(TagsJoined);
-		}
-
 		float Best = 0.f;
 		FString BestField = TEXT("path");
 		auto Consider = [&](const FString& S, const TCHAR* FieldName)
@@ -218,6 +252,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 	}
 
 	Hits.Sort([](const FHit& A, const FHit& B) { return A.Score > B.Score; });
+	const bool bLowConfidence = (Hits.Num() == 0 || Hits[0].Score < 40.f);
 	if (Hits.Num() > MaxResults)
 	{
 		Hits.SetNum(MaxResults);
@@ -247,9 +282,24 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TSharedPtr<FJsonObject>& Args)
 {
 	FString Query;
-	if (!Args->TryGetStringField(TEXT("query"), Query) || Query.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("asset_index_fuzzy_search: non-empty query string is required."));
+		const TArray<const TCHAR*> Aliases = { TEXT("search_string"), TEXT("filter"), TEXT("name_prefix") };
+		UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
+			Args,
+			TEXT("query"),
+			Aliases,
+			Query);
+	}
+	if (Query.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("query"), TEXT("coin"));
+		SuggestedArgs->SetStringField(TEXT("path_prefix"), TEXT("/Game"));
+		SuggestedArgs->SetNumberField(TEXT("max_results"), 20.0);
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("asset_index_fuzzy_search: non-empty query string is required (preferred key: 'query'; accepted aliases: 'search_string', 'filter', 'name_prefix')."),
+			TEXT("asset_index_fuzzy_search"),
+			SuggestedArgs);
 	}
 	FString PathPrefix(TEXT("/Game"));
 	Args->TryGetStringField(TEXT("path_prefix"), PathPrefix);
@@ -271,6 +321,9 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 	}
 	FString ClassSubstring;
 	Args->TryGetStringField(TEXT("class_name_substring"), ClassSubstring);
+	const FString QLower = Query.ToLower();
+	const FString ClassSubstringLower = ClassSubstring.ToLower();
+	const bool bHasClassFilter = !ClassSubstringLower.IsEmpty();
 
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 	IAssetRegistry& AR = ARM.Get();
@@ -296,21 +349,51 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 	};
 
 	TArray<FHit> Hits;
+	Hits.Reserve(FMath::Min(Assets.Num(), MaxResults * 8));
 	for (const FAssetData& AD : Assets)
 	{
-		if (!ClassSubstring.IsEmpty())
+		if (bHasClassFilter)
 		{
 			const FString Cls = AD.AssetClassPath.ToString();
-			if (!Cls.Contains(ClassSubstring, ESearchCase::IgnoreCase))
+			if (!Cls.Contains(ClassSubstringLower, ESearchCase::IgnoreCase))
 			{
 				continue;
 			}
 		}
+		const FString AssetName = AD.AssetName.ToString();
+		const FString ObjectPath = AD.GetObjectPathString();
+		const FString ClassPath = AD.AssetClassPath.ToString();
+		const FString NameLower = AssetName.ToLower();
+		const FString PathLower = ObjectPath.ToLower();
+		const FString ClassLower = ClassPath.ToLower();
 		TArray<FString> Candidates;
-		Candidates.Add(AD.AssetName.ToString());
-		Candidates.Add(AD.GetObjectPathString());
-		Candidates.Add(AD.AssetClassPath.ToString());
-		const float S = UnrealAiFuzzySearch::ScoreAgainstCandidates(Query, Candidates);
+		Candidates.Reserve(3);
+		Candidates.Add(AssetName);
+		Candidates.Add(ObjectPath);
+		Candidates.Add(ClassPath);
+		float WeightedScore = UnrealAiFuzzySearch::ScoreAgainstCandidates(Query, Candidates);
+		// Prefer deterministic lexical wins for constrained projects.
+		if (NameLower.Equals(QLower))
+		{
+			WeightedScore += 120.f;
+		}
+		else if (NameLower.StartsWith(QLower))
+		{
+			WeightedScore += 80.f;
+		}
+		else if (NameLower.Contains(QLower))
+		{
+			WeightedScore += 35.f;
+		}
+		if (PathLower.Contains(TEXT("/") + QLower) || PathLower.Contains(QLower + TEXT(".")))
+		{
+			WeightedScore += 25.f;
+		}
+		if (bHasClassFilter && ClassLower.Contains(ClassSubstringLower))
+		{
+			WeightedScore += 15.f;
+		}
+		const float S = WeightedScore;
 		if (S < 1.f)
 		{
 			continue;
@@ -324,6 +407,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 	}
 
 	Hits.Sort([](const FHit& A, const FHit& B) { return A.Score > B.Score; });
+	const bool bLowConfidence = (Hits.Num() == 0 || Hits[0].Score < 40.f);
 	if (Hits.Num() > MaxResults)
 	{
 		Hits.SetNum(MaxResults);
@@ -346,6 +430,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 	O->SetStringField(TEXT("query"), Query);
 	O->SetStringField(TEXT("path_prefix"), PathPrefix);
 	O->SetBoolField(TEXT("truncated"), bTruncated);
+	if (bLowConfidence)
+	{
+		O->SetStringField(TEXT("low_confidence_notice"), TEXT("Top matches are low confidence. Try a narrower query or set class_name_substring."));
+		O->SetBoolField(TEXT("low_confidence"), true);
+	}
 	O->SetArrayField(TEXT("matches"), Arr);
 	O->SetNumberField(TEXT("count"), static_cast<double>(Arr.Num()));
 	return UnrealAiToolJson::Ok(O);
@@ -354,9 +443,23 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 FUnrealAiToolInvocationResult UnrealAiDispatch_SourceSearchFuzzy(const TSharedPtr<FJsonObject>& Args)
 {
 	FString Query;
-	if (!Args->TryGetStringField(TEXT("query"), Query) || Query.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("source_search_symbol: non-empty query string is required."));
+		const TArray<const TCHAR*> Aliases = { TEXT("symbol"), TEXT("term"), TEXT("needle"), TEXT("name") };
+		UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
+			Args,
+			TEXT("query"),
+			Aliases,
+			Query);
+	}
+	if (Query.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("query"), TEXT("RunAgentTurn"));
+		SuggestedArgs->SetStringField(TEXT("glob"), TEXT("*.cpp;*.h"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("source_search_symbol: non-empty query string is required (aliases: symbol, term, needle, name). Do not retry with empty args; provide a concrete symbol/function/file token."),
+			TEXT("source_search_symbol"),
+			SuggestedArgs);
 	}
 	FString Glob;
 	Args->TryGetStringField(TEXT("glob"), Glob);

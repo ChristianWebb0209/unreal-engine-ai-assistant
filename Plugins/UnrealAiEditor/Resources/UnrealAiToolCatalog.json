@@ -693,7 +693,7 @@
     },
     {
       "tool_id": "asset_open_editor",
-      "summary": "Open an asset in its native editor.",
+      "summary": "Open an asset in its native editor when you already have an exact object path (for example from asset_index_fuzzy_search or asset_registry_query). Use for inspection/focus, not discovery.",
       "category": "editor_ui_navigation",
       "tags": [
         "content",
@@ -716,7 +716,13 @@
         "additionalProperties": false,
         "properties": {
           "object_path": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "description": "Canonical asset object path. Preferred key. Example: /Game/Blueprints/MyBP.MyBP."
+          },
+          "asset_path": {
+            "type": "string",
+            "description": "Compatibility alias for object_path."
           },
           "focused": {
             "type": "boolean",
@@ -739,7 +745,7 @@
     },
     {
       "tool_id": "asset_registry_query",
-      "summary": "Query Asset Registry for assets.",
+      "summary": "Query Asset Registry for deterministic listing by exact path/class filters. Use this when you need predictable structured results; use asset_index_fuzzy_search for fuzzy name discovery.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -762,10 +768,59 @@
         "additionalProperties": false,
         "properties": {
           "path_filter": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "description": "Package path prefix (for example /Game or /Game/Blueprints). Preferred key."
+          },
+          "filter": {
+            "type": "string",
+            "description": "Compatibility alias for path_filter."
+          },
+          "object_path": {
+            "type": "string",
+            "description": "Compatibility alias: object path converted to package path for path_filter."
           },
           "class_name": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "description": "Single class path filter (for example /Script/Engine.Blueprint). Preferred key."
+          },
+          "class_paths": {
+            "type": "array",
+            "description": "Compatibility alias for class_name; first entry is used.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "class_filters": {
+            "type": "array",
+            "description": "Compatibility alias for class_name; first entry is used.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "class_names": {
+            "type": "array",
+            "description": "Compatibility alias for class_name; first entry is used. Short names are expanded to /Script/Engine.<Name>.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "filters": {
+            "type": "array",
+            "description": "Compatibility alias for structured callers. Primary shape is array entries like {\"key\":\"class\",\"value\":\"/Script/Engine.Blueprint\"} and {\"key\":\"path\",\"value\":\"/Game\"}; object shape with path_prefix/path_filter is also tolerated at runtime.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "key": { "type": "string" },
+                "value": { "type": "string" }
+              },
+              "required": [
+                "key",
+                "value"
+              ]
+            }
           },
           "max_results": {
             "type": "integer"
@@ -938,10 +993,20 @@
             "type": "string"
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "description": "Variable name (preferred key). Alias: variable_name."
+          },
+          "variable_name": {
+            "type": "string",
+            "description": "Legacy alias for name."
           },
           "type": {
-            "type": "string"
+            "type": "string",
+            "description": "Variable type token (preferred key). Alias: variable_type."
+          },
+          "variable_type": {
+            "type": "string",
+            "description": "Legacy alias for type."
           },
           "category": {
             "type": "string"
@@ -1016,7 +1081,7 @@
     },
     {
       "tool_id": "blueprint_apply_ir",
-      "summary": "Apply compact Blueprint IR and materialize/wire EventGraph nodes. Primary tool for gameplay logic (overlap, timers, variables, calls). Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Not for UMG Designer layout.",
+      "summary": "Apply compact Blueprint IR and materialize/wire EventGraph nodes. Primary tool for gameplay logic (overlap, timers, variables, calls). Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Minimal valid shape: blueprint_path + nodes[] + links[] where each node has node_id/op and each link has from/to pin refs. Not for UMG Designer layout.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -1040,7 +1105,8 @@
         "additionalProperties": false,
         "properties": {
           "blueprint_path": {
-            "type": "string"
+            "type": "string",
+            "description": "Blueprint asset path under /Game. Accepted forms: /Game/Folder/MyBP or /Game/Folder/MyBP.MyBP."
           },
           "graph_name": {
             "type": "string"
@@ -1098,12 +1164,14 @@
           },
           "nodes": {
             "type": "array",
+            "description": "IR nodes to materialize. Minimal node object shape: {\"node_id\":\"id\",\"op\":\"event_begin_play\"}.",
             "items": {
               "type": "object",
               "additionalProperties": false,
               "properties": {
                 "node_id": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Stable node reference used by links/defaults."
                 },
                 "op": {
                   "type": "string",
@@ -1144,15 +1212,18 @@
           },
           "links": {
             "type": "array",
+            "description": "Connections using pin refs in node_id.pin format.",
             "items": {
               "type": "object",
               "additionalProperties": false,
               "properties": {
                 "from": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Source pin reference in node_id.pin form (example: beginplay.Then)."
                 },
                 "to": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Target pin reference in node_id.pin form (example: delay.execute)."
                 }
               },
               "required": [
@@ -2451,7 +2522,12 @@
         "additionalProperties": false,
         "properties": {
           "relative_path": {
-            "type": "string"
+            "type": "string",
+            "description": "Project-relative file path (preferred key). Alias: file_path."
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Legacy alias for relative_path."
           },
           "max_bytes": {
             "type": "integer"
@@ -2498,6 +2574,10 @@
         "properties": {
           "relative_path": {
             "type": "string"
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Legacy alias for relative_path."
           },
           "content": {
             "type": "string"
@@ -2737,7 +2817,7 @@
     },
     {
       "tool_id": "scene_fuzzy_search",
-      "summary": "Fuzzy-search actors in the current editor world/level (not Content Browser assets): matches labels, names, class names, object paths, and tags. Use to find lights, meshes, volumes, etc. when spelling may be wrong. Requires a loaded level.",
+      "summary": "Fuzzy-search actors in the loaded editor world/level (not Content Browser assets). Use this first when you need to discover actor paths by topic/label before calling actor mutation tools.",
       "category": "world_actors",
       "tags": [
         "actor",
@@ -2764,6 +2844,7 @@
         "properties": {
           "query": {
             "type": "string",
+            "minLength": 1,
             "description": "Approximate text; may be misspelled. Compared against actor label, name, class, path, and tags."
           },
           "max_results": {
@@ -2789,7 +2870,7 @@
     },
     {
       "tool_id": "asset_index_fuzzy_search",
-      "summary": "Fuzzy-search the Unreal Asset Registry index (engine-maintained indexed view of content packages). Uses the same asset data the Content Browser uses; supply path_prefix (e.g. /Game or /Game/Textures) to scope. Ranks asset names, object paths, and class paths even when spelling is approximate. Prefer this over source_search_symbol for textures, materials, meshes, and other UAssets.",
+      "summary": "Fuzzy-search the Unreal Asset Registry index for asset discovery. Use this first to discover asset paths by approximate name, then pass selected object_path into tools like asset_open_editor/asset_apply_properties.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -2816,7 +2897,20 @@
         "properties": {
           "query": {
             "type": "string",
-            "description": "Approximate text; may be misspelled. Compared against asset name, object path, and class path."
+            "minLength": 1,
+            "description": "Approximate text; may be misspelled. Compared against asset name, object path, and class path. Preferred key. Example: \"coin\", \"footstep\", \"M_\"."
+          },
+          "search_string": {
+            "type": "string",
+            "description": "Legacy alias for query. Prefer query; accepted for compatibility with older prompts."
+          },
+          "filter": {
+            "type": "string",
+            "description": "Compatibility alias for query (deprecated). Prefer query."
+          },
+          "name_prefix": {
+            "type": "string",
+            "description": "Compatibility alias for query (deprecated). Prefer query."
           },
           "path_prefix": {
             "type": "string",
@@ -2832,7 +2926,7 @@
           },
           "class_name_substring": {
             "type": "string",
-            "description": "Optional filter: asset class path must contain this substring (e.g. Texture2D)."
+            "description": "Optional filter: asset class path must contain this substring (e.g. Texture2D, StaticMesh, SoundBase, Material)."
           }
         },
         "required": [
@@ -3508,6 +3602,10 @@
           "title": {
             "type": "string"
           },
+          "definitionOfDone": {
+            "type": "string",
+            "description": "Compatibility alias for title."
+          },
           "steps": {
             "type": "array",
             "items": {
@@ -3536,7 +3634,7 @@
     },
     {
       "tool_id": "asset_create",
-      "summary": "Create a new asset under /Game via IAssetTools (asset_class path + optional factory_class). Use for Blueprints, materials, sounds, Widget BPs, SaveGame subclasses, etc.; combine with asset_apply_properties. Creating the asset does not wire level or input.",
+      "summary": "Create a new asset under /Game via IAssetTools (asset_class path + optional factory_class). Use for Blueprint assets/materials/sounds/etc. For Character/Pawn gameplay, create a Blueprint asset (/Script/Engine.Blueprint) then set parent_class via blueprint_apply_ir create_if_missing flow.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -3568,7 +3666,11 @@
           },
           "asset_class": {
             "type": "string",
-            "description": "UClass path, e.g. /Script/Engine.Material or /Script/LevelSequence.LevelSequence"
+            "description": "Native asset UClass path (not content path), e.g. /Script/Engine.Blueprint, /Script/Engine.Material, /Script/LevelSequence.LevelSequence. Do not pass gameplay actor classes like /Script/Engine.Character here."
+          },
+          "class_path": {
+            "type": "string",
+            "description": "Compatibility alias for asset_class. Prefer asset_class."
           },
           "factory_class": {
             "type": "string",
@@ -3619,6 +3721,10 @@
         "properties": {
           "object_path": {
             "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "Compatibility alias for object_path."
           }
         },
         "required": [
@@ -3811,7 +3917,7 @@
     },
     {
       "tool_id": "blueprint_export_ir",
-      "summary": "Read-only: export Blueprint graph IR (nodes, links, defaults) as JSON compatible with blueprint_apply_ir; unknown nodes export as hints—pair with blueprint_compile after edits.",
+      "summary": "Read-only: export Blueprint graph IR for an existing Blueprint asset path (usually discovered via asset_index_fuzzy_search/asset_registry_query). Use before blueprint_apply_ir when patching logic.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -3835,7 +3941,9 @@
         "additionalProperties": false,
         "properties": {
           "blueprint_path": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "description": "Blueprint asset path under /Game. Accepted forms: /Game/Folder/MyBP or /Game/Folder/MyBP.MyBP."
           },
           "graph_name": {
             "type": "string"

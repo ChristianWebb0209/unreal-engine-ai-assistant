@@ -105,6 +105,386 @@ namespace UnrealAiBlueprintToolsPriv
 		int32 DuplicateAnchors = 0;
 	};
 
+	struct FIrNormalizationReport
+	{
+		bool bApplied = false;
+		TArray<FString> Notes;
+		TArray<FString> DeprecatedFieldsSeen;
+	};
+
+	static FString NormalizeIrOpToken(const FString& InOp, FIrNormalizationReport& Report)
+	{
+		const FString Op = InOp.ToLower();
+		if (Op == TEXT("add_movement_input"))
+		{
+			Report.bApplied = true;
+			Report.DeprecatedFieldsSeen.Add(TEXT("op:add_movement_input"));
+			Report.Notes.Add(TEXT("Mapped deprecated op add_movement_input -> call_function(/Script/Engine.Pawn.AddMovementInput)."));
+			return TEXT("call_function");
+		}
+		if (Op == TEXT("turn_at_rate"))
+		{
+			Report.bApplied = true;
+			Report.DeprecatedFieldsSeen.Add(TEXT("op:turn_at_rate"));
+			Report.Notes.Add(TEXT("Mapped deprecated op turn_at_rate -> call_function(/Script/Engine.Pawn.AddControllerYawInput)."));
+			return TEXT("call_function");
+		}
+		if (Op == TEXT("lookup_at_rate"))
+		{
+			Report.bApplied = true;
+			Report.DeprecatedFieldsSeen.Add(TEXT("op:lookup_at_rate"));
+			Report.Notes.Add(TEXT("Mapped deprecated op lookup_at_rate -> call_function(/Script/Engine.Pawn.AddControllerPitchInput)."));
+			return TEXT("call_function");
+		}
+		return InOp;
+	}
+
+	static void NormalizeBlueprintIrArgs(const TSharedPtr<FJsonObject>& Args, FIrNormalizationReport& Report)
+	{
+		if (!Args.IsValid())
+		{
+			return;
+		}
+		FString Path;
+		if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("object_path"), Path);
+			if (Path.IsEmpty())
+			{
+				Args->TryGetStringField(TEXT("asset_path"), Path);
+			}
+			if (!Path.IsEmpty())
+			{
+				Args->SetStringField(TEXT("blueprint_path"), Path);
+				Report.bApplied = true;
+				Report.DeprecatedFieldsSeen.Add(TEXT("blueprint_path_alias"));
+			}
+		}
+		FString GraphName;
+		if (!Args->TryGetStringField(TEXT("graph_name"), GraphName) || GraphName.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("graph"), GraphName);
+			if (!GraphName.IsEmpty())
+			{
+				Args->SetStringField(TEXT("graph_name"), GraphName);
+				Report.bApplied = true;
+				Report.DeprecatedFieldsSeen.Add(TEXT("graph_name_alias"));
+			}
+		}
+		const TArray<TSharedPtr<FJsonValue>>* Nodes = nullptr;
+		if (Args->TryGetArrayField(TEXT("nodes"), Nodes) && Nodes)
+		{
+			for (const TSharedPtr<FJsonValue>& V : *Nodes)
+			{
+				const TSharedPtr<FJsonObject>* O = nullptr;
+				if (!V.IsValid() || !V->TryGetObject(O) || !O || !(*O).IsValid())
+				{
+					continue;
+				}
+				TSharedPtr<FJsonObject> Node = *O;
+				// Node key alias repair (node_id / variable / class / function).
+				// The downstream strict parser requires these canonical keys.
+				{
+					FString CanonicalNodeId;
+					if (!Node->TryGetStringField(TEXT("node_id"), CanonicalNodeId) || CanonicalNodeId.IsEmpty())
+					{
+						FString AltNodeId;
+						if (Node->TryGetStringField(TEXT("nodeId"), AltNodeId) && !AltNodeId.IsEmpty())
+						{
+							Node->SetStringField(TEXT("node_id"), AltNodeId);
+							Report.bApplied = true;
+							Report.DeprecatedFieldsSeen.Add(TEXT("nodes.nodeId"));
+							Report.Notes.Add(TEXT("Aliased nodes[i].nodeId -> nodes[i].node_id"));
+						}
+						else if (Node->TryGetStringField(TEXT("id"), AltNodeId) && !AltNodeId.IsEmpty())
+						{
+							Node->SetStringField(TEXT("node_id"), AltNodeId);
+							Report.bApplied = true;
+							Report.DeprecatedFieldsSeen.Add(TEXT("nodes.id"));
+							Report.Notes.Add(TEXT("Aliased nodes[i].id -> nodes[i].node_id"));
+						}
+					}
+				}
+
+				FString Op;
+				Node->TryGetStringField(TEXT("op"), Op);
+				if (!Op.IsEmpty())
+				{
+					const FString CanonOp = NormalizeIrOpToken(Op, Report);
+					if (!CanonOp.Equals(Op, ESearchCase::CaseSensitive))
+					{
+						Node->SetStringField(TEXT("op"), CanonOp);
+					}
+					if (CanonOp == TEXT("call_function"))
+					{
+						if (Op.Equals(TEXT("add_movement_input"), ESearchCase::IgnoreCase))
+						{
+							Node->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.Pawn"));
+							Node->SetStringField(TEXT("function_name"), TEXT("AddMovementInput"));
+						}
+						else if (Op.Equals(TEXT("turn_at_rate"), ESearchCase::IgnoreCase))
+						{
+							Node->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.Pawn"));
+							Node->SetStringField(TEXT("function_name"), TEXT("AddControllerYawInput"));
+						}
+						else if (Op.Equals(TEXT("lookup_at_rate"), ESearchCase::IgnoreCase))
+						{
+							Node->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.Pawn"));
+							Node->SetStringField(TEXT("function_name"), TEXT("AddControllerPitchInput"));
+						}
+					}
+				}
+				FString Alias;
+				if (!Node->HasField(TEXT("variable")) && Node->TryGetStringField(TEXT("variable_name"), Alias) && !Alias.IsEmpty())
+				{
+					Node->SetStringField(TEXT("variable"), Alias);
+					Report.bApplied = true;
+					Report.DeprecatedFieldsSeen.Add(TEXT("variable_name"));
+				}
+				if (!Node->HasField(TEXT("class_path")) && Node->TryGetStringField(TEXT("class"), Alias) && !Alias.IsEmpty())
+				{
+					Node->SetStringField(TEXT("class_path"), Alias);
+					Report.bApplied = true;
+					Report.DeprecatedFieldsSeen.Add(TEXT("class"));
+				}
+				if (!Node->HasField(TEXT("function_name")) && Node->TryGetStringField(TEXT("function"), Alias) && !Alias.IsEmpty())
+				{
+					Node->SetStringField(TEXT("function_name"), Alias);
+					Report.bApplied = true;
+					Report.DeprecatedFieldsSeen.Add(TEXT("function"));
+				}
+
+				// `custom_event` nodes require `name` (custom function name) for K2 pin/signature creation.
+				// Models often emit only `node_id` + `op:custom_event`; treat `node_id` (or `function_name`)
+				// as the implicit custom event name to reduce avoidable apply failures.
+				{
+					FString NodeOp;
+					if (Node->TryGetStringField(TEXT("op"), NodeOp) && NodeOp.Equals(TEXT("custom_event"), ESearchCase::IgnoreCase))
+					{
+						FString ExistingName;
+						const bool bHasName = Node->TryGetStringField(TEXT("name"), ExistingName) && !ExistingName.IsEmpty();
+						if (!bHasName)
+						{
+							FString ImplicitName;
+							if (Node->TryGetStringField(TEXT("function_name"), ImplicitName) && !ImplicitName.IsEmpty())
+							{
+								Node->SetStringField(TEXT("name"), ImplicitName);
+								Report.bApplied = true;
+								Report.DeprecatedFieldsSeen.Add(TEXT("function_name_for_custom_event_name"));
+								Report.Notes.Add(TEXT("custom_event.name missing; mapped from nodes.function_name"));
+							}
+							else if (Node->TryGetStringField(TEXT("node_id"), ImplicitName) && !ImplicitName.IsEmpty())
+							{
+								Node->SetStringField(TEXT("name"), ImplicitName);
+								Report.bApplied = true;
+								Report.DeprecatedFieldsSeen.Add(TEXT("node_id_for_custom_event_name"));
+								Report.Notes.Add(TEXT("custom_event.name missing; mapped from nodes.node_id"));
+							}
+						}
+					}
+				}
+			}
+		}
+		const TArray<TSharedPtr<FJsonValue>>* Links = nullptr;
+		if (Args->TryGetArrayField(TEXT("links"), Links) && Links)
+		{
+			for (const TSharedPtr<FJsonValue>& V : *Links)
+			{
+				const TSharedPtr<FJsonObject>* O = nullptr;
+				if (!V.IsValid() || !V->TryGetObject(O) || !O || !(*O).IsValid())
+				{
+					continue;
+				}
+				TSharedPtr<FJsonObject> Link = *O;
+				FString From;
+				FString To;
+				if (!Link->TryGetStringField(TEXT("from"), From) || From.IsEmpty())
+				{
+					if (Link->TryGetStringField(TEXT("source"), From) && !From.IsEmpty())
+					{
+						Link->SetStringField(TEXT("from"), From);
+						Report.bApplied = true;
+						Report.DeprecatedFieldsSeen.Add(TEXT("links.source"));
+					}
+				}
+				if (!Link->TryGetStringField(TEXT("to"), To) || To.IsEmpty())
+				{
+					if (Link->TryGetStringField(TEXT("target"), To) && !To.IsEmpty())
+					{
+						Link->SetStringField(TEXT("to"), To);
+						Report.bApplied = true;
+						Report.DeprecatedFieldsSeen.Add(TEXT("links.target"));
+					}
+				}
+				if (!From.IsEmpty() && !From.Contains(TEXT(".")))
+				{
+					Link->SetStringField(TEXT("from"), From + TEXT(".Then"));
+					Report.bApplied = true;
+					Report.Notes.Add(TEXT("Normalized link.from without pin to .Then"));
+				}
+				else if (!From.IsEmpty() && From.Contains(TEXT(".")))
+				{
+					int32 Dot = INDEX_NONE;
+					From.FindLastChar(TEXT('.'), Dot);
+					if (Dot > 0 && Dot < From.Len() - 1)
+					{
+						const FString NodeId = From.Left(Dot);
+						const FString PinTok = From.Mid(Dot + 1);
+						FString CanonPin = PinTok;
+						if (PinTok.Equals(TEXT("Exec"), ESearchCase::IgnoreCase) || PinTok.Equals(TEXT("Execute"), ESearchCase::IgnoreCase))
+						{
+							CanonPin = UEdGraphSchema_K2::PN_Execute.ToString();
+						}
+						else if (PinTok.Equals(TEXT("Then"), ESearchCase::IgnoreCase))
+						{
+							CanonPin = UEdGraphSchema_K2::PN_Then.ToString();
+						}
+						else if (PinTok.Equals(TEXT("Else"), ESearchCase::IgnoreCase))
+						{
+							CanonPin = UEdGraphSchema_K2::PN_Else.ToString();
+						}
+						else if (PinTok.Equals(TEXT("Condition"), ESearchCase::IgnoreCase))
+						{
+							CanonPin = UEdGraphSchema_K2::PN_Condition.ToString();
+						}
+						if (!CanonPin.Equals(PinTok, ESearchCase::CaseSensitive))
+						{
+							Link->SetStringField(TEXT("from"), NodeId + TEXT(".") + CanonPin);
+							Report.bApplied = true;
+							Report.DeprecatedFieldsSeen.Add(TEXT("links.pin_token_alias.from"));
+							Report.Notes.Add(TEXT("Normalized link.from pin token alias to canonical K2 pin name"));
+						}
+					}
+				}
+				if (!To.IsEmpty() && !To.Contains(TEXT(".")))
+				{
+					Link->SetStringField(TEXT("to"), To + TEXT(".Execute"));
+					Report.bApplied = true;
+					Report.Notes.Add(TEXT("Normalized link.to without pin to .Execute"));
+				}
+				else if (!To.IsEmpty() && To.Contains(TEXT(".")))
+				{
+					int32 Dot = INDEX_NONE;
+					To.FindLastChar(TEXT('.'), Dot);
+					if (Dot > 0 && Dot < To.Len() - 1)
+					{
+						const FString NodeId = To.Left(Dot);
+						const FString PinTok = To.Mid(Dot + 1);
+						FString CanonPin = PinTok;
+						if (PinTok.Equals(TEXT("Exec"), ESearchCase::IgnoreCase) || PinTok.Equals(TEXT("Execute"), ESearchCase::IgnoreCase))
+						{
+							CanonPin = UEdGraphSchema_K2::PN_Execute.ToString();
+						}
+						else if (PinTok.Equals(TEXT("Then"), ESearchCase::IgnoreCase))
+						{
+							CanonPin = UEdGraphSchema_K2::PN_Then.ToString();
+						}
+						else if (PinTok.Equals(TEXT("Else"), ESearchCase::IgnoreCase))
+						{
+							CanonPin = UEdGraphSchema_K2::PN_Else.ToString();
+						}
+						else if (PinTok.Equals(TEXT("Condition"), ESearchCase::IgnoreCase))
+						{
+							CanonPin = UEdGraphSchema_K2::PN_Condition.ToString();
+						}
+						if (!CanonPin.Equals(PinTok, ESearchCase::CaseSensitive))
+						{
+							Link->SetStringField(TEXT("to"), NodeId + TEXT(".") + CanonPin);
+							Report.bApplied = true;
+							Report.DeprecatedFieldsSeen.Add(TEXT("links.pin_token_alias.to"));
+							Report.Notes.Add(TEXT("Normalized link.to pin token alias to canonical K2 pin name"));
+						}
+					}
+				}
+			}
+		}
+
+		// Defaults repair (optional in schema, but common in AI-generated IR).
+		const TArray<TSharedPtr<FJsonValue>>* Defaults = nullptr;
+		if (Args->TryGetArrayField(TEXT("defaults"), Defaults) && Defaults)
+		{
+			for (const TSharedPtr<FJsonValue>& V : *Defaults)
+			{
+				const TSharedPtr<FJsonObject>* O = nullptr;
+				if (!V.IsValid() || !V->TryGetObject(O) || !O || !(*O).IsValid())
+				{
+					continue;
+				}
+				TSharedPtr<FJsonObject> Default = *O;
+				FString NodeId;
+				if (!Default->TryGetStringField(TEXT("node_id"), NodeId) || NodeId.IsEmpty())
+				{
+					FString Alt;
+					if (Default->TryGetStringField(TEXT("nodeId"), Alt) && !Alt.IsEmpty())
+					{
+						Default->SetStringField(TEXT("node_id"), Alt);
+						Report.bApplied = true;
+						Report.DeprecatedFieldsSeen.Add(TEXT("defaults.nodeId"));
+						Report.Notes.Add(TEXT("Aliased defaults[i].nodeId -> defaults[i].node_id"));
+					}
+					else if (Default->TryGetStringField(TEXT("id"), Alt) && !Alt.IsEmpty())
+					{
+						Default->SetStringField(TEXT("node_id"), Alt);
+						Report.bApplied = true;
+						Report.DeprecatedFieldsSeen.Add(TEXT("defaults.id"));
+						Report.Notes.Add(TEXT("Aliased defaults[i].id -> defaults[i].node_id"));
+					}
+				}
+				FString Pin;
+				if (Default->TryGetStringField(TEXT("pin"), Pin) && !Pin.IsEmpty())
+				{
+					const FString PinTok = Pin;
+					if (PinTok.Equals(TEXT("Exec"), ESearchCase::IgnoreCase) || PinTok.Equals(TEXT("Execute"), ESearchCase::IgnoreCase))
+					{
+						Default->SetStringField(TEXT("pin"), UEdGraphSchema_K2::PN_Execute.ToString());
+						Report.bApplied = true;
+						Report.DeprecatedFieldsSeen.Add(TEXT("defaults.pin_token.Exec"));
+						Report.Notes.Add(TEXT("Normalized defaults[i].pin Exec/Execute -> execute"));
+					}
+					else if (PinTok.Equals(TEXT("Then"), ESearchCase::IgnoreCase))
+					{
+						Default->SetStringField(TEXT("pin"), UEdGraphSchema_K2::PN_Then.ToString());
+						Report.bApplied = true;
+						Report.DeprecatedFieldsSeen.Add(TEXT("defaults.pin_token.Then"));
+						Report.Notes.Add(TEXT("Normalized defaults[i].pin Then -> then"));
+					}
+					else if (PinTok.Equals(TEXT("Else"), ESearchCase::IgnoreCase))
+					{
+						Default->SetStringField(TEXT("pin"), UEdGraphSchema_K2::PN_Else.ToString());
+						Report.bApplied = true;
+						Report.DeprecatedFieldsSeen.Add(TEXT("defaults.pin_token.Else"));
+						Report.Notes.Add(TEXT("Normalized defaults[i].pin Else -> else"));
+					}
+					else if (PinTok.Equals(TEXT("Condition"), ESearchCase::IgnoreCase))
+					{
+						Default->SetStringField(TEXT("pin"), UEdGraphSchema_K2::PN_Condition.ToString());
+						Report.bApplied = true;
+						Report.DeprecatedFieldsSeen.Add(TEXT("defaults.pin_token.Condition"));
+						Report.Notes.Add(TEXT("Normalized defaults[i].pin Condition -> condition"));
+					}
+				}
+				else
+				{
+					FString AltPin;
+					if (Default->TryGetStringField(TEXT("pin_name"), AltPin) && !AltPin.IsEmpty())
+					{
+						Default->SetStringField(TEXT("pin"), AltPin);
+						Report.bApplied = true;
+						Report.DeprecatedFieldsSeen.Add(TEXT("defaults.pin_name"));
+						Report.Notes.Add(TEXT("Aliased defaults[i].pin_name -> defaults[i].pin"));
+					}
+					else if (Default->TryGetStringField(TEXT("pinToken"), AltPin) && !AltPin.IsEmpty())
+					{
+						Default->SetStringField(TEXT("pin"), AltPin);
+						Report.bApplied = true;
+						Report.DeprecatedFieldsSeen.Add(TEXT("defaults.pinToken"));
+						Report.Notes.Add(TEXT("Aliased defaults[i].pinToken -> defaults[i].pin"));
+					}
+				}
+			}
+		}
+	}
+
 	/**
 	 * Models often pass /Game/Folder/Asset without the required .Asset suffix.
 	 * Canonical form for Unreal object paths is /Game/.../Name.Name (package path + exported object name).
@@ -309,12 +689,52 @@ namespace UnrealAiBlueprintToolsPriv
 		return NewBP;
 	}
 
-	static FUnrealAiToolInvocationResult MakeIrErrorResult(const TCHAR* Status, const TCHAR* Headline, const TArray<FIrError>& Errors)
+	static FUnrealAiToolInvocationResult MakeIrErrorResult(
+		const TCHAR* Status,
+		const TCHAR* Headline,
+		const TArray<FIrError>& Errors,
+		const TArray<FString>& NormalizationNotes = TArray<FString>(),
+		const TArray<FString>& DeprecatedFields = TArray<FString>(),
+		TSharedPtr<FJsonObject> SuggestedArguments = nullptr,
+		const TCHAR* SuggestedToolId = TEXT(""))
 	{
 		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 		O->SetBoolField(TEXT("ok"), false);
 		O->SetStringField(TEXT("status"), Status);
 		O->SetStringField(TEXT("error"), Headline);
+		if (NormalizationNotes.Num() > 0 || DeprecatedFields.Num() > 0)
+		{
+			O->SetBoolField(TEXT("normalization_applied"), true);
+		}
+		if (NormalizationNotes.Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> NotesArr;
+			for (const FString& N : NormalizationNotes)
+			{
+				NotesArr.Add(MakeShared<FJsonValueString>(N));
+			}
+			O->SetArrayField(TEXT("normalization_notes"), NotesArr);
+		}
+		if (DeprecatedFields.Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> DepArr;
+			for (const FString& N : DeprecatedFields)
+			{
+				DepArr.Add(MakeShared<FJsonValueString>(N));
+			}
+			O->SetArrayField(TEXT("deprecated_fields_seen"), DepArr);
+		}
+		if (SuggestedArguments.IsValid() && SuggestedArguments->HasField(TEXT("blueprint_path")))
+		{
+			// Contract shape for model retry: { "tool_id": "...", "arguments": { ... } }
+			TSharedPtr<FJsonObject> Suggested = MakeShared<FJsonObject>();
+			if (SuggestedToolId && SuggestedToolId[0] != '\0')
+			{
+				Suggested->SetStringField(TEXT("tool_id"), SuggestedToolId);
+			}
+			Suggested->SetObjectField(TEXT("arguments"), SuggestedArguments);
+			O->SetObjectField(TEXT("suggested_correct_call"), Suggested);
+		}
 
 		TArray<TSharedPtr<FJsonValue>> Arr;
 		for (const FIrError& E : Errors)
@@ -1081,6 +1501,13 @@ void UnrealAiNormalizeBlueprintObjectPath(FString& BlueprintObjectPath)
 	UnrealAiBlueprintToolsPriv::NormalizeBlueprintObjectPath(BlueprintObjectPath);
 }
 
+static FString UnrealAiBlueprintLoadHint(const FString& BlueprintPath)
+{
+	return FString::Printf(
+		TEXT("Could not load Blueprint '%s'. Expected a Blueprint asset object path under /Game (for example /Game/Blueprints/MyBP or /Game/Blueprints/MyBP.MyBP). If this is a new asset, create it first with asset_create or set create_if_missing:true in blueprint_apply_ir."),
+		*BlueprintPath);
+}
+
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompile(const TSharedPtr<FJsonObject>& Args)
 {
 	FString Path;
@@ -1091,7 +1518,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompile(const TSharedPtr
 	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path);
 	if (!BP)
 	{
-		return UnrealAiToolJson::Error(TEXT("Could not load Blueprint"));
+		return UnrealAiToolJson::Error(UnrealAiBlueprintLoadHint(Path));
 	}
 	bool bFormatGraphs = false;
 	Args->TryGetBoolField(TEXT("format_graphs"), bFormatGraphs);
@@ -1162,7 +1589,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportIr(const TSharedPt
 	UBlueprint* BP = LoadBlueprint(Path);
 	if (!BP)
 	{
-		return UnrealAiToolJson::Error(TEXT("Could not load Blueprint"));
+		return UnrealAiToolJson::Error(UnrealAiBlueprintLoadHint(Path));
 	}
 	UEdGraph* Graph = nullptr;
 	if (!GraphName.IsEmpty())
@@ -1175,7 +1602,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportIr(const TSharedPt
 	}
 	if (!Graph)
 	{
-		return UnrealAiToolJson::Error(TEXT("Graph not found"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("blueprint_path"), Path);
+		SuggestedArgs->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("Graph not found. Call blueprint_get_graph_summary first to discover valid graph names, then retry blueprint_export_ir with one concrete graph_name."),
+			TEXT("blueprint_export_ir"),
+			SuggestedArgs);
 	}
 
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
@@ -1280,11 +1713,21 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 {
 	using namespace UnrealAiBlueprintToolsPriv;
 
+	FIrNormalizationReport Normalization;
+	NormalizeBlueprintIrArgs(Args, Normalization);
+
 	FBlueprintIr Ir;
 	TArray<FIrError> ParseErrors;
 	if (!TryParseIr(Args, Ir, ParseErrors))
 	{
-		return MakeIrErrorResult(TEXT("invalid_ir"), TEXT("Invalid blueprint IR"), ParseErrors);
+		return MakeIrErrorResult(
+			TEXT("invalid_ir"),
+			TEXT("Invalid blueprint IR (check required keys/types in error_details)."),
+			ParseErrors,
+			Normalization.Notes,
+			Normalization.DeprecatedFieldsSeen,
+			Normalization.bApplied ? Args : nullptr,
+			TEXT("blueprint_apply_ir"));
 	}
 
 	bool bCreatedBlueprint = false;
@@ -1295,7 +1738,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 		BP = TryCreateBlueprintAsset(Ir.BlueprintPath, Ir.ParentClassPath, CreateErrors);
 		if (!BP)
 		{
-			return MakeIrErrorResult(TEXT("create_failed"), TEXT("Blueprint create failed"), CreateErrors);
+			return MakeIrErrorResult(
+				TEXT("create_failed"),
+				TEXT("Blueprint create failed"),
+				CreateErrors,
+				Normalization.Notes,
+				Normalization.DeprecatedFieldsSeen);
 		}
 		bCreatedBlueprint = true;
 	}
@@ -1308,10 +1756,68 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 			TEXT("$.blueprint_path"),
 			TEXT("Could not load Blueprint"),
 			TEXT("Set create_if_missing:true (optional parent_class /Script/Engine.Actor) or create the asset with asset_create, then retry."));
-		return MakeIrErrorResult(TEXT("asset_not_found"), TEXT("Blueprint load failed"), Errors);
+		TSharedPtr<FJsonObject> SuggestedArgs = nullptr;
+		if (!Ir.bCreateIfMissing)
+		{
+			// Deterministic repair: flip create_if_missing so the Blueprint exists for the apply.
+			SuggestedArgs = Args;
+			SuggestedArgs->SetBoolField(TEXT("create_if_missing"), true);
+			if (!SuggestedArgs->HasField(TEXT("parent_class")))
+			{
+				SuggestedArgs->SetStringField(TEXT("parent_class"), TEXT("/Script/Engine.Actor"));
+			}
+		}
+		return MakeIrErrorResult(
+			TEXT("asset_not_found"),
+			TEXT("Blueprint load failed"),
+			Errors,
+			Normalization.Notes,
+			Normalization.DeprecatedFieldsSeen,
+			SuggestedArgs,
+			TEXT("blueprint_apply_ir"));
+	}
+	if (!Ir.ParentClassPath.IsEmpty() && BP->ParentClass == nullptr)
+	{
+		UClass* DesiredParent = FindObject<UClass>(nullptr, *Ir.ParentClassPath);
+		if (!DesiredParent)
+		{
+			DesiredParent = LoadObject<UClass>(nullptr, *Ir.ParentClassPath);
+		}
+		if (!DesiredParent)
+		{
+			TArray<FIrError> Errors;
+			AddError(
+				Errors,
+				TEXT("invalid_class"),
+				TEXT("$.parent_class"),
+				TEXT("Could not resolve parent_class"),
+				TEXT("Use a native class path like /Script/Engine.Actor or /Script/Engine.Character"));
+			return MakeIrErrorResult(
+				TEXT("invalid_class"),
+				TEXT("Parent class resolution failed"),
+				Errors,
+				Normalization.Notes,
+				Normalization.DeprecatedFieldsSeen);
+		}
+		BP->ParentClass = DesiredParent;
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
 	}
 
 	UEdGraph* Graph = FindGraphByName(BP, Ir.GraphName);
+	if (!Graph && Ir.GraphName.Equals(TEXT("EventGraph"), ESearchCase::IgnoreCase))
+	{
+		UEdGraph* NewUbergraph = FBlueprintEditorUtils::CreateNewGraph(
+			BP,
+			FName(TEXT("EventGraph")),
+			UEdGraph::StaticClass(),
+			UEdGraphSchema_K2::StaticClass());
+		if (NewUbergraph)
+		{
+			FBlueprintEditorUtils::AddUbergraphPage(BP, NewUbergraph);
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+			Graph = NewUbergraph;
+		}
+	}
 	if (!Graph)
 	{
 		TArray<FIrError> Errors;
@@ -1321,7 +1827,21 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 			TEXT("$.graph_name"),
 			TEXT("Graph not found on Blueprint"),
 			TEXT("For v1 use EventGraph (default)"));
-		return MakeIrErrorResult(TEXT("graph_not_found"), TEXT("Graph resolution failed"), Errors);
+		TSharedPtr<FJsonObject> SuggestedArgs = nullptr;
+		if (!Ir.GraphName.Equals(TEXT("EventGraph"), ESearchCase::IgnoreCase))
+		{
+			// Deterministic repair: try EventGraph since the apply path can auto-create it.
+			SuggestedArgs = Args;
+			SuggestedArgs->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+		}
+		return MakeIrErrorResult(
+			TEXT("graph_not_found"),
+			TEXT("Graph resolution failed"),
+			Errors,
+			Normalization.Notes,
+			Normalization.DeprecatedFieldsSeen,
+			SuggestedArgs,
+			TEXT("blueprint_apply_ir"));
 	}
 
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnBpApplyIr", "Unreal AI: apply blueprint IR"));
@@ -1516,7 +2036,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 
 	if (BuildErrors.Num() > 0)
 	{
-		return MakeIrErrorResult(TEXT("apply_failed"), TEXT("Blueprint IR apply failed"), BuildErrors);
+		return MakeIrErrorResult(
+			TEXT("apply_failed"),
+			TEXT("Blueprint IR apply failed"),
+			BuildErrors,
+			Normalization.Notes,
+			Normalization.DeprecatedFieldsSeen);
 	}
 
 	TArray<UEdGraphNode*> MaterializedNodes;
@@ -1560,6 +2085,28 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 	O->SetBoolField(TEXT("layout_applied"), bLayoutApplied);
 	O->SetBoolField(TEXT("auto_layout_requested"), Ir.bAutoLayout);
 	O->SetNumberField(TEXT("layout_nodes_positioned"), static_cast<double>(FormatResult.NodesPositioned));
+	if (Normalization.bApplied)
+	{
+		O->SetBoolField(TEXT("normalization_applied"), true);
+		if (Normalization.Notes.Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> NotesArr;
+			for (const FString& N : Normalization.Notes)
+			{
+				NotesArr.Add(MakeShared<FJsonValueString>(N));
+			}
+			O->SetArrayField(TEXT("normalization_notes"), NotesArr);
+		}
+		if (Normalization.DeprecatedFieldsSeen.Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> DepArr;
+			for (const FString& N : Normalization.DeprecatedFieldsSeen)
+			{
+				DepArr.Add(MakeShareable(new FJsonValueString(N)));
+			}
+			O->SetArrayField(TEXT("deprecated_fields_seen"), DepArr);
+		}
+	}
 	if (!bFormatterAvailable && Ir.bAutoLayout)
 	{
 		O->SetStringField(TEXT("formatter_hint"), UnrealAiBlueprintFormatterBridge::FormatterInstallHint());
@@ -1623,7 +2170,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintFormatGraph(const TShare
 	UBlueprint* BP = LoadBlueprint(Path);
 	if (!BP)
 	{
-		return UnrealAiToolJson::Error(TEXT("Could not load Blueprint"));
+		return UnrealAiToolJson::Error(UnrealAiBlueprintLoadHint(Path));
 	}
 	UEdGraph* Graph = nullptr;
 	if (!GraphName.IsEmpty())
@@ -1687,7 +2234,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGetGraphSummary(const TS
 	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path);
 	if (!BP)
 	{
-		return UnrealAiToolJson::Error(TEXT("Could not load Blueprint"));
+		return UnrealAiToolJson::Error(UnrealAiBlueprintLoadHint(Path));
 	}
 	TArray<UEdGraph*> Graphs;
 	if (!GraphName.IsEmpty())
@@ -1775,13 +2322,34 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintOpenGraphTab(const TShar
 	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty()
 		|| !Args->TryGetStringField(TEXT("graph_name"), GraphName) || GraphName.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("blueprint_path and graph_name are required"));
+		if (Path.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("object_path"), Path);
+		}
+		if (Path.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("asset_path"), Path);
+		}
+		if (GraphName.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("graph"), GraphName);
+		}
+		if (Path.IsEmpty() || GraphName.IsEmpty())
+		{
+			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+			SuggestedArgs->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
+			SuggestedArgs->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+			return UnrealAiToolJson::ErrorWithSuggestedCall(
+				TEXT("blueprint_path and graph_name are required (aliases: object_path/asset_path, graph)."),
+				TEXT("blueprint_open_graph_tab"),
+				SuggestedArgs);
+		}
 	}
 	UnrealAiNormalizeBlueprintObjectPath(Path);
 	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path);
 	if (!BP)
 	{
-		return UnrealAiToolJson::Error(TEXT("Could not load Blueprint"));
+		return UnrealAiToolJson::Error(UnrealAiBlueprintLoadHint(Path));
 	}
 	UEdGraph* G = UnrealAiBlueprintToolsPriv::FindGraphByName(BP, GraphName);
 	if (!G)
@@ -1811,16 +2379,25 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintAddVariable(const TShare
 	FString Path;
 	FString VarName;
 	FString TypeStr;
-	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty()
-		|| !Args->TryGetStringField(TEXT("name"), VarName) || VarName.IsEmpty()
-		|| !Args->TryGetStringField(TEXT("type"), TypeStr) || TypeStr.IsEmpty())
+	Args->TryGetStringField(TEXT("blueprint_path"), Path);
+	Args->TryGetStringField(TEXT("name"), VarName);
+	if (VarName.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("blueprint_path, name, and type are required"));
+		Args->TryGetStringField(TEXT("variable_name"), VarName);
+	}
+	Args->TryGetStringField(TEXT("type"), TypeStr);
+	if (TypeStr.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("variable_type"), TypeStr);
+	}
+	if (Path.IsEmpty() || VarName.IsEmpty() || TypeStr.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("blueprint_path, name, and type are required (aliases: variable_name, variable_type)."));
 	}
 	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path);
 	if (!BP)
 	{
-		return UnrealAiToolJson::Error(TEXT("Could not load Blueprint"));
+		return UnrealAiToolJson::Error(UnrealAiBlueprintLoadHint(Path));
 	}
 	const FEdGraphPinType PinType = UnrealAiBlueprintToolsPriv::ParsePinType(TypeStr);
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnBpVar", "Unreal AI: add BP variable"));

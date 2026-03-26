@@ -4,6 +4,7 @@
 #include "Context/AgentContextTypes.h"
 #include "Context/IAgentContextService.h"
 #include "Tools/UnrealAiToolJson.h"
+#include "Tools/UnrealAiToolDispatch_ArgRepair.h"
 
 #include "Dom/JsonObject.h"
 
@@ -15,6 +16,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/DateTime.h"
+#include "Misc/PackageName.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/TopLevelAssetPath.h"
 #include "HAL/FileManager.h"
@@ -24,8 +26,93 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRegistryQuery(const TSharedP
 {
 	FString PathFilter;
 	Args->TryGetStringField(TEXT("path_filter"), PathFilter);
+	if (PathFilter.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("filter"), PathFilter);
+	}
+	if (PathFilter.IsEmpty())
+	{
+		FString ObjectPath;
+		Args->TryGetStringField(TEXT("object_path"), ObjectPath);
+		if (!ObjectPath.IsEmpty())
+		{
+			PathFilter = FPackageName::ObjectPathToPackageName(ObjectPath);
+		}
+	}
 	FString ClassName;
 	Args->TryGetStringField(TEXT("class_name"), ClassName);
+	const TArray<TSharedPtr<FJsonValue>>* ClassPaths = nullptr;
+	if (ClassName.IsEmpty() && Args->TryGetArrayField(TEXT("class_paths"), ClassPaths) && ClassPaths && ClassPaths->Num() > 0)
+	{
+		FString FirstClass;
+		if ((*ClassPaths)[0].IsValid() && (*ClassPaths)[0]->TryGetString(FirstClass))
+		{
+			ClassName = FirstClass;
+		}
+	}
+	const TArray<TSharedPtr<FJsonValue>>* ClassFilters = nullptr;
+	if (ClassName.IsEmpty() && Args->TryGetArrayField(TEXT("class_filters"), ClassFilters) && ClassFilters && ClassFilters->Num() > 0)
+	{
+		FString FirstClass;
+		if ((*ClassFilters)[0].IsValid() && (*ClassFilters)[0]->TryGetString(FirstClass))
+		{
+			ClassName = FirstClass;
+		}
+	}
+	const TArray<TSharedPtr<FJsonValue>>* ClassNames = nullptr;
+	if (ClassName.IsEmpty() && Args->TryGetArrayField(TEXT("class_names"), ClassNames) && ClassNames && ClassNames->Num() > 0)
+	{
+		FString FirstClass;
+		if ((*ClassNames)[0].IsValid() && (*ClassNames)[0]->TryGetString(FirstClass))
+		{
+			ClassName = FirstClass;
+		}
+	}
+	if (!ClassName.IsEmpty() && !ClassName.StartsWith(TEXT("/Script/"), ESearchCase::IgnoreCase))
+	{
+		ClassName = FString::Printf(TEXT("/Script/Engine.%s"), *ClassName);
+	}
+	const TArray<TSharedPtr<FJsonValue>>* Filters = nullptr;
+	if ((PathFilter.IsEmpty() || ClassName.IsEmpty()) && Args->TryGetArrayField(TEXT("filters"), Filters) && Filters)
+	{
+		for (const TSharedPtr<FJsonValue>& V : *Filters)
+		{
+			const TSharedPtr<FJsonObject>* F = nullptr;
+			if (!V.IsValid() || !V->TryGetObject(F) || !F || !(*F).IsValid())
+			{
+				continue;
+			}
+			FString Key;
+			FString Value;
+			(*F)->TryGetStringField(TEXT("key"), Key);
+			(*F)->TryGetStringField(TEXT("value"), Value);
+			if (Value.IsEmpty())
+			{
+				continue;
+			}
+			if (PathFilter.IsEmpty() && (Key.Equals(TEXT("path"), ESearchCase::IgnoreCase) || Key.Equals(TEXT("path_filter"), ESearchCase::IgnoreCase)))
+			{
+				PathFilter = Value;
+			}
+			else if (ClassName.IsEmpty()
+				&& (Key.Equals(TEXT("class"), ESearchCase::IgnoreCase) || Key.Equals(TEXT("class_name"), ESearchCase::IgnoreCase)))
+			{
+				ClassName = Value;
+			}
+		}
+	}
+	if (PathFilter.IsEmpty())
+	{
+		const TSharedPtr<FJsonObject>* FiltersObj = nullptr;
+		if (Args->TryGetObjectField(TEXT("filters"), FiltersObj) && FiltersObj && (*FiltersObj).IsValid())
+		{
+			(*FiltersObj)->TryGetStringField(TEXT("path_prefix"), PathFilter);
+			if (PathFilter.IsEmpty())
+			{
+				(*FiltersObj)->TryGetStringField(TEXT("path_filter"), PathFilter);
+			}
+		}
+	}
 	int32 MaxResults = 100;
 	double MR = 0.0;
 	if (Args->TryGetNumberField(TEXT("max_results"), MR))
@@ -91,6 +178,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_EditorStateSnapshotRead(
 
 	FAgentContextBuildOptions Opt;
 	Opt.Mode = EUnrealAiAgentMode::Agent;
+	Opt.ContextBuildInvocationReason = TEXT("tool_editor_state_snapshot_read");
 	const FAgentContextBuildResult Built = Ctx->BuildContextWindow(Opt);
 
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
@@ -111,14 +199,43 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AgentEmitTodoPlan(
 		return UnrealAiToolJson::Error(TEXT("invalid arguments"));
 	}
 	FString Title;
-	if (!Args->TryGetStringField(TEXT("title"), Title) || Title.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("title is required"));
+		const TArray<const TCHAR*> Aliases = { TEXT("definitionOfDone") };
+		if (!UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
+				Args,
+				TEXT("title"),
+				Aliases,
+				Title)
+			|| Title.IsEmpty())
+		{
+			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+			SuggestedArgs->SetStringField(TEXT("title"), TEXT("Implement requested task safely"));
+			const TArray<TSharedPtr<FJsonValue>>* Steps = nullptr;
+			if (Args->TryGetArrayField(TEXT("steps"), Steps) && Steps)
+			{
+				SuggestedArgs->SetArrayField(TEXT("steps"), *Steps);
+			}
+			return UnrealAiToolJson::ErrorWithSuggestedCall(
+				TEXT("title is required (alias: definitionOfDone)."),
+				TEXT("agent_emit_todo_plan"),
+				SuggestedArgs);
+		}
 	}
 	const TArray<TSharedPtr<FJsonValue>>* Steps = nullptr;
 	if (!Args->TryGetArrayField(TEXT("steps"), Steps) || !Steps || Steps->Num() == 0)
 	{
-		return UnrealAiToolJson::Error(TEXT("steps array is required"));
+		TSharedPtr<FJsonObject> Suggested = MakeShared<FJsonObject>();
+		Suggested->SetStringField(TEXT("title"), TEXT("Implement requested task safely"));
+		TArray<TSharedPtr<FJsonValue>> SuggestedSteps;
+		TSharedPtr<FJsonObject> S0 = MakeShared<FJsonObject>();
+		S0->SetStringField(TEXT("id"), TEXT("step_1"));
+		S0->SetStringField(TEXT("title"), TEXT("Inspect current state"));
+		S0->SetStringField(TEXT("detail"), TEXT("Use read/search tools to resolve required paths."));
+		S0->SetArrayField(TEXT("dependsOn"), TArray<TSharedPtr<FJsonValue>>());
+		S0->SetStringField(TEXT("status"), TEXT("pending"));
+		SuggestedSteps.Add(MakeShared<FJsonValueObject>(S0));
+		Suggested->SetArrayField(TEXT("steps"), SuggestedSteps);
+		return UnrealAiToolJson::ErrorWithSuggestedCall(TEXT("steps array is required"), TEXT("agent_emit_todo_plan"), Suggested);
 	}
 	IAgentContextService* Ctx = Registry ? Registry->GetContextService() : nullptr;
 	if (!Ctx)
@@ -129,7 +246,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AgentEmitTodoPlan(
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetStringField(TEXT("schema"), TEXT("unreal_ai.todo_plan"));
 	Root->SetStringField(TEXT("title"), Title);
+	const int32 MaxPlanSteps = 12;
+	if (Steps->Num() > MaxPlanSteps)
+	{
+		return UnrealAiToolJson::Error(
+			FString::Printf(TEXT("steps exceeds max allowed (%d). Split into phases or reduce scope."), MaxPlanSteps));
+	}
 	TArray<TSharedPtr<FJsonValue>> StepArr;
+	TSet<FString> StepIds;
 	for (const TSharedPtr<FJsonValue>& V : *Steps)
 	{
 		const TSharedPtr<FJsonObject>* O = nullptr;
@@ -137,11 +261,96 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AgentEmitTodoPlan(
 		{
 			continue;
 		}
-		StepArr.Add(MakeShared<FJsonValueObject>(O->ToSharedRef()));
+		const TSharedPtr<FJsonObject> InStep = *O;
+		TSharedPtr<FJsonObject> OutStep = MakeShared<FJsonObject>();
+		FString Id;
+		InStep->TryGetStringField(TEXT("id"), Id);
+		if (Id.IsEmpty())
+		{
+			Id = FString::Printf(TEXT("step_%d"), StepArr.Num() + 1);
+		}
+		if (StepIds.Contains(Id))
+		{
+			return UnrealAiToolJson::Error(FString::Printf(TEXT("duplicate step id: %s"), *Id));
+		}
+		StepIds.Add(Id);
+		OutStep->SetStringField(TEXT("id"), Id);
+
+		FString StepTitle;
+		InStep->TryGetStringField(TEXT("title"), StepTitle);
+		if (StepTitle.IsEmpty())
+		{
+			InStep->TryGetStringField(TEXT("detail"), StepTitle);
+		}
+		if (StepTitle.IsEmpty())
+		{
+			return UnrealAiToolJson::Error(FString::Printf(TEXT("step '%s' requires title/detail"), *Id));
+		}
+		OutStep->SetStringField(TEXT("title"), StepTitle);
+
+		FString Detail;
+		InStep->TryGetStringField(TEXT("detail"), Detail);
+		if (!Detail.IsEmpty())
+		{
+			OutStep->SetStringField(TEXT("detail"), Detail);
+		}
+		FString Status;
+		InStep->TryGetStringField(TEXT("status"), Status);
+		if (Status.IsEmpty())
+		{
+			Status = TEXT("pending");
+		}
+		const FString StatusNorm = Status.ToLower();
+		if (StatusNorm != TEXT("pending")
+			&& StatusNorm != TEXT("in_progress")
+			&& StatusNorm != TEXT("completed")
+			&& StatusNorm != TEXT("blocked")
+			&& StatusNorm != TEXT("cancelled"))
+		{
+			return UnrealAiToolJson::Error(FString::Printf(TEXT("step '%s' has invalid status '%s'"), *Id, *Status));
+		}
+		OutStep->SetStringField(TEXT("status"), StatusNorm);
+		const TArray<TSharedPtr<FJsonValue>>* Depends = nullptr;
+		if (InStep->TryGetArrayField(TEXT("dependsOn"), Depends) && Depends)
+		{
+			TArray<TSharedPtr<FJsonValue>> OutDepends;
+			for (const TSharedPtr<FJsonValue>& DepVal : *Depends)
+			{
+				FString DepId;
+				if (DepVal.IsValid() && DepVal->TryGetString(DepId) && !DepId.IsEmpty())
+				{
+					OutDepends.Add(MakeShared<FJsonValueString>(DepId));
+				}
+			}
+			OutStep->SetArrayField(TEXT("dependsOn"), OutDepends);
+		}
+		StepArr.Add(MakeShared<FJsonValueObject>(OutStep));
 	}
 	if (StepArr.Num() == 0)
 	{
 		return UnrealAiToolJson::Error(TEXT("steps must contain objects"));
+	}
+	for (const TSharedPtr<FJsonValue>& StepVal : StepArr)
+	{
+		const TSharedPtr<FJsonObject>* StepObj = nullptr;
+		if (!StepVal.IsValid() || !StepVal->TryGetObject(StepObj) || !StepObj || !(*StepObj).IsValid())
+		{
+			continue;
+		}
+		const FString ThisId = (*StepObj)->GetStringField(TEXT("id"));
+		const TArray<TSharedPtr<FJsonValue>>* Depends = nullptr;
+		if ((*StepObj)->TryGetArrayField(TEXT("dependsOn"), Depends) && Depends)
+		{
+			for (const TSharedPtr<FJsonValue>& DepVal : *Depends)
+			{
+				FString DepId;
+				if (DepVal.IsValid() && DepVal->TryGetString(DepId) && !DepId.IsEmpty() && !StepIds.Contains(DepId))
+				{
+					return UnrealAiToolJson::Error(
+						FString::Printf(TEXT("step '%s' dependsOn unknown step id '%s'"), *ThisId, *DepId));
+				}
+			}
+		}
 	}
 	Root->SetArrayField(TEXT("steps"), StepArr);
 	const FString Json = UnrealAiToolJson::SerializeObject(Root);
@@ -155,7 +364,19 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ContentBrowserSyncAsset(const TSh
 	FString Path;
 	if (!Args->TryGetStringField(TEXT("path"), Path) || Path.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("path is required"));
+		if (!Args->TryGetStringField(TEXT("object_path"), Path) || Path.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("asset_path"), Path);
+		}
+	}
+	if (Path.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("path is required (aliases: object_path, asset_path)."),
+			TEXT("content_browser_sync_asset"),
+			SuggestedArgs);
 	}
 
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));

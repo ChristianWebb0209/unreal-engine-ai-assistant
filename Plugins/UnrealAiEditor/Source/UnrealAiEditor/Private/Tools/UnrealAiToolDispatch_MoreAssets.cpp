@@ -42,13 +42,27 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetDelete(const TSharedPtr<FJso
 	const TArray<TSharedPtr<FJsonValue>>* Paths = nullptr;
 	if (!Args->TryGetArrayField(TEXT("object_paths"), Paths) || !Paths || Paths->Num() == 0)
 	{
-		return UnrealAiToolJson::Error(TEXT("object_paths array is required"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		TArray<TSharedPtr<FJsonValue>> SuggestedPaths;
+		SuggestedPaths.Add(MakeShared<FJsonValueString>(TEXT("/Game/Blueprints/MyBP.MyBP")));
+		SuggestedArgs->SetArrayField(TEXT("object_paths"), SuggestedPaths);
+		SuggestedArgs->SetBoolField(TEXT("confirm"), true);
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("object_paths array is required (aliases: object_path, path)."),
+			TEXT("asset_delete"),
+			SuggestedArgs);
 	}
 	bool bConfirm = false;
 	Args->TryGetBoolField(TEXT("confirm"), bConfirm);
 	if (!bConfirm)
 	{
-		return UnrealAiToolJson::Error(TEXT("confirm must be true to delete assets"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetArrayField(TEXT("object_paths"), *Paths);
+		SuggestedArgs->SetBoolField(TEXT("confirm"), true);
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("confirm must be true to delete assets"),
+			TEXT("asset_delete"),
+			SuggestedArgs);
 	}
 	TArray<UObject*> ToDelete;
 	for (const TSharedPtr<FJsonValue>& V : *Paths)
@@ -157,7 +171,16 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetOpenEditor(const TSharedPtr<
 	FString Path;
 	if (!Args->TryGetStringField(TEXT("object_path"), Path) || Path.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("object_path is required"));
+		Args->TryGetStringField(TEXT("asset_path"), Path);
+	}
+	if (Path.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("object_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("object_path is required (alias: asset_path)."),
+			TEXT("asset_open_editor"),
+			SuggestedArgs);
 	}
 	UnrealAiNormalizeBlueprintObjectPath(Path);
 	UObject* Obj = LoadObject<UObject>(nullptr, *Path);

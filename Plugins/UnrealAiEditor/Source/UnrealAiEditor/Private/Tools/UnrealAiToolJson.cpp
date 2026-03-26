@@ -42,3 +42,26 @@ FUnrealAiToolInvocationResult UnrealAiToolJson::Error(const FString& Message)
 	R.EditorPresentation = nullptr;
 	return R;
 }
+
+FUnrealAiToolInvocationResult UnrealAiToolJson::ErrorWithSuggestedCall(
+	const FString& Message,
+	const FString& ToolId,
+	const TSharedPtr<FJsonObject>& SuggestedArguments)
+{
+	FUnrealAiToolInvocationResult R;
+	R.bOk = false;
+	R.ErrorMessage = Message;
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetStringField(TEXT("error"), Message);
+	O->SetBoolField(TEXT("ok"), false);
+	if (!ToolId.IsEmpty() && SuggestedArguments.IsValid())
+	{
+		TSharedPtr<FJsonObject> Suggested = MakeShared<FJsonObject>();
+		Suggested->SetStringField(TEXT("tool_id"), ToolId);
+		Suggested->SetObjectField(TEXT("arguments"), SuggestedArguments);
+		O->SetObjectField(TEXT("suggested_correct_call"), Suggested);
+	}
+	R.ContentForModel = SerializeObject(O);
+	R.EditorPresentation = nullptr;
+	return R;
+}

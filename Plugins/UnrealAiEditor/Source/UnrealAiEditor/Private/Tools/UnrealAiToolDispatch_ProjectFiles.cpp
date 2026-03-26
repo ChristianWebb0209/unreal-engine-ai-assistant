@@ -2,6 +2,7 @@
 
 #include "Tools/UnrealAiToolJson.h"
 #include "Tools/UnrealAiToolProjectPathAllowlist.h"
+#include "Tools/UnrealAiToolDispatch_ArgRepair.h"
 
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -10,9 +11,23 @@
 FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileReadText(const TSharedPtr<FJsonObject>& Args)
 {
 	FString Rel;
-	if (!Args->TryGetStringField(TEXT("relative_path"), Rel) || Rel.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("relative_path is required"));
+		const TArray<const TCHAR*> Aliases = { TEXT("file_path") };
+		if (!UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
+			Args,
+			TEXT("relative_path"),
+			Aliases,
+			Rel)
+			|| Rel.IsEmpty())
+		{
+			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+			SuggestedArgs->SetStringField(TEXT("relative_path"), TEXT("Config/DefaultEngine.ini"));
+			SuggestedArgs->SetNumberField(TEXT("max_bytes"), 1024.0);
+			return UnrealAiToolJson::ErrorWithSuggestedCall(
+				TEXT("relative_path is required (alias: file_path)."),
+				TEXT("project_file_read_text"),
+				SuggestedArgs);
+		}
 	}
 	int32 MaxBytes = 512 * 1024;
 	double MB = 0.0;
@@ -53,15 +68,37 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileWriteText(const TShare
 	FString Rel;
 	FString Content;
 	bool bConfirm = false;
-	if (!Args->TryGetStringField(TEXT("relative_path"), Rel) || Rel.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("relative_path is required"));
+		const TArray<const TCHAR*> Aliases = { TEXT("file_path") };
+		if (!UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
+			Args,
+			TEXT("relative_path"),
+			Aliases,
+			Rel)
+			|| Rel.IsEmpty())
+		{
+			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+			SuggestedArgs->SetStringField(TEXT("relative_path"), TEXT("Config/DefaultEngine.ini"));
+			SuggestedArgs->SetStringField(TEXT("content"), TEXT("// Written by UnrealAiEditor"));
+			SuggestedArgs->SetBoolField(TEXT("confirm"), true);
+			return UnrealAiToolJson::ErrorWithSuggestedCall(
+				TEXT("relative_path is required (alias: file_path)."),
+				TEXT("project_file_write_text"),
+				SuggestedArgs);
+		}
 	}
 	Args->TryGetStringField(TEXT("content"), Content);
 	Args->TryGetBoolField(TEXT("confirm"), bConfirm);
 	if (!bConfirm)
 	{
-		return UnrealAiToolJson::Error(TEXT("confirm must be true"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("relative_path"), Rel);
+		SuggestedArgs->SetStringField(TEXT("content"), Content);
+		SuggestedArgs->SetBoolField(TEXT("confirm"), true);
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("confirm must be true for project_file_write_text."),
+			TEXT("project_file_write_text"),
+			SuggestedArgs);
 	}
 	FString Abs;
 	FString Err;

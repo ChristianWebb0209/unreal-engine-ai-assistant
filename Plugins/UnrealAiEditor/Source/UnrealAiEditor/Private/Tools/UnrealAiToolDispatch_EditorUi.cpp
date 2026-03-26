@@ -46,7 +46,35 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_EditorSetSelection(const TSharedP
 	const TArray<TSharedPtr<FJsonValue>>* Paths = nullptr;
 	if (!Args->TryGetArrayField(TEXT("actor_paths"), Paths) || !Paths)
 	{
-		return UnrealAiToolJson::Error(TEXT("actor_paths array is required"));
+		Args->TryGetArrayField(TEXT("paths"), Paths);
+	}
+	TArray<TSharedPtr<FJsonValue>> NormalizedPaths;
+	if (!Paths || Paths->Num() == 0)
+	{
+		FString SinglePath;
+		if (!Args->TryGetStringField(TEXT("actor_path"), SinglePath) || SinglePath.IsEmpty())
+		{
+			if (!Args->TryGetStringField(TEXT("path"), SinglePath) || SinglePath.IsEmpty())
+			{
+				Args->TryGetStringField(TEXT("selection_path"), SinglePath);
+			}
+		}
+		if (!SinglePath.IsEmpty())
+		{
+			NormalizedPaths.Add(MakeShareable(new FJsonValueString(SinglePath)));
+			Paths = &NormalizedPaths;
+		}
+	}
+	if (!Paths || Paths->Num() == 0)
+	{
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		TArray<TSharedPtr<FJsonValue>> SuggestedList;
+		SuggestedList.Add(MakeShareable(new FJsonValueString(TEXT("PersistentLevel.PlayerStart"))));
+		SuggestedArgs->SetArrayField(TEXT("actor_paths"), SuggestedList);
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("actor_paths array is required (aliases: paths, actor_path, path, selection_path)."),
+			TEXT("editor_set_selection"),
+			SuggestedArgs);
 	}
 	if (!GEditor)
 	{

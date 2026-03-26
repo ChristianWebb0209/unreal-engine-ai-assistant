@@ -6,10 +6,14 @@
 #include "Backend/IUnrealAiPersistence.h"
 #include "Backend/UnrealAiBackendRegistry.h"
 #include "Context/UnrealAiProjectId.h"
+#include "Context/UnrealAiContextRankingPolicy.h"
 #include "Context/AgentContextTypes.h"
 #include "Context/IAgentContextService.h"
 #include "Context/UnrealAiContextDragDrop.h"
 #include "Context/UnrealAiEditorContextQueries.h"
+#include "Context/UnrealAiRecentUiRanking.h"
+#include "Memory/IUnrealAiMemoryService.h"
+#include "Memory/UnrealAiMemoryTypes.h"
 #include "Style/UnrealAiEditorStyle.h"
 #include "Tabs/SUnrealAiEditorChatTab.h"
 #include "Framework/Docking/SDockingTabStack.h"
@@ -43,6 +47,7 @@
 #include "WorkspaceMenuStructure.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/UnrealAiEditorModalMonitor.h"
+#include "Misc/UnrealAiRecentUiTracker.h"
 #include "Misc/Guid.h"
 #include "WorkspaceMenuStructureModule.h"
 #include "Containers/Ticker.h"
@@ -64,6 +69,11 @@ static FUnrealAiEditorModule* GUnrealAiModule = nullptr;
 static IConsoleObject* GUnrealAiCatalogMatrixConsole = nullptr;
 static IConsoleObject* GUnrealAiRunAgentTurnConsole = nullptr;
 static IConsoleObject* GUnrealAiDumpContextWindowConsole = nullptr;
+static IConsoleObject* GUnrealAiDumpRecentUiConsole = nullptr;
+static IConsoleObject* GUnrealAiDumpMemoriesConsole = nullptr;
+static IConsoleObject* GUnrealAiPruneMemoriesConsole = nullptr;
+static IConsoleObject* GUnrealAiDumpContextRankPolicyConsole = nullptr;
+static IConsoleObject* GUnrealAiDumpContextDecisionLogsConsole = nullptr;
 
 static void RegisterUnrealAiEditorKeyBindings()
 {
@@ -124,6 +134,12 @@ void FUnrealAiEditorModule::StartupModule()
 	RegisterOpenChatOnStartup();
 	RegisterSaveOpenChatsOnExit();
 	FUnrealAiEditorModalMonitor::Startup(BackendRegistry);
+	if (BackendRegistry.IsValid())
+	{
+		FUnrealAiRecentUiTracker::Startup(
+			BackendRegistry->GetPersistence(),
+			UnrealAiProjectId::GetCurrentProjectId());
+	}
 
 	UnrealAiBlueprintFormatterBridge::ValidatePluginDependencyOnStartup();
 
@@ -211,7 +227,11 @@ void FUnrealAiEditorModule::StartupModule()
 					Mode = EUnrealAiAgentMode::Orchestrate;
 				}
 			}
-			const FString OutDir = (Args.Num() > BaseIdx + 2) ? Args[BaseIdx + 2] : FString();
+			FString OutDir = (Args.Num() > BaseIdx + 2) ? Args[BaseIdx + 2] : FString();
+			if (OutDir.IsEmpty())
+			{
+				OutDir = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_OUTPUT_DIR"));
+			}
 			bool bDumpContextAfterEachTool = false;
 			{
 				const FString EnvDump = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_DUMP_CONTEXT"));
@@ -294,6 +314,7 @@ void FUnrealAiEditorModule::StartupModule()
 			Ctx->RefreshEditorSnapshotFromEngine();
 			FAgentContextBuildOptions Opt;
 			Opt.Mode = EUnrealAiAgentMode::Agent;
+			Opt.ContextBuildInvocationReason = TEXT("console_dump_context_window");
 			{
 				const FString EnvVerbose = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_CONTEXT_VERBOSE"));
 				const bool bVerbose = EnvVerbose.Equals(TEXT("1"), ESearchCase::IgnoreCase)
@@ -341,6 +362,150 @@ void FUnrealAiEditorModule::StartupModule()
 			}
 		}),
 		ECVF_Default);
+
+	GUnrealAiDumpRecentUiConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.DumpRecentUi"),
+		TEXT("Dump ranked recent UI entries (global + active-thread overlay)."),
+		FConsoleCommandDelegate::CreateLambda([]()
+		{
+			TArray<FRecentUiEntry> GlobalHistory;
+			TArray<FRecentUiEntry> ThreadOverlay;
+			FUnrealAiRecentUiTracker::GetProjectGlobalHistory(GlobalHistory);
+			if (const TSharedPtr<FUnrealAiChatUiSession> Sess = FUnrealAiEditorModule::GetActiveChatSession())
+			{
+				if (Sess->ThreadId.IsValid())
+				{
+					FUnrealAiRecentUiTracker::GetThreadOverlay(Sess->ThreadId.ToString(EGuidFormats::DigitsWithHyphens), ThreadOverlay);
+				}
+			}
+			TArray<FRecentUiEntry> Ranked;
+			UnrealAiRecentUiRanking::MergeAndRank(GlobalHistory, ThreadOverlay, 24, Ranked);
+			UE_LOG(LogTemp, Display, TEXT("UnrealAi.DumpRecentUi: global=%d thread=%d ranked=%d"), GlobalHistory.Num(), ThreadOverlay.Num(), Ranked.Num());
+			const FDateTime NowUtc = FDateTime::UtcNow();
+			for (const FRecentUiEntry& E : Ranked)
+			{
+				const UnrealAiRecentUiRanking::FScoreBreakdown B = UnrealAiRecentUiRanking::ScoreEntry(E, NowUtc);
+				UE_LOG(
+					LogTemp,
+					Display,
+					TEXT("  score=%.1f base=%.1f recency=%.1f freq=%.1f active=%.1f thread=%.1f kind=%d label=%s id=%s"),
+					B.Score,
+					B.BaseImportance,
+					B.Recency,
+					B.Frequency,
+					B.ActiveBonus,
+					B.ThreadOverlayBonus,
+					static_cast<int32>(E.UiKind),
+					*E.DisplayName,
+					*E.StableId);
+			}
+		}),
+		ECVF_Default);
+
+	GUnrealAiDumpContextRankPolicyConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.DumpContextRankPolicy"),
+		TEXT("Dump unified context ranking policy knobs (single-source manual tuning values)."),
+		FConsoleCommandDelegate::CreateLambda([]()
+		{
+			using namespace UnrealAiContextRankingPolicy;
+			const FScoreWeights W = GetScoreWeights();
+			UE_LOG(LogTemp, Display, TEXT("Context ranking policy:"));
+			UE_LOG(LogTemp, Display, TEXT("  weights mention=%.1f semantic=%.1f recency=%.1f freshness=%.1f safety_penalty=%.1f active=%.1f thread=%.1f frequency=%.1f"),
+				W.MentionHit, W.HeuristicSemantic, W.Recency, W.FreshnessReliability, W.SafetyPenalty, W.ActiveBonus, W.ThreadOverlayBonus, W.Frequency);
+			UE_LOG(LogTemp, Display, TEXT("  base_importance recent_tab=%.1f attachment=%.1f tool_result=%.1f editor_snapshot=%.1f todo=%.1f orchestrate=%.1f"),
+				GetBaseTypeImportance(ECandidateType::RecentTab),
+				GetBaseTypeImportance(ECandidateType::Attachment),
+				GetBaseTypeImportance(ECandidateType::ToolResult),
+				GetBaseTypeImportance(ECandidateType::EditorSnapshotField),
+				GetBaseTypeImportance(ECandidateType::TodoState),
+				GetBaseTypeImportance(ECandidateType::OrchestrateState));
+			UE_LOG(LogTemp, Display, TEXT("  caps recent=%d attachment=%d tool=%d snapshot=%d todo=%d orchestrate=%d"),
+				GetPerTypeCap(ECandidateType::RecentTab),
+				GetPerTypeCap(ECandidateType::Attachment),
+				GetPerTypeCap(ECandidateType::ToolResult),
+				GetPerTypeCap(ECandidateType::EditorSnapshotField),
+				GetPerTypeCap(ECandidateType::TodoState),
+				GetPerTypeCap(ECandidateType::OrchestrateState));
+		}),
+		ECVF_Default);
+
+	GUnrealAiDumpMemoriesConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.DumpMemories"),
+		TEXT("Dump indexed memory records."),
+		FConsoleCommandDelegate::CreateLambda([]()
+		{
+			const TSharedPtr<FUnrealAiBackendRegistry> Reg = FUnrealAiEditorModule::GetBackendRegistry();
+			if (!Reg.IsValid())
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.DumpMemories: backend registry unavailable"));
+				return;
+			}
+			IUnrealAiMemoryService* Memory = Reg->GetMemoryService();
+			if (!Memory)
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.DumpMemories: memory service unavailable"));
+				return;
+			}
+			TArray<FUnrealAiMemoryIndexRow> Rows;
+			Memory->ListMemories(Rows);
+			UE_LOG(LogTemp, Display, TEXT("UnrealAi.DumpMemories: count=%d"), Rows.Num());
+			for (const FUnrealAiMemoryIndexRow& Row : Rows)
+			{
+				UE_LOG(LogTemp, Display, TEXT("  id=%s conf=%.2f title=%s"), *Row.Id, Row.Confidence, *Row.Title);
+			}
+		}),
+		ECVF_Default);
+
+	GUnrealAiPruneMemoriesConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.PruneMemories"),
+		TEXT("Prune memories using defaults (maxItems=500 retentionDays=30 minConfidence=0.55)."),
+		FConsoleCommandDelegate::CreateLambda([]()
+		{
+			const TSharedPtr<FUnrealAiBackendRegistry> Reg = FUnrealAiEditorModule::GetBackendRegistry();
+			if (!Reg.IsValid())
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.PruneMemories: backend registry unavailable"));
+				return;
+			}
+			IUnrealAiMemoryService* Memory = Reg->GetMemoryService();
+			if (!Memory)
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.PruneMemories: memory service unavailable"));
+				return;
+			}
+			const int32 Removed = Memory->Prune(500, 30, 0.55f);
+			UE_LOG(LogTemp, Display, TEXT("UnrealAi.PruneMemories: removed=%d"), Removed);
+		}),
+		ECVF_Default);
+
+	GUnrealAiDumpContextDecisionLogsConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.DumpContextDecisionLogs"),
+		TEXT("Print latest context decision log files under Saved/UnrealAiEditor/ContextDecisionLogs."),
+		FConsoleCommandDelegate::CreateLambda([]()
+		{
+			const FString Root = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAiEditor/ContextDecisionLogs"));
+			if (!IFileManager::Get().DirectoryExists(*Root))
+			{
+				UE_LOG(LogTemp, Display, TEXT("UnrealAi.DumpContextDecisionLogs: no logs yet (%s)"), *Root);
+				return;
+			}
+			TArray<FString> ThreadDirs;
+			IFileManager::Get().FindFiles(ThreadDirs, *Root, false, true);
+			UE_LOG(LogTemp, Display, TEXT("UnrealAi.DumpContextDecisionLogs: root=%s thread_dirs=%d"), *Root, ThreadDirs.Num());
+			for (const FString& D : ThreadDirs)
+			{
+				const FString Dir = FPaths::Combine(Root, D);
+				TArray<FString> JsonlFiles;
+				IFileManager::Get().FindFiles(JsonlFiles, *FPaths::Combine(Dir, TEXT("*.jsonl")), true, false);
+				JsonlFiles.Sort([](const FString& A, const FString& B) { return A > B; });
+				UE_LOG(LogTemp, Display, TEXT("  thread=%s files=%d"), *D, JsonlFiles.Num());
+				for (int32 i = 0; i < JsonlFiles.Num() && i < 5; ++i)
+				{
+					UE_LOG(LogTemp, Display, TEXT("    %s"), *FPaths::Combine(Dir, JsonlFiles[i]));
+				}
+			}
+		}),
+		ECVF_Default);
 }
 
 void FUnrealAiEditorModule::ShutdownModule()
@@ -349,6 +514,31 @@ void FUnrealAiEditorModule::ShutdownModule()
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiDumpContextWindowConsole);
 		GUnrealAiDumpContextWindowConsole = nullptr;
+	}
+	if (GUnrealAiDumpRecentUiConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiDumpRecentUiConsole);
+		GUnrealAiDumpRecentUiConsole = nullptr;
+	}
+	if (GUnrealAiDumpMemoriesConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiDumpMemoriesConsole);
+		GUnrealAiDumpMemoriesConsole = nullptr;
+	}
+	if (GUnrealAiPruneMemoriesConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiPruneMemoriesConsole);
+		GUnrealAiPruneMemoriesConsole = nullptr;
+	}
+	if (GUnrealAiDumpContextRankPolicyConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiDumpContextRankPolicyConsole);
+		GUnrealAiDumpContextRankPolicyConsole = nullptr;
+	}
+	if (GUnrealAiDumpContextDecisionLogsConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiDumpContextDecisionLogsConsole);
+		GUnrealAiDumpContextDecisionLogsConsole = nullptr;
 	}
 	if (GUnrealAiRunAgentTurnConsole)
 	{
@@ -362,6 +552,7 @@ void FUnrealAiEditorModule::ShutdownModule()
 	}
 
 	FUnrealAiEditorModalMonitor::Shutdown();
+	FUnrealAiRecentUiTracker::Shutdown();
 	CancelDeferredAgentChatInsertsForShutdown();
 
 	if (BackendRegistry.IsValid())
@@ -369,6 +560,10 @@ void FUnrealAiEditorModule::ShutdownModule()
 		if (IAgentContextService* Ctx = BackendRegistry->GetContextService())
 		{
 			Ctx->FlushAllSessionsToDisk();
+		}
+		if (IUnrealAiMemoryService* Memory = BackendRegistry->GetMemoryService())
+		{
+			Memory->Flush();
 		}
 	}
 
@@ -404,6 +599,14 @@ void FUnrealAiEditorModule::SetActiveChatSession(TSharedPtr<FUnrealAiChatUiSessi
 	if (GUnrealAiModule)
 	{
 		GUnrealAiModule->ActiveChatSession = Session;
+		if (Session.IsValid() && Session->ThreadId.IsValid())
+		{
+			FUnrealAiRecentUiTracker::SetActiveThreadId(Session->ThreadId.ToString(EGuidFormats::DigitsWithHyphens));
+		}
+		else
+		{
+			FUnrealAiRecentUiTracker::SetActiveThreadId(FString());
+		}
 	}
 }
 

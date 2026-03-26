@@ -279,7 +279,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportCapturePng(const TSharedP
 	}
 	if (RelativePath.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("relative_path is required"));
+		Args->TryGetStringField(TEXT("file_path"), RelativePath);
+	}
+	if (RelativePath.IsEmpty())
+	{
+		RelativePath = TEXT("Saved/UnrealAiEditor/ViewportCaptures/viewport_capture.png");
 	}
 	const FString ProjectDir = FPaths::ProjectDir();
 	const FString Full = FPaths::ConvertRelativePathToFull(FPaths::Combine(ProjectDir, RelativePath));
