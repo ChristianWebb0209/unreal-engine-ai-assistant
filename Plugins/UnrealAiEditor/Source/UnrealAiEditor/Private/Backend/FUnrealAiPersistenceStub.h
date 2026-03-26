@@ -26,6 +26,18 @@ public:
 	virtual void ForgetThread(const FString& ProjectId, const FString& ThreadId) override;
 	virtual bool SaveOpenChatTabsState(const FString& ProjectId, const TArray<FGuid>& OpenThreadIdsInOrder) override;
 	virtual bool LoadOpenChatTabsState(const FString& ProjectId, TArray<FGuid>& OutOpenThreadIdsInOrder) override;
+	virtual bool SaveProjectRecentUiJson(const FString& ProjectId, const FString& JsonBody) override;
+	virtual bool LoadProjectRecentUiJson(const FString& ProjectId, FString& OutJsonBody) override;
+	virtual bool SaveMemoryIndexJson(const FString& JsonBody) override;
+	virtual bool LoadMemoryIndexJson(FString& OutJsonBody) override;
+	virtual bool SaveMemoryTombstonesJson(const FString& JsonBody) override;
+	virtual bool LoadMemoryTombstonesJson(FString& OutJsonBody) override;
+	virtual bool SaveMemoryItemJson(const FString& MemoryId, const FString& JsonBody) override;
+	virtual bool LoadMemoryItemJson(const FString& MemoryId, FString& OutJsonBody) override;
+	virtual bool DeleteMemoryItemJson(const FString& MemoryId) override;
+	virtual void ListMemoryItemIds(TArray<FString>& OutMemoryIds) const override;
+	virtual bool SaveMemoryGenerationStatusJson(const FString& JsonBody) override;
+	virtual bool LoadMemoryGenerationStatusJson(FString& OutJsonBody) override;
 	virtual void ListPersistedThreadsForHistory(
 		const FString& ProjectId,
 		TArray<FString>& OutThreadIds,

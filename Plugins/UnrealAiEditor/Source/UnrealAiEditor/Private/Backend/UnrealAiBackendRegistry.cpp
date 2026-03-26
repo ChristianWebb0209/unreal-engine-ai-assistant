@@ -12,6 +12,7 @@
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Harness/IUnrealAiAgentHarness.h"
 #include "Harness/ILlmTransport.h"
+#include "Memory/FUnrealAiMemoryService.h"
 #include "Tools/FUnrealAiToolExecutionHost.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Transport/FOpenAiCompatibleHttpTransport.h"
@@ -24,7 +25,9 @@ FUnrealAiBackendRegistry::FUnrealAiBackendRegistry()
 	Persistence = MakeUnique<FUnrealAiPersistenceStub>();
 	PricingCatalog = MakeUnique<FUnrealAiModelPricingCatalog>();
 	UsageTracker = MakeUnique<FUnrealAiUsageTracker>(Persistence.Get(), PricingCatalog.Get());
-	ContextService = MakeUnique<FUnrealAiContextService>(Persistence.Get());
+	MemoryService = MakeUnique<FUnrealAiMemoryService>(Persistence.Get());
+	MemoryService->Load();
+	ContextService = MakeUnique<FUnrealAiContextService>(Persistence.Get(), MemoryService.Get());
 	ModelProfiles = MakeUnique<FUnrealAiModelProfileRegistry>(Persistence.Get());
 	ToolCatalog = MakeUnique<FUnrealAiToolCatalog>();
 	ToolCatalog->LoadFromPlugin();
@@ -74,7 +77,8 @@ void FUnrealAiBackendRegistry::RebuildAgentHarness()
 		ToolCatalog.Get(),
 		ActiveLlmTransport,
 		ToolExecutionHost.Get(),
-		UsageTracker.Get());
+		UsageTracker.Get(),
+		MemoryService.Get());
 }
 
 void FUnrealAiBackendRegistry::ReloadLlmConfiguration()

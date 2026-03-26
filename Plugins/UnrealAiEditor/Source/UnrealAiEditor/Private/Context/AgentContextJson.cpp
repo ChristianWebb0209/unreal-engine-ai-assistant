@@ -8,6 +8,99 @@
 
 namespace UnrealAiAgentContextJson
 {
+	static FString UiKindToStr(const ERecentUiKind K)
+	{
+		switch (K)
+		{
+		case ERecentUiKind::SceneViewport: return TEXT("scene_viewport");
+		case ERecentUiKind::AssetEditor: return TEXT("asset_editor");
+		case ERecentUiKind::DetailsPanel: return TEXT("details_panel");
+		case ERecentUiKind::ContentBrowser: return TEXT("content_browser");
+		case ERecentUiKind::SceneOutliner: return TEXT("scene_outliner");
+		case ERecentUiKind::OutputLog: return TEXT("output_log");
+		case ERecentUiKind::BlueprintGraph: return TEXT("blueprint_graph");
+		case ERecentUiKind::Inspector: return TEXT("inspector");
+		case ERecentUiKind::ToolPanel: return TEXT("tool_panel");
+		case ERecentUiKind::NomadTab: return TEXT("nomad_tab");
+		default: return TEXT("unknown");
+		}
+	}
+
+	static ERecentUiKind StrToUiKind(const FString& S)
+	{
+		if (S == TEXT("scene_viewport")) return ERecentUiKind::SceneViewport;
+		if (S == TEXT("asset_editor")) return ERecentUiKind::AssetEditor;
+		if (S == TEXT("details_panel")) return ERecentUiKind::DetailsPanel;
+		if (S == TEXT("content_browser")) return ERecentUiKind::ContentBrowser;
+		if (S == TEXT("scene_outliner")) return ERecentUiKind::SceneOutliner;
+		if (S == TEXT("output_log")) return ERecentUiKind::OutputLog;
+		if (S == TEXT("blueprint_graph")) return ERecentUiKind::BlueprintGraph;
+		if (S == TEXT("inspector")) return ERecentUiKind::Inspector;
+		if (S == TEXT("tool_panel")) return ERecentUiKind::ToolPanel;
+		if (S == TEXT("nomad_tab")) return ERecentUiKind::NomadTab;
+		return ERecentUiKind::Unknown;
+	}
+
+	static FString UiSourceToStr(const ERecentUiSource S)
+	{
+		switch (S)
+		{
+		case ERecentUiSource::SlateFocus: return TEXT("slate_focus");
+		case ERecentUiSource::TabEvent: return TEXT("tab_event");
+		case ERecentUiSource::AssetEditorEvent: return TEXT("asset_editor_event");
+		case ERecentUiSource::PollFallback: return TEXT("poll_fallback");
+		default: return TEXT("unknown");
+		}
+	}
+
+	static ERecentUiSource StrToUiSource(const FString& S)
+	{
+		if (S == TEXT("slate_focus")) return ERecentUiSource::SlateFocus;
+		if (S == TEXT("tab_event")) return ERecentUiSource::TabEvent;
+		if (S == TEXT("asset_editor_event")) return ERecentUiSource::AssetEditorEvent;
+		if (S == TEXT("poll_fallback")) return ERecentUiSource::PollFallback;
+		return ERecentUiSource::Unknown;
+	}
+
+	static TSharedPtr<FJsonObject> RecentUiEntryToJson(const FRecentUiEntry& E)
+	{
+		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+		O->SetStringField(TEXT("stableId"), E.StableId);
+		O->SetStringField(TEXT("displayName"), E.DisplayName);
+		O->SetStringField(TEXT("uiKind"), UiKindToStr(E.UiKind));
+		O->SetStringField(TEXT("source"), UiSourceToStr(E.Source));
+		O->SetStringField(TEXT("lastSeenUtc"), E.LastSeenUtc.ToIso8601());
+		O->SetNumberField(TEXT("seenCount"), E.SeenCount);
+		O->SetBoolField(TEXT("currentlyActive"), E.bCurrentlyActive);
+		O->SetBoolField(TEXT("threadLocalPreferred"), E.bThreadLocalPreferred);
+		return O;
+	}
+
+	static bool JsonToRecentUiEntry(const TSharedPtr<FJsonObject>& O, FRecentUiEntry& Out)
+	{
+		if (!O.IsValid())
+		{
+			return false;
+		}
+		O->TryGetStringField(TEXT("stableId"), Out.StableId);
+		O->TryGetStringField(TEXT("displayName"), Out.DisplayName);
+		FString K;
+		O->TryGetStringField(TEXT("uiKind"), K);
+		Out.UiKind = StrToUiKind(K);
+		FString Src;
+		O->TryGetStringField(TEXT("source"), Src);
+		Out.Source = StrToUiSource(Src);
+		FString Ts;
+		if (O->TryGetStringField(TEXT("lastSeenUtc"), Ts))
+		{
+			FDateTime::ParseIso8601(*Ts, Out.LastSeenUtc);
+		}
+		Out.SeenCount = O->HasField(TEXT("seenCount")) ? static_cast<int32>(O->GetNumberField(TEXT("seenCount"))) : 1;
+		O->TryGetBoolField(TEXT("currentlyActive"), Out.bCurrentlyActive);
+		O->TryGetBoolField(TEXT("threadLocalPreferred"), Out.bThreadLocalPreferred);
+		return !Out.StableId.IsEmpty();
+	}
+
 	static FString TypeToStr(EContextAttachmentType T)
 	{
 		switch (T)
@@ -103,6 +196,13 @@ namespace UnrealAiAgentContextJson
 				OpenArr.Add(MakeShared<FJsonValueString>(P));
 			}
 			E->SetArrayField(TEXT("openEditorAssets"), OpenArr);
+			E->SetStringField(TEXT("activeUiEntryId"), S.ActiveUiEntryId);
+			TArray<TSharedPtr<FJsonValue>> RecentArr;
+			for (const FRecentUiEntry& R : S.RecentUiEntries)
+			{
+				RecentArr.Add(MakeShared<FJsonValueObject>(RecentUiEntryToJson(R).ToSharedRef()));
+			}
+			E->SetArrayField(TEXT("recentUiEntries"), RecentArr);
 			E->SetBoolField(TEXT("valid"), S.bValid);
 			Root->SetObjectField(TEXT("editorSnapshot"), E);
 		}
@@ -136,6 +236,12 @@ namespace UnrealAiAgentContextJson
 			OrchStatusArr.Add(MakeShared<FJsonValueObject>(O.ToSharedRef()));
 		}
 		Root->SetArrayField(TEXT("orchestrateNodeStatus"), OrchStatusArr);
+		TArray<TSharedPtr<FJsonValue>> ThreadUiArr;
+		for (const FRecentUiEntry& R : State.ThreadRecentUiOverlay)
+		{
+			ThreadUiArr.Add(MakeShared<FJsonValueObject>(RecentUiEntryToJson(R).ToSharedRef()));
+		}
+		Root->SetArrayField(TEXT("threadRecentUiOverlay"), ThreadUiArr);
 
 		FString Out;
 		const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
@@ -246,6 +352,24 @@ namespace UnrealAiAgentContextJson
 					}
 				}
 			}
+			Es->TryGetStringField(TEXT("activeUiEntryId"), S.ActiveUiEntryId);
+			const TArray<TSharedPtr<FJsonValue>>* RecentArr = nullptr;
+			if (Es->TryGetArrayField(TEXT("recentUiEntries"), RecentArr) && RecentArr)
+			{
+				for (const TSharedPtr<FJsonValue>& V : *RecentArr)
+				{
+					const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+					if (!V.IsValid() || !V->TryGetObject(ObjPtr) || !ObjPtr || !ObjPtr->IsValid())
+					{
+						continue;
+					}
+					FRecentUiEntry Entry;
+					if (JsonToRecentUiEntry(*ObjPtr, Entry))
+					{
+						S.RecentUiEntries.Add(MoveTemp(Entry));
+					}
+				}
+			}
 			Es->TryGetBoolField(TEXT("valid"), S.bValid);
 			// Migration v1: only activeAssetPath was set
 			if (S.ContentBrowserSelectedAssets.Num() == 0 && !S.ActiveAssetPath.IsEmpty())
@@ -297,6 +421,23 @@ namespace UnrealAiAgentContextJson
 				if ((*ObjPtr)->TryGetStringField(TEXT("summary"), Summary) && !Summary.IsEmpty())
 				{
 					OutState.OrchestrateNodeSummaryById.Add(NodeId, Summary);
+				}
+			}
+		}
+		const TArray<TSharedPtr<FJsonValue>>* ThreadUiArr = nullptr;
+		if (Root->TryGetArrayField(TEXT("threadRecentUiOverlay"), ThreadUiArr) && ThreadUiArr)
+		{
+			for (const TSharedPtr<FJsonValue>& V : *ThreadUiArr)
+			{
+				const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+				if (!V.IsValid() || !V->TryGetObject(ObjPtr) || !ObjPtr || !ObjPtr->IsValid())
+				{
+					continue;
+				}
+				FRecentUiEntry Entry;
+				if (JsonToRecentUiEntry(*ObjPtr, Entry))
+				{
+					OutState.ThreadRecentUiOverlay.Add(MoveTemp(Entry));
 				}
 			}
 		}

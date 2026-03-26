@@ -29,6 +29,24 @@ namespace UnrealAiPersistenceUtil
 		return FPaths::Combine(FPlatformProcess::UserDir(), TEXT("Library/Application Support/UnrealAiEditor"));
 #endif
 	}
+
+	static FString SanitizeFileStem(const FString& In)
+	{
+		FString S = In;
+		S.TrimStartAndEndInline();
+		static const TCHAR* Bad = TEXT("\\/:*?\"<>|");
+		for (const TCHAR* P = Bad; *P; ++P)
+		{
+			TCHAR Search[2] = { *P, TEXT('\0') };
+			S.ReplaceInline(Search, TEXT("_"));
+		}
+		S.ReplaceInline(TEXT(".."), TEXT("_"));
+		S.ReplaceInline(TEXT("\r"), TEXT("_"));
+		S.ReplaceInline(TEXT("\n"), TEXT("_"));
+		S.ReplaceInline(TEXT("\t"), TEXT("_"));
+		S.TrimStartAndEndInline();
+		return S;
+	}
 }
 
 namespace UnrealAiThreadIndex
@@ -748,6 +766,148 @@ bool FUnrealAiPersistenceStub::LoadOpenChatTabsState(const FString& ProjectId, T
 		}
 	}
 	return true;
+}
+
+bool FUnrealAiPersistenceStub::SaveProjectRecentUiJson(const FString& ProjectId, const FString& JsonBody)
+{
+	if (ProjectId.IsEmpty())
+	{
+		return false;
+	}
+	const FString ChatsDir = EnsureSubdir(FPaths::Combine(TEXT("chats"), ProjectId));
+	const FString Path = FPaths::Combine(ChatsDir, TEXT("recent-ui.json"));
+	return FFileHelper::SaveStringToFile(JsonBody, *Path);
+}
+
+bool FUnrealAiPersistenceStub::LoadProjectRecentUiJson(const FString& ProjectId, FString& OutJsonBody)
+{
+	OutJsonBody.Reset();
+	if (ProjectId.IsEmpty())
+	{
+		return false;
+	}
+	const FString Path = FPaths::Combine(GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("recent-ui.json"));
+	if (!FPaths::FileExists(Path))
+	{
+		return false;
+	}
+	return FFileHelper::LoadFileToString(OutJsonBody, *Path);
+}
+
+bool FUnrealAiPersistenceStub::SaveMemoryIndexJson(const FString& JsonBody)
+{
+	const FString Dir = EnsureSubdir(TEXT("memories"));
+	const FString Path = FPaths::Combine(Dir, TEXT("index.json"));
+	return FFileHelper::SaveStringToFile(JsonBody, *Path);
+}
+
+bool FUnrealAiPersistenceStub::LoadMemoryIndexJson(FString& OutJsonBody)
+{
+	OutJsonBody.Reset();
+	const FString Path = FPaths::Combine(GetDataRootDirectory(), TEXT("memories"), TEXT("index.json"));
+	if (!FPaths::FileExists(Path))
+	{
+		return false;
+	}
+	return FFileHelper::LoadFileToString(OutJsonBody, *Path);
+}
+
+bool FUnrealAiPersistenceStub::SaveMemoryTombstonesJson(const FString& JsonBody)
+{
+	const FString Dir = EnsureSubdir(TEXT("memories"));
+	const FString Path = FPaths::Combine(Dir, TEXT("tombstones.json"));
+	return FFileHelper::SaveStringToFile(JsonBody, *Path);
+}
+
+bool FUnrealAiPersistenceStub::LoadMemoryTombstonesJson(FString& OutJsonBody)
+{
+	OutJsonBody.Reset();
+	const FString Path = FPaths::Combine(GetDataRootDirectory(), TEXT("memories"), TEXT("tombstones.json"));
+	if (!FPaths::FileExists(Path))
+	{
+		return false;
+	}
+	return FFileHelper::LoadFileToString(OutJsonBody, *Path);
+}
+
+bool FUnrealAiPersistenceStub::SaveMemoryItemJson(const FString& MemoryId, const FString& JsonBody)
+{
+	const FString SafeId = UnrealAiPersistenceUtil::SanitizeFileStem(MemoryId);
+	if (SafeId.IsEmpty())
+	{
+		return false;
+	}
+	const FString Dir = EnsureSubdir(FPaths::Combine(TEXT("memories"), TEXT("items")));
+	const FString Path = FPaths::Combine(Dir, SafeId + TEXT(".json"));
+	return FFileHelper::SaveStringToFile(JsonBody, *Path);
+}
+
+bool FUnrealAiPersistenceStub::LoadMemoryItemJson(const FString& MemoryId, FString& OutJsonBody)
+{
+	OutJsonBody.Reset();
+	const FString SafeId = UnrealAiPersistenceUtil::SanitizeFileStem(MemoryId);
+	if (SafeId.IsEmpty())
+	{
+		return false;
+	}
+	const FString Path = FPaths::Combine(GetDataRootDirectory(), TEXT("memories"), TEXT("items"), SafeId + TEXT(".json"));
+	if (!FPaths::FileExists(Path))
+	{
+		return false;
+	}
+	return FFileHelper::LoadFileToString(OutJsonBody, *Path);
+}
+
+bool FUnrealAiPersistenceStub::DeleteMemoryItemJson(const FString& MemoryId)
+{
+	const FString SafeId = UnrealAiPersistenceUtil::SanitizeFileStem(MemoryId);
+	if (SafeId.IsEmpty())
+	{
+		return false;
+	}
+	const FString Path = FPaths::Combine(GetDataRootDirectory(), TEXT("memories"), TEXT("items"), SafeId + TEXT(".json"));
+	if (!FPaths::FileExists(Path))
+	{
+		return true;
+	}
+	return IFileManager::Get().Delete(*Path, false, true);
+}
+
+void FUnrealAiPersistenceStub::ListMemoryItemIds(TArray<FString>& OutMemoryIds) const
+{
+	OutMemoryIds.Reset();
+	const FString ItemsDir = FPaths::Combine(GetDataRootDirectory(), TEXT("memories"), TEXT("items"));
+	if (!IFileManager::Get().DirectoryExists(*ItemsDir))
+	{
+		return;
+	}
+	TArray<FString> Files;
+	IFileManager::Get().FindFiles(Files, *FPaths::Combine(ItemsDir, TEXT("*.json")), true, false);
+	for (FString& FileName : Files)
+	{
+		if (FileName.RemoveFromEnd(TEXT(".json")))
+		{
+			OutMemoryIds.Add(FileName);
+		}
+	}
+}
+
+bool FUnrealAiPersistenceStub::SaveMemoryGenerationStatusJson(const FString& JsonBody)
+{
+	const FString Dir = EnsureSubdir(TEXT("memories"));
+	const FString Path = FPaths::Combine(Dir, TEXT("generation_status.json"));
+	return FFileHelper::SaveStringToFile(JsonBody, *Path);
+}
+
+bool FUnrealAiPersistenceStub::LoadMemoryGenerationStatusJson(FString& OutJsonBody)
+{
+	OutJsonBody.Reset();
+	const FString Path = FPaths::Combine(GetDataRootDirectory(), TEXT("memories"), TEXT("generation_status.json"));
+	if (!FPaths::FileExists(Path))
+	{
+		return false;
+	}
+	return FFileHelper::LoadFileToString(OutJsonBody, *Path);
 }
 
 void FUnrealAiPersistenceStub::ListPersistedThreadsForHistory(

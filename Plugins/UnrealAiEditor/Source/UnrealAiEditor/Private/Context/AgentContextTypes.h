@@ -39,6 +39,50 @@ struct FToolContextEntry
 	FDateTime Timestamp = FDateTime::UtcNow();
 };
 
+enum class ERecentUiKind : uint8
+{
+	Unknown,
+	SceneViewport,
+	AssetEditor,
+	DetailsPanel,
+	ContentBrowser,
+	SceneOutliner,
+	OutputLog,
+	BlueprintGraph,
+	Inspector,
+	ToolPanel,
+	NomadTab,
+};
+
+enum class ERecentUiSource : uint8
+{
+	Unknown,
+	SlateFocus,
+	TabEvent,
+	AssetEditorEvent,
+	PollFallback,
+};
+
+struct FRecentUiEntry
+{
+	/** Stable dedupe/ranking key (UiKind + canonical id). */
+	FString StableId;
+	/** Human-readable label for prompt/context output. */
+	FString DisplayName;
+	/** Class/category used by hardcoded base-priority tables. */
+	ERecentUiKind UiKind = ERecentUiKind::Unknown;
+	/** Detection source used for diagnostics/tie-breakers. */
+	ERecentUiSource Source = ERecentUiSource::Unknown;
+	/** Most recent time this UI surface was observed/focused. */
+	FDateTime LastSeenUtc = FDateTime::UtcNow();
+	/** Frequency hint for ranking (higher = repeatedly used). */
+	int32 SeenCount = 1;
+	/** Best-effort current active marker at capture time. */
+	bool bCurrentlyActive = false;
+	/** True when this entry is tied to the active thread-local overlay. */
+	bool bThreadLocalPreferred = false;
+};
+
 struct FEditorContextSnapshot
 {
 	/** Comma-separated selected actor labels or paths (best-effort). */
@@ -51,12 +95,16 @@ struct FEditorContextSnapshot
 	TArray<FString> ContentBrowserSelectedAssets;
 	/** Assets with open editor tabs (bounded when captured). */
 	TArray<FString> OpenEditorAssets;
+	/** Canonical id of the currently active/focused UI entry (if known). */
+	FString ActiveUiEntryId;
+	/** Prioritized recent UI entries (all focusable panes/widgets, bounded). */
+	TArray<FRecentUiEntry> RecentUiEntries;
 	bool bValid = false;
 };
 
 struct FAgentContextState
 {
-	static const int32 SchemaVersion = 4;
+	static const int32 SchemaVersion = 5;
 
 	int32 SchemaVersionField = SchemaVersion;
 	TArray<FContextAttachment> Attachments;
@@ -74,6 +122,8 @@ struct FAgentContextState
 	TMap<FString, FString> OrchestrateNodeStatusById;
 	/** Optional one-line summary per completed/failed node for parent context carry-forward. */
 	TMap<FString, FString> OrchestrateNodeSummaryById;
+	/** Thread-local recent UI overlay (bounded, persisted per thread). */
+	TArray<FRecentUiEntry> ThreadRecentUiOverlay;
 };
 
 struct FContextRecordPolicy
@@ -92,10 +142,12 @@ struct FAgentContextBuildOptions
 	bool bIncludeEditorSnapshot = true;
 	/** Optional static block (e.g. safety rules) prepended by caller; not persisted in state. */
 	FString StaticSystemPrefix;
-	/** Latest user message for this turn — feeds `FUnrealAiComplexityAssessor`. */
+	/** Latest user message for this turn — feeds context ranking/retrieval hints. */
 	FString UserMessageForComplexity;
 	/** From model profile: if false, image-like attachments are stripped when building context. */
 	bool bModelSupportsImages = true;
+	/** Optional call-site label for decision log attribution (for example: request_build, harness_dump_run_started). */
+	FString ContextBuildInvocationReason;
 	/**
 	 * If true, BuildContextWindow emits a verbose, out-of-band trace explaining
 	 * which parts were added/dropped (mode, image stripping, and budget trimming).
@@ -109,13 +161,6 @@ struct FAgentContextBuildResult
 	FString SystemOrDeveloperBlock;
 	FString ContextBlock;
 	TArray<FString> Warnings;
-	/** `low` / `medium` / `high` (from complexity assessor). */
-	FString ComplexityLabel;
-	float ComplexityScoreNormalized = 0.f;
-	bool bRecommendPlanGate = false;
-	TArray<FString> ComplexitySignals;
-	/** Full [Complexity] block for prompt injection. */
-	FString ComplexityBlock;
 	/** Short line for {{ACTIVE_TODO_SUMMARY}} when a plan exists. */
 	FString ActiveTodoSummaryText;
 	bool bTruncated = false;

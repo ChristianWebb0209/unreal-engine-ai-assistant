@@ -71,7 +71,9 @@ FString UnrealAiFormatContextOverviewForUi(
 		Budget = St->MaxContextChars;
 	}
 
-	const FAgentContextBuildResult Built = Ctx->BuildContextWindow(Options);
+	FAgentContextBuildOptions BuildOptions = Options;
+	BuildOptions.ContextBuildInvocationReason = TEXT("context_overview");
+	const FAgentContextBuildResult Built = Ctx->BuildContextWindow(BuildOptions);
 	const int32 TokEst = UnrealAiAgentContextFormat::EstimateTokensApprox(Built.ContextBlock);
 
 	FString Out;
@@ -86,14 +88,6 @@ FString UnrealAiFormatContextOverviewForUi(
 		Out += TEXT(" (truncated to budget)");
 	}
 	Out += FString::Printf(TEXT("\nRough size: ~%d tokens (chars/4)\n"), TokEst);
-
-	if (!Built.ComplexityLabel.IsEmpty())
-	{
-		Out += FString::Printf(
-			TEXT("Complexity hint: %s (score %.2f)\n"),
-			*Built.ComplexityLabel,
-			Built.ComplexityScoreNormalized);
-	}
 
 	Out += TEXT("\n— Attachments —\n");
 	if (St->Attachments.Num() == 0)
@@ -158,6 +152,14 @@ FString UnrealAiFormatContextOverviewForUi(
 		if (S.OpenEditorAssets.Num() > 0)
 		{
 			Out += FString::Printf(TEXT("  Open editor tabs: %d\n"), S.OpenEditorAssets.Num());
+		}
+		if (S.RecentUiEntries.Num() > 0)
+		{
+			Out += FString::Printf(TEXT("  Recent UI focus entries: %d\n"), S.RecentUiEntries.Num());
+			if (!S.ActiveUiEntryId.IsEmpty())
+			{
+				Out += FString::Printf(TEXT("  Active UI id: %s\n"), *S.ActiveUiEntryId);
+			}
 		}
 	}
 

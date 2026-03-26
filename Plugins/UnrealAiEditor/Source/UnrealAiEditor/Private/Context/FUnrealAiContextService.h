@@ -4,11 +4,12 @@
 #include "Containers/Ticker.h"
 
 class IUnrealAiPersistence;
+class IUnrealAiMemoryService;
 
 class FUnrealAiContextService final : public IAgentContextService
 {
 public:
-	explicit FUnrealAiContextService(IUnrealAiPersistence* InPersistence);
+	FUnrealAiContextService(IUnrealAiPersistence* InPersistence, IUnrealAiMemoryService* InMemoryService);
 
 	virtual void LoadOrCreate(const FString& ProjectId, const FString& ThreadId) override;
 	virtual void ClearSession(const FString& ProjectId, const FString& ThreadId) override;
@@ -49,6 +50,7 @@ private:
 	bool ValidateAttachment(const FContextAttachment& Attachment, FString* OutWarning) const;
 
 	IUnrealAiPersistence* Persistence = nullptr;
+	IUnrealAiMemoryService* MemoryService = nullptr;
 	TMap<FString, FAgentContextState> Sessions;
 	FString ActiveProjectId;
 	FString ActiveThreadId;

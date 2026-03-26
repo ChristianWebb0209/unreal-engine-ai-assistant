@@ -3,7 +3,11 @@
 #include "Backend/IUnrealAiPersistence.h"
 #include "Context/AgentContextFormat.h"
 #include "Context/AgentContextJson.h"
+#include "Context/UnrealAiContextCandidates.h"
+#include "Context/UnrealAiContextDecisionLogger.h"
 #include "Context/UnrealAiEditorContextQueries.h"
+#include "Context/UnrealAiRecentUiRanking.h"
+#include "Memory/IUnrealAiMemoryService.h"
 #if WITH_EDITOR
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Editor.h"
@@ -16,9 +20,9 @@
 #include "Context/UnrealAiActiveTodoSummary.h"
 #include "Dom/JsonObject.h"
 #include "Misc/Paths.h"
-#include "Planning/UnrealAiComplexityAssessor.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Misc/UnrealAiRecentUiTracker.h"
 
 namespace UnrealAiCtxTodoPriv
 {
@@ -39,8 +43,9 @@ namespace UnrealAiCtxTodoPriv
 	}
 }
 
-FUnrealAiContextService::FUnrealAiContextService(IUnrealAiPersistence* InPersistence)
+FUnrealAiContextService::FUnrealAiContextService(IUnrealAiPersistence* InPersistence, IUnrealAiMemoryService* InMemoryService)
 	: Persistence(InPersistence)
+	, MemoryService(InMemoryService)
 {
 }
 
@@ -311,6 +316,8 @@ void FUnrealAiContextService::RefreshEditorSnapshotFromEngine()
 #if WITH_EDITOR
 	FEditorContextSnapshot Snap;
 	Snap.bValid = true;
+	FUnrealAiRecentUiTracker::SetActiveThreadId(ActiveThreadId);
+	FUnrealAiRecentUiTracker::MarkCurrentFocusNow();
 	if (GEditor)
 	{
 		USelection* SelectedActors = GEditor->GetSelectedActors();
@@ -329,6 +336,31 @@ void FUnrealAiContextService::RefreshEditorSnapshotFromEngine()
 	}
 	UnrealAiEditorContextQueries::PopulateContentBrowserAndSelection(Snap);
 	UnrealAiEditorContextQueries::PopulateOpenEditorAssets(Snap);
+	TArray<FRecentUiEntry> GlobalHistory;
+	TArray<FRecentUiEntry> ThreadOverlay;
+	FUnrealAiRecentUiTracker::GetProjectGlobalHistory(GlobalHistory);
+	FUnrealAiRecentUiTracker::GetThreadOverlay(ActiveThreadId, ThreadOverlay);
+	if (ThreadOverlay.Num() == 0 && !ActiveProjectId.IsEmpty() && !ActiveThreadId.IsEmpty())
+	{
+		if (const FAgentContextState* Existing = FindState(ActiveProjectId, ActiveThreadId))
+		{
+			ThreadOverlay = Existing->ThreadRecentUiOverlay;
+		}
+	}
+	UnrealAiRecentUiRanking::MergeAndRank(GlobalHistory, ThreadOverlay, 18, Snap.RecentUiEntries);
+	for (const FRecentUiEntry& E : Snap.RecentUiEntries)
+	{
+		if (E.bCurrentlyActive)
+		{
+			Snap.ActiveUiEntryId = E.StableId;
+			break;
+		}
+	}
+	if (!ActiveProjectId.IsEmpty() && !ActiveThreadId.IsEmpty())
+	{
+		FAgentContextState* S = FindOrAddState(ActiveProjectId, ActiveThreadId);
+		S->ThreadRecentUiOverlay = ThreadOverlay;
+	}
 	SetEditorSnapshot(Snap);
 #endif
 }
@@ -424,10 +456,32 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 		Budget = Working.MaxContextChars;
 	}
 
-	FString Block = UnrealAiAgentContextFormat::FormatContextBlock(Working, Options);
+	FString Block;
+	const UnrealAiContextCandidates::FUnifiedContextBuildResult Unified =
+		UnrealAiContextCandidates::BuildUnifiedContext(Working, Options, MemoryService, Budget);
+	for (const FString& Line : Unified.TraceLines)
+	{
+		AddTraceLine(Line);
+	}
+	Block = Unified.ContextBlock;
+	Result.bTruncated = Unified.bTruncated;
+	Result.Warnings.Append(Unified.Warnings);
+	AddTraceLine(TEXT("[Ranker] emission=unified"));
+	if (UnrealAiContextDecisionLogger::ShouldLogDecisions(Options.bVerboseContextBuild))
+	{
+		const FString InvocationReason = !Options.ContextBuildInvocationReason.IsEmpty()
+			? Options.ContextBuildInvocationReason
+			: TEXT("unspecified");
+		UnrealAiContextDecisionLogger::WriteDecisionLog(
+			ActiveProjectId,
+			ActiveThreadId,
+			InvocationReason,
+			Options,
+			Budget,
+			Unified,
+			Block);
+	}
 	const int32 RawLen = Block.Len();
-	Block = UnrealAiAgentContextFormat::TruncateToBudget(Block, Budget, Result.Warnings);
-	Result.bTruncated = Block.Len() < RawLen;
 	if (bVerbose)
 	{
 		auto CountOccurrences = [](const FString& Text, const FString& Needle) -> int32
@@ -484,23 +538,6 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 	Result.ContextBlock = MoveTemp(Block);
 
 	Result.ActiveTodoSummaryText = UnrealAiFormatActiveTodoSummary(Working.ActiveTodoPlanJson, Working.TodoStepsDone);
-
-	FUnrealAiComplexityAssessorInputs Cin;
-	Cin.UserMessage = Options.UserMessageForComplexity;
-	Cin.AttachmentCount = Working.Attachments.Num();
-	Cin.ToolResultCount = Found->ToolResults.Num();
-	Cin.ContextBlockCharCount = Result.ContextBlock.Len();
-	Cin.Mode = Options.Mode;
-	if (Found->EditorSnapshot.IsSet() && Found->EditorSnapshot.GetValue().bValid)
-	{
-		Cin.ContentBrowserSelectionCount = Found->EditorSnapshot.GetValue().ContentBrowserSelectedAssets.Num();
-	}
-	const FUnrealAiComplexityAssessment Ca = UnrealAiComplexityAssessor::Assess(Cin);
-	Result.ComplexityLabel = Ca.Label;
-	Result.ComplexityScoreNormalized = Ca.ScoreNormalized;
-	Result.bRecommendPlanGate = Ca.bRecommendPlanGate;
-	Result.ComplexitySignals = Ca.Signals;
-	Result.ComplexityBlock = Ca.FormatBlock();
 
 	if (Options.Mode == EUnrealAiAgentMode::Ask && Found->ToolResults.Num() > 0)
 	{

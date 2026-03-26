@@ -53,6 +53,23 @@ public:
 	 */
 	virtual bool SaveOpenChatTabsState(const FString& ProjectId, const TArray<FGuid>& OpenThreadIdsInOrder) = 0;
 	virtual bool LoadOpenChatTabsState(const FString& ProjectId, TArray<FGuid>& OutOpenThreadIdsInOrder) = 0;
+	/** Project-global recent UI history blob (`chats/<ProjectId>/recent-ui.json`). */
+	virtual bool SaveProjectRecentUiJson(const FString& ProjectId, const FString& JsonBody) = 0;
+	virtual bool LoadProjectRecentUiJson(const FString& ProjectId, FString& OutJsonBody) = 0;
+	/** Memory index (`memories/index.json`). */
+	virtual bool SaveMemoryIndexJson(const FString& JsonBody) = 0;
+	virtual bool LoadMemoryIndexJson(FString& OutJsonBody) = 0;
+	/** Memory tombstones (`memories/tombstones.json`). */
+	virtual bool SaveMemoryTombstonesJson(const FString& JsonBody) = 0;
+	virtual bool LoadMemoryTombstonesJson(FString& OutJsonBody) = 0;
+	/** Memory item payload (`memories/items/<MemoryId>.json`). */
+	virtual bool SaveMemoryItemJson(const FString& MemoryId, const FString& JsonBody) = 0;
+	virtual bool LoadMemoryItemJson(const FString& MemoryId, FString& OutJsonBody) = 0;
+	virtual bool DeleteMemoryItemJson(const FString& MemoryId) = 0;
+	virtual void ListMemoryItemIds(TArray<FString>& OutMemoryIds) const = 0;
+	/** Memory generation health (`memories/generation_status.json`). */
+	virtual bool SaveMemoryGenerationStatusJson(const FString& JsonBody) = 0;
+	virtual bool LoadMemoryGenerationStatusJson(FString& OutJsonBody) = 0;
 
 	/** Known persisted threads for history UI (from threads_index.json). */
 	virtual void ListPersistedThreadsForHistory(const FString& ProjectId, TArray<FString>& OutThreadIds, TArray<FString>& OutDisplayNames) const = 0;
