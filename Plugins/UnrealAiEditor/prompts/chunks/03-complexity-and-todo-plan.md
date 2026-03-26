@@ -1,13 +1,23 @@
-# Complexity and planning
+# Planning policy (simple + dynamic)
 
-Obey:
+Default in agent mode: **act first** with implicit micro-planning.
 
-`{{COMPLEXITY_BLOCK}}`
+Switch to explicit planning by emitting **`unreal_ai.todo_plan`** (via **`agent_emit_todo_plan`**) when one or more triggers fire:
+- destructive/high-impact operation,
+- multi-goal or dependency chain work,
+- repeated tool failure loop,
+- repeated empty/low-confidence discovery/search streak (no actionable matches),
+- unresolved required path after discovery,
+- low remaining round budget while work remains.
 
-**Emit `unreal_ai.todo_plan`** (via **`agent_emit_todo_plan`**, JSON matching the schema) **before** destructive or large dependent work when policy says so or the task is clearly multi-goal/risky. If the tool is unavailable, emit one fenced JSON block once; the harness may run a repair pass.
+Dynamic escalation is expected: if the task starts simple but grows (many tool calls/failures), execute a small forward slice, then queue remaining work in `activeTodoPlan` and continue by plan step.
 
-**Plan shape:** `definitionOfDone`; short `assumptions` / `risks` if needed; `steps` with stable `id`, `title`, `detail`, `dependsOn`, optional `suggestedTools`, `status` starting `pending`. **Cap:** **`{{MAX_PLAN_STEPS}}`** steps—split phases or narrow scope if more.
+Discovery/search budget rule:
+- do not repeat near-identical discovery/search calls more than 2 times;
+- if still unresolved, switch tool category (read -> mutate or alternate resolver) or emit `agent_emit_todo_plan`.
 
-Canonical plan lives on disk (`context.json` / `activeTodoPlan`). **Sub-turns** use summary + pointer—**do not** paste full plan JSON each round unless repairing or scope changed.
+**Plan shape:** `definitionOfDone`; short `assumptions` / `risks` if needed; `steps` with stable `id`, `title`, `detail`, `dependsOn`, optional `suggestedTools`, `status` starting `pending`. **Cap:** **`{{MAX_PLAN_STEPS}}`**.
 
-**Ask mode:** may emit a plan; **must not** run mutating tools afterward unless the product overrides mode for that turn.
+Canonical plan lives on disk (`context.json` / `activeTodoPlan`). Sub-turns use summary + pointer; do not paste full plan JSON each round unless repairing or scope changed.
+
+**Ask mode:** may emit a plan; must not run mutating tools afterward unless product policy explicitly allows.

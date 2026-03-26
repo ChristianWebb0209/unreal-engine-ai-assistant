@@ -89,6 +89,9 @@ if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HTTP_REQUEST_TIMEOUT_SEC)) {
 if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_LLM_STREAM)) {
     $env:UNREAL_AI_LLM_STREAM = '0'
 }
+if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_CONTEXT_DECISION_LOG)) {
+    $env:UNREAL_AI_CONTEXT_DECISION_LOG = '1'
+}
 
 function Get-HarnessRunDirs {
     param([string]$Root)
@@ -110,6 +113,110 @@ function Copy-LatestHarnessToDir {
     Copy-Item -LiteralPath $latest.FullName -Destination $DestDir -Recurse
     Write-Host "  Copied $($latest.Name) -> $DestDir" -ForegroundColor Green
     return $true
+}
+
+function Copy-ContextDecisionLogsForThread {
+    param(
+        [string]$ProjectRootPath,
+        [string]$ThreadId,
+        [string]$DestRunDir
+    )
+    if ([string]::IsNullOrWhiteSpace($ThreadId)) { return 0 }
+    $src = Join-Path $ProjectRootPath ("Saved\UnrealAiEditor\ContextDecisionLogs\{0}" -f $ThreadId)
+    if (-not (Test-Path -LiteralPath $src)) { return 0 }
+    $dest = Join-Path $DestRunDir 'context_decision_logs'
+    New-Item -ItemType Directory -Force -Path $dest | Out-Null
+    $copied = 0
+    $files = Get-ChildItem -LiteralPath $src -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*.jsonl' -or $_.Name -like '*-summary.md' }
+    foreach ($f in $files) {
+        Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $dest $f.Name) -Force
+        $copied++
+    }
+    return $copied
+}
+
+function Resolve-RunJsonlPath {
+    param([string]$RunDir)
+    $runJsonl = Join-Path $RunDir 'run.jsonl'
+    if (Test-Path -LiteralPath $runJsonl) {
+        return $runJsonl
+    }
+    $nested = Get-ChildItem -LiteralPath $RunDir -Recurse -Filter 'run.jsonl' -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($nested) {
+        return $nested.FullName
+    }
+    return $runJsonl
+}
+
+function Get-RunIntegrity {
+    param([string]$RunJsonlPath)
+    $result = [ordered]@{
+        run_jsonl_exists     = $false
+        run_started_present  = $false
+        run_finished_present = $false
+        run_id               = $null
+        run_finished_success = $null
+        row_count            = 0
+        artifact_integrity   = 'missing'
+    }
+    if (-not (Test-Path -LiteralPath $RunJsonlPath)) {
+        return $result
+    }
+    $result.run_jsonl_exists = $true
+    $lines = Get-Content -LiteralPath $RunJsonlPath -Encoding UTF8 -ErrorAction SilentlyContinue
+    if ($null -eq $lines) {
+        $lines = @()
+    }
+    $result.row_count = $lines.Count
+    foreach ($line in $lines) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $obj = $null
+        try {
+            $obj = $line | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            continue
+        }
+        if ($obj.type -eq 'run_started') {
+            $result.run_started_present = $true
+            if (-not [string]::IsNullOrWhiteSpace([string]$obj.run_id)) {
+                $result.run_id = [string]$obj.run_id
+            }
+        }
+        elseif ($obj.type -eq 'run_finished') {
+            $result.run_finished_present = $true
+            $result.run_finished_success = [bool]$obj.success
+        }
+    }
+    if ($result.run_started_present -and $result.run_finished_present) {
+        $result.artifact_integrity = 'ok'
+    }
+    elseif ($result.run_started_present -or $result.run_finished_present) {
+        $result.artifact_integrity = 'partial'
+    }
+    else {
+        $result.artifact_integrity = 'stale'
+    }
+    return $result
+}
+
+function Get-ContextDumpIntegrity {
+    param(
+        [string]$RunDir,
+        [bool]$ExpectContextDumps
+    )
+    $files = @()
+    if (Test-Path -LiteralPath $RunDir) {
+        $files = Get-ChildItem -LiteralPath $RunDir -Filter 'context_window*.txt' -File -ErrorAction SilentlyContinue
+    }
+    $count = if ($files) { $files.Count } else { 0 }
+    return [ordered]@{
+        expected = $ExpectContextDumps
+        emitted_count = $count
+        ok = (-not $ExpectContextDumps) -or ($count -gt 0)
+    }
 }
 
 function Escape-Win32QuotedArgContent {
@@ -313,9 +420,23 @@ foreach ($job in $workflowJobs) {
     $wfOut = Join-Path $ProjectRoot "tests\out\context_runs\$suiteId\$wfId"
     New-Item -ItemType Directory -Force -Path $wfOut | Out-Null
     Copy-Item -LiteralPath $job.Path -Destination (Join-Path $wfOut 'workflow.json') -Force
-    Set-Content -LiteralPath (Join-Path $wfOut 'thread_id.txt') -Value $threadGuid -Encoding utf8
+    [System.IO.File]::WriteAllText(
+        (Join-Path $wfOut 'thread_id.txt'),
+        $threadGuid,
+        (New-Object System.Text.UTF8Encoding($false)))
 
     Write-Host "Workflow $wfId thread=$threadGuid steps=$($steps.Count)" -ForegroundColor Cyan
+    $workflowStatus = [ordered]@{
+        workflow_id = $wfId
+        suite_id = $suiteId
+        thread_id = $threadGuid
+        started_utc = (Get-Date).ToUniversalTime().ToString('o')
+        single_session = [bool]$SingleSession
+        step_count = $steps.Count
+        steps = @()
+        infra_status = 'unknown'
+        agent_status = 'unknown'
+    }
 
     if ($SingleSession) {
         $cmds = @()
@@ -341,13 +462,18 @@ foreach ($job in $workflowJobs) {
             if ($MaxLlmRounds -gt 0) {
                 $env:UNREAL_AI_HARNESS_MAX_LLM_ROUNDS = [string]$MaxLlmRounds
             }
-            [void](Invoke-HeadedEditor $execCmds)
+            $singleExit = [int](Invoke-HeadedEditor $execCmds)
+            $workflowStatus.infra_status = if ($singleExit -eq 0) { 'editor_exit_ok' } else { 'editor_exit_nonzero' }
+            $workflowStatus.agent_status = if ($singleExit -eq 0) { 'unknown' } else { 'error' }
         }
         finally {
             Remove-Item Env:\UNREAL_AI_HARNESS_MAX_LLM_ROUNDS -ErrorAction SilentlyContinue
         }
     }
     else {
+        $maxInfraRetries = 1
+        $workflowHadInfraFailure = $false
+        $workflowHadAgentFailure = $false
         $si3 = 0
         foreach ($st in $steps) {
             $si3++
@@ -356,23 +482,100 @@ foreach ($job in $workflowJobs) {
                 Write-Error "Message file not found: $msgAbs"
             }
             $mode = if ($st.mode) { [string]$st.mode } else { $defaultMode }
-            Set-ContextHarnessStepEnv $msgAbs $threadGuid $mode
-            if ($MaxLlmRounds -gt 0) {
-                $env:UNREAL_AI_HARNESS_MAX_LLM_ROUNDS = [string]$MaxLlmRounds
-            }
-            try {
-                Write-Host "  Step $($st.id): UNREAL_AI_HARNESS_MESSAGE_FILE=$msgAbs | UnrealAi.RunAgentTurn" -ForegroundColor Cyan
-                [void](Invoke-HeadedEditor 'UnrealAi.RunAgentTurn,Quit')
-            }
-            finally {
-                Clear-ContextHarnessStepEnv
-            }
             $safeId = ([string]$st.id) -replace '[^a-zA-Z0-9_-]', '_'
             $stepDir = "step_{0:D2}_{1}" -f $si3, $safeId
             $dest = Join-Path $wfOut $stepDir
-            [void](Copy-LatestHarnessToDir $runsRoot $dest)
+            $attempt = 0
+            $stepStatus = [ordered]@{
+                step_id = [string]$st.id
+                step_dir = $dest
+                message_file = $msgAbs
+                mode = $mode
+                retry_count = 0
+                attempts = @()
+                artifact_integrity = 'missing'
+                infra_status = 'unknown'
+                agent_status = 'unknown'
+                editor_exit_code = $null
+                run_id = $null
+                run_finished_success = $null
+            }
+            do {
+                Set-ContextHarnessStepEnv $msgAbs $threadGuid $mode
+                if ($MaxLlmRounds -gt 0) {
+                    $env:UNREAL_AI_HARNESS_MAX_LLM_ROUNDS = [string]$MaxLlmRounds
+                }
+                $exitCode = -1002
+                try {
+                    Write-Host "  Step $($st.id) attempt ${attempt}: UNREAL_AI_HARNESS_MESSAGE_FILE=$msgAbs | UnrealAi.RunAgentTurn" -ForegroundColor Cyan
+                    $exitCode = [int](Invoke-HeadedEditor 'UnrealAi.RunAgentTurn,Quit')
+                }
+                finally {
+                    Clear-ContextHarnessStepEnv
+                }
+
+                [void](Copy-LatestHarnessToDir $runsRoot $dest)
+                $runJsonl = Resolve-RunJsonlPath $dest
+                $integrity = Get-RunIntegrity $runJsonl
+                $ctxIntegrity = Get-ContextDumpIntegrity -RunDir $dest -ExpectContextDumps ([bool]$DumpContext)
+                $decisionCopied = Copy-ContextDecisionLogsForThread -ProjectRootPath $ProjectRoot -ThreadId $threadGuid -DestRunDir $dest
+                if ($decisionCopied -gt 0) {
+                    Write-Host ("    copied context decision logs: {0}" -f $decisionCopied) -ForegroundColor DarkGray
+                }
+                $attemptStatus = [ordered]@{
+                    attempt_index = $attempt
+                    editor_exit_code = $exitCode
+                    run_jsonl = $runJsonl
+                    run_id = $integrity.run_id
+                    run_started_present = $integrity.run_started_present
+                    run_finished_present = $integrity.run_finished_present
+                    run_finished_success = $integrity.run_finished_success
+                    artifact_integrity = $integrity.artifact_integrity
+                    context_dump_expected = $ctxIntegrity.expected
+                    context_dump_count = $ctxIntegrity.emitted_count
+                    context_dump_ok = $ctxIntegrity.ok
+                    context_decision_log_files = $decisionCopied
+                    infra_status = if ($exitCode -eq 0) { 'editor_exit_ok' } else { 'editor_exit_nonzero' }
+                    agent_status = 'unknown'
+                }
+                if (-not $ctxIntegrity.ok) {
+                    $attemptStatus.infra_status = 'dump_context_missing'
+                }
+                if ($attemptStatus.infra_status -eq 'editor_exit_ok' -and $integrity.run_finished_present) {
+                    $attemptStatus.agent_status = if ($integrity.run_finished_success) { 'success' } else { 'error' }
+                }
+                $stepStatus.attempts += $attemptStatus
+                $stepStatus.retry_count = $attempt
+                $stepStatus.editor_exit_code = $exitCode
+                $stepStatus.artifact_integrity = $integrity.artifact_integrity
+                $stepStatus.infra_status = $attemptStatus.infra_status
+                $stepStatus.agent_status = $attemptStatus.agent_status
+                $stepStatus.run_id = $integrity.run_id
+                $stepStatus.run_finished_success = $integrity.run_finished_success
+
+                if ($exitCode -eq 0) {
+                    break
+                }
+                if ($attempt -lt $maxInfraRetries) {
+                    Write-Warning "Step $($st.id): infra failure (exit=$exitCode). Retrying with fresh editor launch."
+                }
+                $attempt++
+            } while ($attempt -le $maxInfraRetries)
+
+            ($stepStatus | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath (Join-Path $dest 'step_status.json') -Encoding UTF8
+            $workflowStatus.steps += $stepStatus
+            if ($stepStatus.infra_status -ne 'editor_exit_ok') {
+                $workflowHadInfraFailure = $true
+            }
+            if ($stepStatus.agent_status -eq 'error') {
+                $workflowHadAgentFailure = $true
+            }
         }
+        $workflowStatus.infra_status = if ($workflowHadInfraFailure) { 'error' } else { 'ok' }
+        $workflowStatus.agent_status = if ($workflowHadAgentFailure) { 'error' } else { 'ok_or_unknown' }
     }
+    $workflowStatus.completed_utc = (Get-Date).ToUniversalTime().ToString('o')
+    ($workflowStatus | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath (Join-Path $wfOut 'workflow_status.json') -Encoding UTF8
 }
 
 Write-Host "Done. Bundle: python tests\bundle_context_workflow_review.py <tests\out\context_runs\...\workflow_folder>" -ForegroundColor Cyan

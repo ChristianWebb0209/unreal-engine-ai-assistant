@@ -77,6 +77,51 @@ if ([string]::IsNullOrWhiteSpace($EngineRoot)) {
 $ProjectRoot = $PSScriptRoot
 $UProject = Join-Path $ProjectRoot 'blank.uproject'
 
+if (-not ('UnrealWindowFocus' -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class UnrealWindowFocus {
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+}
+
+function Start-ProcessWithoutStealingFocus {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string]$ArgumentList,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory
+    )
+
+    $previousForeground = [UnrealWindowFocus]::GetForegroundWindow()
+    $proc = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -WorkingDirectory $WorkingDirectory -PassThru
+
+    # Give the editor a moment to create a main window, then show it without activation.
+    for ($i = 0; $i -lt 20 -and $proc.MainWindowHandle -eq 0; $i++) {
+        Start-Sleep -Milliseconds 100
+        try {
+            $null = $proc.Refresh()
+        } catch {
+            break
+        }
+    }
+    if ($proc.MainWindowHandle -ne 0) {
+        # SW_SHOWNOACTIVATE = 4
+        [void][UnrealWindowFocus]::ShowWindowAsync($proc.MainWindowHandle, 4)
+    }
+    if ($previousForeground -ne [IntPtr]::Zero) {
+        [void][UnrealWindowFocus]::SetForegroundWindow($previousForeground)
+    }
+}
+
 function Sync-UnrealBlueprintFormatterPlugin {
     param(
         [string]$RepoRoot,
@@ -203,8 +248,8 @@ if (-not $Headless) {
     if (-not (Test-Path $EditorExe)) {
         Write-Error "UnrealEditor.exe not found: $EditorExe`nSet UE_ENGINE_ROOT or pass -EngineRoot."
     }
-    Write-Host "Launching Unreal Editor..." -ForegroundColor Cyan
-    Start-Process -FilePath $EditorExe -ArgumentList "`"$UProject`"" -WorkingDirectory $ProjectRoot
+    Write-Host "Launching Unreal Editor without stealing focus..." -ForegroundColor Cyan
+    Start-ProcessWithoutStealingFocus -FilePath $EditorExe -ArgumentList "`"$UProject`"" -WorkingDirectory $ProjectRoot
 }
 
 exit 0

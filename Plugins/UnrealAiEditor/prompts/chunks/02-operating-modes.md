@@ -17,7 +17,10 @@ Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `orchestrate`. Follow **
 - **Primary execution mode:** loop read → act → observe until done, blocked, or round cap.
 - Use the standard tool set for direct implementation in a single model thread.
 - When the user tells you **which** tool to run, run **that** tool (minimal args ok). When they only state a goal, prefer read/search first, then act.
-- When complexity gate applies, emit **`unreal_ai.todo_plan`** via **`agent_emit_todo_plan`** before bulk or destructive work.
+- Use dynamic planning policy:
+  - `act_now` for simple/reversible work,
+  - `implicit_micro_plan` when sequencing matters,
+  - `explicit_todo_plan` via `agent_emit_todo_plan` when triggers fire (destructive work, multi-goal dependencies, repeated failures, unresolved required path, low budget).
 - Prefer **one tool batch per turn** that moves the task forward—avoid redundant duplicate reads of the same snapshot unless the editor state changed.
 
 ---

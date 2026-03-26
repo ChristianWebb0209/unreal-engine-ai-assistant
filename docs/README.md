@@ -7,6 +7,7 @@
 | [AGENT_HARNESS_HANDOFF.md](./AGENT_HARNESS_HANDOFF.md) | Harness tiers, console commands, deterministic fixtures, qualitative + context runs |
 | [tool-goals.md](./tool-goals.md) | MVP gameplay-style prompt goals vs catalog |
 | [context-management.md](./context-management.md) | Context state, `context.json`, budgets (architecture) |
+| [memory-system.md](./memory-system.md) | Memory architecture, storage, extraction, ranking retrieval, and lifecycle |
 | [chat-renderer.md](./chat-renderer.md) | Agent Chat Slate / transcript UI |
 | [tool-registry.md](./tool-registry.md) | Human-readable tool narrative (canonical JSON: plugin `Resources/UnrealAiToolCatalog.json`) |
 | [asset-type-coverage-matrix.md](./asset-type-coverage-matrix.md) | Dispatch/router coverage vs plan |

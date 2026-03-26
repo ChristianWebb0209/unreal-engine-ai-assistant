@@ -9,7 +9,7 @@ This folder holds **semantic fragments** the harness assembles into **system** a
 ## Design rules
 
 - **One idea per file** so prompts can be cached (static prefix) and A/B-tested without duplicating prose.
-- **Placeholders** use `{{LIKE_THIS}}`. The harness fills them from `FUnrealAiContextService`, `FUnrealAiComplexityAssessor`, and the active tool pack.
+- **Placeholders** use `{{LIKE_THIS}}`. The harness fills them from `FUnrealAiContextService` and the active tool pack.
 - **Order matters** roughly as numbered in `chunks/`; see the matrix below.
 
 ## Composition matrix
@@ -19,7 +19,7 @@ This folder holds **semantic fragments** the harness assembles into **system** a
 | [`chunks/00-template-tokens.md`](chunks/00-template-tokens.md) | ✓ | ✓ | ✓ | Document placeholders only (no model text). |
 | [`chunks/01-identity.md`](chunks/01-identity.md) | ✓ | ✓ | ✓ | Base role + Unreal editor scope. |
 | [`chunks/02-operating-modes.md`](chunks/02-operating-modes.md) | inject **Ask** only | inject **Fast** only | inject **Agent** only | Shared preamble + one `## Mode:` block (`UnrealAiPromptBuilder::ExtractOperatingModeSection`). |
-| [`chunks/03-complexity-and-todo-plan.md`](chunks/03-complexity-and-todo-plan.md) | ✓ (plan allowed; no mutating tools) | ✓ | ✓ | Always append `{{COMPLEXITY_BLOCK}}` from assessor. |
+| [`chunks/03-complexity-and-todo-plan.md`](chunks/03-complexity-and-todo-plan.md) | ✓ (plan allowed; no mutating tools) | ✓ | ✓ | Dynamic trigger-based planning policy (`act_now` / implicit / explicit todo plan). |
 | [`chunks/04-tool-calling-contract.md`](chunks/04-tool-calling-contract.md) | ✓ (read tools only) | ✓ | ✓ | General tool discipline; Blueprint IR + **UnrealBlueprintFormatter** (`merge_policy`, `layout_scope`, `blueprint_format_graph`, `format_graphs`). |
 | [`chunks/05-context-and-editor.md`](chunks/05-context-and-editor.md) | ✓ | ✓ | ✓ | Attachments, snapshot, `@` mentions. |
 | [`chunks/10-mvp-gameplay-and-tooling.md`](chunks/10-mvp-gameplay-and-tooling.md) | ✓ | ✓ | ✓ | MVP gameplay flows, PIE, matrix `ok:false` semantics (`UnrealAiPromptBuilder` after `05`). |
@@ -32,7 +32,7 @@ This folder holds **semantic fragments** the harness assembles into **system** a
 
 The editor builds the system/developer string at LLM time:
 
-1. [`FUnrealAiContextService::BuildContextWindow`](../Source/UnrealAiEditor/Private/Context/FUnrealAiContextService.cpp) — formats `{{CONTEXT_SERVICE_OUTPUT}}`, runs [`FUnrealAiComplexityAssessor`](../Source/UnrealAiEditor/Private/Planning/UnrealAiComplexityAssessor.cpp) (feeds `{{COMPLEXITY_BLOCK}}`), and `ActiveTodoSummaryText` for `{{ACTIVE_TODO_SUMMARY}}`.
+1. [`FUnrealAiContextService::BuildContextWindow`](../Source/UnrealAiEditor/Private/Context/FUnrealAiContextService.cpp) — formats `{{CONTEXT_SERVICE_OUTPUT}}` and `ActiveTodoSummaryText` for `{{ACTIVE_TODO_SUMMARY}}`.
 2. [`UnrealAiPromptBuilder::BuildSystemDeveloperContent`](../Source/UnrealAiEditor/Private/Prompt/UnrealAiPromptBuilder.cpp) — loads `prompts/chunks/*.md`, injects the mode slice from `02-operating-modes.md`, substitutes template tokens.
 3. [`UnrealAiTurnLlmRequestBuilder::Build`](../Source/UnrealAiEditor/Private/Harness/UnrealAiTurnLlmRequestBuilder.cpp) — merges conversation history, tools JSON, model id, streaming flag, API URL/key from the selected model profile (`FUnrealAiAgentTurnRequest::ModelProfileId` from UI session).
 4. [`FUnrealAiLlmInvocationService`](../Source/UnrealAiEditor/Private/Harness/UnrealAiLlmInvocationService.h) + [`ILlmTransport`](../Source/UnrealAiEditor/Private/Harness/ILlmTransport.h) — submit the request; the bundled HTTP transport is [`FOpenAiCompatibleHttpTransport`](../Source/UnrealAiEditor/Private/Transport/FOpenAiCompatibleHttpTransport.cpp) (shared chat-completions JSON shape, not one vendor only).
@@ -43,7 +43,7 @@ The editor builds the system/developer string at LLM time:
 
 1. `01-identity`
 2. Mode slice from `02-operating-modes`
-3. `03` + filled complexity lines
+3. `03` trigger-based planning policy
 4. `04`, `05`, `10`
 5. If executing a stored plan: `06`
 6. `07`, `08`
