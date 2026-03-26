@@ -193,7 +193,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetSavePackages(const TSharedPt
 		if (!Pkg)
 		{
 			// Best-effort: if packages were dirtied/created but not loaded yet, load them.
-			Pkg = LoadPackage(nullptr, *PkgName);
+			Pkg = LoadPackage(nullptr, *PkgName, LOAD_None);
 		}
 		if (Pkg)
 		{
