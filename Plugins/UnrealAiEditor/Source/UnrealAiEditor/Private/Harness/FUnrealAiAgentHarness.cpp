@@ -42,6 +42,86 @@ namespace UnrealAiAgentHarnessPriv
 		return FMath::Clamp(Parsed, MinValue, MaxValue);
 	}
 
+	static bool IsHarnessSyntheticUserMessage(const FString& Content)
+	{
+		return Content.StartsWith(TEXT("[Harness]"));
+	}
+
+	static FString GetLastRealUserMessage(const TArray<FUnrealAiConversationMessage>& Messages)
+	{
+		for (int32 i = Messages.Num() - 1; i >= 0; --i)
+		{
+			if (Messages[i].Role != TEXT("user"))
+			{
+				continue;
+			}
+			if (IsHarnessSyntheticUserMessage(Messages[i].Content))
+			{
+				continue;
+			}
+			return Messages[i].Content;
+		}
+		return FString();
+	}
+
+	static bool UserLikelyRequestsActionTool(const FString& UserText)
+	{
+		const FString T = UserText.ToLower();
+		if (T.IsEmpty())
+		{
+			return false;
+		}
+		static const TCHAR* Tokens[] = {
+			TEXT("run"), TEXT("start"), TEXT("stop"), TEXT("compile"), TEXT("save"),
+			TEXT("open"), TEXT("re-open"), TEXT("reopen"), TEXT("fix"), TEXT("apply"),
+			TEXT("change"), TEXT("adjust"), TEXT("tune"), TEXT("create"), TEXT("delete"),
+			TEXT("playtest"), TEXT("test"), TEXT("resolve")
+		};
+		for (const TCHAR* K : Tokens)
+		{
+			if (T.Contains(K))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static bool UserLikelyRequestsMutation(const FString& UserText)
+	{
+		const FString T = UserText.ToLower();
+		if (T.IsEmpty())
+		{
+			return false;
+		}
+		static const TCHAR* Tokens[] = {
+			TEXT("fix"), TEXT("apply"), TEXT("change"), TEXT("adjust"), TEXT("tune"),
+			TEXT("reduce"), TEXT("increase"), TEXT("set "), TEXT("compile"), TEXT("save"),
+			TEXT("resolve"), TEXT("make ")
+		};
+		for (const TCHAR* K : Tokens)
+		{
+			if (T.Contains(K))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static bool IsLikelyReadOnlyToolName(const FString& ToolName)
+	{
+		const FString T = ToolName.ToLower();
+		return T.Contains(TEXT("_search"))
+			|| T.Contains(TEXT("_query"))
+			|| T.Contains(TEXT("_read"))
+			|| T.Contains(TEXT("_get_"))
+			|| T.Contains(TEXT("_list_"))
+			|| T.Contains(TEXT("snapshot"))
+			|| T.Contains(TEXT("_status"))
+			|| T == TEXT("blueprint_export_ir");
+	}
+
 	static int32 CountConversationUserTurnsForMemory(const TArray<FUnrealAiConversationMessage>& Messages)
 	{
 		int32 Count = 0;
@@ -211,6 +291,8 @@ namespace UnrealAiAgentHarnessPriv
 		int32 ReplanCount = 0;
 		int32 QueueStepsPending = 0;
 		bool bFinishSeen = false;
+		int32 ActionNoToolNudgeCount = 0;
+		int32 MutationFollowthroughNudgeCount = 0;
 		std::atomic<bool> bCancelled{false};
 		std::atomic<bool> bTerminal{false};
 
@@ -579,6 +661,7 @@ namespace UnrealAiAgentHarnessPriv
 		bool bRepeatedEmptySearch = false;
 		int32 ToolSuccessCount = 0;
 		int32 ToolFailCount = 0;
+		TArray<FString> ExecutedToolNames;
 		FUnrealAiConversationMessage Am;
 		Am.Role = TEXT("assistant");
 		Am.Content = AssistantBuffer;
@@ -632,6 +715,7 @@ namespace UnrealAiAgentHarnessPriv
 			const bool bRepeatSignature = bAgentMode && InvokeName != TEXT("agent_emit_todo_plan")
 				&& (SigCount >= 3 || NameCount >= 5);
 			const FUnrealAiToolInvocationResult Inv = Tools->InvokeTool(InvokeName, InvokeArgs, Tc.Id);
+			ExecutedToolNames.Add(InvokeName);
 			const FString DialogFootnote = FUnrealAiEditorModalMonitor::ConsumePendingToolDialogFootnote();
 			FString ModelToolContent = Inv.bOk ? Inv.ContentForModel : Inv.ErrorMessage;
 			if (bRepeatSignature && !Inv.bOk)
@@ -881,6 +965,35 @@ namespace UnrealAiAgentHarnessPriv
 			}
 			Conv->GetMessagesMutable().Add(Nudge);
 		}
+		{
+			const FString LastRealUser = GetLastRealUserMessage(Conv->GetMessages());
+			const bool bNeedsMutationFollowthrough = Request.Mode == EUnrealAiAgentMode::Agent
+				&& UserLikelyRequestsMutation(LastRealUser)
+				&& ExecutedToolNames.Num() > 0;
+			if (bNeedsMutationFollowthrough)
+			{
+				bool bAllReadOnly = true;
+				for (const FString& Name : ExecutedToolNames)
+				{
+					if (!IsLikelyReadOnlyToolName(Name))
+					{
+						bAllReadOnly = false;
+						break;
+					}
+				}
+				if (bAllReadOnly && MutationFollowthroughNudgeCount < 2)
+				{
+					++MutationFollowthroughNudgeCount;
+					FUnrealAiConversationMessage FollowthroughNudge;
+					FollowthroughNudge.Role = TEXT("user");
+					FollowthroughNudge.Content = TEXT(
+						"[Harness] The user requested an actual change, but only read/discovery tools were executed. "
+						"Continue now with at least one concrete write/exec tool call that advances the requested change, "
+						"or state the exact blocker.");
+					Conv->GetMessagesMutable().Add(FollowthroughNudge);
+				}
+			}
+		}
 		PendingToolCalls.Reset();
 		AssistantBuffer.Reset();
 		AccumulateRoundUsage();
@@ -905,6 +1018,8 @@ namespace UnrealAiAgentHarnessPriv
 		// that as a stall, not a successful completion, and schedule another round while under the cap.
 		const bool bModeWantsTools =
 			(Request.Mode == EUnrealAiAgentMode::Agent || Request.Mode == EUnrealAiAgentMode::Orchestrate);
+		const FString LastRealUser = GetLastRealUserMessage(Conv->GetMessages());
+		const bool bActionIntent = UserLikelyRequestsActionTool(LastRealUser);
 		if (bModeWantsTools && AssistantBuffer.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
 		{
 			FUnrealAiConversationMessage Nudge;
@@ -912,6 +1027,19 @@ namespace UnrealAiAgentHarnessPriv
 			Nudge.Content = TEXT(
 				"[Harness] The model returned an empty assistant message. Continue the user's task: call the ")
 				TEXT("next tool(s) now, or briefly explain what blocks you. Do not reply with an empty message.");
+			Conv->GetMessagesMutable().Add(Nudge);
+			AssistantBuffer.Reset();
+			DispatchLlm();
+			return;
+		}
+		if (bModeWantsTools && bActionIntent && LlmRound < EffectiveMaxLlmRounds && ActionNoToolNudgeCount < 2)
+		{
+			++ActionNoToolNudgeCount;
+			FUnrealAiConversationMessage Nudge;
+			Nudge.Role = TEXT("user");
+			Nudge.Content = TEXT(
+				"[Harness] The user asked for concrete editor actions. Do not end with narration-only output. "
+				"Call at least one relevant Unreal tool now (or report the exact blocker if no tool can proceed).");
 			Conv->GetMessagesMutable().Add(Nudge);
 			AssistantBuffer.Reset();
 			DispatchLlm();

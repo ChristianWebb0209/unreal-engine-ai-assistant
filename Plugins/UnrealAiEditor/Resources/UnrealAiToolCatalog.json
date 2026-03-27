@@ -79,33 +79,7 @@
           "socket": {
             "type": "string"
           }
-        },
-        "anyOf": [
-          {
-            "required": [
-              "child_path",
-              "parent_path"
-            ]
-          },
-          {
-            "required": [
-              "child_actor_path",
-              "parent_actor_path"
-            ]
-          },
-          {
-            "required": [
-              "actor_path",
-              "parent_path"
-            ]
-          },
-          {
-            "required": [
-              "actor_path",
-              "parent_actor_path"
-            ]
-          }
-        ]
+        }
       },
       "side_effects": "scene",
       "permission": "write",

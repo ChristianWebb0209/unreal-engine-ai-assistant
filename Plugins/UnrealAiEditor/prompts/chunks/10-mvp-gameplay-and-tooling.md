@@ -12,6 +12,7 @@ The project targets common **gameplay Blueprint** workflows. Use tools in this o
 - **Generic `/Game` assets:** **`asset_create`** (class path + package) → **`asset_export_properties`** / **`asset_apply_properties`** for reflection-driven edits when there is no specialized tool.
 - **Scene:** **`actor_spawn_from_class`** (needs `class_path`, `location`, `rotation` arrays), **`actor_set_transform`**, **`actor_destroy`**, **`scene_fuzzy_search`** to find actors. Paths accept **partial or label-style** resolution when the model omits the full outer path.
 - **Runtime check:** after gameplay changes, **`pie_start`** with `"mode":"viewport"` or `"standalone"` is usually required; **`pie_stop`** when done.
+- **No fake execution:** for requests like "run a quick playtest", "check regressions", or "test in-game", you must emit actual PIE tool calls (`pie_start`, then `pie_status` and `pie_stop` when appropriate). Do not claim test results without those tool results.
 
 ## Task-to-tool map (high level)
 
