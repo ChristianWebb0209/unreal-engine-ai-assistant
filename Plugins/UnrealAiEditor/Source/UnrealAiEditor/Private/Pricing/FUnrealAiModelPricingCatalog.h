@@ -2,10 +2,11 @@
 
 #include "CoreMinimal.h"
 
-/** Loads bundled Litellm-style model_prices JSON for rough USD estimates (best-effort). */
+/** Loads rough pricing from a small built-in curated catalog. */
 class FUnrealAiModelPricingCatalog
 {
 public:
+	FUnrealAiModelPricingCatalog() = default;
 	void EnsureLoaded();
 
 	/** Returns false when the model is unknown or has no usable per-token pricing in the catalog. */
@@ -15,7 +16,6 @@ public:
 	void GetRoughPriceHintLines(const FString& ModelIdForApi, TArray<FString>& OutLines) const;
 
 private:
-	void LoadFromFile(const FString& AbsolutePath);
 	void BuildSuffixIndex();
 
 	mutable bool bLoaded = false;

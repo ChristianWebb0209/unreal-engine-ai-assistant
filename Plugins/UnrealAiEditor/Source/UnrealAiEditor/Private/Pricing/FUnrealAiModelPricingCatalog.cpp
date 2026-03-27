@@ -1,13 +1,5 @@
 #include "Pricing/FUnrealAiModelPricingCatalog.h"
 
-#include "Dom/JsonObject.h"
-#include "Dom/JsonValue.h"
-#include "Interfaces/IPluginManager.h"
-#include "Misc/FileHelper.h"
-#include "Misc/Paths.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
-
 namespace UnrealAiPricingCatalogUtil
 {
 	static FString NormalizedSuffix(const FString& Key)
@@ -33,53 +25,35 @@ void FUnrealAiModelPricingCatalog::EnsureLoaded()
 	SuffixToKeys.Reset();
 	LowerKeyToCanonicalKey.Reset();
 
-	TSharedPtr<IPlugin> P = IPluginManager::Get().FindPlugin(TEXT("UnrealAiEditor"));
-	if (!P.IsValid())
+	// Curated built-in pricing catalog (approximate USD per 1M tokens).
+	struct FSeed
 	{
-		return;
+		const TCHAR* Id;
+		double InPer1M;
+		double OutPer1M;
+	};
+	static const FSeed Seeds[] = {
+		{ TEXT("openai/gpt-5"), 5.00, 15.00 },
+		{ TEXT("openai/gpt-5-mini"), 0.25, 2.00 },
+		{ TEXT("openai/gpt-4o"), 5.00, 15.00 },
+		{ TEXT("openai/gpt-4o-mini"), 0.15, 0.60 },
+		{ TEXT("gpt-5"), 5.00, 15.00 },
+		{ TEXT("gpt-5-mini"), 0.25, 2.00 },
+		{ TEXT("gpt-4o"), 5.00, 15.00 },
+		{ TEXT("gpt-4o-mini"), 0.15, 0.60 },
+		{ TEXT("claude-3-7-sonnet-latest"), 3.00, 15.00 },
+		{ TEXT("claude-3-5-sonnet-latest"), 3.00, 15.00 },
+		{ TEXT("deepseek-chat"), 0.27, 1.10 },
+		{ TEXT("deepseek-reasoner"), 0.55, 2.19 }
+	};
+	for (const FSeed& S : Seeds)
+	{
+		const FString Id = S.Id;
+		InputPerTokenByKey.Add(Id, S.InPer1M / 1.0e6);
+		OutputPerTokenByKey.Add(Id, S.OutPer1M / 1.0e6);
+		LowerKeyToCanonicalKey.Add(Id.ToLower(), Id);
 	}
-	const FString Path = FPaths::Combine(P->GetBaseDir(), TEXT("Resources/ModelPricing/model_prices_and_context_window.json"));
-	LoadFromFile(FPaths::ConvertRelativePathToFull(Path));
 	BuildSuffixIndex();
-}
-
-void FUnrealAiModelPricingCatalog::LoadFromFile(const FString& AbsolutePath)
-{
-	FString Json;
-	if (!FFileHelper::LoadFileToString(Json, *AbsolutePath))
-	{
-		return;
-	}
-	TSharedPtr<FJsonObject> Root;
-	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
-	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
-	{
-		return;
-	}
-	for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Root->Values)
-	{
-		const FString& Key = Pair.Key;
-		if (Key == TEXT("sample_spec"))
-		{
-			continue;
-		}
-		const TSharedPtr<FJsonObject>* Obj = nullptr;
-		if (!Pair.Value.IsValid() || !Pair.Value->TryGetObject(Obj) || !Obj->IsValid())
-		{
-			continue;
-		}
-		double InCost = 0.0;
-		double OutCost = 0.0;
-		const bool bHasIn = (*Obj)->TryGetNumberField(TEXT("input_cost_per_token"), InCost);
-		const bool bHasOut = (*Obj)->TryGetNumberField(TEXT("output_cost_per_token"), OutCost);
-		if (!bHasIn && !bHasOut)
-		{
-			continue;
-		}
-		InputPerTokenByKey.Add(Key, InCost);
-		OutputPerTokenByKey.Add(Key, OutCost);
-		LowerKeyToCanonicalKey.Add(Key.ToLower(), Key);
-	}
 }
 
 void FUnrealAiModelPricingCatalog::BuildSuffixIndex()

@@ -35,8 +35,12 @@ private:
 		bool bSupportsParallelToolCalls = true;
 		bool bSupportsImages = true;
 		FString PricingHintCache;
+		FString ModelSearchText;
 		TSharedPtr<SEditableTextBox> ProfileKeyBox;
 		TSharedPtr<SEditableTextBox> ModelIdForApiBox;
+		TSharedPtr<SComboBox<TSharedPtr<FString>>> ModelIdDropdown;
+		TSharedPtr<SEditableTextBox> ModelSearchBox;
+		TArray<TSharedPtr<FString>> ModelIdOptions;
 		TSharedPtr<SEditableTextBox> MaxContextBox;
 		TSharedPtr<SEditableTextBox> MaxOutputBox;
 		TSharedPtr<SEditableTextBox> MaxAgentLlmRoundsBox;
@@ -78,6 +82,8 @@ private:
 	void RefreshUsageHeaderText();
 	void UpdateModelPricingHint(FDynModelRow& Row);
 	void ApplyCompanyPreset(FDynSectionRow& Row, const FString& PresetId);
+	void RebuildProviderOptions();
+	void RefreshProviderDropdownSelection();
 
 	FReply OnSettingsSegmentClicked(int32 Index);
 	FReply OnChatHistoryRefreshClicked();
@@ -107,6 +113,7 @@ private:
 	TSharedPtr<SEditableTextBox> ApiKeyBox;
 	TSharedPtr<SEditableTextBox> ApiDefaultModelBox;
 	TSharedPtr<SEditableTextBox> ApiDefaultProviderIdBox;
+	TSharedPtr<SComboBox<TSharedPtr<FString>>> ApiDefaultProviderDropdown;
 
 	TSharedPtr<SVerticalBox> SectionsVBox;
 	TSharedPtr<SWidgetSwitcher> SettingsMainSwitcher;
@@ -123,6 +130,7 @@ private:
 	TSharedPtr<STextBlock> UsageSummaryBlock;
 
 	TArray<TSharedPtr<FString>> CompanyPresetOptions;
+	TArray<TSharedPtr<FString>> ProviderIdOptions;
 	TArray<FDynSectionRow> SectionRows;
 	FString SelectedMemoryId;
 	bool bMemoryEnabled = true;

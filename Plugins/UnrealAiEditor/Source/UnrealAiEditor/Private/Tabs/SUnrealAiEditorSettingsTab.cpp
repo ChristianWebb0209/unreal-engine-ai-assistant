@@ -149,6 +149,73 @@ namespace UnrealAiSettingsTabUtil
 		return TEXT("custom");
 	}
 
+	static const TMap<FString, TArray<FString>>& GetKnownProviderModels()
+	{
+		static const TMap<FString, TArray<FString>> Catalog = {
+			{ TEXT("openrouter"), {
+				TEXT("openai/gpt-5"),
+				TEXT("openai/gpt-5-mini"),
+				TEXT("openai/gpt-4o"),
+				TEXT("openai/gpt-4o-mini"),
+				TEXT("anthropic/claude-3.7-sonnet"),
+				TEXT("anthropic/claude-3.5-sonnet"),
+				TEXT("google/gemini-2.5-pro"),
+				TEXT("google/gemini-2.5-flash"),
+				TEXT("meta-llama/llama-3.3-70b-instruct"),
+				TEXT("x-ai/grok-3-mini")
+			}},
+			{ TEXT("openai"), {
+				TEXT("gpt-5"),
+				TEXT("gpt-5-mini"),
+				TEXT("gpt-4o"),
+				TEXT("gpt-4o-mini"),
+				TEXT("o3"),
+				TEXT("o4-mini")
+			}},
+			{ TEXT("anthropic"), {
+				TEXT("claude-3-7-sonnet-latest"),
+				TEXT("claude-3-5-sonnet-latest"),
+				TEXT("claude-3-5-haiku-latest")
+			}},
+			{ TEXT("groq"), {
+				TEXT("llama-3.3-70b-versatile"),
+				TEXT("llama-3.1-8b-instant"),
+				TEXT("deepseek-r1-distill-llama-70b"),
+				TEXT("qwen-qwq-32b")
+			}},
+			{ TEXT("deepseek"), {
+				TEXT("deepseek-chat"),
+				TEXT("deepseek-reasoner")
+			}},
+			{ TEXT("xai"), {
+				TEXT("grok-3"),
+				TEXT("grok-3-mini"),
+				TEXT("grok-2-vision")
+			}}
+		};
+		return Catalog;
+	}
+
+	static void BuildModelOptionsForPreset(const FString& PresetId, const FString& FilterText, TArray<TSharedPtr<FString>>& OutOptions)
+	{
+		OutOptions.Reset();
+		const TMap<FString, TArray<FString>>& Catalog = GetKnownProviderModels();
+		const TArray<FString>* Models = Catalog.Find(PresetId);
+		if (!Models)
+		{
+			return;
+		}
+		const FString Filter = FilterText.ToLower();
+		for (const FString& Model : *Models)
+		{
+			if (!Filter.IsEmpty() && !Model.ToLower().Contains(Filter))
+			{
+				continue;
+			}
+			OutOptions.Add(MakeShared<FString>(Model));
+		}
+	}
+
 	static void AppendModelJsonToSection(
 		const FString& ProfileKey,
 		const TSharedPtr<FJsonObject>& CapObj,
@@ -471,7 +538,8 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 									.Text(LOCTEXT(
 										"SettingsHelp",
 										"Add API key sections (one provider account each) and attach any number of model profiles. "
-										"Rough token pricing uses a bundled Litellm dataset when the model id matches; unknown models still work. "
+										"Use company preset + searchable model picker to choose known OpenAI-compatible ids quickly; "
+										"you can still edit model ids manually. "
 										"Settings save automatically; use Save and apply for an immediate LLM reload."))
 							]
 							+ SVerticalBox::Slot().FillHeight(1.f)
@@ -527,8 +595,35 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 												]
 												+ SGridPanel::Slot(1, 3).Padding(4.f)
 												[
-													SAssignNew(ApiDefaultProviderIdBox, SEditableTextBox)
-														.OnTextChanged(this, &SUnrealAiEditorSettingsTab::OnAnySettingsChanged)
+													SNew(SHorizontalBox)
+													+ SHorizontalBox::Slot().FillWidth(1.f).Padding(FMargin(0.f, 0.f, 6.f, 0.f))
+													[
+														SAssignNew(ApiDefaultProviderIdBox, SEditableTextBox)
+															.OnTextChanged(this, &SUnrealAiEditorSettingsTab::OnAnySettingsChanged)
+													]
+													+ SHorizontalBox::Slot().AutoWidth()
+													[
+														SAssignNew(ApiDefaultProviderDropdown, SComboBox<TSharedPtr<FString>>)
+															.OptionsSource(&ProviderIdOptions)
+															.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+															{
+																return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : FString()));
+															})
+															.OnSelectionChanged_Lambda([this](TSharedPtr<FString> Sel, ESelectInfo::Type)
+															{
+																if (!Sel.IsValid() || !ApiDefaultProviderIdBox.IsValid())
+																{
+																	return;
+																}
+																ApiDefaultProviderIdBox->SetText(FText::FromString(*Sel));
+																OnAnySettingsChanged(FText::GetEmpty());
+															})
+															.Content()
+															[
+																SNew(STextBlock)
+																	.Text(LOCTEXT("DefaultProviderDropdownLabel", "Pick section"))
+															]
+													]
 												]
 											]
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
@@ -1307,6 +1402,46 @@ void SUnrealAiEditorSettingsTab::ApplyCompanyPreset(FDynSectionRow& Row, const F
 	}
 }
 
+void SUnrealAiEditorSettingsTab::RebuildProviderOptions()
+{
+	ProviderIdOptions.Reset();
+	for (const FDynSectionRow& Sec : SectionRows)
+	{
+		if (!Sec.Id.IsEmpty())
+		{
+			ProviderIdOptions.Add(MakeShared<FString>(Sec.Id));
+		}
+	}
+	ProviderIdOptions.Sort([](const TSharedPtr<FString>& A, const TSharedPtr<FString>& B)
+	{
+		const FString AV = A.IsValid() ? *A : FString();
+		const FString BV = B.IsValid() ? *B : FString();
+		return AV < BV;
+	});
+	if (ApiDefaultProviderDropdown.IsValid())
+	{
+		ApiDefaultProviderDropdown->RefreshOptions();
+	}
+}
+
+void SUnrealAiEditorSettingsTab::RefreshProviderDropdownSelection()
+{
+	if (!ApiDefaultProviderDropdown.IsValid() || !ApiDefaultProviderIdBox.IsValid())
+	{
+		return;
+	}
+	const FString Current = ApiDefaultProviderIdBox->GetText().ToString();
+	for (const TSharedPtr<FString>& Opt : ProviderIdOptions)
+	{
+		if (Opt.IsValid() && *Opt == Current)
+		{
+			ApiDefaultProviderDropdown->SetSelectedItem(Opt);
+			return;
+		}
+	}
+	ApiDefaultProviderDropdown->SetSelectedItem(nullptr);
+}
+
 static FText CompanyHintText(const FString& PresetId)
 {
 	if (PresetId == TEXT("openrouter"))
@@ -1586,6 +1721,8 @@ void SUnrealAiEditorSettingsTab::LoadSettingsIntoUi()
 	}
 
 	RebuildDynamicRows();
+	RebuildProviderOptions();
+	RefreshProviderDropdownSelection();
 	bSuppressAutoSave = false;
 }
 
@@ -1618,6 +1755,10 @@ void SUnrealAiEditorSettingsTab::SyncDynamicRowsFromWidgets()
 			if (Mr.ModelIdForApiBox.IsValid())
 			{
 				Mr.ModelIdForApi = Mr.ModelIdForApiBox->GetText().ToString();
+			}
+			if (Mr.ModelSearchBox.IsValid())
+			{
+				Mr.ModelSearchText = Mr.ModelSearchBox->GetText().ToString();
 			}
 			if (Mr.MaxContextBox.IsValid())
 			{
@@ -1656,6 +1797,9 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 		{
 			Mr.ProfileKeyBox.Reset();
 			Mr.ModelIdForApiBox.Reset();
+			Mr.ModelIdDropdown.Reset();
+			Mr.ModelSearchBox.Reset();
+			Mr.ModelIdOptions.Reset();
 			Mr.MaxContextBox.Reset();
 			Mr.MaxOutputBox.Reset();
 			Mr.MaxAgentLlmRoundsBox.Reset();
@@ -1808,6 +1952,7 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 			{
 				const int32 ModelIdx = Mi;
 				FDynModelRow& Mr = Sec.Models[ModelIdx];
+				UnrealAiSettingsTabUtil::BuildModelOptionsForPreset(Sec.CompanyPreset, Mr.ModelSearchText, Mr.ModelIdOptions);
 				UpdateModelPricingHint(Mr);
 				ModelsVBox->AddSlot()
 					.AutoHeight()
@@ -1833,13 +1978,74 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 									]
 									+ SGridPanel::Slot(0, 1).Padding(4.f)
 									[
-										SNew(STextBlock).Text(LOCTEXT("ModelIdApi2", "Model id for API (optional)"))
+										SNew(STextBlock).Text(LOCTEXT("ModelIdApi2", "Model id for API"))
 									]
 									+ SGridPanel::Slot(1, 1).Padding(4.f)
 									[
-										SAssignNew(Mr.ModelIdForApiBox, SEditableTextBox)
-											.Text(FText::FromString(Mr.ModelIdForApi))
-											.OnTextChanged(this, &SUnrealAiEditorSettingsTab::OnAnySettingsChanged)
+										SNew(SHorizontalBox)
+										+ SHorizontalBox::Slot().FillWidth(1.f).Padding(FMargin(0.f, 0.f, 6.f, 0.f))
+										[
+											SAssignNew(Mr.ModelIdForApiBox, SEditableTextBox)
+												.Text(FText::FromString(Mr.ModelIdForApi))
+												.OnTextChanged(this, &SUnrealAiEditorSettingsTab::OnAnySettingsChanged)
+										]
+										+ SHorizontalBox::Slot().FillWidth(1.f)
+										[
+											SNew(SVerticalBox)
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 4.f))
+											[
+												SAssignNew(Mr.ModelSearchBox, SEditableTextBox)
+													.Text(FText::FromString(Mr.ModelSearchText))
+													.HintText(LOCTEXT("ModelSearchHint", "Search known models for this provider..."))
+													.OnTextChanged_Lambda([this, &Mr](const FText& T)
+													{
+														Mr.ModelSearchText = T.ToString();
+														RebuildDynamicRows();
+														OnAnySettingsChanged(T);
+													})
+											]
+											+ SVerticalBox::Slot().AutoHeight()
+											[
+												SAssignNew(Mr.ModelIdDropdown, SComboBox<TSharedPtr<FString>>)
+													.OptionsSource(&Mr.ModelIdOptions)
+													.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+													{
+														return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : FString()));
+													})
+													.OnSelectionChanged_Lambda([this, &Mr](TSharedPtr<FString> NewSelection, ESelectInfo::Type)
+													{
+														if (!NewSelection.IsValid() || !Mr.ModelIdForApiBox.IsValid())
+														{
+															return;
+														}
+														const FString SelectedModel = *NewSelection;
+														Mr.ModelIdForApiBox->SetText(FText::FromString(SelectedModel));
+														if (Mr.ProfileKeyBox.IsValid() && Mr.ProfileKeyBox->GetText().ToString().IsEmpty())
+														{
+															Mr.ProfileKeyBox->SetText(FText::FromString(SelectedModel));
+														}
+														OnAnySettingsChanged(FText::FromString(SelectedModel));
+													})
+													.Content()
+													[
+														SNew(STextBlock)
+															.Text_Lambda([&Mr]()
+															{
+																const FString Current = Mr.ModelIdForApiBox.IsValid()
+																	? Mr.ModelIdForApiBox->GetText().ToString()
+																	: Mr.ModelIdForApi;
+																if (!Current.IsEmpty())
+																{
+																	return FText::FromString(Current);
+																}
+																return FText::FromString(
+																	Mr.ModelIdOptions.Num() > 0
+																		? FString::Printf(TEXT("Pick known model (%d matches)..."), Mr.ModelIdOptions.Num())
+																		: TEXT("No matches for filter"));
+															})
+													]
+											]
+										]
 									]
 									+ SGridPanel::Slot(0, 2).Padding(4.f)
 									[
@@ -2063,6 +2269,8 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 			}
 		}
 	}
+	RebuildProviderOptions();
+	RefreshProviderDropdownSelection();
 }
 
 bool SUnrealAiEditorSettingsTab::BuildJsonFromUi(FString& OutJson, FString& OutError)
