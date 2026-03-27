@@ -9,7 +9,7 @@
 - **Shortcut:** **Ctrl+K** (default chord for Agent Chat).
 - **Nomad tabs** for each surface; dockable like other editor tabs. **Agent Chat** is invoked automatically on editor startup (see **Project Settings → Plugins → Unreal AI Editor → Open Agent Chat on editor startup**). Dock it once where you want it; the editor remembers layout.
 - **Agent Chat**: transcript (`FUnrealAiChatTranscript`), tool rows (`SToolCallCard`), reasoning subline (`SThinkingSubline`), assistant streaming + optional typewriter (`SAssistantStreamBlock`), todo panel (`STodoPlanPanel`), **Stop** (same control as Send in the composer) → `CancelTurn`. Streaming defaults on (`UUnrealAiEditorSettings::bStreamLlmChat`). See [`docs/chat-renderer.md`](../../docs/chat-renderer.md).
-- **AI Settings** (`Window → Unreal AI → AI Settings`): `plugin_settings.json` (v4: nested **API key sections** with unlimited models each), per-model caps including **`maxAgentLlmRounds`** (max tool↔LLM iterations per send, default 16), company presets + hints, session **usage** per model + rough **USD** estimates when a bundled [Litellm](https://github.com/BerriAI/litellm) `model_prices_and_context_window.json` row matches your model id (`Resources/ModelPricing/`). Cumulative usage in `settings/usage_stats.json`. **Test connection**, **Save** → persistence / LLM reload.
+- **AI Settings** (`Window → Unreal AI → AI Settings`): `plugin_settings.json` (v4: nested **API key sections** with unlimited models each), per-model caps including **`maxAgentLlmRounds`** (max tool↔LLM iterations per send, default 16), company presets + provider-specific model picker (search + select known OpenAI-compatible model ids), and session **usage** per model + rough **USD** estimates from a small curated in-code pricing catalog. Cumulative usage in `settings/usage_stats.json`. **Test connection**, **Save** → persistence / LLM reload.
 - **Project Settings → Plugins → Unreal AI Editor**: `UUnrealAiEditorSettings` (default agent, auto connect, verbose logging, OpenRouter fields).
 - **In-module stubs** (`Private/Backend/` — not a separate server process): persistence (writes under `%LOCALAPPDATA%\UnrealAiEditor\` on Windows), chat service (fake stream), model connector (delayed success).
 - **Tool catalog + execution:** [`Resources/UnrealAiToolCatalog.json`](Resources/UnrealAiToolCatalog.json) — single JSON (`meta` + `tools[]`). **`FUnrealAiToolExecutionHost`** (`Private/Tools/`) implements `IToolExecutionHost::InvokeTool` and dispatches to UE5 handlers via `UnrealAiToolDispatch.cpp` and modular `UnrealAiToolDispatch_*.cpp` units (game thread). **Search:** `scene_fuzzy_search`, `asset_index_fuzzy_search`, `source_search_symbol` (`UnrealAiFuzzySearch.cpp`). **Blueprints:** `blueprint_compile`, `blueprint_export_ir`, `blueprint_apply_ir` (merge_policy / event_tick / layout_scope), `blueprint_format_graph`, summaries, open graph, add variable. **Generic assets:** `asset_create`, `asset_export_properties`, `asset_apply_properties`, dependencies/referencers, and more—see catalog and router for the full set. Tools without a handler return a structured `not_implemented`.
@@ -17,13 +17,32 @@
 
 ## Install into a UE project
 
-**This repo** already has a minimal UE project at the root (`blank.uproject`) with this plugin under `Plugins/UnrealAiEditor/`. Open that `.uproject` to build and run.
+**Recommended distribution model (bundled):** ship/install both plugins together:
 
-**Another project:** copy the `UnrealAiEditor` plugin folder to `<YourProject>/Plugins/UnrealAiEditor/`, then:
+- `Plugins/UnrealAiEditor/`
+- `Plugins/UnrealBlueprintFormatter/`
+
+Copy both folders into `<YourProject>/Plugins/`.
+
+**This repo** already has a minimal UE project at the root (`blank.uproject`) with both plugin folders under `Plugins/`.
+
+Then:
 
 1. Right-click the `.uproject` → **Generate Visual Studio project files** (Windows) or equivalent.
 2. Build the **Editor** target.
-3. Launch the editor; enable the plugin if prompted (**Edit → Plugins → Unreal AI Editor**).
+3. Launch the editor; enable plugins if prompted (**Edit → Plugins → Unreal AI Editor**).
+
+### Create a bundled install zip
+
+From repo root, build a single distributable zip containing both plugins:
+
+```powershell
+.\scripts\package-bundled-plugins.ps1
+```
+
+Default output:
+
+- `dist/UnrealAiEditor-bundled-plugins.zip`
 
 ## Manual verification
 

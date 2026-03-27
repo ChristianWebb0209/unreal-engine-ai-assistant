@@ -106,6 +106,23 @@ For **tooling breadth** and known gaps, see [`docs/asset-type-coverage-matrix.md
 
 From **Cursor** or VS Code, use the integrated terminal for the same commands.
 
+## Bundled plugin distribution
+
+For end users, distribute a single bundle that contains both required plugin folders:
+
+- `Plugins/UnrealAiEditor`
+- `Plugins/UnrealBlueprintFormatter`
+
+Create a zip bundle from repo root:
+
+```powershell
+.\scripts\package-bundled-plugins.ps1
+```
+
+Output:
+
+- `dist/UnrealAiEditor-bundled-plugins.zip`
+
 **Agent / harness iteration (prompts, tools, tests):** read [`docs/AGENT_HARNESS_HANDOFF.md`](docs/AGENT_HARNESS_HANDOFF.md) — one file for scripts, file map, and when to report bigger issues or tool catalog changes.
 
 The repo includes a minimal **`Source/Blank`** runtime module so Unreal Build Tool can compile the C++ plugin alongside the blank game target.

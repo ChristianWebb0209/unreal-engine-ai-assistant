@@ -3,7 +3,7 @@
 	"Version": 1,
 	"VersionName": "0.1.0",
 	"FriendlyName": "Unreal AI Editor",
-	"Description": "Local-first AI assistant shell for Unreal Editor (UI + stubbed backend). Depends on UnrealBlueprintFormatter for Blueprint graph auto-layout in AI tools; enable that plugin via Edit > Plugins (listed as a dependency).",
+	"Description": "Local-first AI assistant shell for Unreal Editor (UI + stubbed backend). Distributed as a bundled two-plugin package with UnrealBlueprintFormatter for Blueprint graph auto-layout in AI tools.",
 	"Category": "Editor",
 	"CreatedBy": "Christian Webb",
 	"CreatedByURL": "",
