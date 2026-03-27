@@ -58,14 +58,14 @@ jobs:
       - name: Render maps + update architecture page
         shell: pwsh
         run: |
-          ./scripts/export-architecture-maps.ps1 -WorkspaceDslPath "docs/architecture-maps/architecture.dsl" -OutputDir "docs/architecture-maps" -PagePath "docs/architecture-maps/README.md" -CliJarPath "tools/structurizr-cli/structurizr-cli.jar" -PlantUmlJarPath "tools/plantuml/plantuml.jar"
+          ./scripts/export-architecture-maps.ps1 -WorkspaceDslPath "docs/architecture-maps/architecture.dsl" -OutputDir "docs/architecture-maps" -PagePath "ARCHITECTURE_MAPS.md" -CliPath "tools/structurizr-cli/structurizr.sh" -PlantUmlJarPath "tools/plantuml/plantuml.jar"
 
       - name: Commit generated files
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
           if [ -n "$(git status --porcelain)" ]; then
-            git add architecture.svg docs/architecture-maps
+            git add architecture.svg ARCHITECTURE_MAPS.md docs/architecture-maps
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit -m "docs: regenerate architecture maps"

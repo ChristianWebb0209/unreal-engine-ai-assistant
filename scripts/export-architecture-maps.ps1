@@ -1,8 +1,9 @@
 param(
     [string]$WorkspaceDslPath = "docs/architecture-maps/architecture.dsl",
     [string]$OutputDir = "docs/architecture-maps",
-    [string]$ReadmePath = "README.md",
-    [string]$CliJarPath = ""
+    [string]$PagePath = "ARCHITECTURE_MAPS.md",
+    [string]$CliPath = "",
+    [string]$PlantUmlJarPath = ""
 )
 
 Set-StrictMode -Version Latest
@@ -17,120 +18,129 @@ function Resolve-PathOrFail {
     return $resolved.Path
 }
 
-function New-OrClearDir {
-    param([string]$PathValue)
-    if (Test-Path $PathValue) {
-        Get-ChildItem -Path $PathValue -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-    } else {
-        New-Item -ItemType Directory -Path $PathValue | Out-Null
-    }
-}
-
-function Get-StructurizrJarPath {
-    param([string]$Provided)
-    if (-not [string]::IsNullOrWhiteSpace($Provided)) {
-        return (Resolve-PathOrFail -PathValue $Provided -Label "Structurizr CLI jar")
-    }
-
-    $candidates = @(
-        "tools/structurizr-cli/structurizr-cli.jar",
-        "structurizr-cli.jar"
+function Get-JarPath {
+    param(
+        [string]$Provided,
+        [string[]]$Candidates,
+        [string]$Label
     )
-
-    foreach ($candidate in $candidates) {
+    if (-not [string]::IsNullOrWhiteSpace($Provided)) {
+        return (Resolve-PathOrFail -PathValue $Provided -Label $Label)
+    }
+    foreach ($candidate in $Candidates) {
         $resolved = Resolve-Path -Path $candidate -ErrorAction SilentlyContinue
         if ($resolved) {
             return $resolved.Path
         }
     }
-
-    throw "Could not locate structurizr-cli.jar. Pass -CliJarPath explicitly."
+    throw "Could not locate $Label. Pass the explicit path."
 }
 
-function Build-ArchitectureSection {
+function Ensure-Dir {
+    param([string]$PathValue)
+    if (-not (Test-Path $PathValue)) {
+        New-Item -ItemType Directory -Path $PathValue | Out-Null
+    }
+}
+
+function Clear-GeneratedFiles {
+    param([string]$MapsDir)
+    if (-not (Test-Path $MapsDir)) {
+        return
+    }
+    $patterns = @("*.svg", "*.puml")
+    foreach ($pattern in $patterns) {
+        Get-ChildItem -Path $MapsDir -Filter $pattern -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function To-Title {
+    param([string]$Name)
+    $title = ($Name -replace "[-_]+", " ")
+    if ($title.Length -eq 0) { return $Name }
+    return $title.Substring(0,1).ToUpper() + $title.Substring(1)
+}
+
+function Write-ArchitecturePage {
     param(
-        [string]$MapsDirRelative,
+        [string]$DestinationFile,
         [System.IO.FileInfo[]]$SvgFiles
     )
 
     $nl = [Environment]::NewLine
     $sb = New-Object System.Text.StringBuilder
-    [void]$sb.Append("## Architecture Maps$nl$nl")
-    [void]$sb.Append("- Primary map for quick scanning: [`architecture.svg`](architecture.svg)$nl")
-    [void]$sb.Append("- Full rendered gallery: [`docs/architecture-maps/`](docs/architecture-maps)$nl")
-    [void]$sb.Append("- Source of truth: [`docs/architecture-maps/architecture.dsl`](docs/architecture-maps/architecture.dsl)$nl$nl")
-    [void]$sb.Append("This section is generated from `docs/architecture-maps/architecture.dsl` by CI. Each view below is rendered as SVG from Structurizr DSL and committed to the repo for easy GitHub rendering.$nl$nl")
-    [void]$sb.Append("<!-- ARCHITECTURE_MAPS_START -->$nl")
+    [void]$sb.Append("# Architecture Maps$nl$nl")
+    [void]$sb.Append('Generated from [`docs/architecture-maps/architecture.dsl`](docs/architecture-maps/architecture.dsl) via CI. This page is auto-written by `scripts/export-architecture-maps.ps1`.' + $nl + $nl)
+    [void]$sb.Append('- Primary root image: [`architecture.svg`](architecture.svg)' + $nl)
+    [void]$sb.Append('- Rendered view gallery folder: [`docs/architecture-maps/`](docs/architecture-maps/)' + $nl + $nl)
 
     foreach ($svg in $SvgFiles) {
-        $name = [System.IO.Path]::GetFileNameWithoutExtension($svg.Name)
-        $title = ($name -replace "[-_]+", " ")
-        if ($title.Length -gt 0) {
-            $title = ($title.Substring(0,1).ToUpper() + $title.Substring(1))
-        }
-        [void]$sb.Append("### $title$nl$nl")
-        [void]$sb.Append("![${title}]($MapsDirRelative/$($svg.Name))$nl$nl")
+        $title = To-Title -Name $svg.BaseName
+        [void]$sb.Append("## $title$nl$nl")
+        [void]$sb.Append("![$title](docs/architecture-maps/$($svg.Name))$nl$nl")
     }
 
-    [void]$sb.Append("<!-- ARCHITECTURE_MAPS_END -->$nl")
-    return $sb.ToString()
-}
-
-function Upsert-ArchitectureSection {
-    param(
-        [string]$ReadmeFile,
-        [string]$SectionContent
-    )
-
-    $content = Get-Content -Path $ReadmeFile -Raw
-    $startMarker = "<!-- ARCHITECTURE_MAPS_START -->"
-    $endMarker = "<!-- ARCHITECTURE_MAPS_END -->"
-
-    if ($content.Contains($startMarker) -and $content.Contains($endMarker)) {
-        $pattern = "(?s)## Architecture Maps.*?$endMarker"
-        $replacement = $SectionContent.TrimEnd()
-        $updated = [System.Text.RegularExpressions.Regex]::Replace($content, $pattern, $replacement)
-        Set-Content -Path $ReadmeFile -Value $updated -NoNewline
-        return
-    }
-
-    # Insert early in README (after title + intro paragraph if possible).
-    $insertAfter = $content.IndexOf([Environment]::NewLine + "## ")
-    if ($insertAfter -lt 0) {
-        $updatedContent = $content.TrimEnd() + [Environment]::NewLine + [Environment]::NewLine + $SectionContent.TrimEnd() + [Environment]::NewLine
-        Set-Content -Path $ReadmeFile -Value $updatedContent -NoNewline
-        return
-    }
-
-    $prefix = $content.Substring(0, $insertAfter).TrimEnd()
-    $suffix = $content.Substring($insertAfter).TrimStart()
-    $updated = $prefix + [Environment]::NewLine + [Environment]::NewLine + $SectionContent.TrimEnd() + [Environment]::NewLine + [Environment]::NewLine + $suffix
-    Set-Content -Path $ReadmeFile -Value $updated -NoNewline
+    Set-Content -Path $DestinationFile -Value $sb.ToString() -NoNewline
 }
 
 $workspaceDsl = Resolve-PathOrFail -PathValue $WorkspaceDslPath -Label "Workspace DSL"
-$readme = Resolve-PathOrFail -PathValue $ReadmePath -Label "README"
-$jar = Get-StructurizrJarPath -Provided $CliJarPath
+$cliPathResolved = $null
+if (-not [string]::IsNullOrWhiteSpace($CliPath)) {
+    $cliPathResolved = Resolve-PathOrFail -PathValue $CliPath -Label "Structurizr CLI executable"
+} else {
+    $candidates = @(
+        "tools/structurizr-cli/structurizr.bat",
+        "tools/structurizr-cli/structurizr.sh"
+    )
+    foreach ($candidate in $candidates) {
+        $resolved = Resolve-Path -Path $candidate -ErrorAction SilentlyContinue
+        if ($resolved) {
+            $cliPathResolved = $resolved.Path
+            break
+        }
+    }
+    if (-not $cliPathResolved) {
+        throw "Could not locate Structurizr CLI executable. Pass -CliPath explicitly."
+    }
+}
+$plantUmlJar = Get-JarPath -Provided $PlantUmlJarPath -Candidates @("tools/plantuml/plantuml.jar", "plantuml.jar") -Label "PlantUML jar"
 
-New-OrClearDir -PathValue $OutputDir
+Ensure-Dir -PathValue $OutputDir
+Clear-GeneratedFiles -MapsDir $OutputDir
 
-Write-Host "Exporting SVG views from $workspaceDsl ..."
-java -jar "$jar" export -workspace "$workspaceDsl" -format svg -output "$OutputDir"
+Write-Host "Exporting PlantUML views from $workspaceDsl ..."
+if ($cliPathResolved.ToLower().EndsWith(".sh")) {
+    bash "$cliPathResolved" export -workspace "$workspaceDsl" -format plantuml -output "$OutputDir"
+} else {
+    & "$cliPathResolved" export -workspace "$workspaceDsl" -format plantuml -output "$OutputDir"
+}
+
+$pumlFiles = @(Get-ChildItem -Path $OutputDir -Filter *.puml -File -Recurse | Sort-Object Name)
+if ($pumlFiles.Count -eq 0) {
+    throw "No PlantUML files were exported to $OutputDir."
+}
+
+Write-Host "Rendering SVGs via PlantUML..."
+foreach ($puml in $pumlFiles) {
+    java -jar "$plantUmlJar" -tsvg "$($puml.FullName)"
+}
 
 $svgs = Get-ChildItem -Path $OutputDir -Filter *.svg -File | Sort-Object Name
 if ($svgs.Count -eq 0) {
-    throw "No SVG files were exported to $OutputDir."
+    throw "No SVG files were rendered in $OutputDir."
 }
 
-# Keep a root-level architecture.svg for README/quick preview.
+# Keep repository output clean: retain SVG artifacts only.
+Get-ChildItem -Path $OutputDir -Filter *.puml -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
+# Keep a root-level architecture.svg for quick linking.
 $preferred = $svgs | Where-Object { $_.BaseName -eq "mega-map" } | Select-Object -First 1
 if (-not $preferred) {
     $preferred = $svgs[0]
 }
 Copy-Item -Path $preferred.FullName -Destination "architecture.svg" -Force
 
-$section = Build-ArchitectureSection -MapsDirRelative "docs/architecture-maps" -SvgFiles $svgs
-Upsert-ArchitectureSection -ReadmeFile $readme -SectionContent $section
+Write-ArchitecturePage -DestinationFile $PagePath -SvgFiles $svgs
 
 Write-Host "Exported $($svgs.Count) architecture map(s)."
-Write-Host "Updated README architecture section and root architecture.svg."
+Write-Host "Updated docs architecture page and root architecture.svg."
