@@ -1,1 +1,0 @@
-Implement a day-night cycle by rotating the directional light over time.

@@ -1,1 +1,0 @@
-Create a door that opens when the player presses "E" near it.

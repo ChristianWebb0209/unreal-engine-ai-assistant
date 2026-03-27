@@ -1,1 +1,0 @@
-Display the player's health as a UI bar that updates in real time.

@@ -1,7 +1,0 @@
-Continue the same thread and perform a second pass that cross-checks your earlier findings:
-
-1) Re-read editor snapshot.
-2) Re-run at least two search families (scene + asset index, or asset index + source symbols).
-3) Compare against prior turn outputs and list discrepancies.
-
-Keep the response short, but complete the requested checks before finishing.

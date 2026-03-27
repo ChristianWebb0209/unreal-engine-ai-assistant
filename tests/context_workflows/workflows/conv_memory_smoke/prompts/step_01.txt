@@ -1,3 +1,0 @@
-For this thread only: remember that our test codeword is BLUEBIRD-7.
-
-Reply with one short confirmation only. Do not call editor/build tools for this step; if the harness requires a tool round, answer in plain text and stop.

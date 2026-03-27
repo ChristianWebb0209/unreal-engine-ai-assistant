@@ -1,1 +1,0 @@
-What actors are currently selected in the editor? If you need ground truth from the engine, call editor_get_selection (empty args are fine).

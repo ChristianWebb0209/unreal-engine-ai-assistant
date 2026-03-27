@@ -1,1 +1,0 @@
-Create a health pickup that restores player health when collected.

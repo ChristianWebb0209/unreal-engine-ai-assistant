@@ -1,1 +1,0 @@
-Give the player a weapon that shoots projectiles when clicking.

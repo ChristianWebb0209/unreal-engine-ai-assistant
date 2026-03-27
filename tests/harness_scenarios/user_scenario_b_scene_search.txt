@@ -1,1 +1,0 @@
-Search the loaded level for actors related to lighting. Use scene_fuzzy_search with a short query (e.g. Light) and a small max_results so the result list stays readable.

@@ -1,1 +1,0 @@
-Play footstep sounds when the player walks.
