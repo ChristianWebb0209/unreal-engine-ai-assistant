@@ -1,0 +1,62 @@
+name: Render Architecture Maps
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/architecture-maps/architecture.dsl
+      - scripts/export-architecture-maps.ps1
+      - .github/workflows/architecture-maps.yml
+  pull_request:
+    paths:
+      - docs/architecture-maps/architecture.dsl
+      - scripts/export-architecture-maps.ps1
+      - .github/workflows/architecture-maps.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Download Structurizr CLI
+        shell: bash
+        run: |
+          mkdir -p tools/structurizr-cli
+          curl -L "https://github.com/structurizr/cli/releases/latest/download/structurizr-cli.zip" -o /tmp/structurizr-cli.zip
+          unzip -o /tmp/structurizr-cli.zip -d tools/structurizr-cli
+          ls -la tools/structurizr-cli
+
+      - name: Render maps + update README
+        shell: pwsh
+        run: |
+          ./scripts/export-architecture-maps.ps1 -WorkspaceDslPath "docs/architecture-maps/architecture.dsl" -OutputDir "docs/architecture-maps" -ReadmePath "README.md" -CliJarPath "tools/structurizr-cli/structurizr-cli.jar"
+
+      - name: Commit generated files
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git add architecture.svg docs/architecture-maps README.md
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "docs: regenerate architecture maps"
+            git push
+          else
+            echo "No generated changes to commit."
+          fi
