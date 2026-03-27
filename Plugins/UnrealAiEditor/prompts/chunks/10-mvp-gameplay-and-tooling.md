@@ -13,6 +13,10 @@ The project targets common **gameplay Blueprint** workflows. Use tools in this o
 - **Scene:** **`actor_spawn_from_class`** (needs `class_path`, `location`, `rotation` arrays), **`actor_set_transform`**, **`actor_destroy`**, **`scene_fuzzy_search`** to find actors. Paths accept **partial or label-style** resolution when the model omits the full outer path.
 - **Runtime check:** after gameplay changes, **`pie_start`** with `"mode":"viewport"` or `"standalone"` is usually required; **`pie_stop`** when done.
 - **No fake execution:** for requests like "run a quick playtest", "check regressions", or "test in-game", you must emit actual PIE tool calls (`pie_start`, then `pie_status` and `pie_stop` when appropriate). Do not claim test results without those tool results.
+- **Mutation progression rule:** after discovery confirms a concrete Blueprint/asset/actor target, execute at least one mutation/exec tool in the same run (`blueprint_apply_ir`, `asset_apply_properties`, `actor_set_transform`, etc.) unless blocked with a specific reason.
+- **Known-target shortcut examples:**
+  - If context already has `/Game/...` Blueprint path, skip extra registry queries and go to `blueprint_export_ir` or `blueprint_apply_ir`.
+  - If context already has a valid actor path from prior search, skip repeated fuzzy search and call the requested actor mutation tool.
 
 ## Task-to-tool map (high level)
 

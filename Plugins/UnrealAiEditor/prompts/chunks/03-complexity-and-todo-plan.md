@@ -15,6 +15,7 @@ Dynamic escalation is expected: if the task starts simple but grows (many tool c
 Discovery/search budget rule:
 - do not repeat near-identical discovery/search calls more than 2 times;
 - if still unresolved, switch tool category (read -> mutate or alternate resolver) or emit `agent_emit_todo_plan`.
+- if the user turn has clear action intent and no tool call was made, next turn must either execute a concrete tool call or provide an explicit blocker reason.
 
 **Plan shape:** `definitionOfDone`; short `assumptions` / `risks` if needed; `steps` with stable `id`, `title`, `detail`, `dependsOn`, optional `suggestedTools`, `status` starting `pending`. **Cap:** **`{{MAX_PLAN_STEPS}}`**.
 

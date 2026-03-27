@@ -88,6 +88,67 @@ class ContextState:
         return events
 
 
+ACTION_TOKENS = (
+    "run",
+    "start",
+    "stop",
+    "compile",
+    "save",
+    "open",
+    "re-open",
+    "reopen",
+    "fix",
+    "apply",
+    "change",
+    "adjust",
+    "tune",
+    "create",
+    "delete",
+    "playtest",
+    "test",
+    "resolve",
+)
+
+MUTATION_TOKENS = (
+    "fix",
+    "apply",
+    "change",
+    "adjust",
+    "tune",
+    "reduce",
+    "increase",
+    "set ",
+    "compile",
+    "save",
+    "resolve",
+    "make ",
+)
+
+
+def user_likely_requests_action(text: str) -> bool:
+    low = (text or "").lower()
+    return any(tok in low for tok in ACTION_TOKENS)
+
+
+def user_likely_requests_mutation(text: str) -> bool:
+    low = (text or "").lower()
+    return any(tok in low for tok in MUTATION_TOKENS)
+
+
+def is_likely_read_only_tool(name: str) -> bool:
+    t = (name or "").lower()
+    return (
+        "_search" in t
+        or "_query" in t
+        or "_read" in t
+        or "_get_" in t
+        or "_list_" in t
+        or "snapshot" in t
+        or "_status" in t
+        or t == "blueprint_export_ir"
+    )
+
+
 def engine_label(root: Path) -> str:
     for uproj in root.glob("*.uproject"):
         try:
@@ -344,6 +405,16 @@ def main() -> int:
                 state.tool_memories.append(tm)
                 added_memory.append({"tool": tm.tool, "source_turn": tm.source_turn, "reason": tm.added_reason})
         step_log["tool_call_validations"] = validations
+        turn_flags: list[str] = []
+        if user_likely_requests_action(turn["user"]) and not tool_calls:
+            turn_flags.append("NO_TOOL_ACTION_TURN")
+        if user_likely_requests_mutation(turn["user"]) and tool_calls:
+            names = [str(tc.get("name") or "") for tc in tool_calls]
+            if names and all(is_likely_read_only_tool(n) for n in names):
+                turn_flags.append("READ_ONLY_ON_MUTATION")
+        if tool_calls and all(not bool(v["validation"]["valid"]) for v in validations):
+            turn_flags.append("ALL_TOOL_CALLS_INVALID")
+        step_log["turn_flags"] = turn_flags
         step_log["context_additions_after_turn"] = {"tool_memories_added": added_memory}
 
         post_prune_events = state.prune_to_budget(eng)

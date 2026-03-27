@@ -216,7 +216,7 @@
     },
     {
       "tool_id": "actor_set_transform",
-      "summary": "Set actor transform. Omit `transform` and top-level location/rotation/scale to keep the current pose (useful with `teleport_physics` only). Use `transform` object, or top-level `location`/`rotation`/`scale` number arrays [x,y,z]. `actor_path` accepts full path or a unique suffix (e.g. PersistentLevel.Actor_UAID_...).",
+      "summary": "Mutate/set actor transform. Omit `transform` and top-level location/rotation/scale to keep the current pose (useful with `teleport_physics` only). Use `transform` object, or top-level `location`/`rotation`/`scale` number arrays [x,y,z]. `actor_path` accepts full path or a unique suffix (e.g. PersistentLevel.Actor_UAID_...).",
       "category": "world_actors",
       "tags": [
         "actor"
@@ -1713,7 +1713,7 @@
     },
     {
       "tool_id": "editor_get_selection",
-      "summary": "Return the current editor actor selection (paths and labels); may be empty. Use when the user asks what is selected or before transforms that depend on selection.",
+      "summary": "Return only the current editor selection (paths and labels); may be empty. Do not use as scene-wide discovery—use scene_fuzzy_search when the user asks to find actors in the level.",
       "category": "selection_framing",
       "tags": [
         "selection",
@@ -2435,7 +2435,7 @@
     },
     {
       "tool_id": "pie_start",
-      "summary": "Start Play-In-Editor. Optional mode: \"viewport\" (default, in-process PIE) or \"standalone\" (new process when supported). Pair with pie_stop when finished.",
+      "summary": "Start Play-In-Editor. Optional mode: \"viewport\" (default, in-process PIE) or \"standalone\" (new process when supported). Use pie_status to verify running state and pair with pie_stop when finished.",
       "category": "pie_play",
       "tags": [
         "pie"
@@ -2513,7 +2513,7 @@
     },
     {
       "tool_id": "pie_stop",
-      "summary": "Stop current PIE session.",
+      "summary": "Stop current PIE session started via pie_start. Use when playtest/run requests are complete or to cleanly end runtime checks.",
       "category": "pie_play",
       "tags": [
         "pie"
@@ -2863,7 +2863,7 @@
     },
     {
       "tool_id": "scene_fuzzy_search",
-      "summary": "Fuzzy-search actors in the loaded editor world/level (not Content Browser assets). Use this first when you need to discover actor paths by topic/label before calling actor mutation tools.",
+      "summary": "Fuzzy-search actors across the loaded editor world/level (not Content Browser assets). Use this to discover actor_path targets before mutating tools; skip it when a concrete actor_path is already known from context.",
       "category": "world_actors",
       "tags": [
         "actor",
@@ -2916,7 +2916,7 @@
     },
     {
       "tool_id": "asset_index_fuzzy_search",
-      "summary": "Fuzzy-search the Unreal Asset Registry index for asset discovery. Use this first to discover asset paths by approximate name, then pass selected object_path into tools like asset_open_editor/asset_apply_properties.",
+      "summary": "Fuzzy-search the Unreal Asset Registry for asset discovery under /Game. Use this to resolve concrete object_path values before write tools; if object_path is already known, call the target tool directly instead of re-searching.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -3743,7 +3743,7 @@
     },
     {
       "tool_id": "asset_export_properties",
-      "summary": "Export editable UObject properties under /Game to JSON (reflection). Prefer before bespoke subsystem reads.",
+      "summary": "Read/export editable UObject properties under /Game as JSON (reflection). Read-only inspector used to understand current values before applying a delta with asset_apply_properties.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -3787,7 +3787,7 @@
     },
     {
       "tool_id": "asset_apply_properties",
-      "summary": "Apply JSON property deltas to an asset under /Game (reflection / ImportText). Use dry_run to validate.",
+      "summary": "Write/apply JSON property deltas to an asset under /Game (reflection / ImportText). Mutation tool: use after a concrete object_path is known and prefer dry_run before irreversible edits.",
       "category": "assets_content",
       "tags": [
         "asset",

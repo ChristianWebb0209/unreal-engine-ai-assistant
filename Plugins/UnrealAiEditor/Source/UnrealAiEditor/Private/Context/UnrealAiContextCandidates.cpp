@@ -108,6 +108,25 @@ namespace UnrealAiContextCandidates
 			}
 			return Out;
 		}
+
+		static bool IsDiscoveryToolName(const FString& ToolName)
+		{
+			const FString T = ToolName.ToLower();
+			return T.Contains(TEXT("fuzzy_search"))
+				|| T.Contains(TEXT("_query"))
+				|| T.Contains(TEXT("_read"))
+				|| T.Contains(TEXT("snapshot"))
+				|| T == TEXT("editor_get_selection")
+				|| T == TEXT("asset_registry_query")
+				|| T == TEXT("blueprint_export_ir");
+		}
+
+		static bool HasLikelyActionablePath(const FString& Text)
+		{
+			return Text.Contains(TEXT("/Game/"))
+				|| Text.Contains(TEXT("PersistentLevel."))
+				|| Text.Contains(TEXT("/Script/"));
+		}
 	}
 
 	void CollectCandidates(
@@ -166,6 +185,19 @@ namespace UnrealAiContextCandidates
 			E.Payload = T.TruncatedResult;
 			E.Features.Recency = static_cast<float>(FMath::Max(0.0, 1.0 - (FDateTime::UtcNow() - T.Timestamp).GetTotalMinutes() / 60.0));
 			E.Features.FreshnessReliability = E.Features.Recency;
+			const bool bDiscoveryTool = IsDiscoveryToolName(T.ToolName);
+			const bool bHasActionablePath = HasLikelyActionablePath(T.TruncatedResult);
+			if (bDiscoveryTool && bHasActionablePath)
+			{
+				// Keep recently resolved concrete targets around longer so the model can skip redundant re-discovery.
+				E.Features.ActiveBonus = 1.f;
+				E.Features.ThreadOverlayBonus = 0.75f;
+			}
+			else if (bDiscoveryTool && !bHasActionablePath)
+			{
+				// Discovery outputs with no actionable target should decay faster under pressure.
+				E.Features.FreshnessReliability *= 0.5f;
+			}
 			E.RenderedText = FString::Printf(TEXT("### Tool: %s\n%s"), *T.ToolName, *T.TruncatedResult);
 			E.TokenCostEstimate = EstimateTokens(E.RenderedText);
 			OutCandidates.Add(MoveTemp(E));
@@ -516,6 +548,32 @@ namespace UnrealAiContextCandidates
 			if (ContentBrowserPath != INDEX_NONE)
 			{
 				TryPackIdx(ContentBrowserPath, TEXT("pack:budget"));
+			}
+		}
+		// - One actionable tool result anchor (best-effort): preserve a recently resolved concrete target path.
+		{
+			int32 BestActionableTool = INDEX_NONE;
+			float BestScore = -FLT_MAX;
+			for (const int32 I : Idx)
+			{
+				const FContextCandidateEnvelope& C = Candidates[I];
+				if (C.Type != UnrealAiContextRankingPolicy::ECandidateType::ToolResult)
+				{
+					continue;
+				}
+				if (!HasLikelyActionablePath(C.Payload))
+				{
+					continue;
+				}
+				if (C.Score.Total > BestScore)
+				{
+					BestScore = C.Score.Total;
+					BestActionableTool = I;
+				}
+			}
+			if (BestActionableTool != INDEX_NONE)
+			{
+				TryPackIdx(BestActionableTool, TEXT("pack:budget"));
 			}
 		}
 		Idx.Sort([&Candidates](const int32 A, const int32 B)

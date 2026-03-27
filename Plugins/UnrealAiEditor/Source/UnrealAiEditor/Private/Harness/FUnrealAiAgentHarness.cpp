@@ -109,6 +109,40 @@ namespace UnrealAiAgentHarnessPriv
 		return false;
 	}
 
+	static bool AssistantContainsExplicitBlocker(const FString& AssistantText)
+	{
+		const FString T = AssistantText.ToLower();
+		if (T.IsEmpty())
+		{
+			return false;
+		}
+		static const TCHAR* Tokens[] = {
+			TEXT("blocked"),
+			TEXT("blocker"),
+			TEXT("cannot"),
+			TEXT("can't"),
+			TEXT("unable"),
+			TEXT("failed"),
+			TEXT("error"),
+			TEXT("missing"),
+			TEXT("not available"),
+			TEXT("no access"),
+			TEXT("permission"),
+			TEXT("manual step"),
+			TEXT("need you to"),
+			TEXT("requires")
+		};
+		int32 Hits = 0;
+		for (const TCHAR* K : Tokens)
+		{
+			if (T.Contains(K))
+			{
+				++Hits;
+			}
+		}
+		return Hits > 0 && T.Len() >= 24;
+	}
+
 	static bool IsLikelyReadOnlyToolName(const FString& ToolName)
 	{
 		const FString T = ToolName.ToLower();
@@ -917,7 +951,7 @@ namespace UnrealAiAgentHarnessPriv
 			FUnrealAiConversationMessage RepairNudge;
 			RepairNudge.Role = TEXT("user");
 			RepairNudge.Content = TEXT(
-				"[Harness] The same tool validation failure repeated multiple times. Repair-or-stop now: either call one corrected tool invocation with fixed arguments, or provide a concise blocked summary with the exact failing tool and required fields. Last failing pattern: ");
+				"[Harness][reason=repeated_validation_failure] The same tool validation failure repeated multiple times. Repair-or-stop now: either call one corrected tool invocation with fixed arguments, or provide a concise blocked summary with the exact failing tool and required fields. Last failing pattern: ");
 			RepairNudge.Content += LastToolFailureSignature;
 			Conv->GetMessagesMutable().Add(RepairNudge);
 		}
@@ -926,7 +960,7 @@ namespace UnrealAiAgentHarnessPriv
 			FUnrealAiConversationMessage LoopNudge;
 			LoopNudge.Role = TEXT("user");
 			LoopNudge.Content = TEXT(
-				"[Harness] Repeated tool loop detected. Replan-or-stop now: either emit one concise `agent_emit_todo_plan` for remaining work and continue from step 1, or provide a concise blocked summary with the exact blocker.");
+				"[Harness][reason=repeated_tool_loop] Repeated tool loop detected. Replan-or-stop now: either emit one concise `agent_emit_todo_plan` for remaining work and continue from step 1, or provide a concise blocked summary with the exact blocker.");
 			Conv->GetMessagesMutable().Add(LoopNudge);
 		}
 		// The next round still runs (DispatchLlm below), but models often reply with text-only and end
@@ -936,7 +970,7 @@ namespace UnrealAiAgentHarnessPriv
 			FUnrealAiConversationMessage Nudge;
 			Nudge.Role = TEXT("user");
 			Nudge.Content = TEXT(
-				"[Harness] Plan recorded. Continue immediately: execute the first pending plan step using "
+				"[Harness][reason=todo_plan_only] Plan recorded. Continue immediately: execute the first pending plan step using "
 				"Unreal Editor tools. Do not finish with narration only—invoke tools this turn unless truly blocked.");
 			Conv->GetMessagesMutable().Add(Nudge);
 		}
@@ -949,7 +983,7 @@ namespace UnrealAiAgentHarnessPriv
 			if (bDeferredQueue)
 			{
 				Nudge.Content = FString::Printf(
-					TEXT("[Harness] Tool round complete (ok=%d, failed=%d). Additional requested tools were deferred (%d) due to dynamic planning policy. ")
+					TEXT("[Harness][reason=tool_round_complete_deferred] Tool round complete (ok=%d, failed=%d). Additional requested tools were deferred (%d) due to dynamic planning policy. ")
 					TEXT("Now emit/update a concise todo plan that queues remaining work, then execute the first pending step."),
 					ToolSuccessCount,
 					ToolFailCount,
@@ -958,7 +992,7 @@ namespace UnrealAiAgentHarnessPriv
 			else
 			{
 				Nudge.Content = FString::Printf(
-					TEXT("[Harness] Tool round complete (ok=%d, failed=%d). Continue executing the user's request. ")
+					TEXT("[Harness][reason=tool_round_complete] Tool round complete (ok=%d, failed=%d). Continue executing the user's request. ")
 					TEXT("If the task is not complete, call the next tool now. Only finish when the requested scene/work is actually done or you are truly blocked."),
 					ToolSuccessCount,
 					ToolFailCount);
@@ -987,7 +1021,7 @@ namespace UnrealAiAgentHarnessPriv
 					FUnrealAiConversationMessage FollowthroughNudge;
 					FollowthroughNudge.Role = TEXT("user");
 					FollowthroughNudge.Content = TEXT(
-						"[Harness] The user requested an actual change, but only read/discovery tools were executed. "
+						"[Harness][reason=mutation_readonly_loop] The user requested an actual change, but only read/discovery tools were executed. "
 						"Continue now with at least one concrete write/exec tool call that advances the requested change, "
 						"or state the exact blocker.");
 					Conv->GetMessagesMutable().Add(FollowthroughNudge);
@@ -1020,29 +1054,35 @@ namespace UnrealAiAgentHarnessPriv
 			(Request.Mode == EUnrealAiAgentMode::Agent || Request.Mode == EUnrealAiAgentMode::Orchestrate);
 		const FString LastRealUser = GetLastRealUserMessage(Conv->GetMessages());
 		const bool bActionIntent = UserLikelyRequestsActionTool(LastRealUser);
+		const bool bHasExplicitBlocker = AssistantContainsExplicitBlocker(AssistantBuffer);
 		if (bModeWantsTools && AssistantBuffer.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
 		{
 			FUnrealAiConversationMessage Nudge;
 			Nudge.Role = TEXT("user");
 			Nudge.Content = TEXT(
-				"[Harness] The model returned an empty assistant message. Continue the user's task: call the ")
+				"[Harness][reason=empty_assistant] The model returned an empty assistant message. Continue the user's task: call the ")
 				TEXT("next tool(s) now, or briefly explain what blocks you. Do not reply with an empty message.");
 			Conv->GetMessagesMutable().Add(Nudge);
 			AssistantBuffer.Reset();
 			DispatchLlm();
 			return;
 		}
-		if (bModeWantsTools && bActionIntent && LlmRound < EffectiveMaxLlmRounds && ActionNoToolNudgeCount < 2)
+		if (bModeWantsTools && bActionIntent && !bHasExplicitBlocker && LlmRound < EffectiveMaxLlmRounds && ActionNoToolNudgeCount < 2)
 		{
 			++ActionNoToolNudgeCount;
 			FUnrealAiConversationMessage Nudge;
 			Nudge.Role = TEXT("user");
 			Nudge.Content = TEXT(
-				"[Harness] The user asked for concrete editor actions. Do not end with narration-only output. "
+				"[Harness][reason=action_no_tool] The user asked for concrete editor actions. Do not end with narration-only output. "
 				"Call at least one relevant Unreal tool now (or report the exact blocker if no tool can proceed).");
 			Conv->GetMessagesMutable().Add(Nudge);
 			AssistantBuffer.Reset();
 			DispatchLlm();
+			return;
+		}
+		if (bModeWantsTools && bActionIntent && !bHasExplicitBlocker && ActionNoToolNudgeCount >= 2)
+		{
+			Fail(TEXT("Action-intent turn ended without tool calls or explicit blocker explanation."));
 			return;
 		}
 

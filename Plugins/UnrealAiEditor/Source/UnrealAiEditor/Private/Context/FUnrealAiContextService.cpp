@@ -492,6 +492,19 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 	{
 		AddTraceLine(Line);
 	}
+	if (bVerbose)
+	{
+		int32 ActionableTargetAnchors = 0;
+		for (const UnrealAiContextCandidates::FContextCandidateEnvelope& Packed : Unified.Packed)
+		{
+			if (Packed.Type == UnrealAiContextRankingPolicy::ECandidateType::ToolResult
+				&& (Packed.Payload.Contains(TEXT("/Game/")) || Packed.Payload.Contains(TEXT("PersistentLevel."))))
+			{
+				++ActionableTargetAnchors;
+			}
+		}
+		AddTraceLine(FString::Printf(TEXT("[Ranker] actionable_target_anchors_kept=%d"), ActionableTargetAnchors));
+	}
 	Block = Unified.ContextBlock;
 	Result.bTruncated = Unified.bTruncated;
 	Result.Warnings.Append(Unified.Warnings);
