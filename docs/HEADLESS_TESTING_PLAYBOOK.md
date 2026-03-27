@@ -198,6 +198,15 @@ Future agents should test new topic families beyond current movement/material/PI
 - UI/navigation-heavy tasks
 - mixed multi-system tasks (Blueprint + materials + scene + PIE)
 
+Suggested scenario seeds in this repo:
+
+- `tests/vague_actors_world_workflow.json`
+- `tests/vague_source_project_edit_workflow.json`
+- `tests/vague_asset_pipeline_workflow.json`
+- `tests/vague_build_packaging_workflow.json`
+- `tests/vague_ui_navigation_workflow.json`
+- `tests/vague_mixed_multisystem_workflow.json`
+
 Exit criteria:
 - Topic-level matrix where each domain has:
   - at least one vague complex scenario,

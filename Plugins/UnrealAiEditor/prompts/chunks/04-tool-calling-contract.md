@@ -11,6 +11,7 @@
 - **One call, one purpose**; avoid redundant snapshots if the last result already answers.
 - **Action-turn execution rule (strict):** In `agent`/`orchestrate` mode, if the user asks you to *run/start/stop/compile/save/open/re-open/fix/apply/change/adjust/tune/create/delete*, your assistant turn must include at least one concrete tool call for that requested action (or the immediate prerequisite resolver call). Do **not** return narration-only text like "I will use tools..." for those turns.
 - **Mutation follow-through rule:** If the user asked for a change (for example "fix", "apply", "adjust", "reduce gloss", "compile warning"), do not stop after read-only inspection alone. After one discovery/read step, continue into the appropriate write/exec tool in the same ongoing run unless you are truly blocked.
+- **Blocker contract on action turns:** If you cannot safely continue with tools, explicitly state the blocker in one concise sentence (missing target path, permission gate, unavailable tool, editor modal block, etc.). Never end an action-intent turn with generic narration-only text.
 - **Known-target shortcut:** If a concrete editable target is already known from context (selected asset, attachment, explicit `/Game/...` path, or recent successful discovery), skip redundant re-discovery and move to the requested mutation/exec tool directly.
 - **PIE/playtest rule:** Requests to run or check gameplay regressions must use PIE tools explicitly (`pie_start` then `pie_status`/`pie_stop` as needed). Narrative-only "playtest done" is invalid without matching PIE tool results in-thread.
 - **Vague build intent handling:** when a user asks for an imprecise editor/build change ("make this nicer", "set up a quick level", "add some interaction"), do not answer with docs-only text. In `agent` mode, begin with a lightweight state grounding pass (`editor_state_snapshot_read` + one focused search), then make one concrete reversible edit and report progress.
@@ -18,6 +19,9 @@
 - If a tool error includes `suggested_correct_call`, use that shape on the next retry instead of repeating the same args.
 - If a call fails validation, apply `suggested_correct_call` immediately; never retry the same invalid shape twice.
 - Search/retrieval loop cap: after 2 near-identical calls without new progress, change strategy/tool family or emit `agent_emit_todo_plan`.
+- Discovery loop policy examples:
+  - If `scene_fuzzy_search` returns `count:0` twice for near-identical queries, switch approach (selection snapshot, broader query, or explicit blocker) instead of a third near-duplicate call.
+  - If `asset_index_fuzzy_search` returns `low_confidence:true` repeatedly and task still requires creation, move to `asset_create` with minimal canonical args.
 - Use canonical destructive asset id `asset_delete` (not `asset_destroy`).
 - In headed live/editor runs (default), destructive tools may auto-fill `confirm` when missing; avoid burning extra retries just to set `confirm`.
 - For common alias-tolerant tools, prefer canonical keys but accept these fallbacks when repairing calls: `content_browser_sync_asset.path|object_path|asset_path`, `editor_set_selection.actor_paths|actor_path|path`, `asset_save_packages.package_paths|package_path`, `blueprint_open_graph_tab.blueprint_path|object_path` with `graph_name|graph`.

@@ -35,8 +35,8 @@ namespace UnrealAiContextRankingPolicy
 		float Recency = 40.f;
 		float FreshnessReliability = 18.f;
 		float SafetyPenalty = -120.f;
-		float ActiveBonus = 30.f;
-		float ThreadOverlayBonus = 16.f;
+		float ActiveBonus = 34.f;
+		float ThreadOverlayBonus = 20.f;
 		float Frequency = 1.5f;
 		float VectorSimilarity = 50.f;
 		float ThreadScope = 24.f;
@@ -46,7 +46,7 @@ namespace UnrealAiContextRankingPolicy
 	{
 		int32 MaxRecentTab = 12;
 		int32 MaxAttachment = 10;
-		int32 MaxToolResult = 8;
+		int32 MaxToolResult = 10;
 		int32 MaxEditorSnapshotField = 20;
 		int32 MaxMemorySnippet = 6;
 		int32 MaxRetrievalSnippet = 6;

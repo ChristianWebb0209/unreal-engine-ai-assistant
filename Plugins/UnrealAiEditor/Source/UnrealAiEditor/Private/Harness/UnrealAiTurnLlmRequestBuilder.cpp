@@ -152,6 +152,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	else
 	{
 		// Wiring / latency checks only: full tool array is often 50k+ chars and dominates upload + server time vs. curl smoke tests.
+		bool bExplicitOmitTools = false;
 		const FString OmitToolsEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_OMIT_TOOLS"));
 		if (!OmitToolsEnv.IsEmpty())
 		{
@@ -159,7 +160,16 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 			if (O == TEXT("1") || O == TEXT("true") || O == TEXT("yes"))
 			{
 				ToolsJson = TEXT("[]");
+				bExplicitOmitTools = true;
 			}
+		}
+		// Guardrail: in normal agent turns we should expose at least one callable tool.
+		if (!bExplicitOmitTools
+			&& Request.Mode != EUnrealAiAgentMode::Ask
+			&& ToolsJson.TrimStartAndEnd() == TEXT("[]"))
+		{
+			OutError = TEXT("Turn builder: empty tool surface in non-ask mode (set UNREAL_AI_HARNESS_OMIT_TOOLS=1 only for transport smoke tests).");
+			return false;
 		}
 	}
 
