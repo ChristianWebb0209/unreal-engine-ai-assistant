@@ -143,7 +143,52 @@ if ($Headed) {
     Write-Host "  Mode: headed (visible editor window)" -ForegroundColor DarkGray
 }
 $logsDir = Join-Path $ProjectRoot 'Saved\Logs'
-$p = Start-Process -FilePath $EditorBinary -ArgumentList $CmdArgs -WorkingDirectory $ProjectRoot -Wait -PassThru -NoNewWindow
+
+if (-not ('UnrealWindowFocus' -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class UnrealWindowFocus {
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+}
+
+function Minimize-ProcessMainWindowNoActivate {
+    param(
+        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Proc,
+        [Parameter(Mandatory = $true)][IntPtr]$PreviousForeground
+    )
+    try {
+        for ($i = 0; $i -lt 50 -and $Proc.MainWindowHandle -eq 0; $i++) {
+            Start-Sleep -Milliseconds 100
+            $null = $Proc.Refresh()
+        }
+        if ($Proc.MainWindowHandle -ne 0) {
+            # SW_SHOWMINNOACTIVE = 7 (minimized, does not activate)
+            [void][UnrealWindowFocus]::ShowWindowAsync($Proc.MainWindowHandle, 7)
+        }
+    } catch {}
+    if ($PreviousForeground -ne [IntPtr]::Zero) {
+        try { [void][UnrealWindowFocus]::SetForegroundWindow($PreviousForeground) } catch {}
+    }
+}
+
+$prevForeground = [UnrealWindowFocus]::GetForegroundWindow()
+$p = Start-Process -FilePath $EditorBinary -ArgumentList $CmdArgs -WorkingDirectory $ProjectRoot -PassThru -WindowStyle Minimized
+if ($Headed) {
+    Minimize-ProcessMainWindowNoActivate -Proc $p -PreviousForeground $prevForeground
+}
+if ($p) {
+    $null = $p.WaitForExit()
+}
 $procExit = $p.ExitCode
 $blankLog = Join-Path $logsDir 'blank.log'
 if (Test-Path -LiteralPath $blankLog) {

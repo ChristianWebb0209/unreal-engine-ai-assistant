@@ -24,6 +24,7 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
                 settingsLoader = component "Settings Loader" "Loads providers/models/defaults from settings JSON." "FUnrealAiModelProfileRegistry" "Core"
                 capResolver = component "Capability Resolver" "Resolves effective caps for requested model profile." "FUnrealAiModelProfileRegistry" "Core"
                 apiResolver = component "API Endpoint Resolver" "Resolves base URL/API key by model/provider." "FUnrealAiModelProfileRegistry" "Core"
+                curatedModelCatalog = component "Curated Model Catalog" "Built-in provider -> known OpenAI-compatible model id list used by settings pickers." "SUnrealAiEditorSettingsTab" "Core"
             }
 
             promptLibrary = container "Prompt Chunk Library" "Prompt chunk templates and token replacement contracts." "Markdown + C++" "Core"
@@ -95,6 +96,7 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
                 toolAuditLogger = component "Tool Audit Logger" "Structured tool execution audit records." "Tool audit paths" "Core"
                 retrievalDiag = component "Retrieval Diagnostics" "Index status and diagnostics export rows." "UnrealAiRetrievalDiagnostics" "Core"
                 usageTracker = component "Usage Tracker" "Token/cost metric aggregation." "FUnrealAiUsageTracker" "Core"
+                pricingCatalog = component "Curated Pricing Catalog" "Small in-code rough pricing map used for usage estimates." "FUnrealAiModelPricingCatalog" "Core"
                 workflowStatus = component "Workflow Status Writer" "Reliability artifacts and step/workflow status files." "workflow status emitters" "Core"
             }
 
@@ -131,6 +133,7 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
         plugin.backendRegistry -> plugin.retrievalService "Constructs optional"
         plugin.backendRegistry -> plugin.embeddingProvider "Constructs optional"
         plugin.backendRegistry -> plugin.observability "Constructs"
+        plugin.backendRegistry -> plugin.modelProfiles.curatedModelCatalog "Settings pick-list source"
 
         plugin.harness -> plugin.requestBuilder "Build request each round"
         plugin.harness -> plugin.transport "Send model call"
@@ -174,6 +177,7 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
         plugin.dataRoot -> localData.diagnostics "Owns"
 
         plugin.modelProfiles -> localData.settingsJson "Load settings"
+        plugin.observability.usageTracker -> plugin.observability.pricingCatalog "Estimate rough USD totals"
         plugin.requestBuilder -> localData.conversationJson "Read/write transcript"
         plugin.contextService -> localData.contextJson "Read/write context"
         plugin.memoryService -> localData.memoriesIndex "Read/write memory index"

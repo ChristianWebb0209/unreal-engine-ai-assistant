@@ -541,7 +541,7 @@ def main() -> int:
         md_lines.append("")
         md_lines.append("### Qualitative checklist")
         md_lines.append("")
-        md_lines.append("- [ ] Meets expected outcome (see docs/tool-goals.md for `source_task` in manifest)")
+        md_lines.append("- [ ] Meets expected outcome for this scenario (`source_task` in manifest)")
         md_lines.append("- [ ] Notes:")
         md_lines.append("")
         md_lines.append("---")

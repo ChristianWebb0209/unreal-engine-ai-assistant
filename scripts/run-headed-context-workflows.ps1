@@ -26,11 +26,16 @@ param(
     [switch]$ContextVerbose,
     [switch]$DryRun,
     [switch]$AllowFixture,
+    [switch]$TakeoverLock,
     [int]$MaxLlmRounds = 4,
-    [int]$EditorExitTimeoutSec = 300
+    [int]$EditorExitTimeoutSec = 0,
+    [int]$EditorExitGraceSec = 30,
+    [int]$InfraRetries = 0
 )
 
 $ErrorActionPreference = 'Stop'
+$Script:SpawnedEditorPids = @()
+$currentPid = $PID
 
 $RepoRootForEnv = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'Import-RepoDotenv.ps1')
@@ -93,6 +98,88 @@ if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_CONTEXT_DECISION_LOG)) {
     $env:UNREAL_AI_CONTEXT_DECISION_LOG = '1'
 }
 
+if (-not ('UnrealWindowFocus' -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class UnrealWindowFocus {
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+}
+
+function Minimize-ProcessMainWindowNoActivate {
+    param(
+        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Proc,
+        [Parameter(Mandatory = $true)][IntPtr]$PreviousForeground
+    )
+    try {
+        for ($i = 0; $i -lt 50 -and $Proc.MainWindowHandle -eq 0; $i++) {
+            Start-Sleep -Milliseconds 100
+            $null = $Proc.Refresh()
+        }
+        if ($Proc.MainWindowHandle -ne 0) {
+            # SW_SHOWMINNOACTIVE = 7 (minimized, does not activate)
+            [void][UnrealWindowFocus]::ShowWindowAsync($Proc.MainWindowHandle, 7)
+        }
+    } catch {}
+    if ($PreviousForeground -ne [IntPtr]::Zero) {
+        try { [void][UnrealWindowFocus]::SetForegroundWindow($PreviousForeground) } catch {}
+    }
+}
+
+function Acquire-RunLock {
+    param([string]$Path, [switch]$Takeover)
+    if (Test-Path -LiteralPath $Path) {
+        $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
+        $existing = $null
+        try { $existing = $raw | ConvertFrom-Json } catch {}
+        if ($existing -and $existing.pid) {
+            $proc = Get-Process -Id ([int]$existing.pid) -ErrorAction SilentlyContinue
+            if ($proc -and -not $Takeover) {
+                throw "Another context workflow runner is active (pid=$($existing.pid), started=$($existing.started_utc))."
+            }
+        }
+    }
+    $payload = [ordered]@{
+        pid = $currentPid
+        started_utc = (Get-Date).ToUniversalTime().ToString('o')
+        host = $env:COMPUTERNAME
+        script = $MyInvocation.MyCommand.Path
+    }
+    ($payload | ConvertTo-Json -Depth 4) + "`n" | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+function Release-RunLock {
+    param([string]$Path)
+    if (Test-Path -LiteralPath $Path) {
+        $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
+        $existing = $null
+        try { $existing = $raw | ConvertFrom-Json } catch {}
+        if ($existing -and [int]$existing.pid -eq $currentPid) {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Stop-SpawnedEditors {
+    foreach ($pid in @($Script:SpawnedEditorPids)) {
+        try {
+            $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+            if ($proc) {
+                $proc | Stop-Process -Force -ErrorAction SilentlyContinue
+            }
+        } catch {}
+    }
+}
+
 function Get-HarnessRunDirs {
     param([string]$Root)
     if (-not (Test-Path $Root)) { return @() }
@@ -100,11 +187,30 @@ function Get-HarnessRunDirs {
 }
 
 function Copy-LatestHarnessToDir {
-    param([string]$Root, [string]$DestDir)
+    param(
+        [string]$Root,
+        [string]$DestDir,
+        [Nullable[datetime]]$NotBeforeUtc = $null
+    )
+    $result = [ordered]@{
+        copied = $false
+        source_name = $null
+        source_last_write_utc = $null
+        source_is_fresh = $true
+    }
     $latest = Get-HarnessRunDirs $Root | Select-Object -First 1
     if (-not $latest) {
         Write-Warning "No harness run under $Root"
-        return $false
+        return $result
+    }
+    $result.source_name = $latest.Name
+    $result.source_last_write_utc = $latest.LastWriteTimeUtc.ToString('o')
+    if ($NotBeforeUtc.HasValue) {
+        $minFreshUtc = $NotBeforeUtc.Value.AddSeconds(-2)
+        if ($latest.LastWriteTimeUtc -lt $minFreshUtc) {
+            $result.source_is_fresh = $false
+            Write-Warning ("Latest harness run appears stale for this attempt: {0} (last_write_utc={1}, expected_after={2})" -f $latest.Name, $latest.LastWriteTimeUtc.ToString('o'), $NotBeforeUtc.Value.ToString('o'))
+        }
     }
     if (Test-Path $DestDir) {
         Remove-Item -LiteralPath $DestDir -Recurse -Force
@@ -112,7 +218,8 @@ function Copy-LatestHarnessToDir {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $DestDir) | Out-Null
     Copy-Item -LiteralPath $latest.FullName -Destination $DestDir -Recurse
     Write-Host "  Copied $($latest.Name) -> $DestDir" -ForegroundColor Green
-    return $true
+    $result.copied = $true
+    return $result
 }
 
 function Copy-ContextDecisionLogsForThread {
@@ -125,6 +232,9 @@ function Copy-ContextDecisionLogsForThread {
     $src = Join-Path $ProjectRootPath ("Saved\UnrealAiEditor\ContextDecisionLogs\{0}" -f $ThreadId)
     if (-not (Test-Path -LiteralPath $src)) { return 0 }
     $dest = Join-Path $DestRunDir 'context_decision_logs'
+    if (Test-Path -LiteralPath $dest) {
+        Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue
+    }
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
     $copied = 0
     $files = Get-ChildItem -LiteralPath $src -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*.jsonl' -or $_.Name -like '*-summary.md' }
@@ -202,6 +312,35 @@ function Get-RunIntegrity {
     return $result
 }
 
+function Ensure-RunJsonlTerminalRecord {
+    param(
+        [string]$RunJsonlPath,
+        [int]$EditorExitCode
+    )
+    if (-not (Test-Path -LiteralPath $RunJsonlPath)) {
+        return $false
+    }
+
+    $integrity = Get-RunIntegrity $RunJsonlPath
+    if ($integrity.run_finished_present) {
+        return $false
+    }
+    if (-not $integrity.run_started_present) {
+        return $false
+    }
+
+    $reason = "Missing run_finished record; synthesized by harness runner fail-safe (editor_exit_code=$EditorExitCode)."
+    $obj = [ordered]@{
+        type = 'run_finished'
+        success = $false
+        error_message = $reason
+    }
+    $line = ($obj | ConvertTo-Json -Compress)
+    Add-Content -LiteralPath $RunJsonlPath -Value $line -Encoding UTF8
+    Write-Warning "Synthesized terminal run_finished in run.jsonl due to missing sink completion."
+    return $true
+}
+
 function Get-ContextDumpIntegrity {
     param(
         [string]$RunDir,
@@ -226,7 +365,10 @@ function Escape-Win32QuotedArgContent {
 }
 
 function Invoke-HeadedEditor {
-    param([string]$ExecCmds)
+    param(
+        [string]$ExecCmds,
+        [string]$ExpectedRunJsonlPath = ''
+    )
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $EditorExe
     $psi.WorkingDirectory = $ProjectRoot
@@ -235,24 +377,81 @@ function Invoke-HeadedEditor {
     $ecEsc = Escape-Win32QuotedArgContent $ExecCmds
     $psi.Arguments = '"' + $upEsc + '" -unattended -nop4 -NoSplash -ExecCmds="' + $ecEsc + '" -log'
 
+    function Test-RunJsonlFinished {
+        param([string]$RunJsonlPath)
+        if ([string]::IsNullOrWhiteSpace($RunJsonlPath)) { return $false }
+        if (-not (Test-Path -LiteralPath $RunJsonlPath)) { return $false }
+        try {
+            $raw = Get-Content -LiteralPath $RunJsonlPath -Raw -Encoding UTF8 -ErrorAction Stop
+            return $raw -match '"type"\s*:\s*"run_finished"'
+        } catch {
+            return $false
+        }
+    }
+
     function Wait-ForEditorExitOrKill {
         param([System.Diagnostics.Process]$Proc)
         if ($null -eq $Proc) { return 1 }
-        $waitMs = [Math]::Max(1000, $EditorExitTimeoutSec * 1000)
-        if (-not $Proc.WaitForExit($waitMs)) {
-            Write-Warning "UnrealEditor did not exit within $EditorExitTimeoutSec seconds; force-killing for fast iteration."
-            try { $Proc.Kill() } catch {}
-            try { $Proc.WaitForExit() } catch {}
+        $useWatchdog = ($EditorExitTimeoutSec -gt 0)
+        $deadlineUtc = if ($useWatchdog) { (Get-Date).ToUniversalTime().AddSeconds([Math]::Max(1, $EditorExitTimeoutSec)) } else { $null }
+        $sawTerminalRun = $false
+
+        # Event-driven path: as soon as run.jsonl reaches terminal record, proceed.
+        if (-not [string]::IsNullOrWhiteSpace($ExpectedRunJsonlPath)) {
+            while ($true) {
+                if ($Proc.HasExited) {
+                    break
+                }
+                if (Test-RunJsonlFinished -RunJsonlPath $ExpectedRunJsonlPath) {
+                    $sawTerminalRun = $true
+                    break
+                }
+                if ($useWatchdog -and ((Get-Date).ToUniversalTime() -ge $deadlineUtc)) {
+                    break
+                }
+                Start-Sleep -Milliseconds 200
+            }
+            if ($sawTerminalRun -and -not $Proc.HasExited) {
+                try { [void]$Proc.CloseMainWindow() } catch {}
+                if (-not $Proc.WaitForExit(3000)) {
+                    try { $Proc.Kill() } catch {}
+                    try { $Proc.WaitForExit() } catch {}
+                }
+                Write-Host "  UnrealEditor exit: $($Proc.ExitCode)" -ForegroundColor $(if ($Proc.ExitCode -eq 0) { 'Green' } else { 'Yellow' })
+                return $Proc.ExitCode
+            }
+        }
+
+        if (-not $Proc.HasExited) {
+            if ($useWatchdog) {
+                Write-Warning "UnrealEditor did not reach terminal state within $EditorExitTimeoutSec seconds; waiting an additional grace period of $EditorExitGraceSec seconds before force-kill."
+                $graceMs = [Math]::Max(1000, $EditorExitGraceSec * 1000)
+                if (-not $Proc.WaitForExit($graceMs)) {
+                    Write-Warning "UnrealEditor still running after grace period; attempting graceful close before force-kill."
+                    try { [void]$Proc.CloseMainWindow() } catch {}
+                    if (-not $Proc.WaitForExit(15000)) {
+                        Write-Warning "UnrealEditor did not close gracefully; force-killing for fast iteration."
+                        try { $Proc.Kill() } catch {}
+                        try { $Proc.WaitForExit() } catch {}
+                    }
+                }
+            } else {
+                # No arbitrary timeout mode: wait until editor exits naturally.
+                [void]$Proc.WaitForExit()
+            }
         }
         Write-Host "  UnrealEditor exit: $($Proc.ExitCode)" -ForegroundColor $(if ($Proc.ExitCode -eq 0) { 'Green' } else { 'Yellow' })
         return $Proc.ExitCode
     }
 
     $run = {
+        $prevForeground = [UnrealWindowFocus]::GetForegroundWindow()
         $proc = [System.Diagnostics.Process]::Start($psi)
         if (-not $proc) {
             Write-Error "Failed to start UnrealEditor: $EditorExe"
         }
+        $Script:SpawnedEditorPids += $proc.Id
+        Minimize-ProcessMainWindowNoActivate -Proc $proc -PreviousForeground $prevForeground
         return (Wait-ForEditorExitOrKill $proc)
     }
 
@@ -297,10 +496,12 @@ function Set-ContextHarnessStepEnv {
     param(
         [string]$MsgAbs,
         [string]$ThreadGuid,
-        [string]$Mode
+        [string]$Mode,
+        [string]$OutputDir
     )
     $env:UNREAL_AI_HARNESS_MESSAGE_FILE = $MsgAbs
     $env:UNREAL_AI_HARNESS_THREAD_GUID = $ThreadGuid
+    $env:UNREAL_AI_HARNESS_OUTPUT_DIR = $OutputDir
     Remove-Item Env:\UNREAL_AI_HARNESS_AGENT_MODE -ErrorAction SilentlyContinue
     $m = if ($Mode) { $Mode.ToLowerInvariant() } else { 'agent' }
     if ($m -ne 'agent') {
@@ -311,6 +512,7 @@ function Set-ContextHarnessStepEnv {
 function Clear-ContextHarnessStepEnv {
     Remove-Item Env:\UNREAL_AI_HARNESS_MESSAGE_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:\UNREAL_AI_HARNESS_THREAD_GUID -ErrorAction SilentlyContinue
+    Remove-Item Env:\UNREAL_AI_HARNESS_OUTPUT_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\UNREAL_AI_HARNESS_AGENT_MODE -ErrorAction SilentlyContinue
     Remove-Item Env:\UNREAL_AI_HARNESS_MAX_LLM_ROUNDS -ErrorAction SilentlyContinue
 }
@@ -371,6 +573,11 @@ if ($MaxWorkflows -gt 0 -and $workflowJobs.Count -gt $MaxWorkflows) {
     $workflowJobs = $workflowJobs[0..($MaxWorkflows - 1)]
 }
 
+New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot 'Saved\UnrealAiEditor') | Out-Null
+$lockPath = Join-Path $ProjectRoot 'Saved\UnrealAiEditor\context_workflows.lock.json'
+Acquire-RunLock -Path $lockPath -Takeover:$TakeoverLock
+
+try {
 if ($DryRun) {
     Write-Host "Dry run: $($workflowJobs.Count) workflow(s)" -ForegroundColor Cyan
     foreach ($job in $workflowJobs) {
@@ -388,7 +595,7 @@ if ($DryRun) {
             Write-Host ("    [{0}] {1} -> {2}" -f $si, $st.id, $mp)
         }
     }
-    exit 0
+    return
 }
 
 if (-not $SkipMatrix) {
@@ -471,9 +678,10 @@ foreach ($job in $workflowJobs) {
         }
     }
     else {
-        $maxInfraRetries = 1
+        $maxInfraRetries = [Math]::Max(0, $InfraRetries)
         $workflowHadInfraFailure = $false
         $workflowHadAgentFailure = $false
+        $seenRunIds = @{}
         $si3 = 0
         foreach ($st in $steps) {
             $si3++
@@ -501,24 +709,44 @@ foreach ($job in $workflowJobs) {
                 run_finished_success = $null
             }
             do {
-                Set-ContextHarnessStepEnv $msgAbs $threadGuid $mode
+                $attemptStartUtc = (Get-Date).ToUniversalTime()
+                if (Test-Path -LiteralPath $dest) {
+                    Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                New-Item -ItemType Directory -Force -Path $dest | Out-Null
+                $expectedRunJsonl = Join-Path $dest 'run.jsonl'
+                Set-ContextHarnessStepEnv $msgAbs $threadGuid $mode $dest
                 if ($MaxLlmRounds -gt 0) {
                     $env:UNREAL_AI_HARNESS_MAX_LLM_ROUNDS = [string]$MaxLlmRounds
                 }
                 $exitCode = -1002
                 try {
                     Write-Host "  Step $($st.id) attempt ${attempt}: UNREAL_AI_HARNESS_MESSAGE_FILE=$msgAbs | UnrealAi.RunAgentTurn" -ForegroundColor Cyan
-                    $exitCode = [int](Invoke-HeadedEditor 'UnrealAi.RunAgentTurn,Quit')
+                    $exitCode = [int](Invoke-HeadedEditor 'UnrealAi.RunAgentTurn,Quit' $expectedRunJsonl)
                 }
                 finally {
                     Clear-ContextHarnessStepEnv
                 }
 
-                [void](Copy-LatestHarnessToDir $runsRoot $dest)
+                $copyInfo = [ordered]@{
+                    copied = $true
+                    source_name = 'explicit_output_dir'
+                    source_last_write_utc = $attemptStartUtc.ToString('o')
+                    source_is_fresh = $true
+                }
                 $runJsonl = Resolve-RunJsonlPath $dest
+                $synthesizedTerminal = Ensure-RunJsonlTerminalRecord -RunJsonlPath $runJsonl -EditorExitCode $exitCode
                 $integrity = Get-RunIntegrity $runJsonl
                 $ctxIntegrity = Get-ContextDumpIntegrity -RunDir $dest -ExpectContextDumps ([bool]$DumpContext)
                 $decisionCopied = Copy-ContextDecisionLogsForThread -ProjectRootPath $ProjectRoot -ThreadId $threadGuid -DestRunDir $dest
+                $isDuplicateRunId = $false
+                if (-not [string]::IsNullOrWhiteSpace([string]$integrity.run_id)) {
+                    if ($seenRunIds.ContainsKey([string]$integrity.run_id)) {
+                        $isDuplicateRunId = $true
+                    } else {
+                        $seenRunIds[[string]$integrity.run_id] = $true
+                    }
+                }
                 if ($decisionCopied -gt 0) {
                     Write-Host ("    copied context decision logs: {0}" -f $decisionCopied) -ForegroundColor DarkGray
                 }
@@ -534,15 +762,37 @@ foreach ($job in $workflowJobs) {
                     context_dump_expected = $ctxIntegrity.expected
                     context_dump_count = $ctxIntegrity.emitted_count
                     context_dump_ok = $ctxIntegrity.ok
+                    harness_source_name = $copyInfo.source_name
+                    harness_source_last_write_utc = $copyInfo.source_last_write_utc
+                    harness_source_is_fresh = $copyInfo.source_is_fresh
+                    synthesized_terminal_record = $synthesizedTerminal
+                    duplicate_run_id_seen = $isDuplicateRunId
                     context_decision_log_files = $decisionCopied
                     infra_status = if ($exitCode -eq 0) { 'editor_exit_ok' } else { 'editor_exit_nonzero' }
                     agent_status = 'unknown'
                 }
+                if (-not $copyInfo.source_is_fresh) {
+                    $attemptStatus.infra_status = 'stale_harness_artifact'
+                }
                 if (-not $ctxIntegrity.ok) {
                     $attemptStatus.infra_status = 'dump_context_missing'
                 }
-                if ($attemptStatus.infra_status -eq 'editor_exit_ok' -and $integrity.run_finished_present) {
+                if ($isDuplicateRunId) {
+                    $attemptStatus.infra_status = 'duplicate_run_id'
+                }
+                if ($integrity.run_finished_present) {
                     $attemptStatus.agent_status = if ($integrity.run_finished_success) { 'success' } else { 'error' }
+                }
+                if (
+                    $attemptStatus.infra_status -ne 'dump_context_missing' -and
+                    $attemptStatus.infra_status -ne 'stale_harness_artifact' -and
+                    $attemptStatus.infra_status -ne 'duplicate_run_id' -and
+                    $exitCode -ne 0 -and
+                    $integrity.run_finished_present
+                ) {
+                    # The editor process may be force-killed after the run finishes; use run.jsonl + required dumps
+                    # as the source of truth so we can still proceed to the next workflow step.
+                    $attemptStatus.infra_status = 'editor_exit_nonzero_but_run_finished'
                 }
                 $stepStatus.attempts += $attemptStatus
                 $stepStatus.retry_count = $attempt
@@ -553,18 +803,30 @@ foreach ($job in $workflowJobs) {
                 $stepStatus.run_id = $integrity.run_id
                 $stepStatus.run_finished_success = $integrity.run_finished_success
 
-                if ($exitCode -eq 0) {
+                if (
+                    $integrity.run_finished_success -and
+                    $ctxIntegrity.ok -and
+                    $copyInfo.source_is_fresh -and
+                    (-not $isDuplicateRunId)
+                ) {
                     break
                 }
                 if ($attempt -lt $maxInfraRetries) {
-                    Write-Warning "Step $($st.id): infra failure (exit=$exitCode). Retrying with fresh editor launch."
+                    if (-not ($integrity.run_finished_success -and $ctxIntegrity.ok)) {
+                        Write-Warning "Step $($st.id): infra failure (exit=$exitCode). Retrying with fresh editor launch."
+                    }
                 }
                 $attempt++
             } while ($attempt -le $maxInfraRetries)
 
             ($stepStatus | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath (Join-Path $dest 'step_status.json') -Encoding UTF8
             $workflowStatus.steps += $stepStatus
-            if ($stepStatus.infra_status -ne 'editor_exit_ok') {
+            if (
+                $stepStatus.infra_status -eq 'dump_context_missing' -or
+                $stepStatus.infra_status -eq 'editor_exit_nonzero' -or
+                $stepStatus.infra_status -eq 'stale_harness_artifact' -or
+                $stepStatus.infra_status -eq 'duplicate_run_id'
+            ) {
                 $workflowHadInfraFailure = $true
             }
             if ($stepStatus.agent_status -eq 'error') {
@@ -579,3 +841,9 @@ foreach ($job in $workflowJobs) {
 }
 
 Write-Host "Done. Bundle: python tests\bundle_context_workflow_review.py <tests\out\context_runs\...\workflow_folder>" -ForegroundColor Cyan
+}
+finally {
+    Clear-ContextHarnessStepEnv
+    Stop-SpawnedEditors
+    Release-RunLock -Path $lockPath
+}

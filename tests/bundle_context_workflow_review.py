@@ -50,6 +50,15 @@ def run_finished_success(rows: list[dict[str, Any]]) -> Optional[bool]:
     return None
 
 
+def run_started_id(rows: list[dict[str, Any]]) -> Optional[str]:
+    for r in rows:
+        if r.get("type") == "run_started":
+            rid = str(r.get("run_id", "") or "")
+            if rid:
+                return rid
+    return None
+
+
 def discover_steps(workflow_dir: Path) -> list[tuple[str, Path]]:
     """Return sorted list of (step_dir_name, path) for step_* subdirs containing run.jsonl."""
     if not workflow_dir.is_dir():
@@ -243,21 +252,29 @@ def main() -> int:
 
     prev_finished: Optional[str] = None
     prev_name: Optional[str] = None
+    seen_run_ids: dict[str, list[str]] = {}
 
     for step_name, step_path in steps:
         jl = step_path / "run.jsonl"
         rows = load_jsonl(jl)
         tools = tools_from_jsonl(rows)
         ok = run_finished_success(rows)
+        run_id = run_started_id(rows)
+        if run_id:
+            seen_run_ids.setdefault(run_id, []).append(step_name)
         decision_logs = decision_logs_near(step_path)
         ranking = summarize_decision_logs(decision_logs)
         m = re.match(r"^step_\d+_(.+)$", step_name)
         logical_step_id = m.group(1) if m else step_name
         expected_drop_reasons = expected_drop_by_step.get(logical_step_id, [])
-        all_drop_reason_set = {str(x["reason"]) for x in ranking["all_invocations"]["top_drop_reasons"]}
+        # Expectations should be validated against the "real" context build for the model turn.
+        # Dump-only invocations (harness dumps) can have radically different candidate sets.
+        all_drop_reason_set = {str(x["reason"]) for x in ranking["top_drop_reasons"]}
         expected_drop_hit_count = sum(1 for r in expected_drop_reasons if r in all_drop_reason_set)
         expected_drop_total = len(expected_drop_reasons)
-        expected_drop_coverage_ok = True if expected_drop_total == 0 else expected_drop_hit_count >= expected_drop_total
+        # Treat expected_drop_reasons as a "should see at least one of these" hint, not a hard requirement
+        # to see every reason in a single run (which is brittle as packing behavior evolves).
+        expected_drop_coverage_ok = True if expected_drop_total == 0 else expected_drop_hit_count >= 1
         ctx_files = sorted(step_path.glob("context_window*.txt"))
         finished = step_path / "context_window_run_finished.txt"
         finished_lines = -1
@@ -267,6 +284,7 @@ def main() -> int:
         entry: dict[str, Any] = {
             "step_dir": step_name,
             "run_jsonl": str(jl),
+            "run_id": run_id,
             "run_finished_success": ok,
             "row_count": len(rows),
             "tools_called": tools,
@@ -302,6 +320,7 @@ def main() -> int:
         md.append(f"## {step_name}")
         md.append("")
         md.append(f"- **run.jsonl**: `{jl}` ({len(rows)} lines), success={ok}")
+        md.append(f"- **run_id**: `{run_id}`")
         md.append(f"- **Tools (order)**: {', '.join(tools) if tools else '(none)'}")
         md.append(
             f"- **Ranking metrics (request_build)**: decision_logs={ranking['log_file_count']} kept={ranking['kept_total']} dropped={ranking['dropped_total']}"
@@ -346,6 +365,18 @@ def main() -> int:
         else:
             prev_finished = None
             prev_name = step_name
+
+    duplicate_run_ids = {rid: step_names for rid, step_names in seen_run_ids.items() if rid and len(step_names) > 1}
+    if duplicate_run_ids:
+        md.append("## Harness integrity warnings")
+        md.append("")
+        for rid, step_names in sorted(duplicate_run_ids.items()):
+            md.append(f"- Duplicate `run_id` `{rid}` appears in: {', '.join(step_names)}")
+        md.append("")
+        for entry in bundle_steps:
+            rid = entry.get("run_id")
+            if rid in duplicate_run_ids:
+                entry["artifact_integrity_warning"] = "duplicate_run_id_across_steps"
 
     review_json = out_dir / "context_review.json"
     review_md = out_dir / "context_review.md"

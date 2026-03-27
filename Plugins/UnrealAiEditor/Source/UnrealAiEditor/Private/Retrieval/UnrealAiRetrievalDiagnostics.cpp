@@ -44,12 +44,38 @@ void UnrealAiRetrievalDiagnostics::WriteIndexDiagnostics(
 	Obj->SetStringField(TEXT("timestamp_utc"), FDateTime::UtcNow().ToIso8601());
 
 	TArray<TSharedPtr<FJsonValue>> SourcesArr;
-	for (const FUnrealAiRetrievalDiagnosticsRow& Row : TopSources)
+	auto AppendRowsToArray = [](const TArray<FUnrealAiRetrievalDiagnosticsRow>& Rows, TArray<TSharedPtr<FJsonValue>>& OutArray)
 	{
-		TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
-		R->SetStringField(TEXT("source_id"), Row.SourceId);
-		R->SetNumberField(TEXT("chunk_count"), Row.ChunkCount);
-		SourcesArr.Add(MakeShared<FJsonValueObject>(R));
+		for (const FUnrealAiRetrievalDiagnosticsRow& Row : Rows)
+		{
+			TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
+			R->SetStringField(TEXT("source_id"), Row.SourceId);
+			R->SetNumberField(TEXT("chunk_count"), Row.ChunkCount);
+			OutArray.Add(MakeShared<FJsonValueObject>(R));
+		}
+	};
+	AppendRowsToArray(TopSources, SourcesArr);
+
+	// Preserve the last known non-empty top_sources snapshot if this write has no rows.
+	// This avoids noisy empty diagnostics during transient phases while keeping
+	// counts/state/timestamp fresh for the current write.
+	const FString Path = FPaths::Combine(JobsDir, TEXT("latest_diagnostics.json"));
+	if (SourcesArr.Num() == 0 && FPaths::FileExists(Path))
+	{
+		FString ExistingJson;
+		if (FFileHelper::LoadFileToString(ExistingJson, *Path))
+		{
+			TSharedPtr<FJsonObject> ExistingObj;
+			const TSharedRef<TJsonReader<>> ExistingReader = TJsonReaderFactory<>::Create(ExistingJson);
+			if (FJsonSerializer::Deserialize(ExistingReader, ExistingObj) && ExistingObj.IsValid())
+			{
+				const TArray<TSharedPtr<FJsonValue>>* ExistingSources = nullptr;
+				if (ExistingObj->TryGetArrayField(TEXT("top_sources"), ExistingSources) && ExistingSources && ExistingSources->Num() > 0)
+				{
+					SourcesArr = *ExistingSources;
+				}
+			}
+		}
 	}
 	Obj->SetArrayField(TEXT("top_sources"), SourcesArr);
 
@@ -59,7 +85,6 @@ void UnrealAiRetrievalDiagnostics::WriteIndexDiagnostics(
 	{
 		return;
 	}
-	const FString Path = FPaths::Combine(JobsDir, TEXT("latest_diagnostics.json"));
 	FFileHelper::SaveStringToFile(Json, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 }
 

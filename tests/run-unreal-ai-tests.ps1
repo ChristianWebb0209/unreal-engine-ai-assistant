@@ -131,6 +131,45 @@ $logsDir = Join-Path $ProjectRoot 'Saved\Logs'
 $script:TailedLogPath = ''
 $script:TailedLogByteOffset = 0L
 
+if (-not ('UnrealWindowFocus' -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class UnrealWindowFocus {
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+}
+
+function Minimize-ProcessMainWindowNoActivate {
+    param(
+        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Proc,
+        [Parameter(Mandatory = $true)][IntPtr]$PreviousForeground
+    )
+    try {
+        for ($i = 0; $i -lt 50 -and $Proc.MainWindowHandle -eq 0; $i++) {
+            Start-Sleep -Milliseconds 100
+            $null = $Proc.Refresh()
+        }
+        if ($Proc.MainWindowHandle -ne 0) {
+            # SW_SHOWMINNOACTIVE = 7 (minimized, does not activate)
+            [void][UnrealWindowFocus]::ShowWindowAsync($Proc.MainWindowHandle, 7)
+        }
+    } catch {
+        # Best-effort: ignore focus/minimize failures
+    }
+    if ($PreviousForeground -ne [IntPtr]::Zero) {
+        try { [void][UnrealWindowFocus]::SetForegroundWindow($PreviousForeground) } catch {}
+    }
+}
+
 function Get-NewestSavedEditorLogPath {
     param([string]$Dir)
     if (-not (Test-Path -LiteralPath $Dir)) {
@@ -213,12 +252,17 @@ $procArgs = @{
     WorkingDirectory = $ProjectRoot
     PassThru = $true
 }
+$prevForeground = [UnrealWindowFocus]::GetForegroundWindow()
 if (-not $Headed) {
-    $procArgs['NoNewWindow'] = $true
+    # Keep cmd runs from popping the active console to front.
+    $procArgs['WindowStyle'] = 'Minimized'
 }
 $p = Start-Process @procArgs
 if (-not $p) {
     Write-Error 'Failed to start Unreal Editor process.'
+}
+if ($Headed) {
+    Minimize-ProcessMainWindowNoActivate -Proc $p -PreviousForeground $prevForeground
 }
 $nextHeartbeatSec = 30
 while (-not $p.HasExited) {

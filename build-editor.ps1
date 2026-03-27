@@ -43,7 +43,7 @@ param(
     [switch]$AutomationTests,
     [switch]$HeadedScenarioSmoke,
     [switch]$SkipBlueprintFormatterSync,
-    [string]$BlueprintFormatterRepoUrl = 'https://github.com/ChristianWebb0209/unreal-engine-blueprint-plugin.git',
+    [string]$BlueprintFormatterRepoUrl = 'https://github.com/ChristianWebb0209/ue-blueprint-formatter.git',
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$RemainingArguments
 )
@@ -114,8 +114,8 @@ function Start-ProcessWithoutStealingFocus {
         }
     }
     if ($proc.MainWindowHandle -ne 0) {
-        # SW_SHOWNOACTIVATE = 4
-        [void][UnrealWindowFocus]::ShowWindowAsync($proc.MainWindowHandle, 4)
+        # SW_SHOWMINNOACTIVE = 7 (minimized, without stealing focus)
+        [void][UnrealWindowFocus]::ShowWindowAsync($proc.MainWindowHandle, 7)
     }
     if ($previousForeground -ne [IntPtr]::Zero) {
         [void][UnrealWindowFocus]::SetForegroundWindow($previousForeground)
@@ -142,6 +142,17 @@ function Sync-UnrealBlueprintFormatterPlugin {
     }
     $Dest = Join-Path $RepoRoot 'Plugins\UnrealBlueprintFormatter'
     if (Test-Path (Join-Path $Dest '.git')) {
+        # Keep existing clones healthy if the upstream repository was renamed/moved.
+        Push-Location $Dest
+        try {
+            $currentOrigin = (& git remote get-url origin 2>$null)
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($currentOrigin) -and $currentOrigin -ne $RepoUrl) {
+                Write-Host "Updating UnrealBlueprintFormatter origin URL -> $RepoUrl" -ForegroundColor Cyan
+                & git remote set-url origin $RepoUrl
+            }
+        } finally {
+            Pop-Location
+        }
         Write-Host 'Updating UnrealBlueprintFormatter (git pull --ff-only)...' -ForegroundColor Cyan
         Push-Location $Dest
         try {

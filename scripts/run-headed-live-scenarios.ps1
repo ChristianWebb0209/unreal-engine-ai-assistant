@@ -28,10 +28,12 @@ param(
     [switch]$KillPreExistingEditors,
     [switch]$TakeoverLock,
     [int]$MaxLlmRounds = 8,
-    [int]$EditorExitTimeoutSec = 300
+    [int]$EditorExitTimeoutSec = 0,
+    [int]$InfraRetries = 0
 )
 
 $ErrorActionPreference = 'Stop'
+$Script:SpawnedEditorPids = @()
 
 $RepoRootForEnv = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'Import-RepoDotenv.ps1')
@@ -106,6 +108,43 @@ New-Item -ItemType Directory -Force -Path $lockDir | Out-Null
 $lockPath = Join-Path $lockDir 'live_scenarios.lock.json'
 $currentPid = $PID
 
+if (-not ('UnrealWindowFocus' -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class UnrealWindowFocus {
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+}
+
+function Minimize-ProcessMainWindowNoActivate {
+    param(
+        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Proc,
+        [Parameter(Mandatory = $true)][IntPtr]$PreviousForeground
+    )
+    try {
+        for ($i = 0; $i -lt 50 -and $Proc.MainWindowHandle -eq 0; $i++) {
+            Start-Sleep -Milliseconds 100
+            $null = $Proc.Refresh()
+        }
+        if ($Proc.MainWindowHandle -ne 0) {
+            # SW_SHOWMINNOACTIVE = 7 (minimized, does not activate)
+            [void][UnrealWindowFocus]::ShowWindowAsync($Proc.MainWindowHandle, 7)
+        }
+    } catch {}
+    if ($PreviousForeground -ne [IntPtr]::Zero) {
+        try { [void][UnrealWindowFocus]::SetForegroundWindow($PreviousForeground) } catch {}
+    }
+}
+
 function Acquire-RunLock {
     param([string]$Path, [switch]$Takeover)
     if (Test-Path -LiteralPath $Path) {
@@ -140,7 +179,28 @@ function Release-RunLock {
     }
 }
 
+function Stop-SpawnedEditors {
+    foreach ($pid in @($Script:SpawnedEditorPids)) {
+        try {
+            $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+            if ($proc) {
+                $proc | Stop-Process -Force -ErrorAction SilentlyContinue
+            }
+        } catch {}
+    }
+}
+
 Acquire-RunLock -Path $lockPath -Takeover:$TakeoverLock
+trap {
+    Remove-Item Env:\UNREAL_AI_HARNESS_MESSAGE_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:\UNREAL_AI_HARNESS_MAX_LLM_ROUNDS -ErrorAction SilentlyContinue
+    Remove-Item Env:\UNREAL_AI_HARNESS_OUTPUT_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:\UNREAL_AI_HARNESS_THREAD_GUID -ErrorAction SilentlyContinue
+    Remove-Item Env:\UNREAL_AI_HARNESS_AGENT_MODE -ErrorAction SilentlyContinue
+    Stop-SpawnedEditors
+    Release-RunLock -Path $lockPath
+    throw
+}
 
 function Get-HarnessRunDirs {
     param([string]$RunsRoot)
@@ -436,7 +496,10 @@ function Escape-Win32QuotedArgContent {
 }
 
 function Invoke-HeadedEditor {
-    param([string]$ExecCmds)
+    param(
+        [string]$ExecCmds,
+        [string]$ExpectedRunJsonlPath = ''
+    )
     $upEsc = Escape-Win32QuotedArgContent $UProject
     $ecEsc = Escape-Win32QuotedArgContent $ExecCmds
     $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -446,14 +509,56 @@ function Invoke-HeadedEditor {
     $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Minimized
     $psi.Arguments = '"' + $upEsc + '" -unattended -nop4 -NoSplash -ExecCmds="' + $ecEsc + '" -log'
 
+    function Test-RunJsonlFinished {
+        param([string]$RunJsonlPath)
+        if ([string]::IsNullOrWhiteSpace($RunJsonlPath)) { return $false }
+        if (-not (Test-Path -LiteralPath $RunJsonlPath)) { return $false }
+        try {
+            $raw = Get-Content -LiteralPath $RunJsonlPath -Raw -Encoding UTF8 -ErrorAction Stop
+            return $raw -match '"type"\s*:\s*"run_finished"'
+        } catch {
+            return $false
+        }
+    }
+
     function Wait-ForEditorExitOrKill {
         param([System.Diagnostics.Process]$Proc)
         if ($null -eq $Proc) { return 1 }
-        $waitMs = [Math]::Max(1000, $EditorExitTimeoutSec * 1000)
-        if (-not $Proc.WaitForExit($waitMs)) {
-            Write-Warning "UnrealEditor did not exit within $EditorExitTimeoutSec seconds; force-killing for fast iteration."
-            try { $Proc.Kill() } catch {}
-            try { $Proc.WaitForExit() } catch {}
+        $useWatchdog = ($EditorExitTimeoutSec -gt 0)
+        $deadlineUtc = if ($useWatchdog) { (Get-Date).ToUniversalTime().AddSeconds([Math]::Max(1, $EditorExitTimeoutSec)) } else { $null }
+        $sawTerminalRun = $false
+
+        if (-not [string]::IsNullOrWhiteSpace($ExpectedRunJsonlPath)) {
+            while ($true) {
+                if ($Proc.HasExited) { break }
+                if (Test-RunJsonlFinished -RunJsonlPath $ExpectedRunJsonlPath) {
+                    $sawTerminalRun = $true
+                    break
+                }
+                if ($useWatchdog -and ((Get-Date).ToUniversalTime() -ge $deadlineUtc)) {
+                    break
+                }
+                Start-Sleep -Milliseconds 200
+            }
+            if ($sawTerminalRun -and -not $Proc.HasExited) {
+                try { [void]$Proc.CloseMainWindow() } catch {}
+                if (-not $Proc.WaitForExit(3000)) {
+                    try { $Proc.Kill() } catch {}
+                    try { $Proc.WaitForExit() } catch {}
+                }
+                Write-Host "UnrealEditor exit code: $($Proc.ExitCode)" -ForegroundColor $(if ($Proc.ExitCode -eq 0) { 'Green' } else { 'Yellow' })
+                return $Proc.ExitCode
+            }
+        }
+
+        if (-not $Proc.HasExited) {
+            if ($useWatchdog) {
+                Write-Warning "UnrealEditor did not reach terminal state within $EditorExitTimeoutSec seconds; force-killing for fast iteration."
+                try { $Proc.Kill() } catch {}
+                try { $Proc.WaitForExit() } catch {}
+            } else {
+                [void]$Proc.WaitForExit()
+            }
         }
         Write-Host "UnrealEditor exit code: $($Proc.ExitCode)" -ForegroundColor $(if ($Proc.ExitCode -eq 0) { 'Green' } else { 'Yellow' })
         return $Proc.ExitCode
@@ -463,7 +568,10 @@ function Invoke-HeadedEditor {
         $prevDump = $env:UNREAL_AI_HARNESS_DUMP_CONTEXT
         $env:UNREAL_AI_HARNESS_DUMP_CONTEXT = '1'
         try {
+            $prevForeground = [UnrealWindowFocus]::GetForegroundWindow()
             $p = [System.Diagnostics.Process]::Start($psi)
+            if ($p) { $Script:SpawnedEditorPids += $p.Id }
+            if ($p) { Minimize-ProcessMainWindowNoActivate -Proc $p -PreviousForeground $prevForeground }
             return (Wait-ForEditorExitOrKill $p)
         }
         catch {
@@ -481,7 +589,10 @@ function Invoke-HeadedEditor {
     }
     else {
         try {
+            $prevForeground = [UnrealWindowFocus]::GetForegroundWindow()
             $p = [System.Diagnostics.Process]::Start($psi)
+            if ($p) { $Script:SpawnedEditorPids += $p.Id }
+            if ($p) { Minimize-ProcessMainWindowNoActivate -Proc $p -PreviousForeground $prevForeground }
             return (Wait-ForEditorExitOrKill $p)
         }
         catch {
@@ -534,7 +645,7 @@ foreach ($s in $scenarios) {
     }
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
-    $maxInfraRetries = 1
+    $maxInfraRetries = [Math]::Max(0, $InfraRetries)
     $attempt = 0
     $scenarioStatus = [ordered]@{
         scenario_id          = [string]$s.id
@@ -562,7 +673,8 @@ foreach ($s in $scenarios) {
         $execCore = Build-RunAgentTurnExec $msgAbs $mode
         $execCmd = "$execCore,QUIT_EDITOR"
         Write-Host "Scenario $($s.id) attempt ${attempt}: UNREAL_AI_HARNESS_MESSAGE_FILE=$msgAbs | $execCmd" -ForegroundColor Cyan
-        $exitCode = [int](Invoke-HeadedEditor $execCmd)
+        $expectedRunJsonl = Join-Path $runAttemptDir 'run.jsonl'
+        $exitCode = [int](Invoke-HeadedEditor $execCmd $expectedRunJsonl)
         $runJsonl = Join-Path $runAttemptDir 'run.jsonl'
         if (-not (Test-Path -LiteralPath $runJsonl)) {
             $nestedRun = Get-ChildItem -LiteralPath $runAttemptDir -Recurse -Filter 'run.jsonl' -File -ErrorAction SilentlyContinue |
@@ -577,6 +689,8 @@ foreach ($s in $scenarios) {
         $threadId = Get-ThreadIdFromContextTrace -RunDir $runAttemptDir
         $decisionCopiedCount = Copy-ContextDecisionLogsForThread -ProjectRootPath $ProjectRoot -ThreadId $threadId -DestRunDir $runAttemptDir
         $runMetrics = Get-LiveRunMetrics -RunJsonlPath $runJsonl
+
+        $treatAsOk = ($exitCode -eq 0) -or ($integrity.run_finished_present -and $integrity.run_finished_success)
 
         $attemptStatus = [ordered]@{
             attempt_index        = $attempt
@@ -593,7 +707,7 @@ foreach ($s in $scenarios) {
             context_dump_ok      = $ctxIntegrity.ok
             context_decision_thread_id = $threadId
             context_decision_log_files = $decisionCopiedCount
-            infra_status         = if ($exitCode -eq 0) { 'editor_exit_ok' } else { 'editor_exit_nonzero' }
+            infra_status         = if ($treatAsOk) { 'editor_exit_ok' } else { 'editor_exit_nonzero' }
             agent_status         = 'unknown'
         }
         if (-not $ctxIntegrity.ok) {
@@ -625,7 +739,7 @@ foreach ($s in $scenarios) {
         Remove-Item Env:\UNREAL_AI_HARNESS_THREAD_GUID -ErrorAction SilentlyContinue
         Remove-Item Env:\UNREAL_AI_HARNESS_AGENT_MODE -ErrorAction SilentlyContinue
 
-        if ($exitCode -eq 0) {
+        if ($treatAsOk) {
             break
         }
         if ($attempt -lt $maxInfraRetries) {
@@ -651,4 +765,5 @@ foreach ($s in $scenarios) {
 }
 
 Write-Host "Done. Review bundle: python tests\bundle_live_harness_review.py `"$outRoot`"" -ForegroundColor Cyan
+Stop-SpawnedEditors
 Release-RunLock -Path $lockPath
