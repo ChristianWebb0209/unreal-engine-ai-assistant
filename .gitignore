@@ -74,15 +74,9 @@ Thumbs.db
 /tests/tool-call-prompts.generated.json
 /tests/out/
 
-# Tests: keep scripts, ignore data/fixtures/results by default
-/tests/**
-!/tests/**/*.ps1
-!/tests/**/*.py
-!/tests/**/*.sh
 
 # Optional local scratch (untracked copies of scripts, experiments)
 /local/
-/tools/
 
 # Python
 **/__pycache__/
