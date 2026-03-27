@@ -1,7 +1,7 @@
 param(
     [string]$WorkspaceDslPath = "docs/architecture-maps/architecture.dsl",
     [string]$OutputDir = "docs/architecture-maps",
-    [string]$PagePath = "ARCHITECTURE_MAPS.md",
+    [string]$ReadmePath = "README.md",
     [string]$CliPath = "",
     [string]$PlantUmlJarPath = ""
 )
@@ -61,29 +61,67 @@ function To-Title {
     return $title.Substring(0,1).ToUpper() + $title.Substring(1)
 }
 
-function Write-ArchitecturePage {
+function Build-ReadmeArchitectureSection {
     param(
-        [string]$DestinationFile,
         [System.IO.FileInfo[]]$SvgFiles
     )
 
     $nl = [Environment]::NewLine
     $sb = New-Object System.Text.StringBuilder
-    [void]$sb.Append("# Architecture Maps$nl$nl")
-    [void]$sb.Append('Generated from [`docs/architecture-maps/architecture.dsl`](docs/architecture-maps/architecture.dsl) via CI. This page is auto-written by `scripts/export-architecture-maps.ps1`.' + $nl + $nl)
-    [void]$sb.Append('- Primary root image: [`architecture.svg`](architecture.svg)' + $nl)
-    [void]$sb.Append('- Rendered view gallery folder: [`docs/architecture-maps/`](docs/architecture-maps/)' + $nl + $nl)
+    [void]$sb.Append("<!-- ARCHITECTURE_MAPS_START -->$nl")
+    [void]$sb.Append("<details>$nl")
+    [void]$sb.Append("<summary><strong>Architecture Maps (generated)</strong></summary>$nl$nl")
+    [void]$sb.Append("Generated from [`docs/architecture-maps/architecture.dsl`](docs/architecture-maps/architecture.dsl).$nl$nl")
+    [void]$sb.Append("![Architecture (primary)](architecture.svg)$nl$nl")
 
     foreach ($svg in $SvgFiles) {
+        if ($svg.Name -like "*-key.svg") {
+            continue
+        }
         $title = To-Title -Name $svg.BaseName
-        [void]$sb.Append("## $title$nl$nl")
+        [void]$sb.Append("### $title$nl$nl")
         [void]$sb.Append("![$title](docs/architecture-maps/$($svg.Name))$nl$nl")
     }
 
-    Set-Content -Path $DestinationFile -Value $sb.ToString() -NoNewline
+    [void]$sb.Append("</details>$nl")
+    [void]$sb.Append("<!-- ARCHITECTURE_MAPS_END -->$nl")
+    return $sb.ToString()
+}
+
+function Upsert-ReadmeArchitectureSection {
+    param(
+        [string]$ReadmeFile,
+        [string]$SectionContent
+    )
+
+    $nl = [Environment]::NewLine
+    $content = Get-Content -Path $ReadmeFile -Raw
+    $startMarker = "<!-- ARCHITECTURE_MAPS_START -->"
+    $endMarker = "<!-- ARCHITECTURE_MAPS_END -->"
+
+    if ($content.Contains($startMarker) -and $content.Contains($endMarker)) {
+        $pattern = "(?s)<!-- ARCHITECTURE_MAPS_START -->.*?<!-- ARCHITECTURE_MAPS_END -->"
+        $updated = [System.Text.RegularExpressions.Regex]::Replace($content, $pattern, $SectionContent.TrimEnd())
+        Set-Content -Path $ReadmeFile -Value $updated -NoNewline
+        return
+    }
+
+    $insertAnchor = "## Build and run (Windows, UE 5.7)"
+    $anchorIndex = $content.IndexOf($insertAnchor)
+    if ($anchorIndex -lt 0) {
+        $updated = $content.TrimEnd() + $nl + $nl + $SectionContent.TrimEnd() + $nl
+        Set-Content -Path $ReadmeFile -Value $updated -NoNewline
+        return
+    }
+
+    $prefix = $content.Substring(0, $anchorIndex).TrimEnd()
+    $suffix = $content.Substring($anchorIndex).TrimStart()
+    $updated = $prefix + $nl + $nl + $SectionContent.TrimEnd() + $nl + $nl + $suffix
+    Set-Content -Path $ReadmeFile -Value $updated -NoNewline
 }
 
 $workspaceDsl = Resolve-PathOrFail -PathValue $WorkspaceDslPath -Label "Workspace DSL"
+$readme = Resolve-PathOrFail -PathValue $ReadmePath -Label "README"
 $cliPathResolved = $null
 if (-not [string]::IsNullOrWhiteSpace($CliPath)) {
     $cliPathResolved = Resolve-PathOrFail -PathValue $CliPath -Label "Structurizr CLI executable"
@@ -140,7 +178,8 @@ if (-not $preferred) {
 }
 Copy-Item -Path $preferred.FullName -Destination "architecture.svg" -Force
 
-Write-ArchitecturePage -DestinationFile $PagePath -SvgFiles $svgs
+$section = Build-ReadmeArchitectureSection -SvgFiles $svgs
+Upsert-ReadmeArchitectureSection -ReadmeFile $readme -SectionContent $section
 
 Write-Host "Exported $($svgs.Count) architecture map(s)."
-Write-Host "Updated docs architecture page and root architecture.svg."
+Write-Host "Updated README dropdown section and root architecture.svg."

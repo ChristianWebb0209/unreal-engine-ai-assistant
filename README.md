@@ -16,9 +16,56 @@ On **[Fab](https://www.fab.com/channels/unreal-engine)** and the broader Unreal 
 
 **Examples on Fab** (illustrative, not exhaustive—search Fab for “AI”, “Blueprint”, “GPT”, “assistant”): [Blueprint Generator AI (Kibibyte Labs)](https://www.fab.com/listings/6aa00d98-0db0-4f13-8950-e21f0a0eda2c), [AI Integration Toolkit (AIITK)](https://www.fab.com/listings/9de23ba0-e210-402d-9d76-441904e46f47), [HttpGPT](https://www.fab.com/listings/3edf406f-6a87-4f2f-bfdb-b0039f285541), [Offline AI Assistant](https://www.fab.com/listings/191b86f7-650d-4af8-a6dc-88f753e05968), [Universal Offline LLM](https://www.fab.com/listings/c5981158-7add-4977-9e08-440831058e5d). [UnrealAI](https://unrealai.studio/) (also positions as Fab-distributed) markets the same **BYOK / one-time plugin** idea with optional paid cloud credits—same dual cost structure minus **our $0** license.
 
-For **tooling breadth** and known gaps, see [`docs/tool-goals.md`](docs/tool-goals.md) and [`docs/asset-type-coverage-matrix.md`](docs/asset-type-coverage-matrix.md). Narrative tool list: [`docs/tool-registry.md`](docs/tool-registry.md).
+For **tooling breadth** and known gaps, see [`docs/asset-type-coverage-matrix.md`](docs/asset-type-coverage-matrix.md). Narrative tool list: [`docs/tool-registry.md`](docs/tool-registry.md).
 
 **Plugin implementation** (what ships today): [`Plugins/UnrealAiEditor/README.md`](Plugins/UnrealAiEditor/README.md). **Docs index:** [`docs/README.md`](docs/README.md).
+
+<!-- ARCHITECTURE_MAPS_START -->
+<details>
+<summary><strong>Architecture Maps (generated)</strong></summary>
+
+Generated from [docs/architecture-maps/architecture.dsl](docs/architecture-maps/architecture.dsl).
+
+![Architecture (primary)](architecture.svg)
+
+### Structurizr context components
+
+![Structurizr context components](docs/architecture-maps/structurizr-context-components.svg)
+
+### Structurizr harness components
+
+![Structurizr harness components](docs/architecture-maps/structurizr-harness-components.svg)
+
+### Structurizr memory components
+
+![Structurizr memory components](docs/architecture-maps/structurizr-memory-components.svg)
+
+### Structurizr plugin containers
+
+![Structurizr plugin containers](docs/architecture-maps/structurizr-plugin-containers.svg)
+
+### Structurizr request lifecycle
+
+![Structurizr request lifecycle](docs/architecture-maps/structurizr-request-lifecycle.svg)
+
+### Structurizr retrieval components
+
+![Structurizr retrieval components](docs/architecture-maps/structurizr-retrieval-components.svg)
+
+### Structurizr system context
+
+![Structurizr system context](docs/architecture-maps/structurizr-system-context.svg)
+
+### Structurizr tooling components
+
+![Structurizr tooling components](docs/architecture-maps/structurizr-tooling-components.svg)
+
+### Structurizr ui components
+
+![Structurizr ui components](docs/architecture-maps/structurizr-ui-components.svg)
+
+</details>
+<!-- ARCHITECTURE_MAPS_END -->
 
 ## Build and run (Windows, UE 5.7)
 
@@ -61,7 +108,7 @@ The repo includes a minimal **`Source/Blank`** runtime module so Unreal Build To
 
 - **No server and no product backend** — core functionality ships in the **Unreal editor plugin** (UI, tools, persistence, orchestration).
 - **Network:** user-configured **HTTPS to third-party LLM APIs** only (e.g. OpenRouter, Anthropic, OpenAI). Optional **localhost** tooling (e.g. MCP) runs **inside or beside the editor**, not a remote product API.
-- **No vector / semantic index in v1** — context via tools, Asset Registry, and deterministic search; see [`docs/tool-goals.md`](docs/tool-goals.md).
+- **No vector / semantic index in v1** — context via tools, Asset Registry, and deterministic search.
 
 ## Maintainer docs
 
