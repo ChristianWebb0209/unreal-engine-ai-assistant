@@ -42,17 +42,30 @@ jobs:
           unzip -o /tmp/structurizr-cli.zip -d tools/structurizr-cli
           ls -la tools/structurizr-cli
 
-      - name: Render maps + update README
+      - name: Install Graphviz
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y graphviz
+
+      - name: Download PlantUML
+        shell: bash
+        run: |
+          mkdir -p tools/plantuml
+          curl -L "https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar" -o tools/plantuml/plantuml.jar
+          ls -la tools/plantuml
+
+      - name: Render maps + update architecture page
         shell: pwsh
         run: |
-          ./scripts/export-architecture-maps.ps1 -WorkspaceDslPath "docs/architecture-maps/architecture.dsl" -OutputDir "docs/architecture-maps" -ReadmePath "README.md" -CliJarPath "tools/structurizr-cli/structurizr-cli.jar"
+          ./scripts/export-architecture-maps.ps1 -WorkspaceDslPath "docs/architecture-maps/architecture.dsl" -OutputDir "docs/architecture-maps" -PagePath "docs/architecture-maps/README.md" -CliJarPath "tools/structurizr-cli/structurizr-cli.jar" -PlantUmlJarPath "tools/plantuml/plantuml.jar"
 
       - name: Commit generated files
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
           if [ -n "$(git status --porcelain)" ]; then
-            git add architecture.svg docs/architecture-maps README.md
+            git add architecture.svg docs/architecture-maps
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit -m "docs: regenerate architecture maps"
