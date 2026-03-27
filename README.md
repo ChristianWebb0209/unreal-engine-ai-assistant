@@ -28,59 +28,59 @@ For **tooling breadth** and known gaps, see [`docs/asset-type-coverage-matrix.md
 <details>
 <summary><strong>▼ CLICK TO OPEN ARCHITECTURE GALLERY ▼</strong></summary>
 
-### Structurizr system context
+### System context
 
 [Open full-size SVG](docs/architecture-maps/structurizr-system-context.svg)
 
-[![Structurizr system context](docs/architecture-maps/structurizr-system-context.svg)](docs/architecture-maps/structurizr-system-context.svg)
+[![System context](docs/architecture-maps/structurizr-system-context.svg)](docs/architecture-maps/structurizr-system-context.svg)
 
-### Structurizr plugin containers
+### Plugin containers
 
 [Open full-size SVG](docs/architecture-maps/structurizr-plugin-containers.svg)
 
-[![Structurizr plugin containers](docs/architecture-maps/structurizr-plugin-containers.svg)](docs/architecture-maps/structurizr-plugin-containers.svg)
+[![Plugin containers](docs/architecture-maps/structurizr-plugin-containers.svg)](docs/architecture-maps/structurizr-plugin-containers.svg)
 
-### Structurizr context components
+### Context components
 
 [Open full-size SVG](docs/architecture-maps/structurizr-context-components.svg)
 
-[![Structurizr context components](docs/architecture-maps/structurizr-context-components.svg)](docs/architecture-maps/structurizr-context-components.svg)
+[![Context components](docs/architecture-maps/structurizr-context-components.svg)](docs/architecture-maps/structurizr-context-components.svg)
 
-### Structurizr harness components
+### Harness components
 
 [Open full-size SVG](docs/architecture-maps/structurizr-harness-components.svg)
 
-[![Structurizr harness components](docs/architecture-maps/structurizr-harness-components.svg)](docs/architecture-maps/structurizr-harness-components.svg)
+[![Harness components](docs/architecture-maps/structurizr-harness-components.svg)](docs/architecture-maps/structurizr-harness-components.svg)
 
-### Structurizr tooling components
+### Tooling components
 
 [Open full-size SVG](docs/architecture-maps/structurizr-tooling-components.svg)
 
-[![Structurizr tooling components](docs/architecture-maps/structurizr-tooling-components.svg)](docs/architecture-maps/structurizr-tooling-components.svg)
+[![Tooling components](docs/architecture-maps/structurizr-tooling-components.svg)](docs/architecture-maps/structurizr-tooling-components.svg)
 
-### Structurizr retrieval components
+### Retrieval components
 
 [Open full-size SVG](docs/architecture-maps/structurizr-retrieval-components.svg)
 
-[![Structurizr retrieval components](docs/architecture-maps/structurizr-retrieval-components.svg)](docs/architecture-maps/structurizr-retrieval-components.svg)
+[![Retrieval components](docs/architecture-maps/structurizr-retrieval-components.svg)](docs/architecture-maps/structurizr-retrieval-components.svg)
 
-### Structurizr memory components
+### Memory components
 
 [Open full-size SVG](docs/architecture-maps/structurizr-memory-components.svg)
 
-[![Structurizr memory components](docs/architecture-maps/structurizr-memory-components.svg)](docs/architecture-maps/structurizr-memory-components.svg)
+[![Memory components](docs/architecture-maps/structurizr-memory-components.svg)](docs/architecture-maps/structurizr-memory-components.svg)
 
-### Structurizr ui components
+### Ui components
 
 [Open full-size SVG](docs/architecture-maps/structurizr-ui-components.svg)
 
-[![Structurizr ui components](docs/architecture-maps/structurizr-ui-components.svg)](docs/architecture-maps/structurizr-ui-components.svg)
+[![Ui components](docs/architecture-maps/structurizr-ui-components.svg)](docs/architecture-maps/structurizr-ui-components.svg)
 
-### Structurizr request lifecycle
+### Request lifecycle
 
 [Open full-size SVG](docs/architecture-maps/structurizr-request-lifecycle.svg)
 
-[![Structurizr request lifecycle](docs/architecture-maps/structurizr-request-lifecycle.svg)](docs/architecture-maps/structurizr-request-lifecycle.svg)
+[![Request lifecycle](docs/architecture-maps/structurizr-request-lifecycle.svg)](docs/architecture-maps/structurizr-request-lifecycle.svg)
 
 </details>
 <!-- ARCHITECTURE_MAPS_END -->

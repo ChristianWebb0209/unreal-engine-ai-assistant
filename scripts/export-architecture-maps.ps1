@@ -56,7 +56,8 @@ function Clear-GeneratedFiles {
 
 function To-Title {
     param([string]$Name)
-    $title = ($Name -replace "[-_]+", " ")
+    $title = $Name -replace '^structurizr-', ''
+    $title = ($title -replace "[-_]+", " ")
     if ($title.Length -eq 0) { return $Name }
     return $title.Substring(0,1).ToUpper() + $title.Substring(1)
 }
