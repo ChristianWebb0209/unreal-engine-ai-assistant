@@ -20,7 +20,11 @@ When end-to-end work already takes **1–10+ minutes** (engine operations, cooks
 - Narrower tool sets and clearer contracts
 - Observable runs (IDs, logs, merge rationale)
 
-### 1.3 v1 indexing and retrieval (explicit scope)
+### 1.3 v1 indexing and retrieval (historical v1 scope)
+
+> Status note (current plugin): this section documents the original v1 launch boundary.
+> The current codebase now includes an optional local per-project vector index and retrieval path.
+> For current behavior and implementation details, see `docs/vector-db-implementation-plan.md`.
 
 - **v1 includes no vector search whatsoever** — no embeddings, no vector database (local or hosted), and no semantic / embedding-based codebase RAG.
 - Context in v1 comes from **non-semantic sources** only, for example: user messages, **tool-mediated reads** (files, assets, editor state), **Unreal Asset Registry** and other **deterministic** engine APIs where applicable, simple **keyword/path** search if we add it, and **conversation history** within limits.

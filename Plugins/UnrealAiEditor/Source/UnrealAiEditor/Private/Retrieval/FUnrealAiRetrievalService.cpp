@@ -180,6 +180,15 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 {
 	FUnrealAiRetrievalQueryResult Result;
 	const FUnrealAiRetrievalSettings Settings = LoadSettings();
+	UE_LOG(
+		LogTemp,
+		Log,
+		TEXT("Retrieval query start project_id=%s enabled=%d query_chars=%d maxResults=%d cfgMax=%d"),
+		*Query.ProjectId,
+		Settings.bEnabled ? 1 : 0,
+		Query.QueryText.Len(),
+		Query.MaxResults,
+		Settings.MaxSnippetsPerTurn);
 	if (!Settings.bEnabled)
 	{
 		return Result;
@@ -300,13 +309,29 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 	FUnrealAiEmbeddingRequest EmbeddingRequest;
 	EmbeddingRequest.InputText = Query.QueryText;
 	FUnrealAiEmbeddingResponse EmbeddingResponse;
+	const int32 TopKRaw = Query.MaxResults > 0 ? Query.MaxResults : Settings.MaxSnippetsPerTurn;
+	const int32 TopK = FMath::Max(1, TopKRaw);
+	if (TopKRaw <= 0)
+	{
+		Result.Warnings.Add(TEXT("Retrieval max snippets <= 0; clamped to 1."));
+	}
 	if (!EmbeddingProvider->EmbedOne(Settings.EmbeddingModel, EmbeddingRequest, EmbeddingResponse))
 	{
-		Result.Warnings.Add(FString::Printf(TEXT("Retrieval query embedding failed: %s"), *EmbeddingResponse.Error));
+		Result.Warnings.Add(FString::Printf(TEXT("Retrieval query embedding failed; using lexical fallback: %s"), *EmbeddingResponse.Error));
+		if (!Store.QueryTopKByLexical(Query.QueryText, TopK, Result.Snippets, StoreError))
+		{
+			Result.Warnings.Add(FString::Printf(TEXT("Retrieval lexical fallback failed: %s"), *StoreError));
+		}
+		UE_LOG(
+			LogTemp,
+			Log,
+			TEXT("Retrieval lexical fallback project_id=%s topk=%d hits=%d"),
+			*Query.ProjectId,
+			TopK,
+			Result.Snippets.Num());
 		return Result;
 	}
 
-	const int32 TopK = Query.MaxResults > 0 ? Query.MaxResults : Settings.MaxSnippetsPerTurn;
 	if (!Store.QueryTopKByCosine(EmbeddingResponse.Vector, TopK, Result.Snippets, StoreError))
 	{
 		Result.Warnings.Add(FString::Printf(TEXT("Retrieval query failed: %s"), *StoreError));
@@ -320,6 +345,24 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 			*Query.ProjectId,
 			TopK,
 			Result.Snippets.Num());
+	}
+	if (Result.Snippets.Num() == 0)
+	{
+		// Fallback keeps retrieval useful when embeddings return no close vectors.
+		if (Store.QueryTopKByLexical(Query.QueryText, TopK, Result.Snippets, StoreError))
+		{
+			UE_LOG(
+				LogTemp,
+				Log,
+				TEXT("Retrieval lexical fallback after empty vector hits project_id=%s topk=%d hits=%d"),
+				*Query.ProjectId,
+				TopK,
+				Result.Snippets.Num());
+		}
+		else
+		{
+			Result.Warnings.Add(FString::Printf(TEXT("Retrieval lexical fallback failed: %s"), *StoreError));
+		}
 	}
 	return Result;
 }

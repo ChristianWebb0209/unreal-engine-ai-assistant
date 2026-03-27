@@ -11,6 +11,7 @@
 #include "Serialization/JsonWriter.h"
 #include "HAL/Event.h"
 #include "HAL/PlatformProcess.h"
+#include "Misc/ScopeLock.h"
 
 FOpenAiCompatibleEmbeddingProvider::FOpenAiCompatibleEmbeddingProvider(FUnrealAiModelProfileRegistry* InProfiles)
 	: Profiles(InProfiles)
@@ -60,25 +61,41 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne(
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 	HttpRequest->SetContentAsString(Body);
 
-	bool bDone = false;
-	bool bOk = false;
-	FString ResponseBody;
+	struct FEmbeddingRequestState
+	{
+		FCriticalSection Mutex;
+		bool bDone = false;
+		bool bOk = false;
+		FString ResponseBody;
+		FEvent* DoneEvent = nullptr;
+		bool bEventArmed = true;
+	};
+	TSharedRef<FEmbeddingRequestState, ESPMode::ThreadSafe> State = MakeShared<FEmbeddingRequestState, ESPMode::ThreadSafe>();
 	FEvent* DoneEvent = FPlatformProcess::GetSynchEventFromPool(false);
 	if (!DoneEvent)
 	{
 		OutResponse.Error = TEXT("Failed to allocate sync event for embeddings request.");
 		return false;
 	}
+	State->DoneEvent = DoneEvent;
 	HttpRequest->OnProcessRequestComplete().BindLambda(
-		[&bDone, &bOk, &ResponseBody, DoneEvent](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedOk)
+		[State](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedOk)
 		{
 			const int32 Status = Response.IsValid() ? Response->GetResponseCode() : 0;
-			bOk = bConnectedOk && Response.IsValid() && Status >= 200 && Status < 300;
-			ResponseBody = Response.IsValid() ? Response->GetContentAsString() : FString();
-			bDone = true;
-			if (DoneEvent)
+			FEvent* EventToTrigger = nullptr;
 			{
-				DoneEvent->Trigger();
+				FScopeLock Lock(&State->Mutex);
+				State->bOk = bConnectedOk && Response.IsValid() && Status >= 200 && Status < 300;
+				State->ResponseBody = Response.IsValid() ? Response->GetContentAsString() : FString();
+				State->bDone = true;
+				if (State->bEventArmed)
+				{
+					EventToTrigger = State->DoneEvent;
+				}
+			}
+			if (EventToTrigger)
+			{
+				EventToTrigger->Trigger();
 			}
 		});
 
@@ -89,7 +106,31 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne(
 		return false;
 	}
 
-	DoneEvent->Wait(30000);
+	const bool bSignaled = DoneEvent->Wait(30000);
+	if (!bSignaled)
+	{
+		HttpRequest->CancelRequest();
+		HttpRequest->OnProcessRequestComplete().Unbind();
+		{
+			FScopeLock Lock(&State->Mutex);
+			State->bEventArmed = false;
+			State->DoneEvent = nullptr;
+		}
+		FPlatformProcess::ReturnSynchEventToPool(DoneEvent);
+		OutResponse.Error = TEXT("Embeddings HTTP request timed out.");
+		return false;
+	}
+	bool bDone = false;
+	bool bOk = false;
+	FString ResponseBody;
+	{
+		FScopeLock Lock(&State->Mutex);
+		bDone = State->bDone;
+		bOk = State->bOk;
+		ResponseBody = State->ResponseBody;
+		State->bEventArmed = false;
+		State->DoneEvent = nullptr;
+	}
 	FPlatformProcess::ReturnSynchEventToPool(DoneEvent);
 	if (!bDone || !bOk)
 	{

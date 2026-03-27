@@ -17,7 +17,7 @@ namespace
 {
 	static FCriticalSection GVectorDbOpenMutex;
 
-	static FString GetVectorProjectRoot(const FString& ProjectId)
+	static FString GetVectorProjectRootForStore(const FString& ProjectId)
 	{
 		const FString LocalAppData = FPlatformMisc::GetEnvironmentVariable(TEXT("LOCALAPPDATA"));
 		const FString Base = LocalAppData.IsEmpty()
@@ -51,7 +51,7 @@ namespace
 
 FUnrealAiVectorIndexStore::FUnrealAiVectorIndexStore(const FString& InProjectId)
 	: ProjectId(InProjectId)
-	, RootDir(GetVectorProjectRoot(InProjectId))
+	, RootDir(GetVectorProjectRootForStore(InProjectId))
 {
 }
 
@@ -420,6 +420,113 @@ bool FUnrealAiVectorIndexStore::QueryTopKByCosine(
 	All.Sort([](const FUnrealAiRetrievalSnippet& A, const FUnrealAiRetrievalSnippet& B)
 	{
 		return A.Score > B.Score;
+	});
+	const int32 Keep = FMath::Clamp(TopK, 0, All.Num());
+	for (int32 i = 0; i < Keep; ++i)
+	{
+		OutSnippets.Add(All[i]);
+	}
+	return true;
+}
+
+bool FUnrealAiVectorIndexStore::QueryTopKByLexical(
+	const FString& QueryText,
+	const int32 TopK,
+	TArray<FUnrealAiRetrievalSnippet>& OutSnippets,
+	FString& OutError)
+{
+	OutSnippets.Reset();
+	if (!Initialize(OutError))
+	{
+		return false;
+	}
+
+	FString Clean = QueryText.ToLower();
+	for (int32 i = 0; i < Clean.Len(); ++i)
+	{
+		const TCHAR C = Clean[i];
+		if (!FChar::IsAlnum(C) && C != TEXT('_') && C != TEXT('/') && C != TEXT('.'))
+		{
+			Clean[i] = TEXT(' ');
+		}
+	}
+	TArray<FString> Tokens;
+	Clean.ParseIntoArray(Tokens, TEXT(" "), true);
+	TArray<FString> Keywords;
+	TSet<FString> Seen;
+	for (const FString& T : Tokens)
+	{
+		if (T.Len() < 3 || Seen.Contains(T))
+		{
+			continue;
+		}
+		Seen.Add(T);
+		Keywords.Add(T);
+	}
+	if (Keywords.Num() == 0)
+	{
+		return true;
+	}
+
+	FSQLitePreparedStatement SelectStmt;
+	if (!SelectStmt.Create(*Db,
+		TEXT("SELECT chunk_id, source_path, chunk_text FROM chunks WHERE project_id=?1;"),
+		ESQLitePreparedStatementFlags::Persistent))
+	{
+		OutError = TEXT("Failed to create lexical select statement.");
+		return false;
+	}
+	SelectStmt.SetBindingValueByIndex(1, ProjectId);
+
+	TArray<FUnrealAiRetrievalSnippet> All;
+	while (SelectStmt.Step() == ESQLitePreparedStatementStepResult::Row)
+	{
+		FString ChunkId;
+		FString SourcePath;
+		FString ChunkText;
+		SelectStmt.GetColumnValueByIndex(0, ChunkId);
+		SelectStmt.GetColumnValueByIndex(1, SourcePath);
+		SelectStmt.GetColumnValueByIndex(2, ChunkText);
+		if (ChunkText.IsEmpty())
+		{
+			continue;
+		}
+		const FString ChunkLower = ChunkText.ToLower();
+		int32 Hits = 0;
+		for (const FString& K : Keywords)
+		{
+			if (ChunkLower.Contains(K))
+			{
+				++Hits;
+			}
+		}
+		if (Hits <= 0)
+		{
+			continue;
+		}
+		FUnrealAiRetrievalSnippet Snippet;
+		Snippet.SnippetId = ChunkId;
+		Snippet.SourceId = SourcePath;
+		{
+			const FString Marker = TEXT(":thread:");
+			const int32 ThreadPos = SourcePath.Find(Marker, ESearchCase::CaseSensitive);
+			if (ThreadPos != INDEX_NONE)
+			{
+				Snippet.ThreadId = SourcePath.Mid(ThreadPos + Marker.Len());
+			}
+		}
+		Snippet.Text = ChunkText;
+		Snippet.Score = static_cast<float>(Hits) / static_cast<float>(Keywords.Num());
+		All.Add(MoveTemp(Snippet));
+	}
+
+	All.Sort([](const FUnrealAiRetrievalSnippet& A, const FUnrealAiRetrievalSnippet& B)
+	{
+		if (!FMath::IsNearlyEqual(A.Score, B.Score))
+		{
+			return A.Score > B.Score;
+		}
+		return A.Text.Len() < B.Text.Len();
 	});
 	const int32 Keep = FMath::Clamp(TopK, 0, All.Num());
 	for (int32 i = 0; i < Keep; ++i)

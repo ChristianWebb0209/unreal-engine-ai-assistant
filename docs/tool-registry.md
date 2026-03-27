@@ -1078,7 +1078,7 @@ Use this as a reading checklist against your **installed** `Engine/Source` tree.
 | **UnrealEd** | `UEditorEngine.h`, `GEditor`, `FEditorDelegates` | Core editor entry, selection, world context. |
 | **LevelEditor** | `FLevelEditorModule`, `ILevelEditor`, first active viewport | Level Editor integration, tabs. |
 | **ContentBrowser** | `FContentBrowserModule`, sync APIs | Navigate UI to assets. |
-| **AssetRegistry** | `IAssetRegistry`, `FARFilter`, `FAssetData` | Deterministic asset queries (PRD: no vector index). |
+| **AssetRegistry** | `IAssetRegistry`, `FARFilter`, `FAssetData` | Deterministic asset queries and baseline indexing signals; complements (does not replace) optional local vector retrieval. |
 | **AssetTools** | `IAssetTools`, import/rename/delete | Asset mutations. |
 | **UnrealEd / EditorScriptingUtilities** | `UEditorAssetLibrary`, `UGameplayStatics` (limited) | Blueprint-exposed patterns; compare with native C++. |
 | **Kismet** | `FKismetEditorUtilities`, `FBlueprintEditorUtils` | Blueprint compile/edit. |

@@ -40,6 +40,7 @@ public:
 		const TArray<FString>& RemovedSources,
 		FString& OutError);
 	bool QueryTopKByCosine(const TArray<float>& QueryEmbedding, int32 TopK, TArray<FUnrealAiRetrievalSnippet>& OutSnippets, FString& OutError);
+	bool QueryTopKByLexical(const FString& QueryText, int32 TopK, TArray<FUnrealAiRetrievalSnippet>& OutSnippets, FString& OutError);
 	bool LoadSourceHashes(TMap<FString, FString>& OutSourceHashes, FString& OutError);
 	bool GetIndexCounts(int32& OutFiles, int32& OutChunks, FString& OutError);
 	bool CheckIntegrity(FString& OutError);

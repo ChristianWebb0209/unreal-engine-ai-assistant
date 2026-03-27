@@ -385,6 +385,9 @@ Normative:
 
 ## 20) Implementation checklist (execution order)
 
+Implementation status note: this checklist is the original execution plan.
+The current plugin has implemented core local vector indexing/retrieval flows; remaining unchecked items should be treated as follow-up hardening/tuning tasks, not evidence that retrieval is absent.
+
 This checklist is designed for a single implementation agent to execute in order.
 
 ### 20.1 Phase 0: scaffolding and no-op wiring
