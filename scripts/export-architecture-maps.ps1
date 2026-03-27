@@ -61,26 +61,62 @@ function To-Title {
     return $title.Substring(0,1).ToUpper() + $title.Substring(1)
 }
 
+function Get-ViewOrderFromDsl {
+    param([string]$DslPath)
+
+    $raw = Get-Content -Path $DslPath -Raw
+    $lines = $raw -split "`r?`n"
+    $keys = New-Object System.Collections.Generic.List[string]
+
+    foreach ($line in $lines) {
+        # Match: systemContext plugin "system-context" ... or custom "mega-map" ...
+        $m = [System.Text.RegularExpressions.Regex]::Match(
+            $line,
+            '^\s*(systemContext|container|component|dynamic|custom)\s+(?:\S+\s+)?"([^"]+)"'
+        )
+        if ($m.Success) {
+            $key = $m.Groups[2].Value
+            if (-not [string]::IsNullOrWhiteSpace($key) -and -not $keys.Contains($key)) {
+                [void]$keys.Add($key)
+            }
+        }
+    }
+
+    return $keys
+}
+
 function Build-ReadmeArchitectureSection {
     param(
+        [System.Collections.Generic.List[string]]$ViewOrder,
         [System.IO.FileInfo[]]$SvgFiles
     )
 
     $nl = [Environment]::NewLine
+    $indexByKey = @{}
+    for ($i = 0; $i -lt $ViewOrder.Count; $i++) {
+        $indexByKey[$ViewOrder[$i]] = $i
+    }
+    $ordered = $SvgFiles | Where-Object { $_.Name -notlike "*-key.svg" } | Sort-Object `
+        @{ Expression = {
+                $k = $_.BaseName
+                $k = $k -replace '^structurizr-', ''
+                if ($indexByKey.ContainsKey($k)) { return $indexByKey[$k] }
+                return 9999
+           }}, `
+        @{ Expression = { $_.Name } }
+
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.Append("<!-- ARCHITECTURE_MAPS_START -->$nl")
+    [void]$sb.Append("## Architecture Maps$nl$nl")
+    [void]$sb.Append("> **IMPORTANT:** Expand the section below to view all generated architecture diagrams (auto-generated from `docs/architecture-maps/architecture.dsl`).$nl$nl")
     [void]$sb.Append("<details>$nl")
-    [void]$sb.Append("<summary><strong>Architecture Maps (generated)</strong></summary>$nl$nl")
-    [void]$sb.Append("Generated from [`docs/architecture-maps/architecture.dsl`](docs/architecture-maps/architecture.dsl).$nl$nl")
-    [void]$sb.Append("![Architecture (primary)](architecture.svg)$nl$nl")
+    [void]$sb.Append("<summary><strong>▼ CLICK TO OPEN ARCHITECTURE GALLERY ▼</strong></summary>$nl$nl")
 
-    foreach ($svg in $SvgFiles) {
-        if ($svg.Name -like "*-key.svg") {
-            continue
-        }
+    foreach ($svg in $ordered) {
         $title = To-Title -Name $svg.BaseName
         [void]$sb.Append("### $title$nl$nl")
-        [void]$sb.Append("![$title](docs/architecture-maps/$($svg.Name))$nl$nl")
+        [void]$sb.Append("[Open full-size SVG](docs/architecture-maps/$($svg.Name))$nl$nl")
+        [void]$sb.Append("[![$title](docs/architecture-maps/$($svg.Name))](docs/architecture-maps/$($svg.Name))$nl$nl")
     }
 
     [void]$sb.Append("</details>$nl")
@@ -122,6 +158,7 @@ function Upsert-ReadmeArchitectureSection {
 
 $workspaceDsl = Resolve-PathOrFail -PathValue $WorkspaceDslPath -Label "Workspace DSL"
 $readme = Resolve-PathOrFail -PathValue $ReadmePath -Label "README"
+$viewOrder = Get-ViewOrderFromDsl -DslPath $workspaceDsl
 $cliPathResolved = $null
 if (-not [string]::IsNullOrWhiteSpace($CliPath)) {
     $cliPathResolved = Resolve-PathOrFail -PathValue $CliPath -Label "Structurizr CLI executable"
@@ -178,7 +215,7 @@ if (-not $preferred) {
 }
 Copy-Item -Path $preferred.FullName -Destination "architecture.svg" -Force
 
-$section = Build-ReadmeArchitectureSection -SvgFiles $svgs
+$section = Build-ReadmeArchitectureSection -ViewOrder $viewOrder -SvgFiles $svgs
 Upsert-ReadmeArchitectureSection -ReadmeFile $readme -SectionContent $section
 
 Write-Host "Exported $($svgs.Count) architecture map(s)."

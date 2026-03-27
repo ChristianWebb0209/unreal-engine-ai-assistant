@@ -21,48 +21,66 @@ For **tooling breadth** and known gaps, see [`docs/asset-type-coverage-matrix.md
 **Plugin implementation** (what ships today): [`Plugins/UnrealAiEditor/README.md`](Plugins/UnrealAiEditor/README.md). **Docs index:** [`docs/README.md`](docs/README.md).
 
 <!-- ARCHITECTURE_MAPS_START -->
+## Architecture Maps
+
+> **IMPORTANT:** Expand the section below to view all generated architecture diagrams (auto-generated from docs/architecture-maps/architecture.dsl).
+
 <details>
-<summary><strong>Architecture Maps (generated)</strong></summary>
-
-Generated from [docs/architecture-maps/architecture.dsl](docs/architecture-maps/architecture.dsl).
-
-![Architecture (primary)](architecture.svg)
-
-### Structurizr context components
-
-![Structurizr context components](docs/architecture-maps/structurizr-context-components.svg)
-
-### Structurizr harness components
-
-![Structurizr harness components](docs/architecture-maps/structurizr-harness-components.svg)
-
-### Structurizr memory components
-
-![Structurizr memory components](docs/architecture-maps/structurizr-memory-components.svg)
-
-### Structurizr plugin containers
-
-![Structurizr plugin containers](docs/architecture-maps/structurizr-plugin-containers.svg)
-
-### Structurizr request lifecycle
-
-![Structurizr request lifecycle](docs/architecture-maps/structurizr-request-lifecycle.svg)
-
-### Structurizr retrieval components
-
-![Structurizr retrieval components](docs/architecture-maps/structurizr-retrieval-components.svg)
+<summary><strong>▼ CLICK TO OPEN ARCHITECTURE GALLERY ▼</strong></summary>
 
 ### Structurizr system context
 
-![Structurizr system context](docs/architecture-maps/structurizr-system-context.svg)
+[Open full-size SVG](docs/architecture-maps/structurizr-system-context.svg)
+
+[![Structurizr system context](docs/architecture-maps/structurizr-system-context.svg)](docs/architecture-maps/structurizr-system-context.svg)
+
+### Structurizr plugin containers
+
+[Open full-size SVG](docs/architecture-maps/structurizr-plugin-containers.svg)
+
+[![Structurizr plugin containers](docs/architecture-maps/structurizr-plugin-containers.svg)](docs/architecture-maps/structurizr-plugin-containers.svg)
+
+### Structurizr context components
+
+[Open full-size SVG](docs/architecture-maps/structurizr-context-components.svg)
+
+[![Structurizr context components](docs/architecture-maps/structurizr-context-components.svg)](docs/architecture-maps/structurizr-context-components.svg)
+
+### Structurizr harness components
+
+[Open full-size SVG](docs/architecture-maps/structurizr-harness-components.svg)
+
+[![Structurizr harness components](docs/architecture-maps/structurizr-harness-components.svg)](docs/architecture-maps/structurizr-harness-components.svg)
 
 ### Structurizr tooling components
 
-![Structurizr tooling components](docs/architecture-maps/structurizr-tooling-components.svg)
+[Open full-size SVG](docs/architecture-maps/structurizr-tooling-components.svg)
+
+[![Structurizr tooling components](docs/architecture-maps/structurizr-tooling-components.svg)](docs/architecture-maps/structurizr-tooling-components.svg)
+
+### Structurizr retrieval components
+
+[Open full-size SVG](docs/architecture-maps/structurizr-retrieval-components.svg)
+
+[![Structurizr retrieval components](docs/architecture-maps/structurizr-retrieval-components.svg)](docs/architecture-maps/structurizr-retrieval-components.svg)
+
+### Structurizr memory components
+
+[Open full-size SVG](docs/architecture-maps/structurizr-memory-components.svg)
+
+[![Structurizr memory components](docs/architecture-maps/structurizr-memory-components.svg)](docs/architecture-maps/structurizr-memory-components.svg)
 
 ### Structurizr ui components
 
-![Structurizr ui components](docs/architecture-maps/structurizr-ui-components.svg)
+[Open full-size SVG](docs/architecture-maps/structurizr-ui-components.svg)
+
+[![Structurizr ui components](docs/architecture-maps/structurizr-ui-components.svg)](docs/architecture-maps/structurizr-ui-components.svg)
+
+### Structurizr request lifecycle
+
+[Open full-size SVG](docs/architecture-maps/structurizr-request-lifecycle.svg)
+
+[![Structurizr request lifecycle](docs/architecture-maps/structurizr-request-lifecycle.svg)](docs/architecture-maps/structurizr-request-lifecycle.svg)
 
 </details>
 <!-- ARCHITECTURE_MAPS_END -->
