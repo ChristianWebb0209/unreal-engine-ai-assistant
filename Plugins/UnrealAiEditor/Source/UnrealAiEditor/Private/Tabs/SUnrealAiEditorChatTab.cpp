@@ -4,6 +4,8 @@
 #include "UnrealAiEditorModule.h"
 #include "UnrealAiEditorTabIds.h"
 #include "Context/UnrealAiContextDragDrop.h"
+#include "Context/UnrealAiProjectId.h"
+#include "Retrieval/IUnrealAiRetrievalService.h"
 #include "Widgets/SChatComposer.h"
 #include "Widgets/SChatHeader.h"
 #include "Widgets/SChatMessageList.h"
@@ -95,6 +97,32 @@ void SUnrealAiEditorChatTab::Construct(const FArguments& InArgs)
 					.BackendRegistry(BackendRegistry)
 					.MessageList(MessageListWidget)
 					.Session(Session)
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 3.f))
+			[
+				SNew(STextBlock)
+					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+					.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.58f, 1.f)))
+					.Text_Lambda([this]()
+					{
+						if (!BackendRegistry.IsValid() || !BackendRegistry->GetRetrievalService())
+						{
+							return FText::FromString(TEXT("Retrieval: unavailable"));
+						}
+						const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+						const FUnrealAiRetrievalProjectStatus Status = BackendRegistry->GetRetrievalService()->GetProjectStatus(ProjectId);
+						if (!Status.bEnabled)
+						{
+							return FText::FromString(TEXT("Retrieval: disabled"));
+						}
+						const FString BusySuffix = Status.bBusy ? TEXT(" (updating...)") : FString();
+						return FText::FromString(FString::Printf(
+							TEXT("Retrieval: %s%s | files=%d chunks=%d"),
+							*Status.StateText,
+							*BusySuffix,
+							Status.FilesIndexed,
+							Status.ChunksIndexed));
+					})
 			]
 		];
 

@@ -7,12 +7,14 @@
 - **Path-resolution gates:** if a target tool requires `object_path`/`blueprint_path`, resolve that path first via discovery tools, then call the target tool with concrete args in a single attempt.
 - **Character/Pawn creation gate:** when creating a playable character asset, do **not** pass `/Script/Engine.Character` or `/Script/Engine.Pawn` to `asset_create.asset_class`; create a Blueprint asset and set Character/Pawn as `parent_class` in `blueprint_apply_ir` with `create_if_missing:true`.
 - **Generic asset authoring (most `UObject` / DataAsset / config-like assets under `/Game`):** prefer **`asset_export_properties`** → **`asset_apply_properties`** before bespoke subsystem tools. Create with **`asset_create`** (`package_path`, `asset_name`, `asset_class`, optional `factory_class`). Dependencies: **`asset_get_dependencies`**, referencers: **`asset_find_referencers`**. Level Sequence shortcut: **`level_sequence_create_asset`**.
+- **Renames:** do **not** set `AssetName`/`ObjectName` in `asset_apply_properties`. Use **`asset_rename`** for renames/moves.
 - **One call, one purpose**; avoid redundant snapshots if the last result already answers.
 - **Params:** follow the tool JSON schema **exactly**: use canonical key names first, fill required fields, and omit unknown optionals. Use aliases only when the schema explicitly documents them. Canonical examples: `asset_index_fuzzy_search.query`, `scene_fuzzy_search.query`, `asset_open_editor.object_path`, `asset_export_properties.object_path`, `asset_create.asset_class`, `project_file_read_text.relative_path`, `project_file_write_text.relative_path`.
 - If a tool error includes `suggested_correct_call`, use that shape on the next retry instead of repeating the same args.
 - If a call fails validation, apply `suggested_correct_call` immediately; never retry the same invalid shape twice.
 - Search/retrieval loop cap: after 2 near-identical calls without new progress, change strategy/tool family or emit `agent_emit_todo_plan`.
 - Use canonical destructive asset id `asset_delete` (not `asset_destroy`).
+- In headed live/editor runs (default), destructive tools may auto-fill `confirm` when missing; avoid burning extra retries just to set `confirm`.
 - For common alias-tolerant tools, prefer canonical keys but accept these fallbacks when repairing calls: `content_browser_sync_asset.path|object_path|asset_path`, `editor_set_selection.actor_paths|actor_path|path`, `asset_save_packages.package_paths|package_path`, `blueprint_open_graph_tab.blueprint_path|object_path` with `graph_name|graph`.
 - For `asset_index_fuzzy_search`, if `low_confidence` is true or `matches` is empty, do not repeat near-identical fuzzy queries; switch strategy (narrow scope, add class filter, or create needed asset).
 - Asset creation flow: when discovery returns low-confidence/empty and the task still requires a new asset, call `asset_create` with canonical minimal args (`package_path`, `asset_name`, `asset_class`) instead of retrying empty `{}` calls.
@@ -26,7 +28,7 @@
 
 ## MVP gameplay (characters, pickups, UI, PIE)
 
-For **gameplay Blueprint** work (movement, overlap, timers, health, spawners), read **`10-mvp-gameplay-and-tooling.md`** and `docs/tool-goals.md`. Prefer **`blueprint_export_ir` → `blueprint_apply_ir` → `blueprint_compile`** (set **`format_graphs: true`** on compile when every script graph should get a formatter pass), **`asset_create` + `asset_apply_properties`**, then **`pie_start`** / **`pie_stop`** to verify. Empty `{}` in automated tests often yields `ok:false` on write tools until required paths are filled — use search/selection tools first.
+For **gameplay Blueprint** work (movement, overlap, timers, health, spawners), read **`10-mvp-gameplay-and-tooling.md`**. Prefer **`blueprint_export_ir` → `blueprint_apply_ir` → `blueprint_compile`** (set **`format_graphs: true`** on compile when every script graph should get a formatter pass), **`asset_create` + `asset_apply_properties`**, then **`pie_start`** / **`pie_stop`** to verify. Empty `{}` in automated tests often yields `ok:false` on write tools until required paths are filled — use search/selection tools first.
 
 ## Editor focus (`focused`)
 
@@ -39,7 +41,7 @@ For **gameplay Blueprint** work (movement, overlap, timers, health, spawners), r
 
 ## Blueprint IR + Unreal Blueprint Formatter (graph plugin)
 
-Unreal AI Editor is built to use **`UnrealBlueprintFormatter`** as shipped: it is an **enabled plugin dependency** and the AI module **links** the formatter module. From this repo’s root, **`.\build-editor.ps1`** **clones or `git pull --ff-only`** the formatter into `Plugins/UnrealBlueprintFormatter` before building (see repo **`docs/UnrealBlueprintFormatter.md`**). Use **`-SkipBlueprintFormatterSync`** or **`UE_SKIP_BLUEPRINT_FORMATTER_SYNC=1`** only when you intentionally manage that folder yourself.
+Unreal AI Editor is built to use **`UnrealBlueprintFormatter`** as shipped: it is an **enabled plugin dependency** and the AI module **links** the formatter module. From this repo’s root, **`.\build-editor.ps1`** **clones or `git pull --ff-only`** the formatter into `Plugins/UnrealBlueprintFormatter` before building. Use **`-SkipBlueprintFormatterSync`** or **`UE_SKIP_BLUEPRINT_FORMATTER_SYNC=1`** only when you intentionally manage that folder yourself.
 
 ### Read / write loop
 
@@ -69,4 +71,7 @@ Unreal AI Editor is built to use **`UnrealBlueprintFormatter`** as shipped: it i
 - Node references must be stable **`node_id`**; links must be **string pin refs** in **`node_id.pin`** form (example: `{ "from":"beginplay.Then", "to":"delay.execute" }`).
 - Ops: `event_begin_play`, **`event_tick`**, `custom_event`, `branch`, `sequence`, `call_function`, `delay`, `get_variable`, `set_variable`, `dynamic_cast`.
 - For **`call_function`**, always provide **`class_path`** + **`function_name`**.
+- Do **not invent pseudo-ops** (for example `launch_character`, `play_sound`, `event_overlap`, `play_sound_at_location`, `add_component`). If the intent is gameplay behavior, express it as a supported op, usually **`call_function`**.
+- Use canonical overlap event op names from the list above (for overlap flows, use `event_actor_begin_overlap`).
+- For **`call_function.class_path`**, use native script class paths (typically `/Script/...`), not `/Game/...` asset object paths.
 - **Packaging:** editor tools operate on the **project workspace**; packaging, staging, and platform cook steps are **out of scope** for this catalog unless a dedicated tool exists—direct the user to **Platforms** / **Project Launcher** when they ask for shipping builds.

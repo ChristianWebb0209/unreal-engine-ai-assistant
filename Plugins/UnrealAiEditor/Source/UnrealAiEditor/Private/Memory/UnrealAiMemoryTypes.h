@@ -62,6 +62,8 @@ struct FUnrealAiMemoryTombstone
 struct FUnrealAiMemoryQuery
 {
 	FString QueryText;
+	/** Optional active thread id for scope/tag preference during ranking. */
+	FString PreferredThreadId;
 	TArray<FString> RequiredTags;
 	bool bIncludeBodies = false;
 	bool bPreferThreadScope = true;

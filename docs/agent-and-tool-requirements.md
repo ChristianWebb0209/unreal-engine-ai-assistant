@@ -30,7 +30,7 @@ When end-to-end work already takes **1–10+ minutes** (engine operations, cooks
 
 ### 1.4 MVP deployment (plugin-only — no server, no product backend)
 
-Aligned with **`PRD.md` §2.3–§2.5** (MVP architecture, local-first mandate, persistence).
+Aligned with the MVP architecture, local-first mandate, and persistence model.
 
 | Rule | Detail |
 |------|--------|
@@ -297,10 +297,10 @@ Many Unreal-oriented integrations use **standard models** + **structured tools**
 ## 11. Related artifacts in this repo
 
 - `README.md` — MVP summary (plugin-only, no product backend).
-- `PRD.md` — full product requirements and persistence layout.
+- `README.md` — product positioning, architecture summary, and build flow.
 - `docs/context-service.md` — **context assembly service**: per-chat `context.json`, `BuildContextWindow`, no vector search in v1.
 - `analysis/unreal_plugin_demand_shortlist.md` — demand-oriented plugin ideas from Reddit question posts (separate research track).
 
 ---
 
-*Document version: 1.2 — adds **MVP plugin-only / no product backend** (§1.4), aligned with `PRD.md`. v1.1: no vector search (§1.3).*
+*Document version: 1.2 — adds **MVP plugin-only / no product backend** (§1.4). v1.1: no vector search (§1.3).*

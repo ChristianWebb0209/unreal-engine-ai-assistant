@@ -2,9 +2,12 @@
 
 #include "Misc/AutomationTest.h"
 #include "Tools/UnrealAiToolDispatch.h"
+#include "Tools/UnrealAiAssetFactoryResolver.h"
 #include "Tools/UnrealAiToolJson.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonReader.h"
+#include "Engine/Blueprint.h"
+#include "Engine/StaticMesh.h"
 
 /**
  * Contract tests for tool JSON helpers (no Editor / world required).
@@ -583,6 +586,22 @@ bool FUnrealAiGenericAssetToolsContractTest::RunTest(const FString& Parameters)
 			FString(),
 			FString());
 		TestFalse(TEXT("asset_apply_properties missing properties field: bOk"), R.bOk);
+	}
+
+	// Factory resolver: should resolve common asset classes without requiring explicit factory_class.
+	{
+		const FUnrealAiAssetFactoryResolver::FResolveResult R = FUnrealAiAssetFactoryResolver::Resolve(
+			UBlueprint::StaticClass(),
+			FString());
+		TestTrue(TEXT("factory_resolver blueprint: has factory"), R.Factory != nullptr);
+		TestFalse(TEXT("factory_resolver blueprint: has class path"), R.FactoryClassPath.IsEmpty());
+	}
+	{
+		const FUnrealAiAssetFactoryResolver::FResolveResult R = FUnrealAiAssetFactoryResolver::Resolve(
+			UStaticMesh::StaticClass(),
+			FString());
+		TestTrue(TEXT("factory_resolver staticmesh: has factory"), R.Factory != nullptr);
+		TestFalse(TEXT("factory_resolver staticmesh: has class path"), R.FactoryClassPath.IsEmpty());
 	}
 
 	{

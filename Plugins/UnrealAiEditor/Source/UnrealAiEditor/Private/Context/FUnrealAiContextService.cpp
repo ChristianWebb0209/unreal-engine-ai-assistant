@@ -8,6 +8,8 @@
 #include "Context/UnrealAiEditorContextQueries.h"
 #include "Context/UnrealAiRecentUiRanking.h"
 #include "Memory/IUnrealAiMemoryService.h"
+#include "Retrieval/IUnrealAiRetrievalService.h"
+#include "Retrieval/UnrealAiRetrievalObservability.h"
 #if WITH_EDITOR
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Editor.h"
@@ -43,9 +45,13 @@ namespace UnrealAiCtxTodoPriv
 	}
 }
 
-FUnrealAiContextService::FUnrealAiContextService(IUnrealAiPersistence* InPersistence, IUnrealAiMemoryService* InMemoryService)
+FUnrealAiContextService::FUnrealAiContextService(
+	IUnrealAiPersistence* InPersistence,
+	IUnrealAiMemoryService* InMemoryService,
+	IUnrealAiRetrievalService* InRetrievalService)
 	: Persistence(InPersistence)
 	, MemoryService(InMemoryService)
+	, RetrievalService(InRetrievalService)
 {
 }
 
@@ -456,9 +462,32 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 		Budget = Working.MaxContextChars;
 	}
 
+	FAgentContextBuildOptions EffectiveOptions = Options;
+	EffectiveOptions.ThreadIdForMemory = ActiveThreadId;
+	TArray<FUnrealAiRetrievalSnippet> RetrievalSnippets;
+	if (RetrievalService && RetrievalService->IsEnabledForProject(ActiveProjectId))
+	{
+		FUnrealAiRetrievalQuery RetrievalQuery;
+		RetrievalQuery.ProjectId = ActiveProjectId;
+		RetrievalQuery.ThreadId = ActiveThreadId;
+		RetrievalQuery.QueryText = EffectiveOptions.UserMessageForComplexity;
+		UnrealAiRetrievalObservability::EmitQueryStart(RetrievalQuery);
+		const FUnrealAiRetrievalQueryResult RetrievalResult = RetrievalService->Query(RetrievalQuery);
+		RetrievalSnippets = RetrievalResult.Snippets;
+		UnrealAiRetrievalObservability::EmitQueryEnd(RetrievalQuery, RetrievalResult);
+		for (const FString& Warning : RetrievalResult.Warnings)
+		{
+			Result.Warnings.Add(Warning);
+		}
+		if (bVerbose)
+		{
+			AddTraceLine(FString::Printf(TEXT("Retrieval hook enabled: snippets=%d"), RetrievalResult.Snippets.Num()));
+		}
+	}
+
 	FString Block;
 	const UnrealAiContextCandidates::FUnifiedContextBuildResult Unified =
-		UnrealAiContextCandidates::BuildUnifiedContext(Working, Options, MemoryService, Budget);
+		UnrealAiContextCandidates::BuildUnifiedContext(Working, EffectiveOptions, MemoryService, &RetrievalSnippets, Budget);
 	for (const FString& Line : Unified.TraceLines)
 	{
 		AddTraceLine(Line);
@@ -476,7 +505,7 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 			ActiveProjectId,
 			ActiveThreadId,
 			InvocationReason,
-			Options,
+			EffectiveOptions,
 			Budget,
 			Unified,
 			Block);

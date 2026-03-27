@@ -4,6 +4,7 @@
 #include "Context/UnrealAiContextRankingPolicy.h"
 
 class IUnrealAiMemoryService;
+struct FUnrealAiRetrievalSnippet;
 
 namespace UnrealAiContextCandidates
 {
@@ -17,6 +18,8 @@ namespace UnrealAiContextCandidates
 		float ActiveBonus = 0.f;
 		float ThreadOverlayBonus = 0.f;
 		float Frequency = 0.f;
+		float VectorSimilarity = 0.f;
+		float ThreadScope = 0.f;
 	};
 
 	struct FScoreBreakdown
@@ -30,6 +33,8 @@ namespace UnrealAiContextCandidates
 		float ActiveBonus = 0.f;
 		float ThreadOverlayBonus = 0.f;
 		float Frequency = 0.f;
+		float VectorSimilarity = 0.f;
+		float ThreadScope = 0.f;
 		float Total = 0.f;
 	};
 
@@ -55,12 +60,20 @@ namespace UnrealAiContextCandidates
 		TArray<FString> TraceLines;
 		TArray<FContextCandidateEnvelope> Packed;
 		TArray<FContextCandidateEnvelope> Dropped;
+		// Decision-log helpers (so we can explain why certain caps applied).
+		int32 PromptCharCount = 0;
+		int32 PromptTokenCount = 0;
+		bool bShortPrompt = false;
+		int32 MemorySnippetCapApplied = 0;
+		int32 SoftBudgetCharsApplied = 0;
+		int32 MaxPackedCandidatesApplied = 0;
 	};
 
 	void CollectCandidates(
 		const FAgentContextState& State,
 		const FAgentContextBuildOptions& Options,
 		IUnrealAiMemoryService* MemoryService,
+		const TArray<FUnrealAiRetrievalSnippet>* RetrievalSnippets,
 		TArray<FContextCandidateEnvelope>& OutCandidates);
 
 	void FilterHardPolicy(
@@ -74,11 +87,13 @@ namespace UnrealAiContextCandidates
 	void PackCandidatesUnderBudget(
 		TArray<FContextCandidateEnvelope>& Candidates,
 		int32 BudgetChars,
+		const FAgentContextBuildOptions& Options,
 		FUnifiedContextBuildResult& OutResult);
 
 	FUnifiedContextBuildResult BuildUnifiedContext(
 		const FAgentContextState& State,
 		const FAgentContextBuildOptions& Options,
 		IUnrealAiMemoryService* MemoryService,
+		const TArray<FUnrealAiRetrievalSnippet>* RetrievalSnippets,
 		int32 BudgetChars);
 }

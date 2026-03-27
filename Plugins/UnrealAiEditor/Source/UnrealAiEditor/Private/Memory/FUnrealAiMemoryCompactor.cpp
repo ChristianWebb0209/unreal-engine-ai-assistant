@@ -8,6 +8,53 @@ FUnrealAiMemoryCompactor::FUnrealAiMemoryCompactor(IUnrealAiMemoryService* InMem
 {
 }
 
+namespace
+{
+	static void AddHashtagTags(const FString& Text, TArray<FString>& InOutTags)
+	{
+		if (Text.IsEmpty())
+		{
+			return;
+		}
+		TSet<FString> Existing;
+		for (const FString& T : InOutTags)
+		{
+			Existing.Add(T.ToLower());
+		}
+		FString Copy = Text;
+		Copy.ReplaceInline(TEXT("\r"), TEXT(" "));
+		Copy.ReplaceInline(TEXT("\n"), TEXT(" "));
+		TArray<FString> Parts;
+		Copy.ParseIntoArray(Parts, TEXT(" "), true);
+		for (FString P : Parts)
+		{
+			P.TrimStartAndEndInline();
+			if (!P.StartsWith(TEXT("#")))
+			{
+				continue;
+			}
+			P = P.RightChop(1).ToLower();
+			while (!P.IsEmpty() && !FChar::IsAlnum(P[P.Len() - 1]) && P[P.Len() - 1] != TEXT('_') && P[P.Len() - 1] != TEXT('-'))
+			{
+				P.LeftChopInline(1);
+			}
+			if (P.Len() < 2)
+			{
+				continue;
+			}
+			if (!Existing.Contains(P))
+			{
+				Existing.Add(P);
+				InOutTags.Add(P);
+			}
+			if (InOutTags.Num() >= 12)
+			{
+				break;
+			}
+		}
+	}
+}
+
 FUnrealAiMemoryCompactionResult FUnrealAiMemoryCompactor::Run(
 	const FUnrealAiMemoryCompactionInput& Input,
 	const int32 MaxToCreate,
@@ -65,6 +112,7 @@ FUnrealAiMemoryCompactionResult FUnrealAiMemoryCompactor::Run(
 	Record.Status = EUnrealAiMemoryStatus::Active;
 	Record.Confidence = Confidence;
 	Record.Tags = { TEXT("auto"), TEXT("lesson"), TEXT("thread") };
+	AddHashtagTags(Input.ConversationJson, Record.Tags);
 	Record.CreatedAtUtc = FDateTime::UtcNow();
 	Record.UpdatedAtUtc = Record.CreatedAtUtc;
 	Record.LastUsedAtUtc = Record.CreatedAtUtc;
@@ -74,6 +122,7 @@ FUnrealAiMemoryCompactionResult FUnrealAiMemoryCompactor::Run(
 		Ref.Kind = TEXT("thread");
 		Ref.Value = Input.ThreadId;
 		Record.SourceRefs.Add(Ref);
+		Record.Tags.AddUnique(FString::Printf(TEXT("thread_%s"), *Input.ThreadId.Left(8).ToLower()));
 	}
 
 	const FString AcceptedId = Record.Id;

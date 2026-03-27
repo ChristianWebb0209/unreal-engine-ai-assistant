@@ -119,6 +119,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRegistryQuery(const TSharedP
 	{
 		MaxResults = FMath::Clamp(static_cast<int32>(MR), 1, 5000);
 	}
+	else
+	{
+		double Limit = 0.0;
+		if (Args->TryGetNumberField(TEXT("limit"), Limit))
+		{
+			MaxResults = FMath::Clamp(static_cast<int32>(Limit), 1, 5000);
+		}
+	}
 
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 	IAssetRegistry& AR = ARM.Get();

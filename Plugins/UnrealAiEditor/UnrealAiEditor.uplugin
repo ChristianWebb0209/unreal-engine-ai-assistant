@@ -29,6 +29,10 @@
 		{
 			"Name": "UnrealBlueprintFormatter",
 			"Enabled": true
+		},
+		{
+			"Name": "SQLiteCore",
+			"Enabled": true
 		}
 	]
 }

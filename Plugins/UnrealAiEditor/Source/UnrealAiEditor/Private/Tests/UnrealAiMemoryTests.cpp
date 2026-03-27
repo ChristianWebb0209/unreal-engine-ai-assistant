@@ -144,7 +144,7 @@ bool FUnrealAiMemoryRankerCandidateTest::RunTest(const FString& Parameters)
 	Opt.UserMessageForComplexity = TEXT("Update inventory panel and details selection.");
 	Opt.MaxContextChars = 1200;
 	const UnrealAiContextCandidates::FUnifiedContextBuildResult R =
-		UnrealAiContextCandidates::BuildUnifiedContext(State, Opt, &MemoryService, Opt.MaxContextChars);
+		UnrealAiContextCandidates::BuildUnifiedContext(State, Opt, &MemoryService, nullptr, Opt.MaxContextChars);
 	TestTrue(TEXT("Context includes memory"), R.ContextBlock.Contains(TEXT("Memory: Inventory panel workflow")));
 
 	MemoryService.DeleteMemory(Record.Id);

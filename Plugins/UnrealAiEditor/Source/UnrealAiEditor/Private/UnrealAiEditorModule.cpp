@@ -59,6 +59,7 @@
 #include "Tools/UnrealAiToolCatalogMatrixRunner.h"
 #include "Tools/UnrealAiBlueprintFormatterBridge.h"
 #include "Harness/UnrealAiHarnessScenarioRunner.h"
+#include "Retrieval/IUnrealAiRetrievalService.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 
@@ -74,6 +75,8 @@ static IConsoleObject* GUnrealAiDumpMemoriesConsole = nullptr;
 static IConsoleObject* GUnrealAiPruneMemoriesConsole = nullptr;
 static IConsoleObject* GUnrealAiDumpContextRankPolicyConsole = nullptr;
 static IConsoleObject* GUnrealAiDumpContextDecisionLogsConsole = nullptr;
+static IConsoleObject* GUnrealAiRetrievalRebuildConsole = nullptr;
+static IConsoleObject* GUnrealAiRetrievalWaitConsole = nullptr;
 
 static void RegisterUnrealAiEditorKeyBindings()
 {
@@ -506,6 +509,59 @@ void FUnrealAiEditorModule::StartupModule()
 			}
 		}),
 		ECVF_Default);
+
+	GUnrealAiRetrievalRebuildConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.Retrieval.RebuildNow"),
+		TEXT("Request a local retrieval index rebuild for the current project."),
+		FConsoleCommandDelegate::CreateLambda([Reg]()
+		{
+			if (!Reg.IsValid() || !Reg->GetRetrievalService())
+			{
+				UE_LOG(LogTemp, Warning, TEXT("UnrealAi.Retrieval.RebuildNow: retrieval service unavailable"));
+				return;
+			}
+			const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+			Reg->GetRetrievalService()->RequestRebuild(ProjectId);
+			UE_LOG(LogTemp, Display, TEXT("UnrealAi.Retrieval.RebuildNow: requested rebuild for project_id=%s"), *ProjectId);
+		}),
+		ECVF_Default);
+
+	GUnrealAiRetrievalWaitConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.Retrieval.WaitForReady"),
+		TEXT("Block until retrieval index is ready or timeout. Args: [TimeoutSec=120]"),
+		FConsoleCommandWithArgsDelegate::CreateLambda([Reg](const TArray<FString>& Args)
+		{
+			if (!Reg.IsValid() || !Reg->GetRetrievalService())
+			{
+				UE_LOG(LogTemp, Warning, TEXT("UnrealAi.Retrieval.WaitForReady: retrieval service unavailable"));
+				return;
+			}
+
+			const int32 TimeoutSec = (Args.Num() > 0) ? FCString::Atoi(*Args[0]) : 120;
+			const double Deadline = FPlatformTime::Seconds() + FMath::Max(1, TimeoutSec);
+			const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+
+			IUnrealAiRetrievalService* Retrieval = Reg->GetRetrievalService();
+			while (FPlatformTime::Seconds() < Deadline)
+			{
+				const FUnrealAiRetrievalProjectStatus S = Retrieval->GetProjectStatus(ProjectId);
+				if (!S.bBusy && S.StateText.Equals(TEXT("ready"), ESearchCase::IgnoreCase))
+				{
+					UE_LOG(LogTemp, Display, TEXT("UnrealAi.Retrieval.WaitForReady: ready files=%d chunks=%d"),
+						S.FilesIndexed, S.ChunksIndexed);
+					return;
+				}
+				FPlatformProcess::Sleep(0.2f);
+			}
+
+			const FUnrealAiRetrievalProjectStatus S = Retrieval->GetProjectStatus(ProjectId);
+			UE_LOG(LogTemp, Warning, TEXT("UnrealAi.Retrieval.WaitForReady: timeout state=%s busy=%s files=%d chunks=%d"),
+				*S.StateText,
+				S.bBusy ? TEXT("true") : TEXT("false"),
+				S.FilesIndexed,
+				S.ChunksIndexed);
+		}),
+		ECVF_Default);
 }
 
 void FUnrealAiEditorModule::ShutdownModule()
@@ -539,6 +595,16 @@ void FUnrealAiEditorModule::ShutdownModule()
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiDumpContextDecisionLogsConsole);
 		GUnrealAiDumpContextDecisionLogsConsole = nullptr;
+	}
+	if (GUnrealAiRetrievalRebuildConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiRetrievalRebuildConsole);
+		GUnrealAiRetrievalRebuildConsole = nullptr;
+	}
+	if (GUnrealAiRetrievalWaitConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiRetrievalWaitConsole);
+		GUnrealAiRetrievalWaitConsole = nullptr;
 	}
 	if (GUnrealAiRunAgentTurnConsole)
 	{

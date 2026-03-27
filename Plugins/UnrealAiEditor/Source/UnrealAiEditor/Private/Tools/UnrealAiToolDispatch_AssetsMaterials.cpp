@@ -229,9 +229,34 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRename(const TSharedPtr<FJso
 	{
 		Args->TryGetStringField(TEXT("new_name"), ToName);
 	}
+	// Alias shape often emitted by agents: { package_path, old_name, new_name }.
+	if (From.IsEmpty())
+	{
+		FString PackagePath;
+		FString OldName;
+		if (Args->TryGetStringField(TEXT("package_path"), PackagePath) && !PackagePath.IsEmpty()
+			&& Args->TryGetStringField(TEXT("old_name"), OldName) && !OldName.IsEmpty())
+		{
+			if (PackagePath.EndsWith(TEXT("/")))
+			{
+				PackagePath.LeftChopInline(1);
+			}
+			From = PackagePath + TEXT("/") + OldName + TEXT(".") + OldName;
+		}
+	}
+	if (ToName.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("new_name"), ToName);
+	}
 	if (From.IsEmpty() || ToName.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("from_path and to_name (or new_name) are required"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("from_path"), TEXT("/Game/AIHarness/Task24/ScratchAsset.ScratchAsset"));
+		SuggestedArgs->SetStringField(TEXT("to_name"), TEXT("ScratchAsset_Renamed"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("from_path and to_name (or new_name) are required (aliases: asset_path; or package_path+old_name+new_name)."),
+			TEXT("asset_rename"),
+			SuggestedArgs);
 	}
 	UObject* Obj = LoadObject<UObject>(nullptr, *From);
 	if (!Obj)
@@ -283,6 +308,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialGetUsageSummary(const TSh
 	FString MaterialPath;
 	if (!Args->TryGetStringField(TEXT("material_path"), MaterialPath) || MaterialPath.IsEmpty())
 	{
+		Args->TryGetStringField(TEXT("object_path"), MaterialPath);
+		if (MaterialPath.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("path"), MaterialPath);
+		}
+	}
+	if (MaterialPath.IsEmpty())
+	{
 		return UnrealAiToolJson::Error(TEXT("material_path is required"));
 	}
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
@@ -312,8 +345,19 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetScalarParamete
 {
 	FString MaterialPath;
 	FString Param;
-	if (!Args->TryGetStringField(TEXT("material_path"), MaterialPath) || MaterialPath.IsEmpty()
-		|| !Args->TryGetStringField(TEXT("parameter_name"), Param) || Param.IsEmpty())
+	if (!Args->TryGetStringField(TEXT("material_path"), MaterialPath) || MaterialPath.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("object_path"), MaterialPath);
+		if (MaterialPath.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("path"), MaterialPath);
+		}
+	}
+	if (!Args->TryGetStringField(TEXT("parameter_name"), Param) || Param.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("param"), Param);
+	}
+	if (MaterialPath.IsEmpty() || Param.IsEmpty())
 	{
 		return UnrealAiToolJson::Error(TEXT("material_path and parameter_name are required"));
 	}
@@ -337,8 +381,19 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetVectorParamete
 {
 	FString MaterialPath;
 	FString Param;
-	if (!Args->TryGetStringField(TEXT("material_path"), MaterialPath) || MaterialPath.IsEmpty()
-		|| !Args->TryGetStringField(TEXT("parameter_name"), Param) || Param.IsEmpty())
+	if (!Args->TryGetStringField(TEXT("material_path"), MaterialPath) || MaterialPath.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("object_path"), MaterialPath);
+		if (MaterialPath.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("path"), MaterialPath);
+		}
+	}
+	if (!Args->TryGetStringField(TEXT("parameter_name"), Param) || Param.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("param"), Param);
+	}
+	if (MaterialPath.IsEmpty() || Param.IsEmpty())
 	{
 		return UnrealAiToolJson::Error(TEXT("material_path and parameter_name are required"));
 	}

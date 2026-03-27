@@ -57,18 +57,54 @@
         "additionalProperties": false,
         "properties": {
           "child_path": {
-            "type": "string"
+            "type": "string",
+            "description": "World path of the child actor (same as child_actor_path)."
           },
           "parent_path": {
-            "type": "string"
+            "type": "string",
+            "description": "World path of the parent actor (same as parent_actor_path)."
+          },
+          "child_actor_path": {
+            "type": "string",
+            "description": "Alias for child_path."
+          },
+          "parent_actor_path": {
+            "type": "string",
+            "description": "Alias for parent_path."
+          },
+          "actor_path": {
+            "type": "string",
+            "description": "When paired with parent_path or parent_actor_path, treated as the child actor path."
           },
           "socket": {
             "type": "string"
           }
         },
-        "required": [
-          "child_path",
-          "parent_path"
+        "anyOf": [
+          {
+            "required": [
+              "child_path",
+              "parent_path"
+            ]
+          },
+          {
+            "required": [
+              "child_actor_path",
+              "parent_actor_path"
+            ]
+          },
+          {
+            "required": [
+              "actor_path",
+              "parent_path"
+            ]
+          },
+          {
+            "required": [
+              "actor_path",
+              "parent_actor_path"
+            ]
+          }
         ]
       },
       "side_effects": "scene",
@@ -112,8 +148,7 @@
           }
         },
         "required": [
-          "actor_path",
-          "confirm"
+          "actor_path"
         ]
       },
       "side_effects": "scene",
@@ -307,6 +342,46 @@
       "side_effects": "scene",
       "permission": "write",
       "ue_entry_points": "AActor visibility APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "actor_blueprint_toggle_visibility",
+      "summary": "Toggle whether the actor is temporarily hidden in the editor (flips current state). Prefer actor_set_visibility when you need an explicit hidden true/false.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "visibility"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "fast": true,
+        "agent": true,
+        "orchestrate": true
+      },
+      "context_selector": {
+        "priority": 47,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_path"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "AActor::SetIsTemporarilyHiddenInEditor",
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
@@ -2386,7 +2461,7 @@
     },
     {
       "tool_id": "pie_start",
-      "summary": "Start Play-In-Editor. Required arg mode: \"viewport\" | \"standalone\". Use after gameplay/Blueprint changes to validate behavior; pair with pie_stop when finished.",
+      "summary": "Start Play-In-Editor. Optional mode: \"viewport\" (default, in-process PIE) or \"standalone\" (new process when supported). Pair with pie_stop when finished.",
       "category": "pie_play",
       "tags": [
         "pie"
@@ -2413,12 +2488,10 @@
               "viewport",
               "standalone"
             ],
-            "description": "viewport = PIE in active editor viewport; standalone = separate process when supported."
+            "description": "viewport = in-process PIE (default). standalone = separate process when supported."
           }
         },
-        "required": [
-          "mode"
-        ]
+        "required": []
       },
       "side_effects": "play",
       "permission": "exec",
@@ -2432,7 +2505,7 @@
     },
     {
       "tool_id": "pie_status",
-      "summary": "Return whether PIE is active.",
+      "summary": "Return PIE / play-session state: playing_in_editor, play_session_request_queued, play_session_in_progress.",
       "category": "pie_play",
       "tags": [
         "pie",
@@ -2592,8 +2665,7 @@
         },
         "required": [
           "relative_path",
-          "content",
-          "confirm"
+          "content"
         ]
       },
       "side_effects": "disk",

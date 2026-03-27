@@ -10,6 +10,7 @@ class IUnrealAiModelConnector;
 class IAgentContextService;
 class IToolExecutionHost;
 class IUnrealAiMemoryService;
+class IUnrealAiRetrievalService;
 class FUnrealAiAgentHarness;
 class FUnrealAiLlmTransportFixture;
 class FUnrealAiModelProfileRegistry;
@@ -28,6 +29,7 @@ public:
 	IUnrealAiModelConnector* GetModelConnector() const { return ModelConnector.Get(); }
 	IAgentContextService* GetContextService() const { return ContextService.Get(); }
 	IUnrealAiMemoryService* GetMemoryService() const { return MemoryService.Get(); }
+	IUnrealAiRetrievalService* GetRetrievalService() const { return RetrievalService.Get(); }
 	IToolExecutionHost* GetToolExecutionHost() const { return ToolExecutionHost.Get(); }
 	IUnrealAiAgentHarness* GetAgentHarness() const { return AgentHarness.Get(); }
 	FUnrealAiModelProfileRegistry* GetModelProfileRegistry() const { return ModelProfiles.Get(); }
@@ -45,6 +47,7 @@ private:
 	TUniquePtr<IUnrealAiPersistence> Persistence;
 	TUniquePtr<IAgentContextService> ContextService;
 	TUniquePtr<IUnrealAiMemoryService> MemoryService;
+	TUniquePtr<IUnrealAiRetrievalService> RetrievalService;
 	TUniquePtr<IUnrealAiChatService> ChatService;
 	TUniquePtr<IUnrealAiModelConnector> ModelConnector;
 	TUniquePtr<IToolExecutionHost> ToolExecutionHost;

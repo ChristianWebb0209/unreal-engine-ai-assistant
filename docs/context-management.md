@@ -8,7 +8,9 @@ This document is the **single source of truth** for how the Unreal AI Editor plu
 
 ## 1. System at a glance
 
-In-editor **context management** is a **logical service** in the plugin process—not a network backend ([`PRD.md`](PRD.md) §2.3). Context is now assembled by a **ranked candidate pipeline** that includes editor state, attachments, tool snippets, and memory snippets.
+In-editor **context management** is a **logical service** in the plugin process—not a network backend. Context is now assembled by a **ranked candidate pipeline** that includes editor state, attachments, tool snippets, and memory snippets.
+
+Optional: when local retrieval is enabled, the candidate pipeline may also include **`retrieval_snippet`** candidates sourced from the per-project local vector index (see `docs/vector-db-implementation-plan.md`). Retrieval remains **disabled by default** and must degrade safely to deterministic-only behavior.
 
 | Responsibility | Owner |
 |----------------|--------|
@@ -361,6 +363,7 @@ After assembly, message **character budget** can be enforced by dropping oldest 
   - recent tab entries,
   - todo/orchestrate state,
   - memory snippets from `IUnrealAiMemoryService::QueryRelevantMemories(...)`.
+  - (optional) retrieval snippets from the local vector index when enabled.
 - Hard policy filters run first (mode gates, image-model compatibility, inclusion flags).
 - Scoring uses weighted features (`mention`, heuristic semantic overlap, recency, confidence/freshness, active/thread bonuses, safety penalties).
 - Packing enforces budget and per-type caps (including memory-specific caps and minimum memory score threshold).

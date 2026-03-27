@@ -46,6 +46,39 @@ namespace UnrealAiToolActorsInternal
 		{
 			return C;
 		}
+
+		// Model commonly supplies Blueprint object/package path without the generated
+		// class suffix. Try canonicalizing /Game/Foo or /Game/Foo.Foo to /Game/Foo.Foo_C.
+		if (P.StartsWith(TEXT("/Game/"), ESearchCase::IgnoreCase))
+		{
+			FString Candidate = P;
+			if (!Candidate.Contains(TEXT(".")))
+			{
+				int32 Slash = INDEX_NONE;
+				if (Candidate.FindLastChar(TEXT('/'), Slash) && Slash >= 0 && Slash < Candidate.Len() - 1)
+				{
+					const FString Leaf = Candidate.Mid(Slash + 1);
+					Candidate = Candidate + TEXT(".") + Leaf;
+				}
+			}
+			if (!Candidate.EndsWith(TEXT("_C"), ESearchCase::IgnoreCase))
+			{
+				Candidate += TEXT("_C");
+			}
+			if (UClass* BC = StaticLoadClass(UObject::StaticClass(), nullptr, *Candidate))
+			{
+				return BC;
+			}
+			const FSoftClassPath BlueprintSoftPath(Candidate);
+			if (BlueprintSoftPath.IsValid())
+			{
+				if (UClass* BC = BlueprintSoftPath.TryLoadClass<UObject>())
+				{
+					return BC;
+				}
+			}
+		}
+
 		const FSoftClassPath SoftPath(P);
 		if (SoftPath.IsValid())
 		{
@@ -55,7 +88,7 @@ namespace UnrealAiToolActorsInternal
 			}
 		}
 		OutErr = FString::Printf(
-			TEXT("Could not resolve class_path (got '%s'). Use a path like /Game/MyActor.MyActor_C or /Script/Engine.StaticMeshActor"),
+			TEXT("Could not resolve class_path (got '%s'). Use a spawnable actor class path like /Game/MyActor.MyActor_C or /Script/Engine.StaticMeshActor"),
 			*P);
 		return nullptr;
 	}
@@ -475,14 +508,50 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorSetVisibility(const TSharedP
 	return UnrealAiToolJson::Ok(O);
 }
 
+FUnrealAiToolInvocationResult UnrealAiDispatch_ActorBlueprintToggleVisibility(const TSharedPtr<FJsonObject>& Args)
+{
+	FString ActorPath;
+	if (!Args->TryGetStringField(TEXT("actor_path"), ActorPath) || ActorPath.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("actor_path is required"));
+	}
+	UWorld* World = UnrealAiGetEditorWorld();
+	AActor* A = UnrealAiResolveActorInWorld(World, ActorPath);
+	if (!A)
+	{
+		return UnrealAiToolJson::Error(TEXT("Actor not found"));
+	}
+	const bool bWasHidden = A->IsTemporarilyHiddenInEditor(false);
+	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnActorVisToggle", "Unreal AI: toggle visibility"));
+	A->SetIsTemporarilyHiddenInEditor(!bWasHidden);
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetBoolField(TEXT("ok"), true);
+	O->SetBoolField(TEXT("hidden"), !bWasHidden);
+	O->SetBoolField(TEXT("was_hidden"), bWasHidden);
+	return UnrealAiToolJson::Ok(O);
+}
+
 FUnrealAiToolInvocationResult UnrealAiDispatch_ActorAttachTo(const TSharedPtr<FJsonObject>& Args)
 {
 	FString ChildPath;
 	FString ParentPath;
-	if (!Args->TryGetStringField(TEXT("child_path"), ChildPath) || ChildPath.IsEmpty()
-		|| !Args->TryGetStringField(TEXT("parent_path"), ParentPath) || ParentPath.IsEmpty())
+	if (!Args->TryGetStringField(TEXT("child_path"), ChildPath) || ChildPath.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("child_path and parent_path are required"));
+		Args->TryGetStringField(TEXT("child_actor_path"), ChildPath);
+	}
+	if (!Args->TryGetStringField(TEXT("parent_path"), ParentPath) || ParentPath.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("parent_actor_path"), ParentPath);
+	}
+	// Common model shape: { "actor_path": "<child>", "parent_path": "<parent>" }
+	if (ChildPath.IsEmpty() && !ParentPath.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("actor_path"), ChildPath);
+	}
+	if (ChildPath.IsEmpty() || ParentPath.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(
+			TEXT("child_path and parent_path are required (aliases: child_actor_path, parent_actor_path; or actor_path + parent_path)"));
 	}
 	FString Socket;
 	Args->TryGetStringField(TEXT("socket"), Socket);

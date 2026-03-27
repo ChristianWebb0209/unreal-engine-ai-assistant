@@ -50,6 +50,7 @@ public class UnrealAiEditor : ModuleRules
 				"LevelSequence",
 				"MovieScene",
 				"ImageWrapper",
+				"SQLiteCore",
 				"UnrealBlueprintFormatter"
 			});
 	}

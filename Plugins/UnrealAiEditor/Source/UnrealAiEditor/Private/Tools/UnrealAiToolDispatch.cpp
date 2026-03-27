@@ -69,6 +69,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	}
 
 	const TSharedPtr<FJsonObject>& A = Args.IsValid() ? Args : MakeShared<FJsonObject>();
+	const bool bAutoRunDestructive = []() {
+		const FString Raw = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_AUTO_RUN_DESTRUCTIVE"));
+		FString V = Raw;
+		V.TrimStartAndEndInline();
+		V = V.ToLower();
+		return !V.IsEmpty()
+			&& (V.Equals(TEXT("1")) || V.Equals(TEXT("true")) || V.Equals(TEXT("yes")) || V.Equals(TEXT("on")));
+	}();
 
 	const FString ProjectId = ResolveProjectId(SessionProjectId);
 	const FString ThreadId = ResolveThreadId(SessionThreadId);
@@ -89,6 +97,30 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 
 	if (ToolId == TEXT("actor_destroy"))
 	{
+		if (bAutoRunDestructive)
+		{
+			// Tool contract uses a "loose confirm" string (DELETE/yes/true/1/etc).
+			// When auto-run is enabled, fill missing/invalid confirm so the agent
+			// doesn't need an extra retry just to set intent.
+			FString Confirm;
+			const bool bHasConfirm = A->TryGetStringField(TEXT("confirm"), Confirm);
+			if (!bHasConfirm || Confirm.IsEmpty())
+			{
+				A->SetStringField(TEXT("confirm"), TEXT("DELETE"));
+			}
+			else
+			{
+				FString C = Confirm;
+				C.TrimStartAndEndInline();
+				C = C.ToLower();
+				const bool bOk = C.Equals(TEXT("delete")) || C.Equals(TEXT("yes")) || C.Equals(TEXT("y")) || C.Equals(TEXT("true"))
+					|| C.Equals(TEXT("confirm")) || C.Equals(TEXT("1"));
+				if (!bOk)
+				{
+					A->SetStringField(TEXT("confirm"), TEXT("DELETE"));
+				}
+			}
+		}
 		return UnrealAiDispatch_ActorDestroy(A);
 	}
 	if (ToolId == TEXT("actor_find_by_label"))
@@ -106,6 +138,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	if (ToolId == TEXT("actor_set_visibility"))
 	{
 		return UnrealAiDispatch_ActorSetVisibility(A);
+	}
+	if (ToolId == TEXT("actor_blueprint_toggle_visibility"))
+	{
+		return UnrealAiDispatch_ActorBlueprintToggleVisibility(A);
 	}
 	if (ToolId == TEXT("actor_attach_to"))
 	{
@@ -167,6 +203,15 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	}
 	if (ToolId == TEXT("project_file_write_text"))
 	{
+		if (bAutoRunDestructive)
+		{
+			bool bConfirm = false;
+			const bool bHasConfirm = A->TryGetBoolField(TEXT("confirm"), bConfirm);
+			if (!bHasConfirm || !bConfirm)
+			{
+				A->SetBoolField(TEXT("confirm"), true);
+			}
+		}
 		return UnrealAiDispatch_ProjectFileWriteText(A);
 	}
 
@@ -244,8 +289,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 		}
 
 		// Preserve provided confirm when present; if missing, dispatcher treats it as false and returns a suggested call.
+		// When auto-run destructive is enabled, default missing/false confirm to true to avoid an extra retry.
 		bool bConfirm = false;
-		if (A->TryGetBoolField(TEXT("confirm"), bConfirm))
+		const bool bHasConfirm = A->TryGetBoolField(TEXT("confirm"), bConfirm);
+		if (bAutoRunDestructive)
+		{
+			Norm->SetBoolField(TEXT("confirm"), true);
+		}
+		else if (bHasConfirm)
 		{
 			Norm->SetBoolField(TEXT("confirm"), bConfirm);
 		}
@@ -257,7 +308,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 		TSharedPtr<FJsonObject> Norm = MakeShared<FJsonObject>();
 		bool bConfirm = false;
 		A->TryGetBoolField(TEXT("confirm"), bConfirm);
-		Norm->SetBoolField(TEXT("confirm"), bConfirm);
+		Norm->SetBoolField(TEXT("confirm"), bAutoRunDestructive ? true : bConfirm);
 		const TArray<TSharedPtr<FJsonValue>>* ObjPaths = nullptr;
 		if (A->TryGetArrayField(TEXT("object_paths"), ObjPaths) && ObjPaths && ObjPaths->Num() > 0)
 		{
@@ -467,6 +518,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	if (ToolId == TEXT("subagent_spawn"))
 	{
 		return UnrealAiDispatch_SubagentSpawn(A);
+	}
+
+	if (ToolId == TEXT("scene_fuzzy_search.query"))
+	{
+		// Some agents/tools refer to the canonical key as `<tool_id>.query` for parameters.
+		// Treat `scene_fuzzy_search.query` as an alias for `scene_fuzzy_search`.
+		return UnrealAiDispatch_SceneFuzzySearch(A);
 	}
 
 	if (ToolId == TEXT("scene_fuzzy_search"))

@@ -64,6 +64,8 @@ namespace UnrealAiContextDecisionLogger
 			Features->SetNumberField(TEXT("activeBonus"), C.Features.ActiveBonus);
 			Features->SetNumberField(TEXT("threadOverlayBonus"), C.Features.ThreadOverlayBonus);
 			Features->SetNumberField(TEXT("frequency"), C.Features.Frequency);
+			Features->SetNumberField(TEXT("vectorSimilarity"), C.Features.VectorSimilarity);
+			Features->SetNumberField(TEXT("threadScope"), C.Features.ThreadScope);
 			O->SetObjectField(TEXT("features"), Features);
 
 			TSharedPtr<FJsonObject> Score = MakeShared<FJsonObject>();
@@ -76,9 +78,32 @@ namespace UnrealAiContextDecisionLogger
 			Score->SetNumberField(TEXT("activeBonus"), C.Score.ActiveBonus);
 			Score->SetNumberField(TEXT("threadOverlayBonus"), C.Score.ThreadOverlayBonus);
 			Score->SetNumberField(TEXT("frequency"), C.Score.Frequency);
+			Score->SetNumberField(TEXT("vectorSimilarity"), C.Score.VectorSimilarity);
+			Score->SetNumberField(TEXT("threadScope"), C.Score.ThreadScope);
 			Score->SetNumberField(TEXT("total"), C.Score.Total);
 			O->SetObjectField(TEXT("scoreBreakdown"), Score);
 
+			return O;
+		}
+
+		static TSharedPtr<FJsonObject> TypeCountsToJson(
+			const TArray<UnrealAiContextCandidates::FContextCandidateEnvelope>& Items)
+		{
+			TMap<FString, int32> Counts;
+			for (const UnrealAiContextCandidates::FContextCandidateEnvelope& C : Items)
+			{
+				const FString K = UnrealAiContextRankingPolicy::CandidateTypeName(C.Type);
+				Counts.FindOrAdd(K) += 1;
+			}
+			TArray<FString> Keys;
+			Counts.GetKeys(Keys);
+			Keys.Sort();
+
+			TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+			for (const FString& K : Keys)
+			{
+				O->SetNumberField(K, Counts[K]);
+			}
 			return O;
 		}
 	}
@@ -141,10 +166,18 @@ namespace UnrealAiContextDecisionLogger
 			Meta->SetStringField(TEXT("threadId"), ThreadId);
 			Meta->SetStringField(TEXT("invocationReason"), InvocationReason);
 			Meta->SetStringField(TEXT("mode"), ModeName(Options.Mode));
+			Meta->SetNumberField(TEXT("promptCharCount"), Unified.PromptCharCount);
+			Meta->SetNumberField(TEXT("promptTokenCount"), Unified.PromptTokenCount);
+			Meta->SetBoolField(TEXT("shortPrompt"), Unified.bShortPrompt);
+			Meta->SetNumberField(TEXT("memorySnippetCapApplied"), Unified.MemorySnippetCapApplied);
+			Meta->SetNumberField(TEXT("softBudgetCharsApplied"), Unified.SoftBudgetCharsApplied);
+			Meta->SetNumberField(TEXT("maxPackedCandidatesApplied"), Unified.MaxPackedCandidatesApplied);
 			Meta->SetNumberField(TEXT("budgetChars"), BudgetChars);
 			Meta->SetNumberField(TEXT("emittedChars"), EmittedContextBlock.Len());
 			Meta->SetNumberField(TEXT("keptCount"), Unified.Packed.Num());
 			Meta->SetNumberField(TEXT("droppedCount"), Unified.Dropped.Num());
+			Meta->SetObjectField(TEXT("keptByType"), TypeCountsToJson(Unified.Packed));
+			Meta->SetObjectField(TEXT("droppedByType"), TypeCountsToJson(Unified.Dropped));
 			WriteJsonlLine(Meta);
 		}
 

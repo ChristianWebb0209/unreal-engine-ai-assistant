@@ -93,10 +93,43 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetDuplicate(const TSharedPtr<F
 {
 	FString SourcePath;
 	FString DestPath;
-	if (!Args->TryGetStringField(TEXT("source_path"), SourcePath) || SourcePath.IsEmpty()
-		|| !Args->TryGetStringField(TEXT("dest_path"), DestPath) || DestPath.IsEmpty())
+	if (!Args->TryGetStringField(TEXT("source_path"), SourcePath) || SourcePath.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("source_path and dest_path are required"));
+		Args->TryGetStringField(TEXT("source_object_path"), SourcePath);
+	}
+	if (!Args->TryGetStringField(TEXT("dest_path"), DestPath) || DestPath.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("target_object_path"), DestPath);
+		if (DestPath.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("dest_object_path"), DestPath);
+		}
+	}
+	if (SourcePath.IsEmpty() || DestPath.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("source_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
+		SuggestedArgs->SetStringField(TEXT("dest_path"), TEXT("/Game/Blueprints/MyBP_Copy"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("source_path and dest_path are required (aliases: source_object_path, target_object_path)."),
+			TEXT("asset_duplicate"),
+			SuggestedArgs);
+	}
+
+	// Accept object-path form for dest and normalize to package path (/Game/Foo/Bar.Bar -> /Game/Foo/Bar).
+	{
+		FString P = DestPath;
+		if (P.Contains(TEXT(".")))
+		{
+			P = FPackageName::ObjectPathToPackageName(P) + TEXT("/") + FPackageName::GetShortName(P);
+			P.ReplaceInline(TEXT("."), TEXT("/"));
+		}
+		// If it still looks like an object path /Game/Foo/Bar.Bar, strip the suffix.
+		if (P.Contains(TEXT(".")))
+		{
+			P = FPackageName::ObjectPathToPackageName(P) + TEXT("/") + FPackageName::GetShortName(FPackageName::ObjectPathToPackageName(P));
+		}
+		DestPath = P;
 	}
 	UObject* Src = LoadObject<UObject>(nullptr, *SourcePath);
 	if (!Src)
@@ -107,7 +140,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetDuplicate(const TSharedPtr<F
 	FString DestName;
 	if (!SplitDestPath(DestPath, DestPackagePath, DestName))
 	{
-		return UnrealAiToolJson::Error(TEXT("dest_path must be like /Game/Folder/AssetName"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("source_path"), SourcePath);
+		SuggestedArgs->SetStringField(TEXT("dest_path"), TEXT("/Game/AIHarness/Task24/ScratchAsset_Copy"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("dest_path must be like /Game/Folder/AssetName (no trailing slash; not an object path)."),
+			TEXT("asset_duplicate"),
+			SuggestedArgs);
 	}
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnAssetDup", "Unreal AI: duplicate asset"));
 	UObject* Dup = IAssetTools::Get().DuplicateAsset(DestName, DestPackagePath, Src);

@@ -11,7 +11,6 @@ This document defines the standalone memory subsystem for Unreal AI Editor. It i
   - Ranked memory retrieval integrated into context candidate assembly.
   - Settings UI for inspecting and deleting memory records.
 - **Out of scope in this phase**
-  - Provider-embedding retrieval (v1 remains local heuristic matching).
   - Provider-backed memory generation (v1 remains local compaction).
 
 The memory system must remain isolated from chat transcript persistence and context persistence, with integration only through explicit service interfaces.
@@ -61,6 +60,15 @@ Memory retrieval is staged and budget-aware:
 3. **Body stage**: expand only the final top-K for deep context.
 
 This staged contract is used by the context ranker and keeps memory inclusion deterministic and token efficient.
+
+### 4.1 Optional vector retrieval integration (post-v1)
+
+When retrieval is enabled, the plugin may also index memory records into the local vector index and surface them as `retrieval_snippet` candidates. This does **not** replace the existing staged memory query contract:
+
+- The deterministic memory service query remains the primary, budget-aware contract.
+- Vectorized memory chunks are treated as an additional recall signal and must still respect ranking gates and budget caps.
+
+See `docs/vector-db-implementation-plan.md` for the local vector index schema and migration behavior.
 
 ## 5. Extraction/compaction policy
 

@@ -34,7 +34,7 @@ namespace UnrealAiToolDispatchSearchInternal
 		if (FPaths::DirectoryExists(PPlugins))
 		{
 			TArray<FString> PluginNames;
-			IFileManager::Get().FindFiles(PluginNames, *PPlugins, false, true);
+			IFileManager::Get().FindFiles(PluginNames, *FPaths::Combine(PPlugins, TEXT("*")), false, true);
 			for (const FString& PluginName : PluginNames)
 			{
 				const FString Src = FPaths::Combine(PPlugins, PluginName, TEXT("Source"));
@@ -87,7 +87,7 @@ namespace UnrealAiToolDispatchSearchInternal
 			if (FPaths::DirectoryExists(EPlugins))
 			{
 				TArray<FString> EnginePluginNames;
-				IFileManager::Get().FindFiles(EnginePluginNames, *EPlugins, false, true);
+				IFileManager::Get().FindFiles(EnginePluginNames, *FPaths::Combine(EPlugins, TEXT("*")), false, true);
 				for (const FString& PluginName : EnginePluginNames)
 				{
 					const FString Src = FPaths::Combine(EPlugins, PluginName, TEXT("Source"));
@@ -444,7 +444,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SourceSearchFuzzy(const TSharedPt
 {
 	FString Query;
 	{
-		const TArray<const TCHAR*> Aliases = { TEXT("symbol"), TEXT("term"), TEXT("needle"), TEXT("name") };
+		const TArray<const TCHAR*> Aliases = { TEXT("symbol"), TEXT("term"), TEXT("needle"), TEXT("name"), TEXT("search") };
 		UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
 			Args,
 			TEXT("query"),
@@ -492,7 +492,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SourceSearchFuzzy(const TSharedPt
 	for (const FString& Root : Roots)
 	{
 		TArray<FString> Files;
-		IFileManager::Get().FindFilesRecursive(Files, *Root, TEXT(""), true, false);
+		IFileManager::Get().FindFilesRecursive(Files, *Root, TEXT("*"), true, false);
 		AllFiles.Append(Files);
 	}
 

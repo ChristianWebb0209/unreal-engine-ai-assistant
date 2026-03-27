@@ -83,10 +83,13 @@ private:
 	FReply OnChatHistoryRefreshClicked();
 	void RebuildChatHistoryListUi();
 	FReply OnMemoriesRefreshClicked();
+	FReply OnRetrievalRebuildNowClicked();
 	void RebuildMemoryListUi();
 	void SelectMemoryById(const FString& MemoryId);
 	bool LoadMemorySettingsFromRoot(const TSharedPtr<FJsonObject>& Root);
 	void WriteMemorySettingsToRoot(TSharedPtr<FJsonObject>& Root) const;
+	bool LoadRetrievalSettingsFromRoot(const TSharedPtr<FJsonObject>& Root);
+	void WriteRetrievalSettingsToRoot(TSharedPtr<FJsonObject>& Root) const;
 
 	void SyncChatAppearanceWidgetsFromSettings();
 	void CommitUserChatBubbleComponent(int32 ChannelIndex, float Value);
@@ -127,6 +130,13 @@ private:
 	FString MemoryMaxItemsStr = TEXT("500");
 	FString MemoryMinConfidenceStr = TEXT("0.55");
 	FString MemoryRetentionDaysStr = TEXT("30");
+	bool bRetrievalEnabled = false;
+	FString RetrievalEmbeddingModel = TEXT("text-embedding-3-small");
+	FString RetrievalMaxSnippetsPerTurnStr = TEXT("6");
+	FString RetrievalMaxSnippetTokensStr = TEXT("256");
+	bool bRetrievalAutoIndexOnProjectOpen = true;
+	FString RetrievalPeriodicScrubMinutesStr = TEXT("30");
+	bool bRetrievalAllowMixedModelCompatibility = false;
 
 	FText StatusText;
 };

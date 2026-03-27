@@ -196,7 +196,19 @@ float FUnrealAiMemoryService::ScoreRow(const FUnrealAiMemoryIndexRow& Row, const
 	{
 		if (Row.Tags.Contains(Tag))
 		{
-			Score += 1.0f;
+			Score += 1.8f;
+		}
+	}
+	if (Query.bPreferThreadScope && Row.Scope == EUnrealAiMemoryScope::Thread)
+	{
+		Score += 1.25f;
+	}
+	if (!Query.PreferredThreadId.IsEmpty())
+	{
+		const FString ThreadTag = FString::Printf(TEXT("thread_%s"), *Query.PreferredThreadId.Left(8).ToLower());
+		if (Row.Tags.Contains(ThreadTag))
+		{
+			Score += 4.5f;
 		}
 	}
 	Score += Row.Confidence * 3.0f;
@@ -206,6 +218,7 @@ float FUnrealAiMemoryService::ScoreRow(const FUnrealAiMemoryIndexRow& Row, const
 void FUnrealAiMemoryService::QueryMemories(const FUnrealAiMemoryQuery& Query, TArray<FUnrealAiMemoryQueryResult>& OutResults) const
 {
 	OutResults.Reset();
+	TSet<FString> DedupKeys;
 	for (const FUnrealAiMemoryIndexRow& Row : IndexRows)
 	{
 		if (Row.Confidence < Query.MinConfidence || Row.Status != EUnrealAiMemoryStatus::Active)
@@ -225,12 +238,19 @@ void FUnrealAiMemoryService::QueryMemories(const FUnrealAiMemoryQuery& Query, TA
 		{
 			continue;
 		}
+		const FString DedupKey = (Row.Title + TEXT("|") + Row.Description).ToLower();
+		if (DedupKeys.Contains(DedupKey))
+		{
+			continue;
+		}
+		DedupKeys.Add(DedupKey);
 		FUnrealAiMemoryQueryResult Hit;
 		Hit.IndexRow = Row;
 		Hit.Score = ScoreRow(Row, Query);
 		OutResults.Add(MoveTemp(Hit));
 	}
-	OutResults.Sort([](const FUnrealAiMemoryQueryResult& A, const FUnrealAiMemoryQueryResult& B)
+	TArray<FUnrealAiMemoryQueryResult> BaseRanked = OutResults;
+	BaseRanked.Sort([](const FUnrealAiMemoryQueryResult& A, const FUnrealAiMemoryQueryResult& B)
 	{
 		if (!FMath::IsNearlyEqual(A.Score, B.Score))
 		{
@@ -238,6 +258,51 @@ void FUnrealAiMemoryService::QueryMemories(const FUnrealAiMemoryQuery& Query, TA
 		}
 		return A.IndexRow.UpdatedAtUtc > B.IndexRow.UpdatedAtUtc;
 	});
+	OutResults.Reset();
+	auto TagSimilarity = [](const TArray<FString>& A, const TArray<FString>& B) -> float
+	{
+		if (A.Num() == 0 || B.Num() == 0)
+		{
+			return 0.0f;
+		}
+		TSet<FString> SA;
+		TSet<FString> SB;
+		for (const FString& T : A) { SA.Add(T.ToLower()); }
+		for (const FString& T : B) { SB.Add(T.ToLower()); }
+		int32 Inter = 0;
+		for (const FString& T : SA)
+		{
+			if (SB.Contains(T))
+			{
+				++Inter;
+			}
+		}
+		const int32 Union = SA.Num() + SB.Num() - Inter;
+		return Union > 0 ? static_cast<float>(Inter) / static_cast<float>(Union) : 0.0f;
+	};
+	while (BaseRanked.Num() > 0)
+	{
+		int32 BestIdx = 0;
+		float BestAdjusted = -FLT_MAX;
+		for (int32 i = 0; i < BaseRanked.Num(); ++i)
+		{
+			const FUnrealAiMemoryQueryResult& Candidate = BaseRanked[i];
+			float MaxSim = 0.0f;
+			for (const FUnrealAiMemoryQueryResult& Chosen : OutResults)
+			{
+				MaxSim = FMath::Max(MaxSim, TagSimilarity(Candidate.IndexRow.Tags, Chosen.IndexRow.Tags));
+			}
+			// Diversity penalty to avoid near-duplicate memories crowding the top of results.
+			const float Adjusted = Candidate.Score - (MaxSim * 2.5f);
+			if (Adjusted > BestAdjusted)
+			{
+				BestAdjusted = Adjusted;
+				BestIdx = i;
+			}
+		}
+		OutResults.Add(BaseRanked[BestIdx]);
+		BaseRanked.RemoveAt(BestIdx, 1, EAllowShrinking::No);
+	}
 	if (Query.MaxResults > 0 && OutResults.Num() > Query.MaxResults)
 	{
 		OutResults.SetNum(Query.MaxResults, EAllowShrinking::No);

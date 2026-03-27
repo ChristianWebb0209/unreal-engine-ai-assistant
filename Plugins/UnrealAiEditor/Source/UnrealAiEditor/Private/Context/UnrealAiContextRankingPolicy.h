@@ -22,6 +22,7 @@ namespace UnrealAiContextRankingPolicy
 		ToolResult,
 		EditorSnapshotField,
 		MemorySnippet,
+		RetrievalSnippet,
 		TodoState,
 		OrchestrateState,
 	};
@@ -37,6 +38,8 @@ namespace UnrealAiContextRankingPolicy
 		float ActiveBonus = 30.f;
 		float ThreadOverlayBonus = 16.f;
 		float Frequency = 1.5f;
+		float VectorSimilarity = 50.f;
+		float ThreadScope = 24.f;
 	};
 
 	struct FPerTypeBudgetCaps
@@ -46,14 +49,32 @@ namespace UnrealAiContextRankingPolicy
 		int32 MaxToolResult = 8;
 		int32 MaxEditorSnapshotField = 20;
 		int32 MaxMemorySnippet = 6;
+		int32 MaxRetrievalSnippet = 6;
+		// For short/direct user prompts we want live editor state to dominate over durable
+		// memory to avoid spending most of the token budget on historical snippets.
+		int32 MaxMemorySnippetShortPrompt = 2;
 		int32 MaxTodoState = 4;
 		int32 MaxOrchestrateState = 10;
 	};
 
 	inline constexpr int32 DefaultHardMaxCandidates = 256;
 	inline constexpr int32 MinBudgetReserveChars = 180;
+	// Soft packing constraints:
+	// Even when we have plenty of budget, avoid filling the entire context window just because there are
+	// many high-signal candidates. Prefer the top K by score and leave slack for the live conversation.
+	inline constexpr float SoftContextFillFraction = 0.65f;
+	inline constexpr int32 MinSoftBudgetChars = 1800;
+	inline constexpr int32 MaxPackedCandidatesSoft = 32;
 	inline constexpr int32 MaxMemoryCandidatesScanned = 24;
 	inline constexpr float MinMemoryCandidateScoreToPack = 8.0f;
+	inline constexpr float MinRetrievalCandidateScoreToPack = 6.0f;
+	inline constexpr float RetrievalInThreadScopeBoost = 1.0f;
+	inline constexpr float RetrievalCrossThreadPenalty = -1.0f;
+	// Heuristic: when the user prompt is short/direct, treat it as a "short prompt" turn.
+	// This is intentionally based on token-ish splitting and raw length (not embeddings).
+	// Keep permissive: harness prompts include extra constraints even for simple tasks.
+	inline constexpr int32 ShortPromptUserTokenThreshold = 48;
+	inline constexpr int32 ShortPromptCharThreshold = 512;
 
 	inline FScoreWeights GetScoreWeights()
 	{
@@ -90,6 +111,9 @@ namespace UnrealAiContextRankingPolicy
 		case ECandidateType::MemorySnippet:
 			// Durable learned context; useful but should not dominate live editor state.
 			return 68.f;
+		case ECandidateType::RetrievalSnippet:
+			// Retrieved local code/doc chunks can be high signal when query-matched.
+			return 66.f;
 		case ECandidateType::OrchestrateState:
 			// Important in orchestration mode; generally less critical in simple turns.
 			return 60.f;
@@ -108,6 +132,7 @@ namespace UnrealAiContextRankingPolicy
 		case ECandidateType::ToolResult: return Caps.MaxToolResult;
 		case ECandidateType::EditorSnapshotField: return Caps.MaxEditorSnapshotField;
 		case ECandidateType::MemorySnippet: return Caps.MaxMemorySnippet;
+		case ECandidateType::RetrievalSnippet: return Caps.MaxRetrievalSnippet;
 		case ECandidateType::TodoState: return Caps.MaxTodoState;
 		case ECandidateType::OrchestrateState: return Caps.MaxOrchestrateState;
 		case ECandidateType::EngineHeader: return 1;
@@ -125,6 +150,7 @@ namespace UnrealAiContextRankingPolicy
 		case ECandidateType::ToolResult: return TEXT("tool_result");
 		case ECandidateType::EditorSnapshotField: return TEXT("editor_snapshot_field");
 		case ECandidateType::MemorySnippet: return TEXT("memory_snippet");
+		case ECandidateType::RetrievalSnippet: return TEXT("retrieval_snippet");
 		case ECandidateType::TodoState: return TEXT("todo_state");
 		case ECandidateType::OrchestrateState: return TEXT("orchestrate_state");
 		default: return TEXT("unknown");

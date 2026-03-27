@@ -5,6 +5,7 @@
 #include "Context/UnrealAiEditorContextQueries.h"
 #include "Memory/IUnrealAiMemoryService.h"
 #include "Misc/EngineVersion.h"
+#include "Retrieval/UnrealAiRetrievalTypes.h"
 
 namespace UnrealAiContextCandidates
 {
@@ -69,12 +70,51 @@ namespace UnrealAiContextCandidates
 			}
 			return static_cast<float>(Hits) / static_cast<float>(FMath::Max(UserTokens.Num(), 1));
 		}
+
+		static TArray<FString> ExtractExplicitTagHints(const FString& UserText)
+		{
+			TArray<FString> Out;
+			if (UserText.IsEmpty())
+			{
+				return Out;
+			}
+			TSet<FString> Seen;
+			FString Copy = UserText;
+			Copy.ReplaceInline(TEXT("\r"), TEXT(" "));
+			Copy.ReplaceInline(TEXT("\n"), TEXT(" "));
+			TArray<FString> Parts;
+			Copy.ParseIntoArray(Parts, TEXT(" "), true);
+			for (FString P : Parts)
+			{
+				P.TrimStartAndEndInline();
+				if (!P.StartsWith(TEXT("#")))
+				{
+					continue;
+				}
+				P = P.RightChop(1).ToLower();
+				while (!P.IsEmpty() && !FChar::IsAlnum(P[P.Len() - 1]) && P[P.Len() - 1] != TEXT('_') && P[P.Len() - 1] != TEXT('-'))
+				{
+					P.LeftChopInline(1);
+				}
+				if (P.Len() < 2)
+				{
+					continue;
+				}
+				if (!Seen.Contains(P))
+				{
+					Seen.Add(P);
+					Out.Add(P);
+				}
+			}
+			return Out;
+		}
 	}
 
 	void CollectCandidates(
 		const FAgentContextState& State,
 		const FAgentContextBuildOptions& Options,
 		IUnrealAiMemoryService* MemoryService,
+		const TArray<FUnrealAiRetrievalSnippet>* RetrievalSnippets,
 		TArray<FContextCandidateEnvelope>& OutCandidates)
 	{
 		OutCandidates.Reset();
@@ -212,11 +252,13 @@ namespace UnrealAiContextCandidates
 		{
 			FUnrealAiMemoryQuery Query;
 			Query.QueryText = Options.UserMessageForComplexity;
+			Query.PreferredThreadId = Options.ThreadIdForMemory;
 			Query.bIncludeBodies = false;
 			Query.bTitleDescriptionOnly = true;
 			Query.bPreferThreadScope = true;
 			Query.MaxResults = UnrealAiContextRankingPolicy::MaxMemoryCandidatesScanned;
 			Query.MinConfidence = 0.30f;
+			Query.RequiredTags = ExtractExplicitTagHints(Options.UserMessageForComplexity);
 			TArray<FUnrealAiMemoryQueryResult> Hits;
 			MemoryService->QueryRelevantMemories(Query, Hits);
 			for (const FUnrealAiMemoryQueryResult& Hit : Hits)
@@ -231,6 +273,27 @@ namespace UnrealAiContextCandidates
 				const double AgeSec = FMath::Max(0.0, (FDateTime::UtcNow() - Hit.IndexRow.UpdatedAtUtc).GetTotalSeconds());
 				E.Features.Recency = static_cast<float>(FMath::Max(0.0, 1.0 - AgeSec / (3600.0 * 24.0 * 30.0)));
 				E.RenderedText = FString::Printf(TEXT("Memory: %s\n%s"), *Hit.IndexRow.Title, *Hit.IndexRow.Description);
+				E.TokenCostEstimate = EstimateTokens(E.RenderedText);
+				OutCandidates.Add(MoveTemp(E));
+			}
+		}
+
+		if (RetrievalSnippets)
+		{
+			for (const FUnrealAiRetrievalSnippet& Snippet : *RetrievalSnippets)
+			{
+				FContextCandidateEnvelope E;
+				E.Type = UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet;
+				E.SourceId = Snippet.SourceId.IsEmpty() ? Snippet.SnippetId : Snippet.SourceId;
+				E.Payload = Snippet.Text;
+				E.Features.VectorSimilarity = FMath::Max(0.f, Snippet.Score);
+				if (!Snippet.ThreadId.IsEmpty() && !Options.ThreadIdForMemory.IsEmpty())
+				{
+					E.Features.ThreadScope = Snippet.ThreadId == Options.ThreadIdForMemory
+						? UnrealAiContextRankingPolicy::RetrievalInThreadScopeBoost
+						: UnrealAiContextRankingPolicy::RetrievalCrossThreadPenalty;
+				}
+				E.RenderedText = FString::Printf(TEXT("Retrieved context: %s\n%s"), *E.SourceId, *Snippet.Text);
 				E.TokenCostEstimate = EstimateTokens(E.RenderedText);
 				OutCandidates.Add(MoveTemp(E));
 			}
@@ -310,15 +373,39 @@ namespace UnrealAiContextCandidates
 			C.Score.ActiveBonus = FMath::Clamp(C.Features.ActiveBonus, 0.f, 1.f) * W.ActiveBonus;
 			C.Score.ThreadOverlayBonus = FMath::Clamp(C.Features.ThreadOverlayBonus, 0.f, 1.f) * W.ThreadOverlayBonus;
 			C.Score.Frequency = FMath::Clamp(C.Features.Frequency, 0.f, 30.f) * W.Frequency;
+			C.Score.VectorSimilarity = FMath::Clamp(C.Features.VectorSimilarity, 0.f, 1.f) * W.VectorSimilarity;
+			C.Score.ThreadScope = C.Features.ThreadScope * W.ThreadScope;
 			C.Score.Total =
 				C.Score.Base + C.Score.MentionHit + C.Score.HeuristicSemantic + C.Score.Recency +
 				C.Score.FreshnessReliability + C.Score.SafetyPenalty + C.Score.ActiveBonus +
-				C.Score.ThreadOverlayBonus + C.Score.Frequency;
+				C.Score.ThreadOverlayBonus + C.Score.Frequency + C.Score.VectorSimilarity + C.Score.ThreadScope;
 		}
 	}
 
-	void PackCandidatesUnderBudget(TArray<FContextCandidateEnvelope>& Candidates, const int32 BudgetChars, FUnifiedContextBuildResult& OutResult)
+	void PackCandidatesUnderBudget(
+		TArray<FContextCandidateEnvelope>& Candidates,
+		const int32 BudgetChars,
+		const FAgentContextBuildOptions& Options,
+		FUnifiedContextBuildResult& OutResult)
 	{
+		const int32 UserCharCount = Options.UserMessageForComplexity.Len();
+		const int32 UserTokenCount = BuildUserTokens(Options.UserMessageForComplexity).Num();
+		const bool bShortPrompt =
+			(UserCharCount > 0)
+			&& (UserTokenCount <= UnrealAiContextRankingPolicy::ShortPromptUserTokenThreshold
+				|| UserCharCount <= UnrealAiContextRankingPolicy::ShortPromptCharThreshold);
+		const UnrealAiContextRankingPolicy::FPerTypeBudgetCaps PerTypeCaps = UnrealAiContextRankingPolicy::GetPerTypeBudgetCaps();
+		OutResult.PromptCharCount = UserCharCount;
+		OutResult.PromptTokenCount = UserTokenCount;
+		OutResult.bShortPrompt = bShortPrompt;
+		OutResult.MemorySnippetCapApplied = bShortPrompt ? PerTypeCaps.MaxMemorySnippetShortPrompt : PerTypeCaps.MaxMemorySnippet;
+		OutResult.SoftBudgetCharsApplied = FMath::Min(
+			BudgetChars,
+			FMath::Max(
+				UnrealAiContextRankingPolicy::MinSoftBudgetChars,
+				static_cast<int32>(static_cast<float>(BudgetChars) * UnrealAiContextRankingPolicy::SoftContextFillFraction)));
+		OutResult.MaxPackedCandidatesApplied = UnrealAiContextRankingPolicy::MaxPackedCandidatesSoft;
+
 		TArray<int32> Idx;
 		Idx.Reserve(Candidates.Num());
 		for (int32 i = 0; i < Candidates.Num(); ++i)
@@ -326,6 +413,109 @@ namespace UnrealAiContextCandidates
 			if (!Candidates[i].bDropped)
 			{
 				Idx.Add(i);
+			}
+		}
+
+		// Anchor minimums: include a tiny set of "always important" live editor context first (if present),
+		// even when we are under heavy candidate pressure.
+		//
+		// We intentionally do NOT guarantee minimums for every type; only a few live signals.
+		TArray<bool> bPacked;
+		bPacked.Init(false, Candidates.Num());
+		TMap<UnrealAiContextRankingPolicy::ECandidateType, int32> Counts;
+		int32 UsedChars = 0;
+
+		auto TryPackIdx = [&](const int32 Index, const TCHAR* DropReasonIfAny) -> bool
+		{
+			if (!Candidates.IsValidIndex(Index))
+			{
+				return false;
+			}
+			FContextCandidateEnvelope& C = Candidates[Index];
+			if (C.bDropped || bPacked[Index])
+			{
+				return false;
+			}
+			int32 Cap = UnrealAiContextRankingPolicy::GetPerTypeCap(C.Type);
+			if (bShortPrompt && C.Type == UnrealAiContextRankingPolicy::ECandidateType::MemorySnippet)
+			{
+				Cap = PerTypeCaps.MaxMemorySnippetShortPrompt;
+			}
+			const int32 Cur = Counts.FindRef(C.Type);
+			if (Cap > 0 && Cur >= Cap)
+			{
+				C.bDropped = true;
+				C.DropReason = TEXT("pack:per_type_cap");
+				return false;
+			}
+			const int32 CandidateChars = C.RenderedText.Len() + 2;
+			if ((UsedChars + CandidateChars + UnrealAiContextRankingPolicy::MinBudgetReserveChars) > BudgetChars)
+			{
+				C.bDropped = true;
+				C.DropReason = DropReasonIfAny ? DropReasonIfAny : TEXT("pack:budget");
+				return false;
+			}
+			UsedChars += CandidateChars;
+			Counts.Add(C.Type, Cur + 1);
+			OutResult.Packed.Add(C);
+			bPacked[Index] = true;
+			return true;
+		};
+
+		// - One active recent tab (best-effort): ensures the model has the "what I'm looking at" anchor.
+		{
+			int32 BestActiveRecent = INDEX_NONE;
+			float BestScore = -FLT_MAX;
+			for (const int32 I : Idx)
+			{
+				const FContextCandidateEnvelope& C = Candidates[I];
+				if (C.Type != UnrealAiContextRankingPolicy::ECandidateType::RecentTab)
+				{
+					continue;
+				}
+				if (C.Features.ActiveBonus <= 0.f)
+				{
+					continue;
+				}
+				if (C.Score.Total > BestScore)
+				{
+					BestScore = C.Score.Total;
+					BestActiveRecent = I;
+				}
+			}
+			if (BestActiveRecent != INDEX_NONE)
+			{
+				TryPackIdx(BestActiveRecent, TEXT("pack:budget"));
+			}
+		}
+
+		// - Two key snapshot fields: selected actors + content browser path (best-effort).
+		{
+			int32 SelectedActors = INDEX_NONE;
+			int32 ContentBrowserPath = INDEX_NONE;
+			for (const int32 I : Idx)
+			{
+				const FContextCandidateEnvelope& C = Candidates[I];
+				if (C.Type != UnrealAiContextRankingPolicy::ECandidateType::EditorSnapshotField)
+				{
+					continue;
+				}
+				if (C.SourceId == TEXT("snap:selected_actors"))
+				{
+					SelectedActors = I;
+				}
+				else if (C.SourceId == TEXT("snap:cb_path"))
+				{
+					ContentBrowserPath = I;
+				}
+			}
+			if (SelectedActors != INDEX_NONE)
+			{
+				TryPackIdx(SelectedActors, TEXT("pack:budget"));
+			}
+			if (ContentBrowserPath != INDEX_NONE)
+			{
+				TryPackIdx(ContentBrowserPath, TEXT("pack:budget"));
 			}
 		}
 		Idx.Sort([&Candidates](const int32 A, const int32 B)
@@ -337,12 +527,24 @@ namespace UnrealAiContextCandidates
 			return Candidates[A].TokenCostEstimate < Candidates[B].TokenCostEstimate;
 		});
 
-		TMap<UnrealAiContextRankingPolicy::ECandidateType, int32> Counts;
-		int32 UsedChars = 0;
 		for (const int32 I : Idx)
 		{
 			FContextCandidateEnvelope& C = Candidates[I];
-			const int32 Cap = UnrealAiContextRankingPolicy::GetPerTypeCap(C.Type);
+			if (bPacked.IsValidIndex(I) && bPacked[I])
+			{
+				continue;
+			}
+			if (OutResult.MaxPackedCandidatesApplied > 0 && OutResult.Packed.Num() >= OutResult.MaxPackedCandidatesApplied)
+			{
+				C.bDropped = true;
+				C.DropReason = TEXT("pack:max_candidates");
+				continue;
+			}
+			int32 Cap = UnrealAiContextRankingPolicy::GetPerTypeCap(C.Type);
+			if (bShortPrompt && C.Type == UnrealAiContextRankingPolicy::ECandidateType::MemorySnippet)
+			{
+				Cap = PerTypeCaps.MaxMemorySnippetShortPrompt;
+			}
 			const int32 Cur = Counts.FindRef(C.Type);
 			if (Cap > 0 && Cur >= Cap)
 			{
@@ -351,6 +553,12 @@ namespace UnrealAiContextCandidates
 				continue;
 			}
 			const int32 CandidateChars = C.RenderedText.Len() + 2;
+			if ((UsedChars + CandidateChars + UnrealAiContextRankingPolicy::MinBudgetReserveChars) > OutResult.SoftBudgetCharsApplied)
+			{
+				C.bDropped = true;
+				C.DropReason = TEXT("pack:soft_budget");
+				continue;
+			}
 			if ((UsedChars + CandidateChars + UnrealAiContextRankingPolicy::MinBudgetReserveChars) > BudgetChars)
 			{
 				C.bDropped = true;
@@ -362,6 +570,13 @@ namespace UnrealAiContextCandidates
 			{
 				C.bDropped = true;
 				C.DropReason = TEXT("pack:memory_min_score");
+				continue;
+			}
+			if (C.Type == UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet
+				&& C.Score.Total < UnrealAiContextRankingPolicy::MinRetrievalCandidateScoreToPack)
+			{
+				C.bDropped = true;
+				C.DropReason = TEXT("pack:retrieval_min_score");
 				continue;
 			}
 			UsedChars += CandidateChars;
@@ -393,14 +608,15 @@ namespace UnrealAiContextCandidates
 		const FAgentContextState& State,
 		const FAgentContextBuildOptions& Options,
 		IUnrealAiMemoryService* MemoryService,
+		const TArray<FUnrealAiRetrievalSnippet>* RetrievalSnippets,
 		const int32 BudgetChars)
 	{
 		FUnifiedContextBuildResult R;
 		TArray<FContextCandidateEnvelope> Candidates;
-		CollectCandidates(State, Options, MemoryService, Candidates);
+		CollectCandidates(State, Options, MemoryService, RetrievalSnippets, Candidates);
 		FilterHardPolicy(Candidates, Options);
 		ScoreCandidates(Candidates, Options);
-		PackCandidatesUnderBudget(Candidates, BudgetChars, R);
+		PackCandidatesUnderBudget(Candidates, BudgetChars, Options, R);
 
 		R.TraceLines.Add(FString::Printf(TEXT("[Ranker] candidates_total=%d packed=%d dropped=%d budget_chars=%d emitted_chars=%d"),
 			Candidates.Num(),

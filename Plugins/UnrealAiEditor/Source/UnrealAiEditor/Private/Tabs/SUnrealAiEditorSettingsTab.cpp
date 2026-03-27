@@ -4,6 +4,7 @@
 #include "UnrealAiEditorSettings.h"
 #include "Backend/FUnrealAiUsageTracker.h"
 #include "Context/UnrealAiProjectId.h"
+#include "Retrieval/IUnrealAiRetrievalService.h"
 #include "Backend/IUnrealAiModelConnector.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Backend/UnrealAiBackendRegistry.h"
@@ -67,7 +68,16 @@ namespace UnrealAiSettingsTemplate
 		"\t\t\t\t}\n"
 		"\t\t\t]\n"
 		"\t\t}\n"
-		"\t]\n"
+		"\t],\n"
+		"\t\"retrieval\": {\n"
+		"\t\t\"enabled\": false,\n"
+		"\t\t\"embeddingModel\": \"text-embedding-3-small\",\n"
+		"\t\t\"maxSnippetsPerTurn\": 6,\n"
+		"\t\t\"maxSnippetTokens\": 256,\n"
+		"\t\t\"autoIndexOnProjectOpen\": true,\n"
+		"\t\t\"periodicScrubMinutes\": 30,\n"
+		"\t\t\"allowMixedModelCompatibility\": false\n"
+		"\t}\n"
 		"}\n");
 }
 
@@ -523,6 +533,120 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 											]
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
 											[
+												SNew(STextBlock)
+													.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+													.Text(LOCTEXT("SecRetrieval", "Retrieval (local vector index)"))
+											]
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
+											[
+												SNew(SGridPanel).FillColumn(1, 1.f)
+												+ SGridPanel::Slot(0, 0).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalEnabledLbl", "Enabled"))
+												]
+												+ SGridPanel::Slot(1, 0).Padding(4.f)
+												[
+													SNew(SCheckBox)
+														.IsChecked_Lambda([this]() { return bRetrievalEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+														.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+														{
+															bRetrievalEnabled = (S == ECheckBoxState::Checked);
+															OnAnySettingsChanged(FText::GetEmpty());
+														})
+												]
+												+ SGridPanel::Slot(0, 1).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalModelLbl", "Embedding model"))
+												]
+												+ SGridPanel::Slot(1, 1).Padding(4.f)
+												[
+													SNew(SEditableTextBox)
+														.Text_Lambda([this]() { return FText::FromString(RetrievalEmbeddingModel); })
+														.OnTextChanged_Lambda([this](const FText& T)
+														{
+															RetrievalEmbeddingModel = T.ToString();
+															OnAnySettingsChanged(T);
+														})
+												]
+												+ SGridPanel::Slot(0, 2).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalMaxSnipsLbl", "Max snippets per turn"))
+												]
+												+ SGridPanel::Slot(1, 2).Padding(4.f)
+												[
+													SNew(SEditableTextBox)
+														.Text_Lambda([this]() { return FText::FromString(RetrievalMaxSnippetsPerTurnStr); })
+														.OnTextChanged_Lambda([this](const FText& T)
+														{
+															RetrievalMaxSnippetsPerTurnStr = T.ToString();
+															OnAnySettingsChanged(T);
+														})
+												]
+												+ SGridPanel::Slot(0, 3).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalMaxTokLbl", "Max snippet tokens"))
+												]
+												+ SGridPanel::Slot(1, 3).Padding(4.f)
+												[
+													SNew(SEditableTextBox)
+														.Text_Lambda([this]() { return FText::FromString(RetrievalMaxSnippetTokensStr); })
+														.OnTextChanged_Lambda([this](const FText& T)
+														{
+															RetrievalMaxSnippetTokensStr = T.ToString();
+															OnAnySettingsChanged(T);
+														})
+												]
+												+ SGridPanel::Slot(0, 4).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalAutoIdxLbl", "Auto-index on project open"))
+												]
+												+ SGridPanel::Slot(1, 4).Padding(4.f)
+												[
+													SNew(SCheckBox)
+														.IsChecked_Lambda([this]() { return bRetrievalAutoIndexOnProjectOpen ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+														.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+														{
+															bRetrievalAutoIndexOnProjectOpen = (S == ECheckBoxState::Checked);
+															OnAnySettingsChanged(FText::GetEmpty());
+														})
+												]
+												+ SGridPanel::Slot(0, 5).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalScrubLbl", "Periodic scrub minutes"))
+												]
+												+ SGridPanel::Slot(1, 5).Padding(4.f)
+												[
+													SNew(SEditableTextBox)
+														.Text_Lambda([this]() { return FText::FromString(RetrievalPeriodicScrubMinutesStr); })
+														.OnTextChanged_Lambda([this](const FText& T)
+														{
+															RetrievalPeriodicScrubMinutesStr = T.ToString();
+															OnAnySettingsChanged(T);
+														})
+												]
+												+ SGridPanel::Slot(0, 6).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalMixedCompatLbl", "Allow mixed model compatibility"))
+												]
+												+ SGridPanel::Slot(1, 6).Padding(4.f)
+												[
+													SNew(SCheckBox)
+														.IsChecked_Lambda([this]() { return bRetrievalAllowMixedModelCompatibility ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+														.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+														{
+															bRetrievalAllowMixedModelCompatibility = (S == ECheckBoxState::Checked);
+															OnAnySettingsChanged(FText::GetEmpty());
+														})
+												]
+											]
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
+											[
+												SNew(SButton)
+													.Text(LOCTEXT("RetrievalRebuildNowBtn", "Rebuild retrieval index now"))
+													.OnClicked(this, &SUnrealAiEditorSettingsTab::OnRetrievalRebuildNowClicked)
+											]
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+											[
 												SNew(SHorizontalBox)
 												+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 												[
@@ -907,6 +1031,44 @@ bool SUnrealAiEditorSettingsTab::LoadMemorySettingsFromRoot(const TSharedPtr<FJs
 	return true;
 }
 
+bool SUnrealAiEditorSettingsTab::LoadRetrievalSettingsFromRoot(const TSharedPtr<FJsonObject>& Root)
+{
+	bRetrievalEnabled = false;
+	RetrievalEmbeddingModel = TEXT("text-embedding-3-small");
+	RetrievalMaxSnippetsPerTurnStr = TEXT("6");
+	RetrievalMaxSnippetTokensStr = TEXT("256");
+	bRetrievalAutoIndexOnProjectOpen = true;
+	RetrievalPeriodicScrubMinutesStr = TEXT("30");
+	bRetrievalAllowMixedModelCompatibility = false;
+	if (!Root.IsValid())
+	{
+		return false;
+	}
+	const TSharedPtr<FJsonObject>* RetrievalObj = nullptr;
+	if (!Root->TryGetObjectField(TEXT("retrieval"), RetrievalObj) || !RetrievalObj || !(*RetrievalObj).IsValid())
+	{
+		return false;
+	}
+	(*RetrievalObj)->TryGetBoolField(TEXT("enabled"), bRetrievalEnabled);
+	(*RetrievalObj)->TryGetStringField(TEXT("embeddingModel"), RetrievalEmbeddingModel);
+	double Number = 0.0;
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("maxSnippetsPerTurn"), Number))
+	{
+		RetrievalMaxSnippetsPerTurnStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("maxSnippetTokens"), Number))
+	{
+		RetrievalMaxSnippetTokensStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
+	}
+	(*RetrievalObj)->TryGetBoolField(TEXT("autoIndexOnProjectOpen"), bRetrievalAutoIndexOnProjectOpen);
+	(*RetrievalObj)->TryGetBoolField(TEXT("allowMixedModelCompatibility"), bRetrievalAllowMixedModelCompatibility);
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("periodicScrubMinutes"), Number))
+	{
+		RetrievalPeriodicScrubMinutesStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
+	}
+	return true;
+}
+
 void SUnrealAiEditorSettingsTab::WriteMemorySettingsToRoot(TSharedPtr<FJsonObject>& Root) const
 {
 	if (!Root.IsValid())
@@ -922,9 +1084,38 @@ void SUnrealAiEditorSettingsTab::WriteMemorySettingsToRoot(TSharedPtr<FJsonObjec
 	Root->SetObjectField(TEXT("memory"), MemoryObj);
 }
 
+void SUnrealAiEditorSettingsTab::WriteRetrievalSettingsToRoot(TSharedPtr<FJsonObject>& Root) const
+{
+	if (!Root.IsValid())
+	{
+		return;
+	}
+	TSharedPtr<FJsonObject> RetrievalObj = MakeShared<FJsonObject>();
+	RetrievalObj->SetBoolField(TEXT("enabled"), bRetrievalEnabled);
+	RetrievalObj->SetStringField(TEXT("embeddingModel"), RetrievalEmbeddingModel);
+	RetrievalObj->SetNumberField(TEXT("maxSnippetsPerTurn"), FMath::Max(0, FCString::Atoi(*RetrievalMaxSnippetsPerTurnStr)));
+	RetrievalObj->SetNumberField(TEXT("maxSnippetTokens"), FMath::Max(0, FCString::Atoi(*RetrievalMaxSnippetTokensStr)));
+	RetrievalObj->SetBoolField(TEXT("autoIndexOnProjectOpen"), bRetrievalAutoIndexOnProjectOpen);
+	RetrievalObj->SetBoolField(TEXT("allowMixedModelCompatibility"), bRetrievalAllowMixedModelCompatibility);
+	RetrievalObj->SetNumberField(TEXT("periodicScrubMinutes"), FMath::Max(0, FCString::Atoi(*RetrievalPeriodicScrubMinutesStr)));
+	Root->SetObjectField(TEXT("retrieval"), RetrievalObj);
+}
+
 FReply SUnrealAiEditorSettingsTab::OnMemoriesRefreshClicked()
 {
 	RebuildMemoryListUi();
+	return FReply::Handled();
+}
+
+FReply SUnrealAiEditorSettingsTab::OnRetrievalRebuildNowClicked()
+{
+	if (!BackendRegistry.IsValid() || !BackendRegistry->GetRetrievalService())
+	{
+		StatusText = LOCTEXT("RetrievalRebuildUnavailable", "Retrieval service unavailable.");
+		return FReply::Handled();
+	}
+	BackendRegistry->GetRetrievalService()->RequestRebuild(UnrealAiProjectId::GetCurrentProjectId());
+	StatusText = LOCTEXT("RetrievalRebuildQueued", "Queued retrieval index rebuild.");
 	return FReply::Handled();
 }
 
@@ -1275,6 +1466,7 @@ void SUnrealAiEditorSettingsTab::LoadSettingsIntoUi()
 
 	CachedSettingsRoot = UnrealAiSettingsTabUtil::CloneJsonObject(Root);
 	LoadMemorySettingsFromRoot(Root);
+	LoadRetrievalSettingsFromRoot(Root);
 
 	const TSharedPtr<FJsonObject>* ApiObj = nullptr;
 	if (Root->TryGetObjectField(TEXT("api"), ApiObj) && ApiObj->IsValid())
@@ -1904,6 +2096,7 @@ bool SUnrealAiEditorSettingsTab::BuildJsonFromUi(FString& OutJson, FString& OutE
 	}
 	Root->SetObjectField(TEXT("api"), Api);
 	WriteMemorySettingsToRoot(Root);
+	WriteRetrievalSettingsToRoot(Root);
 
 	TArray<TSharedPtr<FJsonValue>> SecArr;
 	for (const FDynSectionRow& Sec : SectionRows)

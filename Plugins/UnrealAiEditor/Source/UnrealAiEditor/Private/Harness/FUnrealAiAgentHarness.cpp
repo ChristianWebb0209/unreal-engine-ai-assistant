@@ -31,6 +31,53 @@ namespace UnrealAiAgentHarnessPriv
 {
 	static const TCHAR* GUnrealAiDispatchToolName = TEXT("unreal_ai_dispatch");
 
+	static int32 ReadEnvInt(const TCHAR* Name, const int32 DefaultValue, const int32 MinValue = 0, const int32 MaxValue = INT32_MAX)
+	{
+		const FString Raw = FPlatformMisc::GetEnvironmentVariable(Name);
+		if (Raw.IsEmpty())
+		{
+			return DefaultValue;
+		}
+		const int32 Parsed = FCString::Atoi(*Raw);
+		return FMath::Clamp(Parsed, MinValue, MaxValue);
+	}
+
+	static int32 CountConversationUserTurnsForMemory(const TArray<FUnrealAiConversationMessage>& Messages)
+	{
+		int32 Count = 0;
+		for (const FUnrealAiConversationMessage& M : Messages)
+		{
+			if (M.Role != TEXT("user"))
+			{
+				continue;
+			}
+			// Skip harness synthetic nudges; count only real chat turns.
+			if (M.Content.StartsWith(TEXT("[Harness]")))
+			{
+				continue;
+			}
+			++Count;
+		}
+		return Count;
+	}
+
+	/** Tools whose JSON payload is mostly an echo of assembled context — skip persisting to avoid nested duplication. */
+	static bool ShouldPersistToolResultToContextState(const FString& InvokeName)
+	{
+		static const TCHAR* SkipToolIds[] = {
+			// Returns BuildContextWindow output as `context_block`; snapshot + ranked candidates already cover this.
+			TEXT("editor_state_snapshot_read"),
+		};
+		for (const TCHAR* Id : SkipToolIds)
+		{
+			if (InvokeName == Id)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	static bool UnwrapDispatchToolCall(const FUnrealAiToolCallSpec& Tc, FString& OutInvokeName, FString& OutInvokeArgsJson, FString& OutError)
 	{
 		if (Tc.Name != GUnrealAiDispatchToolName)
@@ -249,21 +296,68 @@ namespace UnrealAiAgentHarnessPriv
 		}
 		if (MemoryService && Conv.IsValid())
 		{
-			FString ConversationForCompactor;
 			const TArray<FUnrealAiConversationMessage>& Ms = Conv->GetMessages();
-			const int32 Start = FMath::Max(0, Ms.Num() - 8);
-			for (int32 i = Start; i < Ms.Num(); ++i)
+			const int32 UserTurns = CountConversationUserTurnsForMemory(Ms);
+			const int32 TurnInterval = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_TURN_INTERVAL"), 4, 1, 1000);
+			const int32 TokenThreshold = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_TOKEN_THRESHOLD"), 3000, 0, 5000000);
+			const int32 PromptThreshold = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_PROMPT_THRESHOLD"), 1800, 0, 5000000);
+			const bool bByTurns = (UserTurns > 0) && ((UserTurns % TurnInterval) == 0);
+			const bool bByTokens = AccumulatedUsage.TotalTokens >= TokenThreshold;
+			const bool bByPromptChars = Request.UserText.Len() >= PromptThreshold;
+			if (bByTurns || bByTokens || bByPromptChars)
 			{
-				ConversationForCompactor += Ms[i].Role + TEXT(": ") + Ms[i].Content.Left(400) + TEXT("\n");
+				const int32 HistoryMessages = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_HISTORY_MESSAGES"), 12, 4, 128);
+				const int32 MaxBodyChars = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_MAX_BODY_CHARS"), 2400, 400, 20000);
+				const int32 MaxToCreate = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_MAX_CREATE"), 1, 1, 16);
+				const float MinConfidence = static_cast<float>(ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_MIN_CONFIDENCE_PERCENT"), 55, 0, 100)) / 100.0f;
+				const int32 PruneMaxItems = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_PRUNE_MAX_ITEMS"), 120, 1, 20000);
+				const int32 PruneRetentionDays = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_PRUNE_RETENTION_DAYS"), 90, 0, 3650);
+				const float PruneMinConfidence = static_cast<float>(ReadEnvInt(TEXT("UNREAL_AI_MEMORY_PRUNE_MIN_CONFIDENCE_PERCENT"), 30, 0, 100)) / 100.0f;
+
+				FString ConversationForCompactor;
+				const int32 Start = FMath::Max(0, Ms.Num() - HistoryMessages);
+				for (int32 i = Start; i < Ms.Num(); ++i)
+				{
+					ConversationForCompactor += Ms[i].Role + TEXT(": ") + Ms[i].Content.Left(400) + TEXT("\n");
+				}
+				if (ConversationForCompactor.Len() > MaxBodyChars)
+				{
+					ConversationForCompactor = ConversationForCompactor.Right(MaxBodyChars);
+				}
+
+				FUnrealAiMemoryCompactionInput CompactionInput;
+				CompactionInput.ProjectId = Request.ProjectId;
+				CompactionInput.ThreadId = Request.ThreadId;
+				CompactionInput.ConversationJson = ConversationForCompactor;
+				CompactionInput.bApiKeyConfigured = Profiles && Profiles->HasAnyConfiguredApiKey();
+				CompactionInput.bExpectProviderGeneration = true;
+				FUnrealAiMemoryCompactor Compactor(MemoryService);
+				const FUnrealAiMemoryCompactionResult Cmp = Compactor.Run(CompactionInput, MaxToCreate, MinConfidence);
+				const int32 Pruned = MemoryService->Prune(PruneMaxItems, PruneRetentionDays, PruneMinConfidence);
+				UE_LOG(
+					LogTemp,
+					Display,
+					TEXT("UnrealAi memory dispatch: turns=%d byTurns=%d byTokens=%d byPromptChars=%d totalTokens=%d accepted=%d pruned=%d"),
+					UserTurns,
+					bByTurns ? 1 : 0,
+					bByTokens ? 1 : 0,
+					bByPromptChars ? 1 : 0,
+					AccumulatedUsage.TotalTokens,
+					Cmp.Accepted,
+					Pruned);
 			}
-			FUnrealAiMemoryCompactionInput CompactionInput;
-			CompactionInput.ProjectId = Request.ProjectId;
-			CompactionInput.ThreadId = Request.ThreadId;
-			CompactionInput.ConversationJson = ConversationForCompactor;
-			CompactionInput.bApiKeyConfigured = Profiles && Profiles->HasAnyConfiguredApiKey();
-			CompactionInput.bExpectProviderGeneration = true;
-			FUnrealAiMemoryCompactor Compactor(MemoryService);
-			Compactor.Run(CompactionInput, 1, 0.55f);
+			else
+			{
+				UE_LOG(
+					LogTemp,
+					VeryVerbose,
+					TEXT("UnrealAi memory dispatch skipped: turns=%d totalTokens=%d thresholds(turnInterval=%d token=%d promptChars=%d)"),
+					UserTurns,
+					AccumulatedUsage.TotalTokens,
+					TurnInterval,
+					TokenThreshold,
+					PromptThreshold);
+			}
 		}
 		FUnrealAiEditorModalMonitor::NotifyAgentTurnEndedForSink(Sink);
 	}
@@ -644,6 +738,14 @@ namespace UnrealAiAgentHarnessPriv
 					Inv.bOk,
 					UnrealAiTruncateForUi(ModelToolContent),
 					Inv.EditorPresentation);
+			}
+			// Persist successful tool results into thread context so future context builds can rank/trim them.
+			if (ContextService && Inv.bOk && InvokeName != TEXT("agent_emit_todo_plan")
+				&& ShouldPersistToolResultToContextState(InvokeName))
+			{
+				ContextService->LoadOrCreate(Request.ProjectId, Request.ThreadId);
+				FContextRecordPolicy Policy;
+				ContextService->RecordToolResult(FName(*InvokeName), ModelToolContent, Policy);
 			}
 			if (InvokeName == TEXT("agent_emit_todo_plan") && Sink.IsValid())
 			{

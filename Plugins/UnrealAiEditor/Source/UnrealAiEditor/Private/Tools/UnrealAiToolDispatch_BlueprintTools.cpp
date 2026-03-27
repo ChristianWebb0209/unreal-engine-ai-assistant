@@ -1,6 +1,7 @@
 #include "Tools/UnrealAiToolDispatch_BlueprintTools.h"
 
 #include "Tools/UnrealAiBlueprintFormatterBridge.h"
+#include "Tools/UnrealAiBlueprintIrHallucinationNormalizer.h"
 #include "Tools/UnrealAiToolDispatch_MoreAssets.h"
 #include "Tools/UnrealAiToolJson.h"
 #include "Tools/Presentation/UnrealAiToolEditorNoteBuilders.h"
@@ -115,6 +116,15 @@ namespace UnrealAiBlueprintToolsPriv
 	static FString NormalizeIrOpToken(const FString& InOp, FIrNormalizationReport& Report)
 	{
 		const FString Op = InOp.ToLower();
+		if (Op == TEXT("event_begin_overlap") || Op == TEXT("event_actor_begin_overlap")
+			|| Op == TEXT("begin_overlap")
+			|| Op == TEXT("on_actor_begin_overlap") || Op == TEXT("actor_begin_overlap"))
+		{
+			Report.bApplied = true;
+			Report.DeprecatedFieldsSeen.Add(TEXT("op:event_begin_overlap_alias"));
+			Report.Notes.Add(TEXT("Mapped overlap event op alias -> event_actor_begin_overlap."));
+			return TEXT("event_actor_begin_overlap");
+		}
 		if (Op == TEXT("add_movement_input"))
 		{
 			Report.bApplied = true;
@@ -172,6 +182,8 @@ namespace UnrealAiBlueprintToolsPriv
 			}
 		}
 		const TArray<TSharedPtr<FJsonValue>>* Nodes = nullptr;
+		TSet<FString> ReferencedVars;
+		TMap<FString, FString> NodeOpById;
 		if (Args->TryGetArrayField(TEXT("nodes"), Nodes) && Nodes)
 		{
 			for (const TSharedPtr<FJsonValue>& V : *Nodes)
@@ -208,15 +220,75 @@ namespace UnrealAiBlueprintToolsPriv
 
 				FString Op;
 				Node->TryGetStringField(TEXT("op"), Op);
+				{
+					// Centralized hallucination map for unsupported pseudo-ops.
+					if (UnrealAiBlueprintIrHallucinationNormalizer::NormalizeNode(
+						Node,
+						Report.Notes,
+						Report.DeprecatedFieldsSeen))
+					{
+						Report.bApplied = true;
+						Node->TryGetStringField(TEXT("op"), Op);
+					}
+				}
+				{
+					// Hallucinated event shape: op=K2Node_Event + title contains overlap event.
+					if (Op.Equals(TEXT("K2Node_Event"), ESearchCase::IgnoreCase))
+					{
+						FString Title;
+						Node->TryGetStringField(TEXT("title"), Title);
+						if (Title.Contains(TEXT("ActorBeginOverlap"), ESearchCase::IgnoreCase)
+							|| Title.Contains(TEXT("BeginOverlap"), ESearchCase::IgnoreCase))
+						{
+							Node->SetStringField(TEXT("op"), TEXT("event_actor_begin_overlap"));
+							Report.bApplied = true;
+							Report.DeprecatedFieldsSeen.Add(TEXT("nodes.op.K2Node_Event.ActorBeginOverlap"));
+							Report.Notes.Add(TEXT("Mapped K2Node_Event ActorBeginOverlap -> event_actor_begin_overlap"));
+							Op = TEXT("event_actor_begin_overlap");
+						}
+					}
+				}
 				if (!Op.IsEmpty())
 				{
 					const FString CanonOp = NormalizeIrOpToken(Op, Report);
 					if (!CanonOp.Equals(Op, ESearchCase::CaseSensitive))
 					{
 						Node->SetStringField(TEXT("op"), CanonOp);
+						Op = CanonOp;
 					}
 					if (CanonOp == TEXT("call_function"))
 					{
+						// If class_path points to a Blueprint asset path (/Game/...), we cannot
+						// resolve a UFunction symbol directly. Convert to custom_event so the IR
+						// still applies and the agent can continue instead of looping on symbol lookup.
+						{
+							FString CP;
+							if (Node->TryGetStringField(TEXT("class_path"), CP)
+								&& CP.StartsWith(TEXT("/Game/"), ESearchCase::IgnoreCase))
+							{
+								Node->SetStringField(TEXT("op"), TEXT("custom_event"));
+								Report.bApplied = true;
+								Report.DeprecatedFieldsSeen.Add(TEXT("call_function.blueprint_class_path_fallback"));
+								Report.Notes.Add(TEXT("Mapped call_function with /Game class_path to custom_event fallback."));
+							}
+						}
+						// Common hallucination: class_path=/Script/Engine.Log function_name=Log
+						// In Blueprints, "logging" is typically UKismetSystemLibrary::PrintString (or PrintText).
+						{
+							FString CP;
+							FString FN;
+							Node->TryGetStringField(TEXT("class_path"), CP);
+							Node->TryGetStringField(TEXT("function_name"), FN);
+							if (CP.Equals(TEXT("/Script/Engine.Log"), ESearchCase::IgnoreCase)
+								&& FN.Equals(TEXT("Log"), ESearchCase::IgnoreCase))
+							{
+								Node->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.KismetSystemLibrary"));
+								Node->SetStringField(TEXT("function_name"), TEXT("PrintString"));
+								Report.bApplied = true;
+								Report.DeprecatedFieldsSeen.Add(TEXT("call_function.Engine.Log.Log"));
+								Report.Notes.Add(TEXT("Mapped call_function /Script/Engine.Log::Log -> /Script/Engine.KismetSystemLibrary::PrintString"));
+							}
+						}
 						if (Op.Equals(TEXT("add_movement_input"), ESearchCase::IgnoreCase))
 						{
 							Node->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.Pawn"));
@@ -234,12 +306,31 @@ namespace UnrealAiBlueprintToolsPriv
 						}
 					}
 				}
+				{
+					FString NodeId;
+					if (Node->TryGetStringField(TEXT("node_id"), NodeId) && !NodeId.IsEmpty() && !Op.IsEmpty())
+					{
+						NodeOpById.Add(NodeId, Op.ToLower());
+					}
+				}
 				FString Alias;
 				if (!Node->HasField(TEXT("variable")) && Node->TryGetStringField(TEXT("variable_name"), Alias) && !Alias.IsEmpty())
 				{
 					Node->SetStringField(TEXT("variable"), Alias);
 					Report.bApplied = true;
 					Report.DeprecatedFieldsSeen.Add(TEXT("variable_name"));
+				}
+				if (!Node->HasField(TEXT("variable")) && Node->HasTypedField<EJson::Object>(TEXT("vars")))
+				{
+					const TSharedPtr<FJsonObject> VarsObj = Node->GetObjectField(TEXT("vars"));
+					FString VarsName;
+					if (VarsObj.IsValid() && VarsObj->TryGetStringField(TEXT("name"), VarsName) && !VarsName.IsEmpty())
+					{
+						Node->SetStringField(TEXT("variable"), VarsName);
+						Report.bApplied = true;
+						Report.DeprecatedFieldsSeen.Add(TEXT("vars.name"));
+						Report.Notes.Add(TEXT("Aliased nodes[i].vars.name -> nodes[i].variable"));
+					}
 				}
 				if (!Node->HasField(TEXT("class_path")) && Node->TryGetStringField(TEXT("class"), Alias) && !Alias.IsEmpty())
 				{
@@ -252,6 +343,21 @@ namespace UnrealAiBlueprintToolsPriv
 					Node->SetStringField(TEXT("function_name"), Alias);
 					Report.bApplied = true;
 					Report.DeprecatedFieldsSeen.Add(TEXT("function"));
+				}
+				// Common fallback: some model outputs put callable name in `name`
+				// for call_function nodes instead of `function_name`.
+				{
+					FString NodeOp;
+					if (!Node->HasField(TEXT("function_name"))
+						&& Node->TryGetStringField(TEXT("name"), Alias) && !Alias.IsEmpty()
+						&& Node->TryGetStringField(TEXT("op"), NodeOp)
+						&& NodeOp.Equals(TEXT("call_function"), ESearchCase::IgnoreCase))
+					{
+						Node->SetStringField(TEXT("function_name"), Alias);
+						Report.bApplied = true;
+						Report.DeprecatedFieldsSeen.Add(TEXT("name_for_call_function"));
+						Report.Notes.Add(TEXT("Aliased call_function node name -> function_name"));
+					}
 				}
 
 				// `custom_event` nodes require `name` (custom function name) for K2 pin/signature creation.
@@ -283,6 +389,73 @@ namespace UnrealAiBlueprintToolsPriv
 						}
 					}
 				}
+
+				// Best-effort: if nodes reference variables via get_variable/set_variable without declaring them,
+				// synthesize variable declarations so apply doesn't fail on missing vars.
+				{
+					FString NodeOp;
+					if (Node->TryGetStringField(TEXT("op"), NodeOp)
+						&& (NodeOp.Equals(TEXT("get_variable"), ESearchCase::IgnoreCase)
+							|| NodeOp.Equals(TEXT("set_variable"), ESearchCase::IgnoreCase)))
+					{
+						FString Var;
+						if (Node->TryGetStringField(TEXT("variable"), Var) && !Var.IsEmpty())
+						{
+							ReferencedVars.Add(Var);
+						}
+					}
+				}
+			}
+		}
+
+		// Add implicit variables[] entries for referenced vars not explicitly declared.
+		if (ReferencedVars.Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> VarsArr;
+			TSet<FString> ExistingVarNames;
+			const TArray<TSharedPtr<FJsonValue>>* Variables = nullptr;
+			if (Args->TryGetArrayField(TEXT("variables"), Variables) && Variables)
+			{
+				VarsArr = *Variables;
+				for (const TSharedPtr<FJsonValue>& VV : *Variables)
+				{
+					const TSharedPtr<FJsonObject>* VO = nullptr;
+					if (VV.IsValid() && VV->TryGetObject(VO) && VO && (*VO).IsValid())
+					{
+						FString N;
+						if ((*VO)->TryGetStringField(TEXT("name"), N) && !N.IsEmpty())
+						{
+							ExistingVarNames.Add(N);
+						}
+					}
+				}
+			}
+
+			int32 Added = 0;
+			for (const FString& VarName : ReferencedVars)
+			{
+				if (ExistingVarNames.Contains(VarName))
+				{
+					continue;
+				}
+				TSharedPtr<FJsonObject> VD = MakeShared<FJsonObject>();
+				VD->SetStringField(TEXT("name"), VarName);
+
+				// Heuristic: bXxx -> bool, otherwise float.
+				const bool bBoolStyle = VarName.Len() >= 2 && VarName[0] == TCHAR('b') && FChar::IsUpper(VarName[1]);
+				VD->SetStringField(TEXT("type"), bBoolStyle ? TEXT("bool") : TEXT("float"));
+
+				VarsArr.Add(MakeShareable(new FJsonValueObject(VD.ToSharedRef())));
+				ExistingVarNames.Add(VarName);
+				++Added;
+			}
+
+			if (Added > 0)
+			{
+				Args->SetArrayField(TEXT("variables"), VarsArr);
+				Report.bApplied = true;
+				Report.DeprecatedFieldsSeen.Add(TEXT("implicit_variables"));
+				Report.Notes.Add(FString::Printf(TEXT("Added %d implicit variables[] entries for referenced get/set_variable nodes"), Added));
 			}
 		}
 		const TArray<TSharedPtr<FJsonValue>>* Links = nullptr;
@@ -316,6 +489,31 @@ namespace UnrealAiBlueprintToolsPriv
 						Report.DeprecatedFieldsSeen.Add(TEXT("links.target"));
 					}
 				}
+				auto EndpointNodeId = [](const FString& Endpoint) -> FString
+				{
+					int32 Dot = INDEX_NONE;
+					if (Endpoint.FindLastChar(TEXT('.'), Dot) && Dot > 0)
+					{
+						return Endpoint.Left(Dot);
+					}
+					return Endpoint;
+				};
+				const FString FromNodeIdRaw = EndpointNodeId(From);
+				const FString ToNodeIdRaw = EndpointNodeId(To);
+				const FString* FromOpPtr = NodeOpById.Find(FromNodeIdRaw);
+				const FString* ToOpPtr = NodeOpById.Find(ToNodeIdRaw);
+				const bool bFromIsEvent = FromOpPtr && FromOpPtr->StartsWith(TEXT("event_"));
+				const bool bToIsEvent = ToOpPtr && ToOpPtr->StartsWith(TEXT("event_"));
+				if (!From.IsEmpty() && !To.IsEmpty() && !bFromIsEvent && bToIsEvent)
+				{
+					Swap(From, To);
+					Link->SetStringField(TEXT("from"), From);
+					Link->SetStringField(TEXT("to"), To);
+					Report.bApplied = true;
+					Report.DeprecatedFieldsSeen.Add(TEXT("links.reversed_event_direction"));
+					Report.Notes.Add(TEXT("Reversed link direction when target was an event node."));
+				}
+
 				if (!From.IsEmpty() && !From.Contains(TEXT(".")))
 				{
 					Link->SetStringField(TEXT("from"), From + TEXT(".Then"));
@@ -331,9 +529,27 @@ namespace UnrealAiBlueprintToolsPriv
 						const FString NodeId = From.Left(Dot);
 						const FString PinTok = From.Mid(Dot + 1);
 						FString CanonPin = PinTok;
+						const FString* FromNodeOp = NodeOpById.Find(NodeId);
 						if (PinTok.Equals(TEXT("Exec"), ESearchCase::IgnoreCase) || PinTok.Equals(TEXT("Execute"), ESearchCase::IgnoreCase))
 						{
 							CanonPin = UEdGraphSchema_K2::PN_Execute.ToString();
+						}
+						else if (PinTok.Equals(TEXT("Trigger"), ESearchCase::IgnoreCase)
+							|| PinTok.Equals(TEXT("OnActorBeginOverlap"), ESearchCase::IgnoreCase)
+							|| PinTok.Equals(TEXT("Finished"), ESearchCase::IgnoreCase))
+						{
+							CanonPin = UEdGraphSchema_K2::PN_Then.ToString();
+						}
+						else if ((PinTok.Equals(TEXT("Overlapped"), ESearchCase::IgnoreCase)
+								|| PinTok.Equals(TEXT("OverlappedActor"), ESearchCase::IgnoreCase)
+								|| PinTok.Equals(TEXT("OtherActor"), ESearchCase::IgnoreCase))
+							&& FromNodeOp && FromNodeOp->StartsWith(TEXT("event_")))
+						{
+							CanonPin = UEdGraphSchema_K2::PN_Then.ToString();
+						}
+						else if (PinTok.Equals(TEXT("Event"), ESearchCase::IgnoreCase))
+						{
+							CanonPin = UEdGraphSchema_K2::PN_Then.ToString();
 						}
 						else if (PinTok.Equals(TEXT("Then"), ESearchCase::IgnoreCase))
 						{
@@ -375,6 +591,16 @@ namespace UnrealAiBlueprintToolsPriv
 						{
 							CanonPin = UEdGraphSchema_K2::PN_Execute.ToString();
 						}
+						else if (PinTok.Equals(TEXT("Trigger"), ESearchCase::IgnoreCase)
+							|| PinTok.Equals(TEXT("OnActorBeginOverlap"), ESearchCase::IgnoreCase)
+							|| PinTok.Equals(TEXT("Finished"), ESearchCase::IgnoreCase))
+						{
+							CanonPin = UEdGraphSchema_K2::PN_Execute.ToString();
+						}
+						else if (PinTok.Equals(TEXT("Event"), ESearchCase::IgnoreCase))
+						{
+							CanonPin = UEdGraphSchema_K2::PN_Then.ToString();
+						}
 						else if (PinTok.Equals(TEXT("Then"), ESearchCase::IgnoreCase))
 						{
 							CanonPin = UEdGraphSchema_K2::PN_Then.ToString();
@@ -403,6 +629,17 @@ namespace UnrealAiBlueprintToolsPriv
 		const TArray<TSharedPtr<FJsonValue>>* Defaults = nullptr;
 		if (Args->TryGetArrayField(TEXT("defaults"), Defaults) && Defaults)
 		{
+			TArray<TSharedPtr<FJsonValue>> RewrittenDefaults;
+			RewrittenDefaults.Reserve(Defaults->Num());
+			bool bRewroteDefaults = false;
+
+			TArray<TSharedPtr<FJsonValue>> VariablesArr;
+			const TArray<TSharedPtr<FJsonValue>>* Variables = nullptr;
+			if (Args->TryGetArrayField(TEXT("variables"), Variables) && Variables)
+			{
+				VariablesArr = *Variables;
+			}
+
 			for (const TSharedPtr<FJsonValue>& V : *Defaults)
 			{
 				const TSharedPtr<FJsonObject>* O = nullptr;
@@ -411,6 +648,54 @@ namespace UnrealAiBlueprintToolsPriv
 					continue;
 				}
 				TSharedPtr<FJsonObject> Default = *O;
+				// Some models put variable declarations in defaults[] as:
+				// { name, type, default }. Rewrite these into variables[] and drop
+				// from defaults[] so strict IR parsing does not fail.
+				{
+					FString DeclName;
+					FString DeclType;
+					FString ExistingNodeId;
+					const bool bHasNodeId =
+						Default->TryGetStringField(TEXT("node_id"), ExistingNodeId) && !ExistingNodeId.IsEmpty();
+					if (!bHasNodeId
+						&& Default->TryGetStringField(TEXT("name"), DeclName) && !DeclName.IsEmpty()
+						&& Default->TryGetStringField(TEXT("type"), DeclType) && !DeclType.IsEmpty())
+					{
+						FString CanonType = DeclType.ToLower();
+						if (CanonType == TEXT("boolean"))
+						{
+							CanonType = TEXT("bool");
+						}
+						else if (CanonType == TEXT("integer"))
+						{
+							CanonType = TEXT("int");
+						}
+						TSharedPtr<FJsonObject> VarDecl = MakeShared<FJsonObject>();
+						VarDecl->SetStringField(TEXT("name"), DeclName);
+						VarDecl->SetStringField(TEXT("type"), CanonType);
+						bool BoolDefault = false;
+						double NumberDefault = 0.0;
+						FString StringDefault;
+						if (Default->TryGetBoolField(TEXT("default"), BoolDefault))
+						{
+							VarDecl->SetBoolField(TEXT("default"), BoolDefault);
+						}
+						else if (Default->TryGetNumberField(TEXT("default"), NumberDefault))
+						{
+							VarDecl->SetNumberField(TEXT("default"), NumberDefault);
+						}
+						else if (Default->TryGetStringField(TEXT("default"), StringDefault))
+						{
+							VarDecl->SetStringField(TEXT("default"), StringDefault);
+						}
+						VariablesArr.Add(MakeShared<FJsonValueObject>(VarDecl));
+						Report.bApplied = true;
+						Report.DeprecatedFieldsSeen.Add(TEXT("defaults.variable_decl_shape"));
+						Report.Notes.Add(TEXT("Rewrote defaults[i] {name,type,default} into variables[] declaration."));
+						bRewroteDefaults = true;
+						continue;
+					}
+				}
 				FString NodeId;
 				if (!Default->TryGetStringField(TEXT("node_id"), NodeId) || NodeId.IsEmpty())
 				{
@@ -481,6 +766,13 @@ namespace UnrealAiBlueprintToolsPriv
 						Report.Notes.Add(TEXT("Aliased defaults[i].pinToken -> defaults[i].pin"));
 					}
 				}
+				RewrittenDefaults.Add(MakeShared<FJsonValueObject>(Default));
+			}
+
+			if (bRewroteDefaults)
+			{
+				Args->SetArrayField(TEXT("variables"), VariablesArr);
+				Args->SetArrayField(TEXT("defaults"), RewrittenDefaults);
 			}
 		}
 	}
@@ -526,6 +818,23 @@ namespace UnrealAiBlueprintToolsPriv
 	{
 		FString Path = PathIn;
 		NormalizeBlueprintObjectPath(Path);
+		// Some malformed blueprint assets in harness content can assert during load
+		// (e.g. GeneratedClass == null). Check registry tags first and fail closed.
+		{
+			FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+			const FAssetData AD = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(Path));
+			if (AD.IsValid())
+			{
+				FString GeneratedClassTag;
+				if (!AD.GetTagValue(FName(TEXT("GeneratedClass")), GeneratedClassTag)
+					|| GeneratedClassTag.IsEmpty()
+					|| GeneratedClassTag.Equals(TEXT("None"), ESearchCase::IgnoreCase)
+					|| GeneratedClassTag.Equals(TEXT("null"), ESearchCase::IgnoreCase))
+				{
+					return nullptr;
+				}
+			}
+		}
 		if (UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *Path))
 		{
 			return BP;
@@ -1027,6 +1336,12 @@ namespace UnrealAiBlueprintToolsPriv
 				OutObj->SetStringField(TEXT("op"), OutOp);
 				return;
 			}
+			if (Mn == FName(TEXT("ReceiveActorBeginOverlap")))
+			{
+				OutOp = TEXT("event_actor_begin_overlap");
+				OutObj->SetStringField(TEXT("op"), OutOp);
+				return;
+			}
 		}
 		if (UK2Node_CustomEvent* Ce = Cast<UK2Node_CustomEvent>(N))
 		{
@@ -1130,6 +1445,15 @@ namespace UnrealAiBlueprintToolsPriv
 		{
 			return UEdGraphSchema_K2::PN_Execute.ToString();
 		}
+		if (P.Equals(TEXT("Event"), ESearchCase::IgnoreCase))
+		{
+			return UEdGraphSchema_K2::PN_Then.ToString();
+		}
+		// Common alias for exec input pins on nodes like Branch.
+		if (P.Equals(TEXT("Input"), ESearchCase::IgnoreCase))
+		{
+			return UEdGraphSchema_K2::PN_Execute.ToString();
+		}
 		if (P.Equals(TEXT("Then"), ESearchCase::IgnoreCase))
 		{
 			return UEdGraphSchema_K2::PN_Then.ToString();
@@ -1180,6 +1504,11 @@ namespace UnrealAiBlueprintToolsPriv
 		if (OpLower == TEXT("event_tick"))
 		{
 			OutMember = FName(TEXT("ReceiveTick"));
+			return true;
+		}
+		if (OpLower == TEXT("event_actor_begin_overlap"))
+		{
+			OutMember = FName(TEXT("ReceiveActorBeginOverlap"));
 			return true;
 		}
 		return false;
@@ -1296,7 +1625,12 @@ namespace UnrealAiBlueprintToolsPriv
 		return Cur;
 	}
 
-	static UEdGraphNode* CreateNodeFromDecl(UBlueprint* BP, UEdGraph* Graph, const FIrNodeDecl& D, TArray<FIrError>& Errors)
+	static UEdGraphNode* CreateNodeFromDecl(
+		UBlueprint* BP,
+		UEdGraph* Graph,
+		const FIrNodeDecl& D,
+		TArray<FIrError>& Errors,
+		bool bReuseCustomEventsByName)
 	{
 		if (!BP || !Graph)
 		{
@@ -1308,6 +1642,19 @@ namespace UnrealAiBlueprintToolsPriv
 
 		if (Op == TEXT("event_begin_play"))
 		{
+			// Reuse existing BeginPlay event to avoid duplicate-override failures.
+			for (UEdGraphNode* Existing : Graph->Nodes)
+			{
+				UK2Node_Event* Ev = Cast<UK2Node_Event>(Existing);
+				if (!Ev)
+				{
+					continue;
+				}
+				if (Ev->EventReference.GetMemberName() == FName(TEXT("ReceiveBeginPlay")))
+				{
+					return Ev;
+				}
+			}
 			UK2Node_Event* N = NewObject<UK2Node_Event>(Graph);
 			N->EventReference.SetExternalMember(FName(TEXT("ReceiveBeginPlay")), AActor::StaticClass());
 			N->bOverrideFunction = true;
@@ -1321,8 +1668,47 @@ namespace UnrealAiBlueprintToolsPriv
 		}
 		else if (Op == TEXT("event_tick"))
 		{
+			// Reuse existing Tick event to avoid duplicate-override failures.
+			for (UEdGraphNode* Existing : Graph->Nodes)
+			{
+				UK2Node_Event* Ev = Cast<UK2Node_Event>(Existing);
+				if (!Ev)
+				{
+					continue;
+				}
+				if (Ev->EventReference.GetMemberName() == FName(TEXT("ReceiveTick")))
+				{
+					return Ev;
+				}
+			}
 			UK2Node_Event* N = NewObject<UK2Node_Event>(Graph);
 			N->EventReference.SetExternalMember(FName(TEXT("ReceiveTick")), AActor::StaticClass());
+			N->bOverrideFunction = true;
+			Graph->AddNode(N, true, false);
+			N->NodePosX = D.X;
+			N->NodePosY = D.Y;
+			N->CreateNewGuid();
+			N->PostPlacedNewNode();
+			N->AllocateDefaultPins();
+			Created = N;
+		}
+		else if (Op == TEXT("event_actor_begin_overlap"))
+		{
+			// Reuse existing overlap event when present.
+			for (UEdGraphNode* Existing : Graph->Nodes)
+			{
+				UK2Node_Event* Ev = Cast<UK2Node_Event>(Existing);
+				if (!Ev)
+				{
+					continue;
+				}
+				if (Ev->EventReference.GetMemberName() == FName(TEXT("ReceiveActorBeginOverlap")))
+				{
+					return Ev;
+				}
+			}
+			UK2Node_Event* N = NewObject<UK2Node_Event>(Graph);
+			N->EventReference.SetExternalMember(FName(TEXT("ReceiveActorBeginOverlap")), AActor::StaticClass());
 			N->bOverrideFunction = true;
 			Graph->AddNode(N, true, false);
 			N->NodePosX = D.X;
@@ -1343,6 +1729,17 @@ namespace UnrealAiBlueprintToolsPriv
 					TEXT("custom_event requires name (function name)"),
 					TEXT(""));
 				return nullptr;
+			}
+			if (bReuseCustomEventsByName)
+			{
+				for (UEdGraphNode* Existing : Graph->Nodes)
+				{
+					UK2Node_CustomEvent* CE = Cast<UK2Node_CustomEvent>(Existing);
+					if (CE && CE->CustomFunctionName.ToString().Equals(D.Name, ESearchCase::IgnoreCase))
+					{
+						return CE;
+					}
+				}
 			}
 			UK2Node_CustomEvent* N = NewObject<UK2Node_CustomEvent>(Graph);
 			Graph->AddNode(N, true, false);
@@ -1488,7 +1885,7 @@ namespace UnrealAiBlueprintToolsPriv
 				TEXT("unsupported_op"),
 				FString::Printf(TEXT("$.nodes[%s].op"), *D.NodeId),
 				FString::Printf(TEXT("Unsupported op '%s'"), *D.Op),
-				TEXT("Supported ops: event_begin_play, event_tick, custom_event, branch, sequence, call_function, delay, get_variable, set_variable, dynamic_cast"));
+				TEXT("Supported ops: event_begin_play, event_tick, custom_event, branch, sequence, call_function, delay, get_variable, set_variable, dynamic_cast. For gameplay actions, use call_function with class_path + function_name."));
 			return nullptr;
 		}
 
@@ -1932,7 +2329,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 				continue;
 			}
 		}
-		if (UEdGraphNode* N = CreateNodeFromDecl(BP, Graph, D, BuildErrors))
+		const bool bReuseCustomEvents = EffectiveMergePolicy.Equals(TEXT("append_to_existing"), ESearchCase::IgnoreCase);
+		if (UEdGraphNode* N = CreateNodeFromDecl(BP, Graph, D, BuildErrors, bReuseCustomEvents))
 		{
 			NodeById.Add(D.NodeId, N);
 		}
@@ -2036,12 +2434,33 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 
 	if (BuildErrors.Num() > 0)
 	{
+		TSharedPtr<FJsonObject> SuggestedArgs = nullptr;
+		const TCHAR* SuggestedToolId = TEXT("");
+		bool bHasUnsupportedOp = false;
+		for (const FIrError& E : BuildErrors)
+		{
+			if (E.Code.Equals(TEXT("unsupported_op"), ESearchCase::CaseSensitive))
+			{
+				bHasUnsupportedOp = true;
+				break;
+			}
+		}
+		if (bHasUnsupportedOp)
+		{
+			// Deterministic recovery for unknown op loops:
+			// ask model to read existing graph IR first, then re-apply with supported ops only.
+			SuggestedArgs = MakeShared<FJsonObject>();
+			SuggestedArgs->SetStringField(TEXT("blueprint_path"), Ir.BlueprintPath);
+			SuggestedToolId = TEXT("blueprint_export_ir");
+		}
 		return MakeIrErrorResult(
 			TEXT("apply_failed"),
 			TEXT("Blueprint IR apply failed"),
 			BuildErrors,
 			Normalization.Notes,
-			Normalization.DeprecatedFieldsSeen);
+			Normalization.DeprecatedFieldsSeen,
+			SuggestedArgs,
+			SuggestedToolId);
 	}
 
 	TArray<UEdGraphNode*> MaterializedNodes;

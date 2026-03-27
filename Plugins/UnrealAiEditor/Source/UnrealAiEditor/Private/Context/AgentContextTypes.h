@@ -144,6 +144,8 @@ struct FAgentContextBuildOptions
 	FString StaticSystemPrefix;
 	/** Latest user message for this turn — feeds context ranking/retrieval hints. */
 	FString UserMessageForComplexity;
+	/** Active thread id at build time, used for thread-preferred memory retrieval. */
+	FString ThreadIdForMemory;
 	/** From model profile: if false, image-like attachments are stripped when building context. */
 	bool bModelSupportsImages = true;
 	/** Optional call-site label for decision log attribution (for example: request_build, harness_dump_run_started). */

@@ -5,11 +5,15 @@
 
 class IUnrealAiPersistence;
 class IUnrealAiMemoryService;
+class IUnrealAiRetrievalService;
 
 class FUnrealAiContextService final : public IAgentContextService
 {
 public:
-	FUnrealAiContextService(IUnrealAiPersistence* InPersistence, IUnrealAiMemoryService* InMemoryService);
+	FUnrealAiContextService(
+		IUnrealAiPersistence* InPersistence,
+		IUnrealAiMemoryService* InMemoryService,
+		IUnrealAiRetrievalService* InRetrievalService = nullptr);
 
 	virtual void LoadOrCreate(const FString& ProjectId, const FString& ThreadId) override;
 	virtual void ClearSession(const FString& ProjectId, const FString& ThreadId) override;
@@ -51,6 +55,7 @@ private:
 
 	IUnrealAiPersistence* Persistence = nullptr;
 	IUnrealAiMemoryService* MemoryService = nullptr;
+	IUnrealAiRetrievalService* RetrievalService = nullptr;
 	TMap<FString, FAgentContextState> Sessions;
 	FString ActiveProjectId;
 	FString ActiveThreadId;

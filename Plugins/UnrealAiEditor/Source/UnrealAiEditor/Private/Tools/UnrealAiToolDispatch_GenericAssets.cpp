@@ -2,6 +2,7 @@
 
 #include "Tools/UnrealAiToolJson.h"
 #include "Tools/UnrealAiToolDispatch_ArgRepair.h"
+#include "Tools/UnrealAiAssetFactoryResolver.h"
 
 #include "AssetRegistry/AssetIdentifier.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -37,6 +38,12 @@ namespace UnrealAiGenericAssets
 			return true;
 		}
 		return Pkg.StartsWith(TEXT("/Game/"));
+	}
+
+	static FString BuildExpectedObjectPath(const FString& PackagePath, const FString& AssetName)
+	{
+		// Example: PackagePath=/Game/Foo, AssetName=Bar -> /Game/Foo/Bar.Bar
+		return PackagePath + TEXT("/") + AssetName + TEXT(".") + AssetName;
 	}
 
 	static UObject* LoadObjectInGame(const FString& ObjectPath, FString& OutErr)
@@ -358,21 +365,84 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetCreate(const TSharedPtr<FJso
 			SuggestedArgs);
 	}
 
-	UFactory* Factory = nullptr;
-	if (!FactoryClassPath.IsEmpty())
+	// If the asset already exists, return success to prevent repeated CreateAsset failures
+	// from consuming agent LLM rounds.
 	{
-		UClass* FC = LoadObject<UClass>(nullptr, *FactoryClassPath);
-		if (!FC || !FC->IsChildOf(UFactory::StaticClass()))
+		const FString ExpectedObjPath = BuildExpectedObjectPath(PackagePath, AssetName);
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+		const FAssetData AD = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(ExpectedObjPath));
+		if (AD.IsValid())
 		{
-			return UnrealAiToolJson::Error(TEXT("factory_class must be a UFactory subclass"));
+			UObject* ExistingObj = LoadObject<UObject>(nullptr, *ExpectedObjPath);
+			if (ExistingObj && ExistingObj->IsA(AssetClass))
+			{
+				TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+				O->SetBoolField(TEXT("ok"), true);
+				O->SetStringField(TEXT("object_path"), ExistingObj->GetPathName());
+				O->SetBoolField(TEXT("already_existed"), true);
+				return UnrealAiToolJson::Ok(O);
+			}
+
+			return UnrealAiToolJson::Error(TEXT("asset_create: asset already exists with a different class"));
 		}
-		Factory = NewObject<UFactory>(GetTransientPackage(), FC);
 	}
+
+	// Resolve / infer a non-interactive factory when omitted.
+	const FUnrealAiAssetFactoryResolver::FResolveResult FactoryRes =
+		FUnrealAiAssetFactoryResolver::Resolve(AssetClass, FactoryClassPath);
+	if (!FactoryRes.Factory)
+	{
+		// Return a deterministic suggested_correct_call that includes a best-guess factory_class when available.
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("package_path"), PackagePath);
+		SuggestedArgs->SetStringField(TEXT("asset_name"), AssetName);
+		SuggestedArgs->SetStringField(TEXT("asset_class"), ClassPath);
+		if (!FactoryRes.FactoryClassPath.IsEmpty())
+		{
+			SuggestedArgs->SetStringField(TEXT("factory_class"), FactoryRes.FactoryClassPath);
+		}
+
+		FString Msg = TEXT("Could not resolve a non-interactive factory for asset_create.");
+		if (FactoryRes.Notes.Num() > 0)
+		{
+			Msg += TEXT(" notes=");
+			Msg += FString::Join(FactoryRes.Notes, TEXT(" | "));
+		}
+		if (FactoryRes.Candidates.Num() > 0)
+		{
+			Msg += TEXT(" candidates=");
+			Msg += FString::Join(FactoryRes.Candidates, TEXT(", "));
+		}
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			Msg,
+			TEXT("asset_create"),
+			SuggestedArgs);
+	}
+	UFactory* Factory = FactoryRes.Factory;
 
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnAssetCreate", "Unreal AI: create asset"));
 	UObject* NewObj = IAssetTools::Get().CreateAsset(AssetName, PackagePath, AssetClass, Factory);
 	if (!NewObj)
 	{
+		// Best-effort: if the asset exists now, treat it as success.
+		{
+			const FString ExpectedObjPath = BuildExpectedObjectPath(PackagePath, AssetName);
+			FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+			const FAssetData AD = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(ExpectedObjPath));
+			if (AD.IsValid())
+			{
+				UObject* ExistingObj = LoadObject<UObject>(nullptr, *ExpectedObjPath);
+				if (ExistingObj && ExistingObj->IsA(AssetClass))
+				{
+					TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+					O->SetBoolField(TEXT("ok"), true);
+					O->SetStringField(TEXT("object_path"), ExistingObj->GetPathName());
+					O->SetBoolField(TEXT("already_existed"), true);
+					return UnrealAiToolJson::Ok(O);
+				}
+			}
+		}
+
 		return UnrealAiToolJson::Error(TEXT("CreateAsset failed (check package path, name, class, factory)"));
 	}
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
@@ -457,6 +527,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetApplyProperties(const TShare
 	}
 
 	TArray<FString> ApplyErrors;
+	TArray<FString> IgnoredProperties;
 	FScopedTransaction Txn(
 		NSLOCTEXT("UnrealAiEditor", "TxnApplyProps", "Unreal AI: apply properties"),
 		!bDryRun);
@@ -468,6 +539,18 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetApplyProperties(const TShare
 
 	for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*Delta)->Values)
 	{
+		// Naming is usually not an editable/reflection-safe property on Unreal assets.
+		// Agents often try to set it after creation; treat these keys as no-ops.
+		{
+			const FString K = Pair.Key;
+			if (K.Equals(TEXT("AssetName"), ESearchCase::IgnoreCase) //
+				|| K.Equals(TEXT("ObjectName"), ESearchCase::IgnoreCase))
+			{
+				IgnoredProperties.Add(K);
+				continue;
+			}
+		}
+
 		FProperty* Prop = FindFProperty<FProperty>(Obj->GetClass(), FName(*Pair.Key));
 		if (!Prop || !ShouldExportProperty(Prop))
 		{
@@ -483,6 +566,17 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetApplyProperties(const TShare
 
 	if (ApplyErrors.Num() > 0)
 	{
+		// If everything failed due to unknown/non-editable properties, suggest exporting properties first.
+		bool bAllUnknown = true;
+		for (const FString& E : ApplyErrors)
+		{
+			if (!E.Contains(TEXT("not editable or unknown property")))
+			{
+				bAllUnknown = false;
+				break;
+			}
+		}
+
 		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 		O->SetBoolField(TEXT("ok"), false);
 		O->SetStringField(TEXT("status"), TEXT("apply_errors"));
@@ -492,9 +586,19 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetApplyProperties(const TShare
 			Arr.Add(MakeShareable(new FJsonValueString(E)));
 		}
 		O->SetArrayField(TEXT("errors"), Arr);
+		if (bAllUnknown)
+		{
+			TSharedPtr<FJsonObject> SuggestedCall = MakeShared<FJsonObject>();
+			SuggestedCall->SetStringField(TEXT("tool"), TEXT("asset_export_properties"));
+			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+			SuggestedArgs->SetStringField(TEXT("object_path"), Obj->GetPathName());
+			SuggestedCall->SetObjectField(TEXT("args"), SuggestedArgs);
+			O->SetObjectField(TEXT("suggested_correct_call"), SuggestedCall);
+		}
 		FUnrealAiToolInvocationResult R;
 		R.bOk = false;
-		R.ErrorMessage = TEXT("One or more properties failed to apply");
+		// Harness consumes ErrorMessage when bOk=false, so include structured details.
+		R.ErrorMessage = UnrealAiToolJson::SerializeObject(O);
 		R.ContentForModel = UnrealAiToolJson::SerializeObject(O);
 		return R;
 	}
@@ -509,6 +613,15 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetApplyProperties(const TShare
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("object_path"), Obj->GetPathName());
 	O->SetBoolField(TEXT("dry_run"), bDryRun);
+	if (IgnoredProperties.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> IgnArr;
+		for (const FString& P : IgnoredProperties)
+		{
+			IgnArr.Add(MakeShareable(new FJsonValueString(P)));
+		}
+		O->SetArrayField(TEXT("ignored_properties"), IgnArr);
+	}
 	return UnrealAiToolJson::Ok(O);
 }
 

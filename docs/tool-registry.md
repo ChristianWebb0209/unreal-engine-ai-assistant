@@ -86,7 +86,7 @@ Every tool below follows this schema (suitable for export to JSON for OpenAI/Ant
 
 ## Tier-1 MVP tools (viewport, capture, selection, UI)
 
-These align with [`PRD.md`](PRD.md) §6 and are the first implementation wave. Each row is expanded in its domain section.
+These are the first implementation wave. Each row is expanded in its domain section.
 
 | `tool_id` | Summary | Permission | Key UE surfaces |
 |-----------|---------|------------|-----------------|
@@ -444,7 +444,7 @@ These align with [`PRD.md`](PRD.md) §6 and are the first implementation wave. E
 | Field | Value |
 |-------|--------|
 | **summary** | Destroy an actor in the editor world. |
-| **parameters** | `actor_path`, `confirm` token for destructive profile. |
+| **parameters** | `actor_path`, optional `confirm` (auto-filled in headed runs when `UNREAL_AI_AUTO_RUN_DESTRUCTIVE=1`). |
 | **returns** | `success`. |
 | **side_effects** | scene |
 | **permission** | `destructive` |
@@ -657,7 +657,7 @@ These align with [`PRD.md`](PRD.md) §6 and are the first implementation wave. E
 
 ## Blueprints & graph tooling
 
-**Layout + merge (append new logic to existing events like Tick instead of duplicating):** see [`UnrealBlueprintFormatter.md`](UnrealBlueprintFormatter.md). The **Unreal Blueprint Formatter** plugin (`Plugins/UnrealBlueprintFormatter/`) supplies `FUnrealBlueprintGraphFormatService` for `auto_layout`, `layout_scope: full_graph`, and **`blueprint_format_graph`**.
+**Layout + merge (append new logic to existing events like Tick instead of duplicating):** the **Unreal Blueprint Formatter** plugin (`Plugins/UnrealBlueprintFormatter/`) supplies `FUnrealBlueprintGraphFormatService` for `auto_layout`, `layout_scope: full_graph`, and **`blueprint_format_graph`**.
 
 ### `blueprint_export_ir`
 
@@ -985,7 +985,7 @@ These align with [`PRD.md`](PRD.md) §6 and are the first implementation wave. E
 | Field | Value |
 |-------|--------|
 | **summary** | Write text file under project (e.g. config or notes) with confirmation. |
-| **parameters** | `relative_path`, `content`, `confirm`. |
+| **parameters** | `relative_path`, `content`, optional `confirm` (auto-filled in headed runs when `UNREAL_AI_AUTO_RUN_DESTRUCTIVE=1`). |
 | **returns** | `success`. |
 | **side_effects** | disk |
 | **permission** | `destructive` |

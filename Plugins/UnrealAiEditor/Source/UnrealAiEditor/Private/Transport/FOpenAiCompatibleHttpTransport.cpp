@@ -9,6 +9,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "HAL/PlatformMisc.h"
+#include "Misc/DefaultValueHelper.h"
 
 namespace OpenAiTransportUtil
 {
@@ -268,6 +269,48 @@ namespace OpenAiTransportUtil
 		// Some proxies omit the final data: [DONE] line; still complete the harness turn.
 		EmitFinalFinish();
 	}
+
+	static float ParseRetryAfterSecondsBestEffort(const FString& RespBody, const FString& RetryAfterHeader)
+	{
+		float HeaderSeconds = 0.0f;
+		if (!RetryAfterHeader.IsEmpty())
+		{
+			// OpenAI-style proxies may send integer seconds.
+			if (FDefaultValueHelper::ParseFloat(RetryAfterHeader, HeaderSeconds) && HeaderSeconds > 0.0f)
+			{
+				return FMath::Clamp(HeaderSeconds, 0.5f, 10.0f);
+			}
+		}
+
+		// Example: "Please try again in 3.756s."
+		const FString Needle = TEXT("Please try again in ");
+		const int32 Idx = RespBody.Find(Needle, ESearchCase::IgnoreCase, ESearchDir::FromStart);
+		if (Idx >= 0)
+		{
+			const int32 Start = Idx + Needle.Len();
+			int32 End = Start;
+			while (End < RespBody.Len())
+			{
+				const TCHAR Ch = RespBody[End];
+				if ((Ch >= '0' && Ch <= '9') || Ch == '.' || Ch == ',')
+				{
+					++End;
+					continue;
+				}
+				break;
+			}
+			FString Num = RespBody.Mid(Start, End - Start);
+			Num.ReplaceInline(TEXT(","), TEXT("."));
+			float BodySeconds = 0.0f;
+			if (FDefaultValueHelper::ParseFloat(Num, BodySeconds) && BodySeconds > 0.0f)
+			{
+				return FMath::Clamp(BodySeconds, 0.5f, 10.0f);
+			}
+		}
+
+		// Fallback: small jittered wait.
+		return 2.0f;
+	}
 }
 
 void FOpenAiCompatibleHttpTransport::CancelActiveRequest()
@@ -374,61 +417,96 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 		Key.Len(),
 		BodyStr.Len(),
 		Request.ToolsJsonArray.Len());
-	ActiveRequest = HttpRequest;
-	HttpRequest->OnProcessRequestComplete().BindLambda(
-		[this, OnEvent, bStream = Request.bStream](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bOk)
+
+	// Best-effort 429 backoff/retry: prevents single-turn failures when the org TPM bucket is briefly exhausted.
+	// Keep small to avoid long hangs in-editor.
+	const int32 MaxAttempts = 3;
+	TSharedRef<int32, ESPMode::ThreadSafe> Attempt = MakeShared<int32, ESPMode::ThreadSafe>(0);
+
+	TFunction<void()> SendAttempt;
+	SendAttempt = [this, OnEvent, bStream = Request.bStream, Url, Key, BodyStr, TimeoutSec, Attempt, MaxAttempts, &SendAttempt]()
+	{
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest2 = FHttpModule::Get().CreateRequest();
+		HttpRequest2->SetURL(Url);
+		HttpRequest2->SetVerb(TEXT("POST"));
+		HttpRequest2->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+		HttpRequest2->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *Key));
+		HttpRequest2->SetContentAsString(BodyStr);
+		HttpRequest2->SetTimeout(TimeoutSec);
+
+		ActiveRequest = HttpRequest2;
+		HttpRequest2->OnProcessRequestComplete().BindLambda(
+			[this, OnEvent, bStream, Url, Attempt, MaxAttempts, &SendAttempt](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bOk)
+			{
+				ActiveRequest.Reset();
+				if (!bOk)
+				{
+					FString Detail = TEXT("HTTP request failed (transport did not complete successfully)");
+					if (Req.IsValid())
+					{
+						Detail = FString::Printf(
+							TEXT("HTTP request failed: %s (%s). URL: %s"),
+							EHttpRequestStatus::ToString(Req->GetStatus()),
+							LexToString(Req->GetFailureReason()),
+							*Req->GetURL());
+					}
+					else if (Resp.IsValid())
+					{
+						Detail = FString::Printf(
+							TEXT("HTTP request failed: %s (%s)"),
+							EHttpRequestStatus::ToString(Resp->GetStatus()),
+							LexToString(Resp->GetFailureReason()));
+					}
+					OpenAiTransportUtil::EmitError(OnEvent, Detail);
+					return;
+				}
+				if (!Resp.IsValid())
+				{
+					OpenAiTransportUtil::EmitError(OnEvent, TEXT("HTTP request failed: no response (check API URL, key, firewall, proxy)"));
+					return;
+				}
+
+				const int32 Code = Resp->GetResponseCode();
+				const FString RespBody = Resp->GetContentAsString();
+				if (Code == 429 && (*Attempt) < (MaxAttempts - 1))
+				{
+					const FString RetryAfterHeader = Resp->GetHeader(TEXT("Retry-After"));
+					const float WaitSec = OpenAiTransportUtil::ParseRetryAfterSecondsBestEffort(RespBody, RetryAfterHeader);
+					UE_LOG(LogTemp, Warning, TEXT("UnrealAi HTTP 429; backing off %.2fs then retrying (attempt %d/%d)."), WaitSec, (*Attempt) + 1, MaxAttempts);
+					++(*Attempt);
+					FPlatformProcess::Sleep(WaitSec);
+					SendAttempt();
+					return;
+				}
+
+				if (Code < 200 || Code >= 300)
+				{
+					OpenAiTransportUtil::EmitError(OnEvent, FString::Printf(TEXT("HTTP %d: %s"), Code, *RespBody.Left(500)));
+					return;
+				}
+
+				if (bStream)
+				{
+					OpenAiTransportUtil::ParseSseBody(RespBody, OnEvent);
+				}
+				else
+				{
+					OpenAiTransportUtil::ParseNonStreamBody(RespBody, OnEvent);
+				}
+			});
+
+		const bool bStarted2 = HttpRequest2->ProcessRequest();
+		if (!bStarted2)
 		{
 			ActiveRequest.Reset();
-			if (!bOk)
-			{
-				FString Detail = TEXT("HTTP request failed (transport did not complete successfully)");
-				if (Req.IsValid())
-				{
-					Detail = FString::Printf(
-						TEXT("HTTP request failed: %s (%s). URL: %s"),
-						EHttpRequestStatus::ToString(Req->GetStatus()),
-						LexToString(Req->GetFailureReason()),
-						*Req->GetURL());
-				}
-				else if (Resp.IsValid())
-				{
-					Detail = FString::Printf(
-						TEXT("HTTP request failed: %s (%s)"),
-						EHttpRequestStatus::ToString(Resp->GetStatus()),
-						LexToString(Resp->GetFailureReason()));
-				}
-				OpenAiTransportUtil::EmitError(OnEvent, Detail);
-				return;
-			}
-			if (!Resp.IsValid())
-			{
-				OpenAiTransportUtil::EmitError(OnEvent, TEXT("HTTP request failed: no response (check API URL, key, firewall, proxy)"));
-				return;
-			}
-			const int32 Code = Resp->GetResponseCode();
-			const FString RespBody = Resp->GetContentAsString();
-			if (Code < 200 || Code >= 300)
-			{
-				OpenAiTransportUtil::EmitError(OnEvent, FString::Printf(TEXT("HTTP %d: %s"), Code, *RespBody.Left(500)));
-				return;
-			}
-			if (bStream)
-			{
-				OpenAiTransportUtil::ParseSseBody(RespBody, OnEvent);
-			}
-			else
-			{
-				OpenAiTransportUtil::ParseNonStreamBody(RespBody, OnEvent);
-			}
-		});
-	const bool bStarted = HttpRequest->ProcessRequest();
-	if (!bStarted)
-	{
-		ActiveRequest.Reset();
-		OpenAiTransportUtil::EmitError(
-			OnEvent,
-			FString::Printf(
-				TEXT("HTTP request failed to start (URL=%s). Check API URL, TLS/proxy/firewall, and provider settings."),
-				*Url));
-	}
+			OpenAiTransportUtil::EmitError(
+				OnEvent,
+				FString::Printf(
+					TEXT("HTTP request failed to start (URL=%s). Check API URL, TLS/proxy/firewall, and provider settings."),
+					*Url));
+		}
+	};
+
+	// Kick off initial attempt.
+	SendAttempt();
 }
