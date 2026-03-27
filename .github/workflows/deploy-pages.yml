@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           rm -rf .pages-src _site
-          mkdir -p .pages-src/docs
+          mkdir -p .pages-src/docs .pages-src/_includes
           cp README.md .pages-src/index.md
           cp ARCHITECTURE_MAPS.md .pages-src/architecture-maps.md
           cp architecture.svg .pages-src/architecture.svg
