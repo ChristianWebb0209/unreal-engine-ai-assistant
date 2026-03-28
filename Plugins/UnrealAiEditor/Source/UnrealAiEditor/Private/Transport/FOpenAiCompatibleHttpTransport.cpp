@@ -9,6 +9,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "HAL/PlatformMisc.h"
+#include "Misc/DateTime.h"
 #include "Misc/DefaultValueHelper.h"
 
 namespace OpenAiTransportUtil
@@ -270,46 +271,146 @@ namespace OpenAiTransportUtil
 		EmitFinalFinish();
 	}
 
-	static float ParseRetryAfterSecondsBestEffort(const FString& RespBody, const FString& RetryAfterHeader)
+	/** Parses "Please try again in N" / "Nms" / "Ns" from a substring (e.g. full body or JSON error.message). */
+	static float TryParseTryAgainInSeconds(const FString& Text)
 	{
-		float HeaderSeconds = 0.0f;
-		if (!RetryAfterHeader.IsEmpty())
-		{
-			// OpenAI-style proxies may send integer seconds.
-			if (FDefaultValueHelper::ParseFloat(RetryAfterHeader, HeaderSeconds) && HeaderSeconds > 0.0f)
-			{
-				return FMath::Clamp(HeaderSeconds, 0.5f, 10.0f);
-			}
-		}
-
-		// Example: "Please try again in 3.756s."
 		const FString Needle = TEXT("Please try again in ");
-		const int32 Idx = RespBody.Find(Needle, ESearchCase::IgnoreCase, ESearchDir::FromStart);
-		if (Idx >= 0)
+		const int32 Idx = Text.Find(Needle, ESearchCase::IgnoreCase, ESearchDir::FromStart);
+		if (Idx < 0)
 		{
-			const int32 Start = Idx + Needle.Len();
-			int32 End = Start;
-			while (End < RespBody.Len())
+			return 0.0f;
+		}
+		const int32 Start = Idx + Needle.Len();
+		int32 End = Start;
+		while (End < Text.Len())
+		{
+			const TCHAR Ch = Text[End];
+			if ((Ch >= '0' && Ch <= '9') || Ch == '.' || Ch == ',')
 			{
-				const TCHAR Ch = RespBody[End];
-				if ((Ch >= '0' && Ch <= '9') || Ch == '.' || Ch == ',')
-				{
-					++End;
-					continue;
-				}
-				break;
+				++End;
+				continue;
 			}
-			FString Num = RespBody.Mid(Start, End - Start);
-			Num.ReplaceInline(TEXT(","), TEXT("."));
-			float BodySeconds = 0.0f;
-			if (FDefaultValueHelper::ParseFloat(Num, BodySeconds) && BodySeconds > 0.0f)
+			break;
+		}
+		FString Num = Text.Mid(Start, End - Start);
+		Num.ReplaceInline(TEXT(","), TEXT("."));
+		float BodySeconds = 0.0f;
+		if (!FDefaultValueHelper::ParseFloat(Num, BodySeconds) || BodySeconds <= 0.0f)
+		{
+			return 0.0f;
+		}
+		// OpenAI TPM limits often return "Please try again in 41ms." — must not treat 41 as seconds.
+		if (End + 1 < Text.Len())
+		{
+			const FString AfterNum = Text.Mid(End, 2);
+			if (AfterNum.Equals(TEXT("ms"), ESearchCase::IgnoreCase))
 			{
-				return FMath::Clamp(BodySeconds, 0.5f, 10.0f);
+				BodySeconds /= 1000.0f;
+			}
+		}
+		return BodySeconds;
+	}
+
+	/** RFC 7231 Retry-After: delay-seconds or HTTP-date. When present, wait this long (not a shorter backoff). */
+	static bool TryParseRetryAfterHeaderSeconds(const FString& RetryAfterHeader, float& OutSeconds)
+	{
+		const FString H = RetryAfterHeader.TrimStartAndEnd();
+		if (H.IsEmpty())
+		{
+			return false;
+		}
+		// Absolute time (e.g. "Wed, 21 Oct 2015 07:28:00 GMT")
+		if (H.Contains(TEXT(",")) || (H.Len() > 0 && FChar::IsAlpha(H[0])))
+		{
+			FDateTime WhenUtc;
+			if (FDateTime::ParseHttpDate(H, WhenUtc))
+			{
+				const FTimespan Remaining = WhenUtc - FDateTime::UtcNow();
+				OutSeconds = static_cast<float>(FMath::Max(0.0, Remaining.GetTotalSeconds()));
+				return true;
+			}
+		}
+		float Sec = 0.0f;
+		if (FDefaultValueHelper::ParseFloat(H, Sec) && Sec >= 0.0f)
+		{
+			OutSeconds = Sec;
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Returns true when the response includes an explicit wait hint (header or body). OutSeconds is then the
+	 * provider-requested delay (honored up to kMax429WaitSec). When false, use exponential fallback (no hint).
+	 */
+	static bool TryParseAuthoritative429WaitSeconds(
+		const FString& RespBody,
+		const FString& RetryAfterHeader,
+		float& OutSeconds)
+	{
+		if (TryParseRetryAfterHeaderSeconds(RetryAfterHeader, OutSeconds))
+		{
+			return true;
+		}
+
+		TSharedPtr<FJsonObject> Root;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(RespBody);
+		if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
+		{
+			const TSharedPtr<FJsonObject>* ErrObj = nullptr;
+			if (Root->TryGetObjectField(TEXT("error"), ErrObj) && ErrObj && ErrObj->IsValid())
+			{
+				double RetryAfterNum = 0.0;
+				if ((*ErrObj)->TryGetNumberField(TEXT("retry_after"), RetryAfterNum) && RetryAfterNum >= 0.0)
+				{
+					OutSeconds = static_cast<float>(RetryAfterNum);
+					return true;
+				}
+				FString Msg;
+				if ((*ErrObj)->TryGetStringField(TEXT("message"), Msg) && !Msg.IsEmpty())
+				{
+					const float FromMsg = TryParseTryAgainInSeconds(Msg);
+					if (FromMsg > 0.0f)
+					{
+						OutSeconds = FromMsg;
+						return true;
+					}
+				}
 			}
 		}
 
-		// Fallback: small jittered wait.
-		return 2.0f;
+		const float FromBody = TryParseTryAgainInSeconds(RespBody);
+		if (FromBody > 0.0f)
+		{
+			OutSeconds = FromBody;
+			return true;
+		}
+		return false;
+	}
+
+	/** Max sleep for a single 429 wait — avoids runaway parses; TPM windows can exceed minutes. */
+	static constexpr float kMax429WaitSec = 86400.0f;
+
+	/** When the provider did not specify a wait, use bounded exponential backoff so we do not hammer 429. */
+	static float Fallback429WaitSeconds(const int32 ZeroBasedAttemptIndex)
+	{
+		const float MinExp = FMath::Clamp(
+			0.5f * FMath::Pow(2.0f, static_cast<float>(FMath::Max(0, ZeroBasedAttemptIndex))),
+			0.5f,
+			45.0f);
+		return FMath::Clamp(FMath::Max(2.0f, MinExp), 0.5f, kMax429WaitSec);
+	}
+
+	static float Compute429WaitSeconds(
+		const bool bAuthoritativeHint,
+		const float AuthoritativeSeconds,
+		const int32 ZeroBasedAttemptIndex)
+	{
+		if (bAuthoritativeHint)
+		{
+			return FMath::Clamp(AuthoritativeSeconds, 0.01f, kMax429WaitSec);
+		}
+		return Fallback429WaitSeconds(ZeroBasedAttemptIndex);
 	}
 }
 
@@ -419,12 +520,19 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 		Request.ToolsJsonArray.Len());
 
 	// Best-effort 429 backoff/retry: prevents single-turn failures when the org TPM bucket is briefly exhausted.
-	// Keep small to avoid long hangs in-editor.
-	const int32 MaxAttempts = 3;
+	// Override: UNREAL_AI_HTTP_429_MAX_ATTEMPTS (clamped 1-8). Default leaves room for TPM + parse fallbacks.
+	int32 MaxAttempts = 5;
+	{
+		const FString MaxAttemptsEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HTTP_429_MAX_ATTEMPTS"));
+		if (!MaxAttemptsEnv.IsEmpty())
+		{
+			MaxAttempts = FMath::Clamp(FCString::Atoi(*MaxAttemptsEnv), 1, 8);
+		}
+	}
 	TSharedRef<int32, ESPMode::ThreadSafe> Attempt = MakeShared<int32, ESPMode::ThreadSafe>(0);
 
-	TFunction<void()> SendAttempt;
-	SendAttempt = [this, OnEvent, bStream = Request.bStream, Url, Key, BodyStr, TimeoutSec, Attempt, MaxAttempts, &SendAttempt]()
+	TSharedRef<TFunction<void()>, ESPMode::ThreadSafe> SendAttempt = MakeShared<TFunction<void()>>();
+	*SendAttempt = [this, OnEvent, bStream = Request.bStream, Url, Key, BodyStr, TimeoutSec, Attempt, MaxAttempts, SendAttempt]()
 	{
 		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest2 = FHttpModule::Get().CreateRequest();
 		HttpRequest2->SetURL(Url);
@@ -436,7 +544,7 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 
 		ActiveRequest = HttpRequest2;
 		HttpRequest2->OnProcessRequestComplete().BindLambda(
-			[this, OnEvent, bStream, Url, Attempt, MaxAttempts, &SendAttempt](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bOk)
+			[this, OnEvent, bStream, Url, Attempt, MaxAttempts, SendAttempt](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bOk)
 			{
 				ActiveRequest.Reset();
 				if (!bOk)
@@ -471,11 +579,19 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 				if (Code == 429 && (*Attempt) < (MaxAttempts - 1))
 				{
 					const FString RetryAfterHeader = Resp->GetHeader(TEXT("Retry-After"));
-					const float WaitSec = OpenAiTransportUtil::ParseRetryAfterSecondsBestEffort(RespBody, RetryAfterHeader);
-					UE_LOG(LogTemp, Warning, TEXT("UnrealAi HTTP 429; backing off %.2fs then retrying (attempt %d/%d)."), WaitSec, (*Attempt) + 1, MaxAttempts);
+					float AuthWaitSec = 0.0f;
+					const bool bAuthHint = OpenAiTransportUtil::TryParseAuthoritative429WaitSeconds(RespBody, RetryAfterHeader, AuthWaitSec);
+					const float WaitSec = OpenAiTransportUtil::Compute429WaitSeconds(bAuthHint, AuthWaitSec, *Attempt);
+					UE_LOG(LogTemp, Warning,
+						TEXT("UnrealAi HTTP 429; waiting %.2fs (%s, raw_hint=%.2fs) then retrying (attempt %d/%d)."),
+						WaitSec,
+						bAuthHint ? TEXT("provider hint") : TEXT("fallback backoff"),
+						bAuthHint ? AuthWaitSec : 0.0f,
+						(*Attempt) + 1,
+						MaxAttempts);
 					++(*Attempt);
 					FPlatformProcess::Sleep(WaitSec);
-					SendAttempt();
+					(*SendAttempt)();
 					return;
 				}
 
@@ -508,5 +624,5 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 	};
 
 	// Kick off initial attempt.
-	SendAttempt();
+	(*SendAttempt)();
 }
