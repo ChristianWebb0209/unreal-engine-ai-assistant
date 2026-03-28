@@ -58,6 +58,18 @@ For **tooling breadth** and known gaps, see [`docs/asset-type-coverage-matrix.md
 
 [![Tooling components](docs/architecture-maps/structurizr-tooling-components.svg)](docs/architecture-maps/structurizr-tooling-components.svg)
 
+### Tool surface graph
+
+[Open full-size SVG](docs/architecture-maps/structurizr-tool-surface-graph.svg)
+
+[![Tool surface graph](docs/architecture-maps/structurizr-tool-surface-graph.svg)](docs/architecture-maps/structurizr-tool-surface-graph.svg)
+
+### Tool surface sequence
+
+[Open full-size SVG](docs/architecture-maps/structurizr-tool-surface-sequence.svg)
+
+[![Tool surface sequence](docs/architecture-maps/structurizr-tool-surface-sequence.svg)](docs/architecture-maps/structurizr-tool-surface-sequence.svg)
+
 ### Retrieval components
 
 [Open full-size SVG](docs/architecture-maps/structurizr-retrieval-components.svg)
