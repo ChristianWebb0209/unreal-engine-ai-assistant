@@ -12,6 +12,33 @@ Running log of changes aimed at improving headed harness quality and API reliabi
 
 ---
 
+## 2026-03-28 — pre-iteration: harness sync default, localized catalog nudges (no global prompt bloat)
+
+### Context
+
+- **`tests/long-running-tests/run-long-running-headed.ps1`:** Default **`-SyncWaitMs`** raised from **60000** to **150000** (150s) so the script’s `UNREAL_AI_HARNESS_SYNC_WAIT_MS` matches the **UnrealAiHarnessScenarioRunner** default intent (C++ uses 150s when env is unset; the script always set 60s before, which starved **plan-mode** turns with `Harness run timed out waiting for completion`). Comment block documents that plan steps often need **≥120s** and suggests **`-SyncWaitMs 180000`** when flaky. On batch start, stdout logs effective sync wait ms.
+
+### Tools
+
+- **`UnrealAiToolCatalog.json` — `asset_index_fuzzy_search`:** Summary + **`query`** description nudge: on vague domain-scoped user asks, **prefer one bounded fuzzy/registry call** (topical query + narrow `path_prefix`) **over** asking the user for a keyword first; align with headed run **fine-tune-01 step_07** where the model replied conversationally instead of searching. *Why:* steer via **per-tool** catalog text (paid when the tool is in the roster), not a long new paragraph in **`04-tool-calling-contract.md`** (global token cost).
+- **Same file — `material_get_usage_summary`:** Summary line + **`failure_modes`** — if not found, retry discovery with **`asset_index_fuzzy_search`** before concluding absence.
+
+### Resolvers
+
+- — (none)
+
+### Prompts
+
+- — (none — intentional; vague-discovery steering is catalog-local this cycle.)
+
+### Iteration stance (for later critique)
+
+- **100% harness completion is not the goal**; we still expect residual **`tool_finish_false`**, qualitative misses, and API variance.
+- **Harness hygiene** (sync wait vs plan executor cost) is owned by **script/C++ bounds**; **LLM policy** nudges for “call search before chit-chat” are **localized catalog** lines to avoid growing always-on prompt chunks.
+- **Coarse metrics:** `harness-classification.json`; **precise:** `run.jsonl` tool lines. We may revise this split if metrics mislead.
+
+---
+
 ## 2026-03-28 — empty arguments, schema guidance, catalog semantics
 
 ### Approach, metrics, and epistemic limits (meta)

@@ -266,12 +266,11 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
             autoLayout tb
         }
 
-        dynamic plugin "tool-surface-sequence" "Round 1 Agent + `unreal_ai_dispatch`: turn builder may run eligibility before HTTP; tiered tool index in system message; harness logs `tool_surface_metrics`, usage JSONL, session prior; optional repair nudge after bad dispatch unwrap." {
-            plugin.requestBuilder.messageBudgeter -> plugin.tools.toolSurfacePipeline "TryBuildTieredToolSurface (env)"
-            plugin.tools.toolSurfacePipeline -> plugin.tools.catalogLoader "Ranked tool ids → markdown appendix"
+        dynamic plugin "tool-surface-sequence" "Round 1 Agent + `unreal_ai_dispatch`: turn builder may run eligibility before HTTP; tiered tool index in system message; harness logs `tool_surface_metrics`, usage JSONL, session prior; optional repair nudge after bad dispatch unwrap. (Container-level only: Structurizr disallows components in `dynamic` views scoped to a software system—see `tool-surface-graph` for MessageBudgeter → ToolSurfacePipeline → CatalogLoader.)" {
+            plugin.requestBuilder -> plugin.tools "TryBuildTieredToolSurface + tiered markdown appendix"
             plugin.harness -> plugin.transport "Chat completion (compact tools[] + index)"
-            plugin.harness.toolLoop -> plugin.tools.toolUsageEventLogger "operational_ok per tool"
-            plugin.harness.toolLoop -> localData.toolUsageEventsJsonl "Append JSONL line"
+            plugin.harness -> plugin.tools "Tool loop: operational_ok, usage prior, tool_surface_metrics"
+            plugin.harness -> localData.toolUsageEventsJsonl "Append JSONL line"
             autoLayout lr
         }
 
