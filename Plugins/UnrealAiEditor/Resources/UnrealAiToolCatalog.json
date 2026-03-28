@@ -794,7 +794,7 @@
     },
     {
       "tool_id": "asset_registry_query",
-      "summary": "Query Asset Registry for deterministic listing by exact path/class filters. Use this when you need predictable structured results; use asset_index_fuzzy_search for fuzzy name discovery.",
+      "summary": "Query Asset Registry for deterministic listing by exact path/class filters. You must pass at least path_filter (or class_name)—unbounded full-registry scans are rejected. Use asset_index_fuzzy_search for fuzzy name discovery under a path_prefix.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -881,7 +881,9 @@
       "permission": "read",
       "ue_entry_points": "IAssetRegistry::GetAssets; FARFilter",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "Neither path_filter nor class_name: provide a bounded filter (handler rejects empty filters)."
+      ],
       "doc_links": [],
       "status": "research"
     },
@@ -1318,7 +1320,9 @@
         "asset_not_found",
         "create_failed",
         "graph_not_found",
-        "apply_failed"
+        "apply_failed",
+        "Bad blueprint_path: must be /Game/... Blueprint object path; resolve with asset_index_fuzzy_search before writes.",
+        "New asset: use create_if_missing:true or asset_create, then apply IR."
       ],
       "doc_links": [],
       "status": "research"
@@ -1374,7 +1378,7 @@
     },
     {
       "tool_id": "blueprint_get_graph_summary",
-      "summary": "Export bounded summary of a Blueprint graph.",
+      "summary": "Read-only: bounded summary of Blueprint graph(s) for an existing asset. blueprint_path must be a /Game Blueprint object path (use asset_index_fuzzy_search if unsure). Optional graph_name narrows to one graph; omit to summarize ubergraph + functions + macros.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -1397,10 +1401,12 @@
         "additionalProperties": false,
         "properties": {
           "blueprint_path": {
-            "type": "string"
+            "type": "string",
+            "description": "Blueprint asset object path under /Game (aliases: object_path, asset_path). Not a level actor path."
           },
           "graph_name": {
-            "type": "string"
+            "type": "string",
+            "description": "Optional; when set, only that graph is summarized if it exists."
           },
           "focused": {
             "type": "boolean",
@@ -1415,7 +1421,10 @@
       "permission": "read",
       "ue_entry_points": "UBlueprint; FBlueprintEditorUtils",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "Load failure: verify path with asset_index_fuzzy_search; create asset first if missing.",
+        "Wrong path kind: PersistentLevel actor paths are not Blueprint assets—use /Game/... object paths."
+      ],
       "doc_links": [],
       "status": "research"
     },
@@ -1596,7 +1605,7 @@
     },
     {
       "tool_id": "content_browser_sync_asset",
-      "summary": "Focus Content Browser on an asset or folder.",
+      "summary": "Focus the Content Browser on a registered asset by object path (`path` / `object_path`). Resolves via the asset registry—use a full `/Game/.../Name.Name` (or equivalent) path. Folder-only strings are not reliable; to find an asset first, use `asset_index_fuzzy_search` or `asset_registry_query`, then sync the concrete path.",
       "category": "editor_ui_navigation",
       "tags": [
         "content_browser"
@@ -1618,7 +1627,8 @@
         "additionalProperties": false,
         "properties": {
           "path": {
-            "type": "string"
+            "type": "string",
+            "description": "Asset object path to sync (aliases: object_path, asset_path). Must resolve in the asset registry—not a substitute for folder navigation."
           },
           "focused": {
             "type": "boolean",
@@ -1633,7 +1643,10 @@
       "permission": "write",
       "ue_entry_points": "FContentBrowserModule sync APIs",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "Missing path or empty arguments: provide path/object_path/asset_path.",
+        "Path does not resolve to an asset: use discovery tools or correct the object path."
+      ],
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/content-browser-in-unreal-engine"
       ],
@@ -1794,7 +1807,7 @@
     },
     {
       "tool_id": "editor_set_selection",
-      "summary": "Replace editor selection with level actors only. Paths must be world/level actor paths (e.g. ...PersistentLevel.ActorName), not /Game/... content object paths. For assets, use content_browser_sync_asset or asset_open_editor.",
+      "summary": "Replace editor selection with level actors only. Paths must be world/level actor paths (e.g. ...PersistentLevel.ActorName), not /Game/.../Asset.Asset content object paths. For Content Browser assets use content_browser_sync_asset, asset_open_editor, or asset_index_fuzzy_search to resolve paths first.",
       "category": "selection_framing",
       "tags": [
         "selection"
@@ -1833,7 +1846,9 @@
       "permission": "write",
       "ue_entry_points": "GEditor->SelectActor; SelectNone",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "Passing /Game/... asset paths returns ok:false with suggested_correct_call toward content_browser_sync_asset; use scene_fuzzy_search to discover level actor paths."
+      ],
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/UEditorEngine"
       ],
@@ -2091,7 +2106,7 @@
     },
     {
       "tool_id": "material_instance_set_scalar_parameter",
-      "summary": "Set one scalar parameter on a Material Instance (write). material_path must resolve to a UMaterialInstanceConstant, not a base Material; duplicate or create an MI first if needed. For referencer/read usage intel, use material_get_usage_summary or asset queries.",
+      "summary": "Set one scalar parameter on a Material Instance (write). material_path must be a UMaterialInstanceConstant object path, not a base UMaterial. If the path is a base Material, open it in the editor (asset_open_editor), duplicate to an MI, then retry with the MI path. For read-only usage intel, use material_get_usage_summary.",
       "category": "materials_rendering",
       "tags": [
         "material"
@@ -2132,7 +2147,9 @@
       "permission": "write",
       "ue_entry_points": "UMaterialInstance editing APIs",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "Base Material path: use asset_open_editor on the Material, duplicate to MI, then pass the MI path."
+      ],
       "doc_links": [],
       "status": "research"
     },
@@ -2546,7 +2563,7 @@
     },
     {
       "tool_id": "project_file_read_text",
-      "summary": "Read text file under project (Source/Config/Content/Plugins, docs/, .github/, scripts/, tools/, build/, root README/LICENSE-style files, *.uproject).",
+      "summary": "Read a text file anywhere under the project directory (path relative to project root; Saved/, Intermediate/, etc. allowed). Large or binary files may be truncated or unsuitable—use max_bytes.",
       "category": "project_files_search",
       "tags": [
         "filesystem",
@@ -2598,7 +2615,7 @@
     },
     {
       "tool_id": "project_file_write_text",
-      "summary": "Write text file under project.",
+      "summary": "Write a text file anywhere under the project directory (same path rules as project_file_read_text; destructive—confirm in headed runs unless auto-run env is set).",
       "category": "project_files_search",
       "tags": [
         "filesystem"
@@ -2863,7 +2880,7 @@
     },
     {
       "tool_id": "scene_fuzzy_search",
-      "summary": "Fuzzy-search actors across the loaded editor world/level (not Content Browser assets). Use this to discover actor_path targets before mutating tools; skip it when a concrete actor_path is already known from context.",
+      "summary": "Fuzzy-search actors across the loaded editor world/level (not Content Browser assets). For /Game assets use asset_index_fuzzy_search. If query is missing or blank, the handler applies a safe default (query_coerced:true)—still pass an explicit non-empty query when possible.",
       "category": "world_actors",
       "tags": [
         "actor",
@@ -2910,13 +2927,15 @@
       "permission": "read",
       "ue_entry_points": "TActorIterator; AActor::GetActorLabel",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "Missing or empty query is coerced to a default search; prefer explicit query strings to avoid irrelevant matches."
+      ],
       "doc_links": [],
       "status": "implemented"
     },
     {
       "tool_id": "asset_index_fuzzy_search",
-      "summary": "Fuzzy-search the Unreal Asset Registry for asset discovery under /Game. Use this to resolve concrete object_path values before write tools; if object_path is already known, call the target tool directly instead of re-searching. Query accepts the same aliases as scene_fuzzy_search; empty/whitespace query is coerced to a safe default (see query_coerced in results).",
+      "summary": "Fuzzy-search the Asset Registry under path_prefix (default /Game). If query is missing or empty, you must pass a narrow path_prefix (e.g. /Game/Blueprints)—otherwise the tool errors instead of scanning the whole project. Enumeration stops after max_assets_to_scan (see truncated, assets_visited). Prefer explicit query + path_prefix for performance.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -2943,8 +2962,7 @@
         "properties": {
           "query": {
             "type": "string",
-            "minLength": 1,
-            "description": "Approximate text; may be misspelled. Compared against asset name, object path, and class path. Preferred key. Example: \"coin\", \"footstep\", \"M_\"."
+            "description": "Approximate text; may be misspelled. Compared against asset name, object path, and class path. If omitted or empty, you must set a narrow path_prefix or the tool returns an error (see query_coerced when a default was applied)."
           },
           "search_string": {
             "type": "string",
@@ -2960,7 +2978,7 @@
           },
           "path_prefix": {
             "type": "string",
-            "description": "Package path prefix to scope the registry query, e.g. /Game or /Game/MyFolder. Defaults to /Game."
+            "description": "Package path prefix to scope the search (e.g. /Game/Blueprints). Required when query is omitted or empty; defaults to /Game only when query is explicit."
           },
           "max_results": {
             "type": "integer",
@@ -2968,22 +2986,22 @@
           },
           "max_assets_to_scan": {
             "type": "integer",
-            "description": "Safety cap on assets pulled from the registry before filtering (large projects)."
+            "description": "Max asset registry entries visited during enumeration (stops early; see truncated and assets_visited in results)."
           },
           "class_name_substring": {
             "type": "string",
             "description": "Optional filter: asset class path must contain this substring (e.g. Texture2D, StaticMesh, SoundBase, Material)."
           }
-        },
-        "required": [
-          "query"
-        ]
+        }
       },
       "side_effects": "none",
       "permission": "read",
-      "ue_entry_points": "IAssetRegistry::GetAssets",
+      "ue_entry_points": "IAssetRegistry::EnumerateAssets",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "Missing query without path_prefix: pass path_prefix or an explicit query.",
+        "truncated true: raise max_assets_to_scan or narrow path_prefix."
+      ],
       "doc_links": [],
       "status": "implemented"
     },
@@ -3487,7 +3505,7 @@
     },
     {
       "tool_id": "viewport_frame_actors",
-      "summary": "Frame actors by path using bounds and FOV fit. Actors with no renderable geometry fall back to a small box at their location.",
+      "summary": "Frame specific level actors by `actor_paths` (bounds + FOV fit). Requires at least one world actor path—use `editor_get_selection` or `scene_fuzzy_search` first if paths are unknown. To frame whatever is already selected without paths, use `viewport_frame_selection` instead.",
       "category": "selection_framing",
       "tags": [
         "viewport",
@@ -3513,7 +3531,8 @@
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Non-empty list of level actor paths (e.g. containing PersistentLevel). Obtain from selection or scene search if not already known."
           },
           "margin_scale": {
             "type": "number"
@@ -3536,7 +3555,9 @@
       "permission": "write",
       "ue_entry_points": "AActor::GetComponentsBoundingBox; FEditorViewportClient",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "Missing actor_paths: discover actors first or use viewport_frame_selection if the selection is already set."
+      ],
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/AActor"
       ],
@@ -3544,7 +3565,7 @@
     },
     {
       "tool_id": "viewport_frame_selection",
-      "summary": "Frame current selection in the viewport.",
+      "summary": "Frame the current editor selection in the viewport (no actor_paths required). Use when actors are already selected; use viewport_frame_actors when you have explicit paths.",
       "category": "selection_framing",
       "tags": [
         "viewport",
