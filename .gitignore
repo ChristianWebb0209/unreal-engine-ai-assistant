@@ -70,10 +70,16 @@ Thumbs.db
 /BuildOut/
 /tests-failed.txt
 
-# Tool-routing fixtures and LLM audit logs (regenerated locally / CI artifacts)
-/tests/tool-call-prompts.generated.json
+# Tests: track only .py and .ps1 (ignore JSON fixtures, run outputs, logs, etc.)
+/tests/**
+!/tests/**/
+!/tests/**/*.py
+!/tests/**/*.ps1
+# Re-ignore paths that became visible because parent dirs were un-ignored for traversal
 /tests/out/
-
+/tests/long-running-tests/runs/
+/tests/**/*.json
+/tests/**/*.jsonl
 
 # Optional local scratch (untracked copies of scripts, experiments)
 /local/
@@ -83,4 +89,3 @@ Thumbs.db
 
 
 /tools/
-/tests/
