@@ -18,6 +18,7 @@
 #include "Memory/IUnrealAiMemoryService.h"
 #include "HAL/PlatformMisc.h"
 #include "Harness/UnrealAiLlmInvocationService.h"
+#include "Harness/UnrealAiHarnessTpmThrottle.h"
 #include "Misc/UnrealAiEditorModalMonitor.h"
 #include "Widgets/UnrealAiToolUi.h"
 #include "Dom/JsonObject.h"
@@ -552,6 +553,11 @@ namespace UnrealAiAgentHarnessPriv
 			P = UsageThisRound.TotalTokens / 2;
 			C = UsageThisRound.TotalTokens - P;
 		}
+		const int32 TpmRecord = UsageThisRound.TotalTokens > 0 ? UsageThisRound.TotalTokens : (P + C);
+		if (TpmRecord > 0)
+		{
+			UnrealAiHarnessTpmThrottle::RecordChatCompletionTokens(TpmRecord);
+		}
 		AccumulatedUsage.PromptTokens += P;
 		AccumulatedUsage.CompletionTokens += C;
 		AccumulatedUsage.TotalTokens += UsageThisRound.TotalTokens;
@@ -722,6 +728,8 @@ namespace UnrealAiAgentHarnessPriv
 				}
 			}
 		}
+
+		UnrealAiHarnessTpmThrottle::MaybeWaitBeforeChatRequest(LlmReq, CharPerTokenApprox);
 
 		const TSharedPtr<FAgentTurnRunner> Self = AsShared();
 		UE_LOG(LogTemp, Display,
@@ -1235,35 +1243,24 @@ namespace UnrealAiAgentHarnessPriv
 			FUnrealAiConversationMessage Nudge;
 			Nudge.Role = TEXT("user");
 			Nudge.Content = TEXT(
-				"[Harness][reason=todo_plan_only] Plan recorded. Continue immediately: execute the first pending plan step using "
-				"Unreal Editor tools. Do not finish with narration only—invoke tools this turn unless truly blocked.");
+				"[Harness][reason=todo_plan_only] Plan recorded. When ready, continue with the first pending plan step using Unreal tools if appropriate.");
 			Conv->GetMessagesMutable().Add(Nudge);
 		}
-		else if (Request.Mode == EUnrealAiAgentMode::Agent)
+		else if (Request.Mode == EUnrealAiAgentMode::Agent && bDeferredQueue)
 		{
-			// Agent mode should keep iterating after tool execution. This avoids frequent one-tool stalls where
-			// the next model turn summarizes and ends instead of taking the next concrete action.
+			// Rare: deferred tool queue — explain why follow-up may be needed (only when dynamic deferral is active).
 			FUnrealAiConversationMessage Nudge;
 			Nudge.Role = TEXT("user");
-			if (bDeferredQueue)
-			{
-				Nudge.Content = FString::Printf(
-					TEXT("[Harness][reason=tool_round_complete_deferred] Tool round complete (ok=%d, failed=%d). Additional requested tools were deferred (%d) due to dynamic planning policy. ")
-					TEXT("Now emit/update a concise todo plan that queues remaining work, then execute the first pending step."),
-					ToolSuccessCount,
-					ToolFailCount,
-					ToolBatchSize - ToolsToExecute);
-			}
-			else
-			{
-				Nudge.Content = FString::Printf(
-					TEXT("[Harness][reason=tool_round_complete] Tool round complete (ok=%d, failed=%d). Continue executing the user's request. ")
-					TEXT("If the task is not complete, call the next tool now. Only finish when the requested scene/work is actually done or you are truly blocked."),
-					ToolSuccessCount,
-					ToolFailCount);
-			}
+			Nudge.Content = FString::Printf(
+				TEXT("[Harness][reason=tool_round_complete_deferred] Tool round complete (ok=%d, failed=%d). Additional requested tools were deferred (%d) due to dynamic planning policy. ")
+				TEXT("Now emit/update a concise todo plan that queues remaining work, then execute the first pending step."),
+				ToolSuccessCount,
+				ToolFailCount,
+				ToolBatchSize - ToolsToExecute);
 			Conv->GetMessagesMutable().Add(Nudge);
 		}
+		// Intentionally no generic "tool_round_complete" nudge after normal agent tool rounds: headed/long-run
+		// harness prioritizes orchestration + tool/schema metrics; task completion is reviewed qualitatively.
 		{
 			const FString LastRealUser = GetLastRealUserMessage(Conv->GetMessages());
 			// Plan-mode planner passes are DAG-only (no tools); do not treat as Agent action-intent turns.
@@ -1308,14 +1305,9 @@ namespace UnrealAiAgentHarnessPriv
 				if (bAllReadOnly && MutationFollowthroughNudgeCount < 2)
 				{
 					++MutationFollowthroughNudgeCount;
-					EmitEnforcementEvent(TEXT("mutation_read_only_nudge"), TEXT("mutation-intent turn used read-only tools only"));
-					FUnrealAiConversationMessage FollowthroughNudge;
-					FollowthroughNudge.Role = TEXT("user");
-					FollowthroughNudge.Content = TEXT(
-						"[Harness][reason=mutation_readonly_loop] The user requested an actual change, but only read/discovery tools were executed. "
-						"Continue now with at least one concrete write/exec tool call that advances the requested change, "
-						"or state the exact blocker.");
-					Conv->GetMessagesMutable().Add(FollowthroughNudge);
+					EmitEnforcementEvent(
+						TEXT("mutation_read_only_note"),
+						TEXT("mutation-intent user message but only read/discovery tools this round; harness not injecting follow-up nudge"));
 				}
 			}
 		}
@@ -1387,25 +1379,14 @@ namespace UnrealAiAgentHarnessPriv
 			DispatchLlm();
 			return;
 		}
-		if (bAgentModeWantsToolExecution && bActionIntent && !bHasExplicitBlocker && LlmRound < EffectiveMaxLlmRounds && ActionNoToolNudgeCount < 2)
+		// Lax policy: do not require tool_calls on every agent round. Text-only wrap-ups after work (or when no tool
+		// applies) are allowed; qualitative review judges task success. Still emit a note when the user prompt looked
+		// action-oriented and this round had no tools, for batch metrics / grep.
+		if (bAgentModeWantsToolExecution && bActionIntent && !bHasExplicitBlocker)
 		{
-			++ActionNoToolNudgeCount;
-			EmitEnforcementEvent(TEXT("action_no_tool_nudge"), TEXT("action-intent turn ended without tool calls; nudge emitted"));
-			FUnrealAiConversationMessage Nudge;
-			Nudge.Role = TEXT("user");
-			Nudge.Content = TEXT(
-				"[Harness][reason=action_no_tool] The user asked for concrete editor actions. Do not end with narration-only output. "
-				"Call at least one relevant Unreal tool now (or report the exact blocker if no tool can proceed).");
-			Conv->GetMessagesMutable().Add(Nudge);
-			AssistantBuffer.Reset();
-			DispatchLlm();
-			return;
-		}
-		if (bAgentModeWantsToolExecution && bActionIntent && !bHasExplicitBlocker && ActionNoToolNudgeCount >= 2)
-		{
-			EmitEnforcementEvent(TEXT("action_no_tool_fail"), TEXT("action-intent turn failed after bounded nudges"));
-			Fail(TEXT("Action-intent turn ended without tool calls or explicit blocker explanation."));
-			return;
+			EmitEnforcementEvent(
+				TEXT("action_text_only_completion"),
+				TEXT("agent round ended with assistant text only (no tool_calls); harness allows success for qualitative review"));
 		}
 
 		Succeed();

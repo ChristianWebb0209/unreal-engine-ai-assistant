@@ -1,5 +1,6 @@
 #include "Retrieval/FOpenAiCompatibleEmbeddingProvider.h"
 
+#include "Harness/UnrealAiHarnessTpmThrottle.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Async/TaskGraphInterfaces.h"
@@ -115,6 +116,8 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne(
 	}
 	HttpRequest->SetTimeout(TimeoutSec);
 
+	UnrealAiHarnessTpmThrottle::MaybeWaitBeforeEmbeddingRequest(Request.InputText.Len());
+
 	struct FEmbeddingRequestState
 	{
 		FCriticalSection Mutex;
@@ -222,6 +225,22 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne(
 		{
 			OutResponse.Error = TEXT("Embeddings response JSON parse failed.");
 			return false;
+		}
+	}
+	{
+		const TSharedPtr<FJsonObject>* UsageObj = nullptr;
+		if (ResponseJson->TryGetObjectField(TEXT("usage"), UsageObj) && UsageObj && (*UsageObj).IsValid())
+		{
+			double TotalTok = 0.0;
+			double PromptTok = 0.0;
+			if ((*UsageObj)->TryGetNumberField(TEXT("total_tokens"), TotalTok) && TotalTok > 0.0)
+			{
+				UnrealAiHarnessTpmThrottle::RecordEmbeddingTokens(static_cast<int32>(TotalTok));
+			}
+			else if ((*UsageObj)->TryGetNumberField(TEXT("prompt_tokens"), PromptTok) && PromptTok > 0.0)
+			{
+				UnrealAiHarnessTpmThrottle::RecordEmbeddingTokens(static_cast<int32>(PromptTok));
+			}
 		}
 	}
 	const TArray<TSharedPtr<FJsonValue>>* DataArray = nullptr;
