@@ -1,6 +1,7 @@
 #include "Widgets/UnrealAiChatUiHelpers.h"
 
 #include "Widgets/UnrealAiChatUiSession.h"
+#include "Widgets/UnrealAiChatTranscript.h"
 #include "Widgets/SChatMessageList.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Backend/UnrealAiBackendRegistry.h"
@@ -9,6 +10,7 @@
 #include "Harness/IUnrealAiAgentHarness.h"
 #include "Harness/UnrealAiConversationJson.h"
 #include "Harness/UnrealAiAgentTypes.h"
+#include "Widgets/UnrealAiPlanDraftPersist.h"
 
 void UnrealAiChatUi_StartNewChat(
 	TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry,
@@ -145,4 +147,18 @@ void UnrealAiChatUi_LoadPersistedThreadIntoUi(
 	}
 
 	MessageList->HydrateTranscriptFromPersistedConversation(Messages);
+
+	FString DraftFile;
+	if (Persist->LoadThreadPlanDraftJson(ProjectId, ThreadIdStr, DraftFile))
+	{
+		FString Dag;
+		if (UnrealAiPlanDraftPersist::TryUnwrapDraftFile(DraftFile, Dag))
+		{
+			if (IAgentContextService* Ctx = BackendRegistry->GetContextService())
+			{
+				Ctx->SetActivePlanDag(Dag);
+			}
+			MessageList->GetTranscript()->AddPlanDraftPending(Dag);
+		}
+	}
 }

@@ -3,8 +3,11 @@
 #include "Widgets/SAssistantStreamBlock.h"
 #include "Widgets/SThinkingSubline.h"
 #include "Widgets/STodoPlanPanel.h"
+#include "Widgets/SPlanDraftBuildPanel.h"
+#include "Context/UnrealAiProjectId.h"
 #include "Widgets/SToolCallCard.h"
 #include "Widgets/UnrealAiChatTranscript.h"
+#include "Widgets/UnrealAiChatUiSession.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "HAL/PlatformTime.h"
 #include "Style/UnrealAiEditorStyle.h"
@@ -29,9 +32,9 @@
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
 /** Row padding around user messages. */
-static const FMargin GChatMessageListRowMargin(12.f, 11.f, 12.f, 11.f);
+static const FMargin GChatMessageListRowMargin(12.f, 14.f, 12.f, 14.f);
 /** Tighter vertical rhythm for assistant stream: tools, timestamps, thinking, notices. */
-static const FMargin GChatMessageListAgentRowMargin(12.f, 4.f, 12.f, 4.f);
+static const FMargin GChatMessageListAgentRowMargin(12.f, 6.f, 12.f, 6.f);
 
 namespace UnrealAiChatListUi
 {
@@ -416,10 +419,12 @@ void SChatMessageList::RebuildTranscript()
 								  SNew(SBox)
 									  .HAlign(HAlign_Fill)
 									  [
-										  SNew(SMultiLineEditableText)
-											  .IsReadOnly(true)
+										  SNew(STextBlock)
 											  .AutoWrapText(true)
+											  .WrapTextAt(800.f)
 											  .Text(FText::FromString(B.UserText))
+											  .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 11))
+											  .ColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 1.f)))
 									  ]
 							  ]);
 
@@ -473,6 +478,7 @@ void SChatMessageList::RebuildTranscript()
 
 				const TSharedRef<SWidget> AssistantBubble =
 					SNew(SBox)
+						.RenderOpacity(0.92f)
 						.Clipping(EWidgetClipping::ClipToBounds)
 						.Padding(FMargin(4.f, 3.f, 4.f, 3.f))
 						[
@@ -602,6 +608,23 @@ void SChatMessageList::RebuildTranscript()
 						.BackendRegistry(BackendRegistry)
 						.Session(Session)
 				];
+			break;
+		case EUnrealAiChatBlockKind::PlanDraftPending:
+			if (BackendRegistry.IsValid() && Session.IsValid())
+			{
+				const FString ThreadIdStr = Session->ThreadId.ToString(EGuidFormats::DigitsWithHyphens);
+				MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
+					[
+						SNew(SPlanDraftBuildPanel)
+							.InitialDagJson(B.TodoJson)
+							.BlockId(B.Id)
+							.BackendRegistry(BackendRegistry)
+							.Session(Session)
+							.Transcript(Transcript)
+							.ProjectId(UnrealAiProjectId::GetCurrentProjectId())
+							.ThreadId(ThreadIdStr)
+					];
+			}
 			break;
 		case EUnrealAiChatBlockKind::RunProgress:
 			MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)

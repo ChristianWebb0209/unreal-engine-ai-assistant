@@ -6,7 +6,7 @@
 class FUnrealAiBackendRegistry;
 struct FUnrealAiChatUiSession;
 
-/** Renders structured todo plan JSON (unreal_ai.todo_plan or generic steps). */
+/** Renders structured todo plan JSON (unreal_ai.todo_plan) or Plan-mode DAG JSON (unreal_ai.plan_dag / nodes). */
 class STodoPlanPanel final : public SCompoundWidget
 {
 public:

@@ -113,6 +113,9 @@ FString FUnrealAiChatTranscript::FormatPlainText() const
 		case EUnrealAiChatBlockKind::TodoPlan:
 			Out += FString::Printf(TEXT("--- Todo plan: %s ---\n%s\n\n"), *B.TodoTitle, *B.TodoJson);
 			break;
+		case EUnrealAiChatBlockKind::PlanDraftPending:
+			Out += FString::Printf(TEXT("--- Plan draft (awaiting Build) ---\n%s\n\n"), *B.TodoJson);
+			break;
 		case EUnrealAiChatBlockKind::RunProgress:
 			Out += FString::Printf(TEXT("--- Progress ---\n%s\n\n"), *B.ProgressLabel);
 			break;
@@ -342,6 +345,47 @@ void FUnrealAiChatTranscript::AddTodoPlan(const FString& Title, const FString& P
 	B.TodoJson = PlanJson;
 	Blocks.Add(MoveTemp(B));
 	OnStructuralChange.Broadcast();
+}
+
+FGuid FUnrealAiChatTranscript::AddPlanDraftPending(const FString& DagJson)
+{
+	FUnrealAiChatBlock B;
+	B.Id = FGuid::NewGuid();
+	B.RunId = ActiveRunId;
+	B.Kind = EUnrealAiChatBlockKind::PlanDraftPending;
+	B.TodoTitle = TEXT("Plan draft");
+	B.TodoJson = DagJson;
+	Blocks.Add(MoveTemp(B));
+	OnStructuralChange.Broadcast();
+	return B.Id;
+}
+
+void FUnrealAiChatTranscript::RemovePlanDraftPendingBlocks()
+{
+	const int32 Before = Blocks.Num();
+	for (int32 i = Blocks.Num() - 1; i >= 0; --i)
+	{
+		if (Blocks[i].Kind == EUnrealAiChatBlockKind::PlanDraftPending)
+		{
+			Blocks.RemoveAt(i);
+		}
+	}
+	if (Blocks.Num() != Before)
+	{
+		OnStructuralChange.Broadcast();
+	}
+}
+
+void FUnrealAiChatTranscript::SetPlanDraftJsonForBlock(const FGuid& BlockId, const FString& DagJson)
+{
+	for (FUnrealAiChatBlock& B : Blocks)
+	{
+		if (B.Id == BlockId && B.Kind == EUnrealAiChatBlockKind::PlanDraftPending)
+		{
+			B.TodoJson = DagJson;
+			return;
+		}
+	}
 }
 
 void FUnrealAiChatTranscript::SetRunProgress(const FString& Label)

@@ -372,6 +372,40 @@ bool FUnrealAiPersistenceStub::LoadThreadConversationJson(
 	return LoadThreadConversationJson_Impl(ProjectId, ThreadId, OutJsonBody);
 }
 
+bool FUnrealAiPersistenceStub::SaveThreadPlanDraftJson(
+	const FString& ProjectId,
+	const FString& ThreadId,
+	const FString& JsonBody)
+{
+	const FString Slug = UnrealAiThreadIndex::ResolveThreadSlug(this, ProjectId, ThreadId);
+	const FString ThreadsRoot = EnsureSubdir(FPaths::Combine(TEXT("chats"), ProjectId, TEXT("threads")));
+	const FString Path = FPaths::Combine(ThreadsRoot, Slug + TEXT("-plan-draft.json"));
+	return FFileHelper::SaveStringToFile(JsonBody, *Path);
+}
+
+bool FUnrealAiPersistenceStub::LoadThreadPlanDraftJson(
+	const FString& ProjectId,
+	const FString& ThreadId,
+	FString& OutJsonBody)
+{
+	const FString Slug = UnrealAiThreadIndex::ResolveThreadSlug(this, ProjectId, ThreadId);
+	const FString ThreadsRoot = FPaths::Combine(GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("threads"));
+	const FString Path = FPaths::Combine(ThreadsRoot, Slug + TEXT("-plan-draft.json"));
+	return FFileHelper::LoadFileToString(OutJsonBody, *Path);
+}
+
+void FUnrealAiPersistenceStub::ClearThreadPlanDraft(const FString& ProjectId, const FString& ThreadId)
+{
+	if (ProjectId.IsEmpty() || ThreadId.IsEmpty())
+	{
+		return;
+	}
+	const FString Slug = UnrealAiThreadIndex::ResolveThreadSlug(this, ProjectId, ThreadId);
+	const FString ThreadsRoot = FPaths::Combine(GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("threads"));
+	const FString Path = FPaths::Combine(ThreadsRoot, Slug + TEXT("-plan-draft.json"));
+	IFileManager::Get().Delete(*Path, false, true);
+}
+
 bool FUnrealAiPersistenceStub::ThreadHasUserVisibleMessages(const FString& ProjectId, const FString& ThreadId) const
 {
 	if (ProjectId.IsEmpty() || ThreadId.IsEmpty())
@@ -567,6 +601,7 @@ void FUnrealAiPersistenceStub::ForgetThread(const FString& ProjectId, const FStr
 	IFileManager& FM = IFileManager::Get();
 	FM.Delete(*FPaths::Combine(ThreadsRoot, Slug + TEXT("-context.json")), false, true);
 	FM.Delete(*FPaths::Combine(ThreadsRoot, Slug + TEXT("-conversation.json")), false, true);
+	FM.Delete(*FPaths::Combine(ThreadsRoot, Slug + TEXT("-plan-draft.json")), false, true);
 	FM.DeleteDirectory(*FPaths::Combine(ThreadsRoot, Slug), false, true);
 }
 
@@ -647,6 +682,10 @@ bool FUnrealAiPersistenceStub::SetThreadChatName(
 
 		MoveFileIfPresent(FlatContext(OldSlug), FlatContext(Slug));
 		MoveFileIfPresent(FlatConversation(OldSlug), FlatConversation(Slug));
+		{
+			auto FlatPlanDraft = [&](const FString& S) { return FPaths::Combine(ThreadsRoot, S + TEXT("-plan-draft.json")); };
+			MoveFileIfPresent(FlatPlanDraft(OldSlug), FlatPlanDraft(Slug));
+		}
 
 		const FString OldLegDir = FPaths::Combine(ThreadsRoot, OldSlug);
 		if (FM.DirectoryExists(*OldLegDir))

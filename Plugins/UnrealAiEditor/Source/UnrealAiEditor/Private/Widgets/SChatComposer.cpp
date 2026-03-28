@@ -11,7 +11,8 @@
 #include "Backend/UnrealAiBackendRegistry.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
-#include "Harness/FUnrealAiOrchestrateExecutor.h"
+#include "Harness/FUnrealAiPlanExecutor.h"
+#include "Harness/UnrealAiPlanDag.h"
 #include "Harness/IAgentRunSink.h"
 #include "Harness/IUnrealAiAgentHarness.h"
 #include "Harness/UnrealAiAgentTypes.h"
@@ -159,14 +160,14 @@ namespace UnrealAiModeUi
 {
 	static FLinearColor Accent(EUnrealAiAgentMode M)
 	{
-		// Mode accents: cool Ask, violet Agent, amber Orchestrate.
+		// Mode accents: cool Ask, violet Agent, amber Plan.
 		switch (M)
 		{
 		case EUnrealAiAgentMode::Ask:
 			return FLinearColor(0.45f, 0.55f, 0.72f, 1.f);
 		case EUnrealAiAgentMode::Agent:
 			return FLinearColor(0.58f, 0.36f, 0.95f, 1.f);
-		case EUnrealAiAgentMode::Orchestrate:
+		case EUnrealAiAgentMode::Plan:
 			return FLinearColor(0.86f, 0.56f, 0.20f, 1.f);
 		default:
 			return FLinearColor(0.45f, 0.55f, 0.72f, 1.f);
@@ -181,7 +182,7 @@ namespace UnrealAiModeUi
 			return FAppStyle::GetBrush(TEXT("Icons.Help"));
 		case EUnrealAiAgentMode::Agent:
 			return FUnrealAiEditorStyle::GetAgentChatTabIconBrush();
-		case EUnrealAiAgentMode::Orchestrate:
+		case EUnrealAiAgentMode::Plan:
 			return FAppStyle::GetBrush(TEXT("Icons.Blueprint"));
 		default:
 			return FAppStyle::GetBrush(TEXT("Icons.Help"));
@@ -611,7 +612,7 @@ void SChatComposer::Construct(const FArguments& InArgs)
 						.HasDownArrow(false)
 						.ForegroundColor(FSlateColor::UseForeground())
 						.OnGetMenuContent(this, &SChatComposer::BuildModeMenuContent)
-						.ToolTipText(LOCTEXT("ModeTip", "Mode: Ask (read-only), Agent, or Orchestrate"))
+						.ToolTipText(LOCTEXT("ModeTip", "Mode: Ask (read-only), Agent, or Plan"))
 						.ButtonContent()
 						[
 							SNew(SBox)
@@ -716,6 +717,11 @@ void SChatComposer::Construct(const FArguments& InArgs)
 
 	RefreshAttachmentChips();
 
+	if (Session.IsValid())
+	{
+		Session->OnPlanDraftBuild.AddSP(this, &SChatComposer::HandlePlanDraftBuild);
+	}
+
 	RegisterActiveTimer(
 		0.5f,
 		FWidgetActiveTimerDelegate::CreateSP(this, &SChatComposer::OnComposerRefreshTick));
@@ -723,6 +729,10 @@ void SChatComposer::Construct(const FArguments& InArgs)
 
 SChatComposer::~SChatComposer()
 {
+	if (Session.IsValid())
+	{
+		Session->OnPlanDraftBuild.RemoveAll(this);
+	}
 	if (ContextAttachmentsChangedHandle.IsValid())
 	{
 		FUnrealAiEditorModule::OnContextAttachmentsChanged().Remove(ContextAttachmentsChangedHandle);
@@ -855,7 +865,7 @@ bool SChatComposer::IsHarnessTurnInProgress() const
 	{
 		return false;
 	}
-	if (ActiveOrchestrateExecutor.IsValid() && ActiveOrchestrateExecutor->IsRunning())
+	if (ActivePlanExecutor.IsValid() && ActivePlanExecutor->IsRunning())
 	{
 		return true;
 	}
@@ -901,9 +911,9 @@ FReply SChatComposer::OnSendOrStopClicked()
 	}
 	if (IUnrealAiAgentHarness* H = BackendRegistry->GetAgentHarness())
 	{
-		if (ActiveOrchestrateExecutor.IsValid() && ActiveOrchestrateExecutor->IsRunning())
+		if (ActivePlanExecutor.IsValid() && ActivePlanExecutor->IsRunning())
 		{
-			ActiveOrchestrateExecutor->Cancel();
+			ActivePlanExecutor->Cancel();
 			return FReply::Handled();
 		}
 		if (H->IsTurnInProgress())
@@ -1844,14 +1854,18 @@ FReply SChatComposer::OnSendClicked()
 		Session,
 		Persist,
 		ProjectId,
-		ThreadIdStr);
-	if (AgentMode == EUnrealAiAgentMode::Orchestrate)
+		ThreadIdStr,
+		AgentMode);
+	if (AgentMode == EUnrealAiAgentMode::Plan)
 	{
-		ActiveOrchestrateExecutor = FUnrealAiOrchestrateExecutor::Start(
+		FUnrealAiPlanExecutorStartOptions PlanOpts;
+		PlanOpts.bPauseAfterPlannerForBuild = true;
+		ActivePlanExecutor = FUnrealAiPlanExecutor::Start(
 			Harness,
 			BackendRegistry->GetContextService(),
 			Req,
-			Sink);
+			Sink,
+			PlanOpts);
 	}
 	else
 	{
@@ -1860,6 +1874,77 @@ FReply SChatComposer::OnSendClicked()
 
 	RefreshAttachmentChips();
 	return FReply::Handled();
+}
+
+void SChatComposer::HandlePlanDraftBuild(const FString& DagJson)
+{
+	if (!BackendRegistry.IsValid() || !MessageList.IsValid() || !Session.IsValid())
+	{
+		return;
+	}
+	IUnrealAiAgentHarness* Harness = BackendRegistry->GetAgentHarness();
+	if (!Harness)
+	{
+		return;
+	}
+	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+	const FString ThreadIdStr = Session->ThreadId.ToString(EGuidFormats::DigitsWithHyphens);
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+
+	FString Err;
+	if (ActivePlanExecutor.IsValid() && ActivePlanExecutor->IsAwaitingBuild())
+	{
+		if (!ActivePlanExecutor->ApplyDagJsonForBuild(DagJson, Err))
+		{
+			MessageList->GetTranscript()->AddInformationalNotice(
+				FString::Printf(TEXT("Plan JSON invalid: %s"), *Err));
+			return;
+		}
+		if (Persist)
+		{
+			Persist->ClearThreadPlanDraft(ProjectId, ThreadIdStr);
+		}
+		MessageList->GetTranscript()->RemovePlanDraftPendingBlocks();
+		ActivePlanExecutor->ResumeNodeExecution();
+		return;
+	}
+
+	if (ActivePlanExecutor.IsValid() && ActivePlanExecutor->IsRunning())
+	{
+		MessageList->GetTranscript()->AddInformationalNotice(
+			TEXT("A plan run is already in progress; wait for it to finish."));
+		return;
+	}
+
+	FUnrealAiPlanDag TestDag;
+	if (!UnrealAiPlanDag::ParseDagJson(DagJson, TestDag, Err) || !UnrealAiPlanDag::ValidateDag(TestDag, 64, Err))
+	{
+		MessageList->GetTranscript()->AddInformationalNotice(FString::Printf(TEXT("Plan JSON invalid: %s"), *Err));
+		return;
+	}
+	if (Persist)
+	{
+		Persist->ClearThreadPlanDraft(ProjectId, ThreadIdStr);
+	}
+	MessageList->GetTranscript()->RemovePlanDraftPendingBlocks();
+
+	FUnrealAiAgentTurnRequest Req;
+	Req.ProjectId = ProjectId;
+	Req.ThreadId = ThreadIdStr;
+	Req.Mode = EUnrealAiAgentMode::Plan;
+	Req.UserText = FString();
+	Req.ModelProfileId = Session->ModelProfileId;
+	Req.bRecordAssistantAsStubToolResult = true;
+
+	const TSharedPtr<IAgentRunSink> Sink = MakeShared<FUnrealAiChatRunSink>(
+		MessageList->GetTranscript(),
+		Session,
+		Persist,
+		ProjectId,
+		ThreadIdStr,
+		EUnrealAiAgentMode::Plan);
+
+	ActivePlanExecutor = FUnrealAiPlanExecutor::ResumeExecutionFromDag(Harness, BackendRegistry->GetContextService(), Req, Sink, DagJson);
 }
 
 void SChatComposer::SetAgentMode(EUnrealAiAgentMode NewMode)
@@ -1880,8 +1965,8 @@ FText SChatComposer::GetModeLabelShort() const
 		return LOCTEXT("ModeAskShort", "Ask");
 	case EUnrealAiAgentMode::Agent:
 		return LOCTEXT("ModeAgentShort", "Agent");
-	case EUnrealAiAgentMode::Orchestrate:
-		return LOCTEXT("ModeOrchestrateShort", "Orchestrate");
+	case EUnrealAiAgentMode::Plan:
+		return LOCTEXT("ModePlanShort", "Plan");
 	default:
 		return LOCTEXT("ModeAskShort", "Ask");
 	}
@@ -1984,9 +2069,9 @@ TSharedRef<SWidget> SChatComposer::BuildModeMenuContent()
 			+ SVerticalBox::Slot().AutoHeight()
 			[
 				MakeModeMenuRow(
-					EUnrealAiAgentMode::Orchestrate,
-					LOCTEXT("ModeOrchestrateTitle", "Orchestrate"),
-					LOCTEXT("ModeOrchestrateBlurb", "DAG planner + Type-B worker execution"))
+					EUnrealAiAgentMode::Plan,
+					LOCTEXT("ModePlanTitle", "Plan"),
+					LOCTEXT("ModePlanBlurb", "DAG planner + Type-B worker execution"))
 			]
 		];
 }

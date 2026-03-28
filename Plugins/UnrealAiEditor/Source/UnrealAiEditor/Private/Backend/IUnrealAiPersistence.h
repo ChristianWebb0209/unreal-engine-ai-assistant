@@ -35,6 +35,14 @@ public:
 	virtual bool SaveThreadConversationJson(const FString& ProjectId, const FString& ThreadId, const FString& JsonBody) = 0;
 	virtual bool LoadThreadConversationJson(const FString& ProjectId, const FString& ThreadId, FString& OutJsonBody) = 0;
 
+	/**
+	 * Plan-mode DAG draft (awaiting Build): `chats/<ProjectId>/threads/<slug>-plan-draft.json`.
+	 * Persists until Build clears it, the thread is deleted, or local chat data is wiped.
+	 */
+	virtual bool SaveThreadPlanDraftJson(const FString& ProjectId, const FString& ThreadId, const FString& JsonBody) = 0;
+	virtual bool LoadThreadPlanDraftJson(const FString& ProjectId, const FString& ThreadId, FString& OutJsonBody) = 0;
+	virtual void ClearThreadPlanDraft(const FString& ProjectId, const FString& ThreadId) = 0;
+
 	/** Storage key (slug) used in thread filenames; GUID string until `SetThreadChatName`. */
 	virtual FString GetThreadStorageSlug(const FString& ProjectId, const FString& ThreadId) const = 0;
 

@@ -4,6 +4,7 @@
 #include "Widgets/UnrealAiToolUi.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Backend/IUnrealAiPersistence.h"
+#include "Widgets/UnrealAiPlanDraftPersist.h"
 
 static bool TryStripChatNameTokenFromText(FString& InOutText, FString& OutChatName)
 {
@@ -69,12 +70,14 @@ FUnrealAiChatRunSink::FUnrealAiChatRunSink(
 	TSharedPtr<FUnrealAiChatUiSession> InSession,
 	IUnrealAiPersistence* InPersistence,
 	const FString& InProjectId,
-	const FString& InThreadId)
+	const FString& InThreadId,
+	const EUnrealAiAgentMode InAgentMode)
 	: Transcript(MoveTemp(InTranscript))
 	, Session(MoveTemp(InSession))
 	, Persistence(InPersistence)
 	, ProjectId(InProjectId)
 	, ThreadId(InThreadId)
+	, AgentMode(InAgentMode)
 {
 }
 
@@ -159,10 +162,29 @@ void FUnrealAiChatRunSink::OnRunContinuation(int32 PhaseIndex, int32 TotalPhases
 
 void FUnrealAiChatRunSink::OnTodoPlanEmitted(const FString& Title, const FString& PlanJson)
 {
-	if (Transcript.IsValid())
+	if (!Transcript.IsValid())
 	{
-		Transcript->AddTodoPlan(Title, PlanJson);
+		return;
 	}
+	if (AgentMode == EUnrealAiAgentMode::Agent)
+	{
+		return;
+	}
+	Transcript->AddTodoPlan(Title, PlanJson);
+}
+
+void FUnrealAiChatRunSink::OnPlanDraftReady(const FString& DagJsonText)
+{
+	if (!Transcript.IsValid())
+	{
+		return;
+	}
+	Transcript->RemovePlanDraftPendingBlocks();
+	if (Persistence && !ProjectId.IsEmpty() && !ThreadId.IsEmpty())
+	{
+		Persistence->SaveThreadPlanDraftJson(ProjectId, ThreadId, UnrealAiPlanDraftPersist::WrapDraftFile(DagJsonText));
+	}
+	Transcript->AddPlanDraftPending(DagJsonText);
 }
 
 void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMessage)

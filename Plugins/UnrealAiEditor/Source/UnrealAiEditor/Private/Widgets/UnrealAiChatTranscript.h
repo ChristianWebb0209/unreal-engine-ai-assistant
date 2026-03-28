@@ -12,6 +12,8 @@ enum class EUnrealAiChatBlockKind : uint8
 	Assistant,
 	ToolCall,
 	TodoPlan,
+	/** Plan-mode DAG awaiting Build (editable JSON persisted separately). */
+	PlanDraftPending,
 	Notice,
 	RunProgress,
 };
@@ -81,6 +83,10 @@ public:
 		const FString& ResultPreview = FString(),
 		const TSharedPtr<FUnrealAiToolEditorPresentation>& EditorPresentation = nullptr);
 	void AddTodoPlan(const FString& Title, const FString& PlanJson);
+	/** @return Block id for the draft row. */
+	FGuid AddPlanDraftPending(const FString& DagJson);
+	void RemovePlanDraftPendingBlocks();
+	void SetPlanDraftJsonForBlock(const FGuid& BlockId, const FString& DagJson);
 	void SetRunProgress(const FString& Label);
 	void EndRun(bool bSuccess, const FString& ErrorMessage);
 	void OnContinuation(int32 PhaseIndex, int32 TotalPhasesHint);

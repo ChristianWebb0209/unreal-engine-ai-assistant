@@ -12,7 +12,6 @@ class IToolExecutionHost;
 class IUnrealAiMemoryService;
 class IUnrealAiRetrievalService;
 class FUnrealAiAgentHarness;
-class FUnrealAiLlmTransportFixture;
 class FUnrealAiModelProfileRegistry;
 class FUnrealAiToolCatalog;
 class FUnrealAiModelPricingCatalog;
@@ -58,7 +57,6 @@ private:
 	TUniquePtr<FUnrealAiToolCatalog> ToolCatalog;
 	TSharedPtr<class FOpenAiCompatibleHttpTransport> HttpTransport;
 	TSharedPtr<class FUnrealAiLlmTransportStub> StubTransport;
-	TSharedPtr<class FUnrealAiLlmTransportFixture> FixtureTransport;
 	TSharedPtr<class ILlmTransport> ActiveLlmTransport;
 	TUniquePtr<FUnrealAiAgentHarness> AgentHarness;
 };

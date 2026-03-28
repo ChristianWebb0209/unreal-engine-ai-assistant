@@ -12,7 +12,7 @@
 struct FSlateBrush;
 
 class FUnrealAiBackendRegistry;
-class FUnrealAiOrchestrateExecutor;
+class FUnrealAiPlanExecutor;
 class SChatMessageList;
 struct FUnrealAiChatUiSession;
 
@@ -69,6 +69,8 @@ private:
 	FReply OnPickMentionCandidate(const FMentionCandidate& Candidate);
 	FReply OnPickSlashCommand(const FString& Command);
 
+	void HandlePlanDraftBuild(const FString& DagJson);
+
 	bool IsMentionMenuOpenWithChoices() const;
 	bool IsSlashMenuOpenWithChoices() const;
 	bool IsMentionPanelBlockingEnterWhileBuilding() const;
@@ -110,5 +112,5 @@ private:
 
 	TWeakPtr<class SScrollBox> PendingComboScrollBox;
 	TWeakPtr<class SWidget> PendingComboScrollRow;
-	TSharedPtr<FUnrealAiOrchestrateExecutor> ActiveOrchestrateExecutor;
+	TSharedPtr<FUnrealAiPlanExecutor> ActivePlanExecutor;
 };

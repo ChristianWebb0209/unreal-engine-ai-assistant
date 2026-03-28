@@ -12,7 +12,7 @@ struct FUnrealAiPromptAssembleParams
 	int32 MaxLlmRounds = 32;
 	FString ThreadId;
 	bool bIncludeExecutionSubturnChunk = false;
-	bool bIncludeOrchestrationChunk = false;
+	bool bIncludePlanDagChunk = false;
 };
 
 namespace UnrealAiPromptBuilder

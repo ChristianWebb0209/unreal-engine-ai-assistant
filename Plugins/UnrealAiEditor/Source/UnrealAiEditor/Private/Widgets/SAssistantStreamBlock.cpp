@@ -39,7 +39,7 @@ void SAssistantStreamBlock::UpdateTextFadeOpacity()
 	}
 	const float T = FMath::Clamp(static_cast<float>(Len) / 72.f, 0.f, 1.f);
 	const float Eased = T * T * (3.f - 2.f * T);
-	const float Opac = FMath::Lerp(0.93f, 1.f, Eased);
+	const float Opac = FMath::Lerp(0.88f, 0.96f, Eased);
 	SetRenderOpacity(Opac);
 }
 

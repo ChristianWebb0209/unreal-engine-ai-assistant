@@ -69,6 +69,7 @@ static FUnrealAiEditorModule* GUnrealAiModule = nullptr;
 
 static IConsoleObject* GUnrealAiCatalogMatrixConsole = nullptr;
 static IConsoleObject* GUnrealAiRunAgentTurnConsole = nullptr;
+static IConsoleObject* GUnrealAiForgetThreadConsole = nullptr;
 static IConsoleObject* GUnrealAiDumpContextWindowConsole = nullptr;
 static IConsoleObject* GUnrealAiDumpRecentUiConsole = nullptr;
 static IConsoleObject* GUnrealAiDumpMemoriesConsole = nullptr;
@@ -168,7 +169,7 @@ void FUnrealAiEditorModule::StartupModule()
 
 	GUnrealAiRunAgentTurnConsole = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("UnrealAi.RunAgentTurn"),
-		TEXT("Run one agent harness turn (same path as Agent Chat). Args: <MessageFilePath> [ThreadGuid] [agent|ask|orchestrate] [OutputDir] [dumpcontext|nodump]. If no file arg is passed, reads UNREAL_AI_HARNESS_MESSAGE_FILE (UTF-8 text); optional UNREAL_AI_HARNESS_THREAD_GUID and UNREAL_AI_HARNESS_AGENT_MODE (ask|orchestrate|agent) when thread/mode are not on the command line. Writes Saved/UnrealAiEditor/HarnessRuns/<ts>/run.jsonl and optional context_window_*.txt. Set UNREAL_AI_HARNESS_DUMP_CONTEXT=1 to dump context after each tool (overridable by 5th arg). Set UNREAL_AI_LLM_FIXTURE to tests/harness_llm_fixture.example.json for deterministic LLM."),
+		TEXT("Run one agent harness turn (same path as Agent Chat). Args: <MessageFilePath> [ThreadGuid] [agent|ask|plan] [OutputDir] [dumpcontext|nodump]. If no file arg is passed, reads UNREAL_AI_HARNESS_MESSAGE_FILE (UTF-8 text); optional UNREAL_AI_HARNESS_THREAD_GUID and UNREAL_AI_HARNESS_AGENT_MODE (ask|plan|agent) when thread/mode are not on the command line. Writes Saved/UnrealAiEditor/HarnessRuns/<ts>/run.jsonl and optional context_window_*.txt. Set UNREAL_AI_HARNESS_DUMP_CONTEXT=1 to dump context after each tool (overridable by 5th arg)."),
 		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 		{
 			FString MsgFilePath;
@@ -213,9 +214,9 @@ void FUnrealAiEditorModule::StartupModule()
 				{
 					Mode = EUnrealAiAgentMode::Ask;
 				}
-				else if (Args[BaseIdx + 1].Equals(TEXT("orchestrate"), ESearchCase::IgnoreCase))
+				else if (Args[BaseIdx + 1].Equals(TEXT("plan"), ESearchCase::IgnoreCase))
 				{
-					Mode = EUnrealAiAgentMode::Orchestrate;
+					Mode = EUnrealAiAgentMode::Plan;
 				}
 			}
 			else
@@ -225,9 +226,9 @@ void FUnrealAiEditorModule::StartupModule()
 				{
 					Mode = EUnrealAiAgentMode::Ask;
 				}
-				else if (ModeEnv.Equals(TEXT("orchestrate"), ESearchCase::IgnoreCase))
+				else if (ModeEnv.Equals(TEXT("plan"), ESearchCase::IgnoreCase))
 				{
-					Mode = EUnrealAiAgentMode::Orchestrate;
+					Mode = EUnrealAiAgentMode::Plan;
 				}
 			}
 			FString OutDir = (Args.Num() > BaseIdx + 2) ? Args[BaseIdx + 2] : FString();
@@ -277,6 +278,42 @@ void FUnrealAiEditorModule::StartupModule()
 				*RunDir,
 				*Jsonl,
 				*Err);
+		}),
+		ECVF_Default);
+
+	GUnrealAiForgetThreadConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.ForgetThread"),
+		TEXT("Remove persisted thread data and clear in-memory context for that thread. Args: <ThreadGuid>"),
+		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		{
+			if (Args.Num() < 1 || Args[0].IsEmpty())
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.ForgetThread: pass thread GUID (digits-with-hyphens)"));
+				return;
+			}
+			FGuid G;
+			if (!FGuid::Parse(Args[0], G) || !G.IsValid())
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.ForgetThread: invalid GUID: %s"), *Args[0]);
+				return;
+			}
+			const FString ThreadId = G.ToString(EGuidFormats::DigitsWithHyphens);
+			const TSharedPtr<FUnrealAiBackendRegistry> Reg = FUnrealAiEditorModule::GetBackendRegistry();
+			if (!Reg.IsValid())
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.ForgetThread: backend registry unavailable"));
+				return;
+			}
+			const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+			if (IAgentContextService* Ctx = Reg->GetContextService())
+			{
+				Ctx->ClearSession(ProjectId, ThreadId);
+			}
+			if (IUnrealAiPersistence* Persist = Reg->GetPersistence())
+			{
+				Persist->ForgetThread(ProjectId, ThreadId);
+			}
+			UE_LOG(LogTemp, Display, TEXT("UnrealAi.ForgetThread: cleared thread=%s"), *ThreadId);
 		}),
 		ECVF_Default);
 
@@ -415,20 +452,20 @@ void FUnrealAiEditorModule::StartupModule()
 			UE_LOG(LogTemp, Display, TEXT("Context ranking policy:"));
 			UE_LOG(LogTemp, Display, TEXT("  weights mention=%.1f semantic=%.1f recency=%.1f freshness=%.1f safety_penalty=%.1f active=%.1f thread=%.1f frequency=%.1f"),
 				W.MentionHit, W.HeuristicSemantic, W.Recency, W.FreshnessReliability, W.SafetyPenalty, W.ActiveBonus, W.ThreadOverlayBonus, W.Frequency);
-			UE_LOG(LogTemp, Display, TEXT("  base_importance recent_tab=%.1f attachment=%.1f tool_result=%.1f editor_snapshot=%.1f todo=%.1f orchestrate=%.1f"),
+			UE_LOG(LogTemp, Display, TEXT("  base_importance recent_tab=%.1f attachment=%.1f tool_result=%.1f editor_snapshot=%.1f todo=%.1f plan=%.1f"),
 				GetBaseTypeImportance(ECandidateType::RecentTab),
 				GetBaseTypeImportance(ECandidateType::Attachment),
 				GetBaseTypeImportance(ECandidateType::ToolResult),
 				GetBaseTypeImportance(ECandidateType::EditorSnapshotField),
 				GetBaseTypeImportance(ECandidateType::TodoState),
-				GetBaseTypeImportance(ECandidateType::OrchestrateState));
-			UE_LOG(LogTemp, Display, TEXT("  caps recent=%d attachment=%d tool=%d snapshot=%d todo=%d orchestrate=%d"),
+				GetBaseTypeImportance(ECandidateType::PlanState));
+			UE_LOG(LogTemp, Display, TEXT("  caps recent=%d attachment=%d tool=%d snapshot=%d todo=%d plan=%d"),
 				GetPerTypeCap(ECandidateType::RecentTab),
 				GetPerTypeCap(ECandidateType::Attachment),
 				GetPerTypeCap(ECandidateType::ToolResult),
 				GetPerTypeCap(ECandidateType::EditorSnapshotField),
 				GetPerTypeCap(ECandidateType::TodoState),
-				GetPerTypeCap(ECandidateType::OrchestrateState));
+				GetPerTypeCap(ECandidateType::PlanState));
 		}),
 		ECVF_Default);
 
@@ -610,6 +647,11 @@ void FUnrealAiEditorModule::ShutdownModule()
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiRunAgentTurnConsole);
 		GUnrealAiRunAgentTurnConsole = nullptr;
+	}
+	if (GUnrealAiForgetThreadConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiForgetThreadConsole);
+		GUnrealAiForgetThreadConsole = nullptr;
 	}
 	if (GUnrealAiCatalogMatrixConsole)
 	{

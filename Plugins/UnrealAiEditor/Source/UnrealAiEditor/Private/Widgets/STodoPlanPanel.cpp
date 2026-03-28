@@ -3,6 +3,7 @@
 #include "Backend/UnrealAiBackendRegistry.h"
 #include "Context/AgentContextTypes.h"
 #include "Context/IAgentContextService.h"
+#include "Harness/UnrealAiPlanDag.h"
 #include "Context/UnrealAiProjectId.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -54,14 +55,16 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 	BackendRegistry = InArgs._BackendRegistry;
 	Session = InArgs._Session;
 
-	TArray<FString> Steps;
-	ParseSteps(PlanJson, Steps);
+	FUnrealAiPlanDag Dag;
+	FString DagErr;
+	const bool bParsedDag = UnrealAiPlanDag::ParseDagJson(PlanJson, Dag, DagErr) && Dag.Nodes.Num() > 0;
 
 	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
 	const FString ThreadId = Session.IsValid()
 		? Session->ThreadId.ToString(EGuidFormats::DigitsWithHyphens)
 		: FString();
 	TArray<bool> DoneFlags;
+	TMap<FString, FString> DagNodeStatus;
 	if (BackendRegistry.IsValid() && Session.IsValid())
 	{
 		if (IAgentContextService* Ctx = BackendRegistry->GetContextService())
@@ -73,18 +76,47 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 				{
 					DoneFlags = St->TodoStepsDone;
 				}
+				if (bParsedDag && !St->ActivePlanDagJson.IsEmpty() && St->ActivePlanDagJson == PlanJson)
+				{
+					DagNodeStatus = St->PlanNodeStatusById;
+				}
 			}
 		}
 	}
 
+	TArray<FString> Steps;
+	if (!bParsedDag)
+	{
+		ParseSteps(PlanJson, Steps);
+	}
+
 	TSharedRef<SVerticalBox> Box = SNew(SVerticalBox);
+	const FString HeaderTitle = bParsedDag && !Dag.Title.IsEmpty() ? Dag.Title : Title;
 	Box->AddSlot().AutoHeight().Padding(4.f)
 		[
 			SNew(STextBlock)
-				.Text(FText::FromString(FString::Printf(TEXT("Plan: %s"), *Title)))
+				.Text(FText::FromString(FString::Printf(
+					TEXT("%s: %s"),
+					bParsedDag ? TEXT("Plan DAG") : TEXT("Plan"),
+					*HeaderTitle)))
 				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
 		];
-	if (Steps.Num() == 0)
+	if (bParsedDag)
+	{
+		for (const FUnrealAiDagNode& N : Dag.Nodes)
+		{
+			const FString* St = DagNodeStatus.Find(N.Id);
+			const FString StatusLine = St && !St->IsEmpty() ? *St : TEXT("pending");
+			const FString Line = FString::Printf(TEXT("[%s] %s — %s"), *N.Id, *StatusLine, N.Title.IsEmpty() ? *N.Id : *N.Title);
+			Box->AddSlot().AutoHeight().Padding(FMargin(8.f, 2.f))
+				[
+					SNew(STextBlock)
+						.AutoWrapText(true)
+						.Text(FText::FromString(Line))
+				];
+		}
+	}
+	else if (Steps.Num() == 0)
 	{
 		Box->AddSlot().AutoHeight().Padding(FMargin(4.f, 0.f))
 			[

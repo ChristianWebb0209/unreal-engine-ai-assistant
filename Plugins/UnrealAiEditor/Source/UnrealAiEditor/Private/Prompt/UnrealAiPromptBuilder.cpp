@@ -30,8 +30,8 @@ namespace UnrealAiPromptBuilderPriv
 			return TEXT("ask");
 		case EUnrealAiAgentMode::Agent:
 			return TEXT("agent");
-		case EUnrealAiAgentMode::Orchestrate:
-			return TEXT("orchestrate");
+		case EUnrealAiAgentMode::Plan:
+			return TEXT("plan");
 		default:
 			return TEXT("ask");
 		}
@@ -49,10 +49,10 @@ namespace UnrealAiPromptBuilderPriv
 			break;
 		case EUnrealAiAgentMode::Agent:
 			Start = TEXT("## Mode: Agent (`agent`)");
-			End = TEXT("## Mode: Orchestrate (`orchestrate`)");
+			End = TEXT("## Mode: Plan (`plan`)");
 			break;
-		case EUnrealAiAgentMode::Orchestrate:
-			Start = TEXT("## Mode: Orchestrate (`orchestrate`)");
+		case EUnrealAiAgentMode::Plan:
+			Start = TEXT("## Mode: Plan (`plan`)");
 			End = nullptr;
 			break;
 		default:
@@ -168,9 +168,9 @@ FString UnrealAiPromptBuilder::BuildSystemDeveloperContent(const FUnrealAiPrompt
 	}
 	AppendChunk(TEXT("07-safety-banned.md"));
 	AppendChunk(TEXT("08-output-style.md"));
-	if (Params.bIncludeOrchestrationChunk)
+	if (Params.bIncludePlanDagChunk)
 	{
-		AppendChunk(TEXT("09-orchestration-workers.md"));
+		AppendChunk(TEXT("09-plan-dag.md"));
 	}
 
 	UnrealAiPromptBuilderPriv::ApplyTemplateTokens(Acc, Params, B);

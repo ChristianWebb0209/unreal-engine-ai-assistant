@@ -18,6 +18,9 @@ public:
 	virtual bool LoadThreadContextJson(const FString& ProjectId, const FString& ThreadId, FString& OutJsonBody) override;
 	virtual bool SaveThreadConversationJson(const FString& ProjectId, const FString& ThreadId, const FString& JsonBody) override;
 	virtual bool LoadThreadConversationJson(const FString& ProjectId, const FString& ThreadId, FString& OutJsonBody) override;
+	virtual bool SaveThreadPlanDraftJson(const FString& ProjectId, const FString& ThreadId, const FString& JsonBody) override;
+	virtual bool LoadThreadPlanDraftJson(const FString& ProjectId, const FString& ThreadId, FString& OutJsonBody) override;
+	virtual void ClearThreadPlanDraft(const FString& ProjectId, const FString& ThreadId) override;
 
 	virtual FString GetThreadStorageSlug(const FString& ProjectId, const FString& ThreadId) const override;
 
