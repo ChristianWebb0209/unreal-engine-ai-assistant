@@ -2075,7 +2075,7 @@
     },
     {
       "tool_id": "material_get_usage_summary",
-      "summary": "List referencers for a material.",
+      "summary": "List referencers for a material. If not found in the registry, the path may be wrong for this project—retry discovery with asset_index_fuzzy_search before concluding the asset is absent.",
       "category": "materials_rendering",
       "tags": [
         "material",
@@ -2109,7 +2109,9 @@
       "permission": "read",
       "ue_entry_points": "IAssetRegistry::GetReferencers",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "Not found: verify material_path with asset_index_fuzzy_search; path may not exist in this project."
+      ],
       "doc_links": [],
       "status": "research"
     },
@@ -2969,7 +2971,7 @@
     },
     {
       "tool_id": "asset_index_fuzzy_search",
-      "summary": "Fuzzy-search the Asset Registry under path_prefix (default /Game). If query is missing or empty, you must pass a narrow path_prefix (e.g. /Game/Blueprints)—otherwise the tool errors instead of scanning the whole project. Enumeration stops after max_assets_to_scan or max_wall_ms (default 12s, max 120s)—see truncated, timed_out, assets_visited. Prefer explicit query + path_prefix for performance.",
+      "summary": "Fuzzy-search the Asset Registry under path_prefix (default /Game). On vague but domain-scoped user asks (e.g. something in project assets, blueprint-ish, material-like), prefer one bounded call with a topical query plus narrow path_prefix over asking the user for a keyword first; ask only if results are empty and the user text has no usable token. If query is missing or empty, you must pass a narrow path_prefix (e.g. /Game/Blueprints)—otherwise the tool errors instead of scanning the whole project. Enumeration stops after max_assets_to_scan or max_wall_ms (default 12s, max 120s)—see truncated, timed_out, assets_visited. Prefer explicit query + path_prefix for performance.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -2996,7 +2998,7 @@
         "properties": {
           "query": {
             "type": "string",
-            "description": "Approximate text; may be misspelled. Compared against asset name, object path, and class path. If omitted or empty, you must set a narrow path_prefix or the tool returns an error (see query_coerced when a default was applied)."
+            "description": "Approximate text; may be misspelled. Compared against asset name, object path, and class path. When the user is vague, guess a topical token from their message rather than asking for a keyword first. If omitted or empty, you must set a narrow path_prefix or the tool returns an error (see query_coerced when a default was applied)."
           },
           "search_string": {
             "type": "string",
