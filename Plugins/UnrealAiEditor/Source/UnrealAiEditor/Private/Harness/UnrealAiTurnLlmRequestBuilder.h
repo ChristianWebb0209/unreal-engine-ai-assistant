@@ -19,6 +19,7 @@ namespace UnrealAiTurnLlmRequestBuilder
 		const FUnrealAiAgentTurnRequest& Request,
 		int32 LlmRound,
 		int32 MaxLlmRounds,
+		const FString& RetrievalTurnKey,
 		IAgentContextService* ContextService,
 		FUnrealAiModelProfileRegistry* Profiles,
 		FUnrealAiToolCatalog* Catalog,

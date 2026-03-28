@@ -2,7 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Harness/FUnrealAiWorkerOrchestrator.h"
-#include "Harness/UnrealAiOrchestrateDag.h"
+#include "Harness/UnrealAiPlanDag.h"
 #include "Harness/UnrealAiAgentTypes.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -29,70 +29,70 @@ bool FUnrealAiMergeDeterministicTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FUnrealAiOrchestrateDagValidationTest,
-	"UnrealAiEditor.Harness.OrchestrateDagValidation",
+	FUnrealAiPlanDagValidationTest,
+	"UnrealAiEditor.Harness.PlanDagValidation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FUnrealAiOrchestrateDagValidationTest::RunTest(const FString& Parameters)
+bool FUnrealAiPlanDagValidationTest::RunTest(const FString& Parameters)
 {
 	(void)Parameters;
 	const FString ValidDag = TEXT(
-		"{\"schema\":\"unreal_ai.orchestrate_dag\",\"title\":\"t\",\"nodes\":["
+		"{\"schema\":\"unreal_ai.plan_dag\",\"title\":\"t\",\"nodes\":["
 		"{\"id\":\"n1\",\"title\":\"a\",\"depends_on\":[]},"
 		"{\"id\":\"n2\",\"title\":\"b\",\"depends_on\":[\"n1\"]}"
 		"]}");
-	FUnrealAiOrchestrateDag Dag;
+	FUnrealAiPlanDag Dag;
 	FString Err;
-	TestTrue(TEXT("parse valid dag"), UnrealAiOrchestrateDag::ParseDagJson(ValidDag, Dag, Err));
-	TestTrue(TEXT("validate valid dag"), UnrealAiOrchestrateDag::ValidateDag(Dag, 32, Err));
+	TestTrue(TEXT("parse valid dag"), UnrealAiPlanDag::ParseDagJson(ValidDag, Dag, Err));
+	TestTrue(TEXT("validate valid dag"), UnrealAiPlanDag::ValidateDag(Dag, 32, Err));
 
 	const FString CyclicDag = TEXT(
-		"{\"schema\":\"unreal_ai.orchestrate_dag\",\"nodes\":["
+		"{\"schema\":\"unreal_ai.plan_dag\",\"nodes\":["
 		"{\"id\":\"a\",\"depends_on\":[\"b\"]},"
 		"{\"id\":\"b\",\"depends_on\":[\"a\"]}"
 		"]}");
-	FUnrealAiOrchestrateDag BadDag;
-	TestTrue(TEXT("parse cyclic dag"), UnrealAiOrchestrateDag::ParseDagJson(CyclicDag, BadDag, Err));
-	TestFalse(TEXT("detect cycle"), UnrealAiOrchestrateDag::ValidateDag(BadDag, 32, Err));
+	FUnrealAiPlanDag BadDag;
+	TestTrue(TEXT("parse cyclic dag"), UnrealAiPlanDag::ParseDagJson(CyclicDag, BadDag, Err));
+	TestFalse(TEXT("detect cycle"), UnrealAiPlanDag::ValidateDag(BadDag, 32, Err));
 
 	const FString LegacyStepsDag = TEXT(
 		"{\"schemaVersion\":4,\"definitionOfDone\":\"d\",\"steps\":["
 		"{\"id\":\"s1\",\"title\":\"first\",\"detail\":\"hint1\",\"dependsOn\":[]},"
 		"{\"id\":\"s2\",\"title\":\"second\",\"detail\":\"hint2\",\"dependsOn\":[\"s1\"]}"
 		"]}");
-	FUnrealAiOrchestrateDag StepDag;
-	TestTrue(TEXT("parse legacy steps dag"), UnrealAiOrchestrateDag::ParseDagJson(LegacyStepsDag, StepDag, Err));
-	TestTrue(TEXT("validate legacy steps dag"), UnrealAiOrchestrateDag::ValidateDag(StepDag, 32, Err));
+	FUnrealAiPlanDag StepDag;
+	TestTrue(TEXT("parse legacy steps dag"), UnrealAiPlanDag::ParseDagJson(LegacyStepsDag, StepDag, Err));
+	TestTrue(TEXT("validate legacy steps dag"), UnrealAiPlanDag::ValidateDag(StepDag, 32, Err));
 	TestEqual(TEXT("legacy node count"), StepDag.Nodes.Num(), 2);
 	TestEqual(TEXT("legacy hint from detail"), StepDag.Nodes[1].Hint, FString(TEXT("hint2")));
 
 	const FString DagWithChatNameSuffix = ValidDag + TEXT("\n<chat-name: \"Test\">");
-	FUnrealAiOrchestrateDag Suffixed;
-	TestTrue(TEXT("parse dag with chat-name suffix"), UnrealAiOrchestrateDag::ParseDagJson(DagWithChatNameSuffix, Suffixed, Err));
+	FUnrealAiPlanDag Suffixed;
+	TestTrue(TEXT("parse dag with chat-name suffix"), UnrealAiPlanDag::ParseDagJson(DagWithChatNameSuffix, Suffixed, Err));
 	TestEqual(TEXT("suffix node count"), Suffixed.Nodes.Num(), 2);
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FUnrealAiOrchestrateReadySetTest,
-	"UnrealAiEditor.Harness.OrchestrateReadySet",
+	FUnrealAiPlanReadySetTest,
+	"UnrealAiEditor.Harness.PlanReadySet",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FUnrealAiOrchestrateReadySetTest::RunTest(const FString& Parameters)
+bool FUnrealAiPlanReadySetTest::RunTest(const FString& Parameters)
 {
 	(void)Parameters;
-	FUnrealAiOrchestrateDag Dag;
+	FUnrealAiPlanDag Dag;
 	Dag.Nodes = {
 		{TEXT("n1"), TEXT("first"), TEXT(""), {}},
 		{TEXT("n2"), TEXT("second"), TEXT(""), {TEXT("n1")}},
 		{TEXT("n3"), TEXT("third"), TEXT(""), {TEXT("n1")}}};
 	TMap<FString, FString> Status;
 	TArray<FString> Ready;
-	UnrealAiOrchestrateDag::GetReadyNodeIds(Dag, Status, Ready);
+	UnrealAiPlanDag::GetReadyNodeIds(Dag, Status, Ready);
 	TestEqual(TEXT("only root ready"), Ready.Num(), 1);
 	TestEqual(TEXT("root id"), Ready[0], FString(TEXT("n1")));
 	Status.Add(TEXT("n1"), TEXT("success"));
-	UnrealAiOrchestrateDag::GetReadyNodeIds(Dag, Status, Ready);
+	UnrealAiPlanDag::GetReadyNodeIds(Dag, Status, Ready);
 	TestEqual(TEXT("children ready after root"), Ready.Num(), 2);
 	return true;
 }

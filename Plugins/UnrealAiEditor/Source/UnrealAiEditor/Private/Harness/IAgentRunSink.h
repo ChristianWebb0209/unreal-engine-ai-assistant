@@ -37,7 +37,19 @@ public:
 	virtual void OnRunContinuation(int32 PhaseIndex, int32 TotalPhasesHint) = 0;
 	/** Structured todo plan from tool or harness (JSON body). */
 	virtual void OnTodoPlanEmitted(const FString& Title, const FString& PlanJson) = 0;
+	/** Plan-mode DAG JSON ready for user review / Build (editor UI only). */
+	virtual void OnPlanDraftReady(const FString& DagJsonText) {}
 	/** Planning-policy runtime signal for observability (agent mode heuristics/escalation). */
 	virtual void OnPlanningDecision(const FString& ModeUsed, const TArray<FString>& TriggerReasons, int32 ReplanCount, int32 QueueStepsPending) {}
+	/** Per-turn enforcement signal for action/mutation execution policy observability. */
+	virtual void OnEnforcementEvent(const FString& EventType, const FString& Detail) {}
+	/** Run-level aggregate counters for action/mutation policy auditing. */
+	virtual void OnEnforcementSummary(
+		int32 ActionIntentTurns,
+		int32 ActionTurnsWithToolCalls,
+		int32 ActionTurnsWithExplicitBlocker,
+		int32 ActionNoToolNudges,
+		int32 MutationIntentTurns,
+		int32 MutationReadOnlyNudges) {}
 	virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) = 0;
 };

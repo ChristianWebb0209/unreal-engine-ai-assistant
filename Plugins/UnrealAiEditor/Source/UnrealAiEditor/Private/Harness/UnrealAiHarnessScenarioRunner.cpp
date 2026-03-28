@@ -10,6 +10,7 @@
 #include "HAL/PlatformTime.h"
 #include "Harness/FAgentRunFileSink.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
+#include "Harness/FUnrealAiPlanExecutor.h"
 #include "Harness/IUnrealAiAgentHarness.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "HttpManager.h"
@@ -134,7 +135,16 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 			*OutJsonlPath,
 			WaitMs / 1000);
 
-		Harness->RunTurn(Req, Sink);
+		if (Mode == EUnrealAiAgentMode::Plan)
+		{
+			// Same pipeline as SChatComposer Plan mode: planner DAG pass + per-node Agent runs.
+			const TSharedRef<FUnrealAiPlanExecutor> PlanRun = FUnrealAiPlanExecutor::Start(Harness, Ctx, Req, Sink);
+			(void)PlanRun;
+		}
+		else
+		{
+			Harness->RunTurn(Req, Sink);
+		}
 		const bool bSignaled = WaitForHarnessEventWhilePumpingGameThread(DoneEvent, WaitMs);
 
 		if (!bSignaled)

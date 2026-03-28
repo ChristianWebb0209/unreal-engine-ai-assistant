@@ -50,6 +50,14 @@ public:
 	virtual void OnRunContinuation(int32 PhaseIndex, int32 TotalPhasesHint) override;
 	virtual void OnTodoPlanEmitted(const FString& Title, const FString& PlanJson) override;
 	virtual void OnPlanningDecision(const FString& ModeUsed, const TArray<FString>& TriggerReasons, int32 ReplanCount, int32 QueueStepsPending) override;
+	virtual void OnEnforcementEvent(const FString& EventType, const FString& Detail) override;
+	virtual void OnEnforcementSummary(
+		int32 ActionIntentTurns,
+		int32 ActionTurnsWithToolCalls,
+		int32 ActionTurnsWithExplicitBlocker,
+		int32 ActionNoToolNudges,
+		int32 MutationIntentTurns,
+		int32 MutationReadOnlyNudges) override;
 	virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) override;
 
 	const FString& GetJsonlPath() const { return JsonlPath; }

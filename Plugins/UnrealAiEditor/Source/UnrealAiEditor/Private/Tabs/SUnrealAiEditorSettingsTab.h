@@ -8,6 +8,7 @@
 
 class FUnrealAiBackendRegistry;
 class SEditableTextBox;
+class SMultiLineEditableTextBox;
 class SVerticalBox;
 class STextBlock;
 class SWidgetSwitcher;
@@ -21,6 +22,9 @@ public:
 
 	void Construct(const FArguments& InArgs);
 	virtual ~SUnrealAiEditorSettingsTab() override;
+
+	/** Usage line + optional Vector DB panel refresh (slow ticker). */
+	void TickSlowUiRefresh();
 
 private:
 	struct FDynModelRow
@@ -86,6 +90,8 @@ private:
 	void RefreshProviderDropdownSelection();
 
 	FReply OnSettingsSegmentClicked(int32 Index);
+	FReply OnVectorDbOverviewRefreshClicked();
+	void RefreshVectorDbOverviewUi();
 	FReply OnChatHistoryRefreshClicked();
 	void RebuildChatHistoryListUi();
 	FReply OnMemoriesRefreshClicked();
@@ -128,6 +134,10 @@ private:
 	TSharedPtr<SEditableTextBox> MemoryRetentionDaysBox;
 	TSharedPtr<STextBlock> MemoryGenerationStatusBlock;
 	TSharedPtr<STextBlock> UsageSummaryBlock;
+	TSharedPtr<STextBlock> VectorDbOverviewBlock;
+
+	int32 ActiveSettingsSegmentIndex = 0;
+	double LastVectorDbOverviewPollSeconds = 0.0;
 
 	TArray<TSharedPtr<FString>> CompanyPresetOptions;
 	TArray<TSharedPtr<FString>> ProviderIdOptions;
@@ -145,6 +155,24 @@ private:
 	bool bRetrievalAutoIndexOnProjectOpen = true;
 	FString RetrievalPeriodicScrubMinutesStr = TEXT("30");
 	bool bRetrievalAllowMixedModelCompatibility = false;
+
+	FString RetrievalRootPresetStr = TEXT("minimal");
+	FString RetrievalIndexedExtensionsText;
+	FString RetrievalMaxFilesPerRebuildStr = TEXT("0");
+	FString RetrievalMaxTotalChunksPerRebuildStr = TEXT("0");
+	FString RetrievalMaxEmbeddingCallsPerRebuildStr = TEXT("0");
+	FString RetrievalChunkCharsStr = TEXT("1200");
+	FString RetrievalChunkOverlapStr = TEXT("200");
+	FString RetrievalAssetRegistryMaxAssetsStr = TEXT("0");
+	bool bRetrievalAssetRegistryIncludeEngineAssets = false;
+	FString RetrievalEmbeddingBatchSizeStr = TEXT("8");
+	FString RetrievalMinDelayMsBetweenBatchesStr = TEXT("0");
+	bool bRetrievalIndexMemoryRecordsInVectorStore = false;
+	FString RetrievalBlueprintMaxFeatureRecordsStr = TEXT("0");
+
+	TArray<TSharedPtr<FString>> RetrievalRootPresetOptions;
+	TSharedPtr<SComboBox<TSharedPtr<FString>>> RetrievalRootPresetCombo;
+	TSharedPtr<SMultiLineEditableTextBox> RetrievalIndexedExtensionsBox;
 
 	FText StatusText;
 };

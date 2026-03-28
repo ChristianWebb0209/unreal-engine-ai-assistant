@@ -17,7 +17,7 @@ namespace UnrealAiAgentHarnessPriv
 	struct FAgentTurnRunner;
 }
 
-/** Orchestrates context, conversation store, tool catalog, transport, and tool host. */
+/** Plans context, conversation store, tool catalog, transport, and tool host. */
 class FUnrealAiAgentHarness final : public IUnrealAiAgentHarness
 {
 public:

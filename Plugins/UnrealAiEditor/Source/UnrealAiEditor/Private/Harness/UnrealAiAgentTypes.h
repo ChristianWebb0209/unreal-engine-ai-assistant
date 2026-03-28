@@ -24,10 +24,15 @@ struct FUnrealAiModelCapabilities
 	/** When false, image-like context attachments are omitted from the built context (text-only models). */
 	bool bSupportsImages = true;
 	/**
-	 * Max tool↔LLM iterations per user send (each round = one completion, possibly + tool calls).
-	 * Higher values allow longer agent runs but usually consume more tokens. Clamped at runtime (e.g. 1–256).
+	 * Soft backstop: max tool↔LLM iterations per user send (each round = one completion, possibly + tool calls).
+	 * Primary limits are repeated identical tool failures and MaxAgentTurnTokens; this remains a safety ceiling (clamped e.g. 1–512).
 	 */
-	int32 MaxAgentLlmRounds = 32;
+	int32 MaxAgentLlmRounds = 512;
+	/**
+	 * Max total prompt+completion tokens for one agent turn (one user message / RunTurn). 0 = use harness default
+	 * or UNREAL_AI_HARNESS_MAX_TOKENS_PER_TURN. Set to -1 in JSON via a sentinel if we add UI later; env "0" disables the cap.
+	 */
+	int32 MaxAgentTurnTokens = 0;
 };
 
 /** Single function/tool call from the model (chat-completions tool_calls shape). */
@@ -89,7 +94,7 @@ struct FUnrealAiAgentTurnRequest
 	bool bRecordAssistantAsStubToolResult = false;
 	/**
 	 * When > 0, the harness uses max(profile MaxAgentLlmRounds, this) for this turn.
-	 * Orchestrate worker nodes set this so multi-tool steps are not cut off at the profile default.
+	 * Plan worker nodes set this so multi-tool steps are not cut off at the profile default.
 	 */
 	int32 LlmRoundBudgetFloor = 0;
 };

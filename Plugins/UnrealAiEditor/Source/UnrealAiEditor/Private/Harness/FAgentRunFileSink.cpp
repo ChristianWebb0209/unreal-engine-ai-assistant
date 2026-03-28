@@ -233,6 +233,34 @@ void FAgentRunFileSink::OnPlanningDecision(
 	AppendJsonObject(O);
 }
 
+void FAgentRunFileSink::OnEnforcementEvent(const FString& EventType, const FString& Detail)
+{
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetStringField(TEXT("type"), TEXT("enforcement_event"));
+	O->SetStringField(TEXT("event_type"), EventType);
+	O->SetStringField(TEXT("detail"), Detail);
+	AppendJsonObject(O);
+}
+
+void FAgentRunFileSink::OnEnforcementSummary(
+	const int32 ActionIntentTurns,
+	const int32 ActionTurnsWithToolCalls,
+	const int32 ActionTurnsWithExplicitBlocker,
+	const int32 ActionNoToolNudges,
+	const int32 MutationIntentTurns,
+	const int32 MutationReadOnlyNudges)
+{
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetStringField(TEXT("type"), TEXT("enforcement_summary"));
+	O->SetNumberField(TEXT("action_intent_turns"), static_cast<double>(ActionIntentTurns));
+	O->SetNumberField(TEXT("action_turns_with_tool_calls"), static_cast<double>(ActionTurnsWithToolCalls));
+	O->SetNumberField(TEXT("action_turns_with_explicit_blocker"), static_cast<double>(ActionTurnsWithExplicitBlocker));
+	O->SetNumberField(TEXT("action_no_tool_nudges"), static_cast<double>(ActionNoToolNudges));
+	O->SetNumberField(TEXT("mutation_intent_turns"), static_cast<double>(MutationIntentTurns));
+	O->SetNumberField(TEXT("mutation_read_only_nudges"), static_cast<double>(MutationReadOnlyNudges));
+	AppendJsonObject(O);
+}
+
 void FAgentRunFileSink::OnRunFinished(const bool bSuccess, const FString& ErrorMessage)
 {
 	bool bExpected = false;
@@ -245,7 +273,19 @@ void FAgentRunFileSink::OnRunFinished(const bool bSuccess, const FString& ErrorM
 	O->SetBoolField(TEXT("success"), bSuccess);
 	O->SetStringField(TEXT("error_message"), ErrorMessage);
 	AppendJsonObject(O);
-	if (bDumpContextOnRunFinished)
+	// BuildContextWindow for "run_finished" can block on retrieval/vector index; the harness does not
+	// signal DoneEvent until after this returns, so ExecCmds (e.g. Quit) is delayed and automation may
+	// try to kill the editor while still inside this path. Opt-in only via env (default: skip).
+	bool bDumpRunFinishedContext = false;
+	{
+		const FString Env = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_RUN_FINISHED_CONTEXT_DUMP"));
+		if (Env.Equals(TEXT("1"), ESearchCase::IgnoreCase) || Env.Equals(TEXT("true"), ESearchCase::IgnoreCase)
+			|| Env.Equals(TEXT("yes"), ESearchCase::IgnoreCase))
+		{
+			bDumpRunFinishedContext = true;
+		}
+	}
+	if (bDumpContextOnRunFinished && bDumpRunFinishedContext)
 	{
 		MaybeDumpContextWindow(TEXT("run_finished"));
 	}

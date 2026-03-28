@@ -1,11 +1,11 @@
-#include "Harness/FUnrealAiOrchestrateExecutor.h"
+#include "Harness/FUnrealAiPlanExecutor.h"
 
 #include "Context/IAgentContextService.h"
 #include "Harness/IAgentRunSink.h"
 #include "Harness/IUnrealAiAgentHarness.h"
 #include "Templates/Function.h"
 
-namespace UnrealAiOrchestrateExecutorPriv
+namespace UnrealAiPlanExecutorPriv
 {
 	class FCollectingSink final : public IAgentRunSink
 	{
@@ -16,13 +16,13 @@ namespace UnrealAiOrchestrateExecutorPriv
 		FString WorkerNodeId;
 		bool bForwardStreamToParent = false;
 
-		FString MakeOrchCallId(const FString& CallId) const
+		FString MakePlanCallId(const FString& CallId) const
 		{
 			if (WorkerNodeId.IsEmpty())
 			{
 				return CallId;
 			}
-			const FString Prefix = FString::Printf(TEXT("orch_%s_"), *WorkerNodeId);
+			const FString Prefix = FString::Printf(TEXT("plan_%s_"), *WorkerNodeId);
 			if (CallId.StartsWith(Prefix, ESearchCase::CaseSensitive))
 			{
 				return CallId;
@@ -55,7 +55,7 @@ namespace UnrealAiOrchestrateExecutorPriv
 		virtual void OnToolCallStarted(const FString& ToolName, const FString& CallId, const FString& ArgumentsJson) override
 		{
 			ForwardIfPossible([&](IAgentRunSink& P)
-			{ P.OnToolCallStarted(ToolName, MakeOrchCallId(CallId), ArgumentsJson); });
+			{ P.OnToolCallStarted(ToolName, MakePlanCallId(CallId), ArgumentsJson); });
 		}
 		virtual void OnToolCallFinished(
 			const FString& ToolName,
@@ -64,7 +64,7 @@ namespace UnrealAiOrchestrateExecutorPriv
 			const FString& ResultPreview,
 			const TSharedPtr<FUnrealAiToolEditorPresentation>& EditorPresentation) override
 		{
-			const FString Id = MakeOrchCallId(CallId);
+			const FString Id = MakePlanCallId(CallId);
 			ForwardIfPossible([&](IAgentRunSink& P)
 			{ P.OnToolCallFinished(ToolName, Id, bSuccess, ResultPreview, EditorPresentation); });
 		}
@@ -80,6 +80,10 @@ namespace UnrealAiOrchestrateExecutorPriv
 		{
 			ForwardIfPossible([&](IAgentRunSink& P) { P.OnTodoPlanEmitted(Title, PlanJson); });
 		}
+		virtual void OnPlanDraftReady(const FString& DagJsonText) override
+		{
+			ForwardIfPossible([&](IAgentRunSink& P) { P.OnPlanDraftReady(DagJsonText); });
+		}
 		virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) override
 		{
 			if (OnFinished)
@@ -90,18 +94,21 @@ namespace UnrealAiOrchestrateExecutorPriv
 	};
 }
 
-TSharedRef<FUnrealAiOrchestrateExecutor> FUnrealAiOrchestrateExecutor::Start(
+TSharedRef<FUnrealAiPlanExecutor> FUnrealAiPlanExecutor::Start(
 	IUnrealAiAgentHarness* InHarness,
 	IAgentContextService* InContextService,
 	const FUnrealAiAgentTurnRequest& InParentRequest,
-	TSharedPtr<IAgentRunSink> InParentSink)
+	TSharedPtr<IAgentRunSink> InParentSink,
+	const FUnrealAiPlanExecutorStartOptions& Options)
 {
-	TSharedRef<FUnrealAiOrchestrateExecutor> Exec = MakeShared<FUnrealAiOrchestrateExecutor>();
+	TSharedRef<FUnrealAiPlanExecutor> Exec = MakeShared<FUnrealAiPlanExecutor>();
 	Exec->Harness = InHarness;
 	Exec->ContextService = InContextService;
 	Exec->ParentRequest = InParentRequest;
 	Exec->ParentSink = MoveTemp(InParentSink);
+	Exec->bPauseAfterPlannerForBuild = Options.bPauseAfterPlannerForBuild;
 	Exec->bRunning = true;
+	Exec->PlanExecutionPhase = 0;
 	Exec->ParentIds.RunId = FGuid::NewGuid();
 	Exec->ParentIds.ParentRunId.Invalidate();
 	Exec->ParentIds.WorkerIndex = INDEX_NONE;
@@ -113,29 +120,114 @@ TSharedRef<FUnrealAiOrchestrateExecutor> FUnrealAiOrchestrateExecutor::Start(
 	return Exec;
 }
 
-void FUnrealAiOrchestrateExecutor::Cancel()
+TSharedRef<FUnrealAiPlanExecutor> FUnrealAiPlanExecutor::ResumeExecutionFromDag(
+	IUnrealAiAgentHarness* InHarness,
+	IAgentContextService* InContextService,
+	const FUnrealAiAgentTurnRequest& InParentRequest,
+	TSharedPtr<IAgentRunSink> InParentSink,
+	const FString& DagJsonText)
+{
+	TSharedRef<FUnrealAiPlanExecutor> Exec = MakeShared<FUnrealAiPlanExecutor>();
+	Exec->Harness = InHarness;
+	Exec->ContextService = InContextService;
+	Exec->ParentRequest = InParentRequest;
+	Exec->ParentSink = MoveTemp(InParentSink);
+	Exec->bPauseAfterPlannerForBuild = false;
+	Exec->bAwaitingBuild = false;
+	Exec->bRunning = true;
+	Exec->PlanExecutionPhase = 0;
+	Exec->ParentIds.RunId = FGuid::NewGuid();
+	Exec->ParentIds.ParentRunId.Invalidate();
+	Exec->ParentIds.WorkerIndex = INDEX_NONE;
+
+	FString Err;
+	if (!UnrealAiPlanDag::ParseDagJson(DagJsonText, Exec->Dag, Err))
+	{
+		Exec->Finish(false, FString::Printf(TEXT("Invalid DAG JSON: %s"), *Err));
+		return Exec;
+	}
+	if (!UnrealAiPlanDag::ValidateDag(Exec->Dag, 64, Err))
+	{
+		Exec->Finish(false, FString::Printf(TEXT("DAG validation failed: %s"), *Err));
+		return Exec;
+	}
+	if (InContextService)
+	{
+		InContextService->LoadOrCreate(InParentRequest.ProjectId, InParentRequest.ThreadId);
+		InContextService->SetActivePlanDag(DagJsonText);
+	}
+	if (Exec->ParentSink.IsValid())
+	{
+		Exec->ParentSink->OnRunStarted(Exec->ParentIds);
+		const int32 TotalPhases = 1 + Exec->Dag.Nodes.Num();
+		Exec->ParentSink->OnRunContinuation(0, TotalPhases);
+	}
+	Exec->BeginNextReadyNode();
+	return Exec;
+}
+
+bool FUnrealAiPlanExecutor::ApplyDagJsonForBuild(const FString& DagJsonText, FString& OutError)
+{
+	if (!UnrealAiPlanDag::ParseDagJson(DagJsonText, Dag, OutError))
+	{
+		return false;
+	}
+	if (!UnrealAiPlanDag::ValidateDag(Dag, 64, OutError))
+	{
+		return false;
+	}
+	if (ContextService)
+	{
+		ContextService->LoadOrCreate(ParentRequest.ProjectId, ParentRequest.ThreadId);
+		ContextService->SetActivePlanDag(DagJsonText);
+	}
+	return true;
+}
+
+void FUnrealAiPlanExecutor::ResumeNodeExecution()
+{
+	if (!bRunning || !bAwaitingBuild)
+	{
+		return;
+	}
+	bAwaitingBuild = false;
+	if (ParentSink.IsValid())
+	{
+		const int32 TotalPhases = 1 + Dag.Nodes.Num();
+		ParentSink->OnRunContinuation(0, TotalPhases);
+	}
+	BeginNextReadyNode();
+}
+
+void FUnrealAiPlanExecutor::Cancel()
 {
 	bCancelled = true;
+	if (bAwaitingBuild)
+	{
+		bAwaitingBuild = false;
+		Finish(false, TEXT("Plan cancelled."));
+		return;
+	}
 	if (Harness)
 	{
 		Harness->CancelTurn();
 	}
 }
 
-void FUnrealAiOrchestrateExecutor::BeginPlannerTurn()
+void FUnrealAiPlanExecutor::BeginPlannerTurn()
 {
 	if (!Harness)
 	{
-		Finish(false, TEXT("Harness unavailable for orchestrate planner."));
+		Finish(false, TEXT("Harness unavailable for plan planner."));
 		return;
 	}
 	FUnrealAiAgentTurnRequest PlannerReq = ParentRequest;
-	PlannerReq.Mode = EUnrealAiAgentMode::Orchestrate;
-	const TSharedRef<UnrealAiOrchestrateExecutorPriv::FCollectingSink> Sink = MakeShared<UnrealAiOrchestrateExecutorPriv::FCollectingSink>();
-	const TWeakPtr<FUnrealAiOrchestrateExecutor> WeakExec = AsShared();
+	PlannerReq.Mode = EUnrealAiAgentMode::Plan;
+	const TSharedRef<UnrealAiPlanExecutorPriv::FCollectingSink> Sink = MakeShared<UnrealAiPlanExecutorPriv::FCollectingSink>();
+	const TWeakPtr<FUnrealAiPlanExecutor> WeakExec = AsShared();
 	Sink->OnFinished = [WeakExec](bool bSuccess, const FString& ErrorText, const FString& Text)
 	{
-		if (const TSharedPtr<FUnrealAiOrchestrateExecutor> Self = WeakExec.Pin())
+		if (const TSharedPtr<FUnrealAiPlanExecutor> Self = WeakExec.Pin())
 		{
 			Self->OnPlannerFinished(bSuccess, ErrorText, Text);
 		}
@@ -143,18 +235,14 @@ void FUnrealAiOrchestrateExecutor::BeginPlannerTurn()
 	Harness->RunTurn(PlannerReq, Sink);
 }
 
-void FUnrealAiOrchestrateExecutor::OnPlannerFinished(bool bSuccess, const FString& ErrorText, const FString& PlannerText)
+void FUnrealAiPlanExecutor::OnPlannerFinished(bool bSuccess, const FString& ErrorText, const FString& PlannerText)
 {
 	if (bCancelled)
 	{
-		Finish(false, TEXT("Orchestrate cancelled."));
+		Finish(false, TEXT("Plan cancelled."));
 		return;
 	}
 
-	// Chat naming token propagation:
-	// Orchestrate planner output is not streamed directly into the chat transcript (we only forward
-	// a short "plan ready" message). If the model appended `<chat-name: ...>` to the planner response,
-	// forward just that token to the parent sink so the UI can rename/strip it.
 	if (ParentSink.IsValid())
 	{
 		const int32 TagStart = PlannerText.Find(TEXT("<chat-name"), ESearchCase::IgnoreCase);
@@ -179,12 +267,12 @@ void FUnrealAiOrchestrateExecutor::OnPlannerFinished(bool bSuccess, const FStrin
 	}
 
 	FString ParseError;
-	if (!UnrealAiOrchestrateDag::ParseDagJson(PlannerText, Dag, ParseError))
+	if (!UnrealAiPlanDag::ParseDagJson(PlannerText, Dag, ParseError))
 	{
 		Finish(false, FString::Printf(TEXT("Planner returned invalid DAG JSON: %s"), *ParseError));
 		return;
 	}
-	if (!UnrealAiOrchestrateDag::ValidateDag(Dag, 64, ParseError))
+	if (!UnrealAiPlanDag::ValidateDag(Dag, 64, ParseError))
 	{
 		Finish(false, FString::Printf(TEXT("Planner DAG failed validation: %s"), *ParseError));
 		return;
@@ -192,20 +280,34 @@ void FUnrealAiOrchestrateExecutor::OnPlannerFinished(bool bSuccess, const FStrin
 	if (ContextService)
 	{
 		ContextService->LoadOrCreate(ParentRequest.ProjectId, ParentRequest.ThreadId);
-		ContextService->SetActiveOrchestrateDag(PlannerText);
+		ContextService->SetActivePlanDag(PlannerText);
+	}
+	if (bPauseAfterPlannerForBuild)
+	{
+		bAwaitingBuild = true;
+		if (ParentSink.IsValid())
+		{
+			ParentSink->OnAssistantDelta(FString::Printf(
+				TEXT("Plan ready (%d nodes). Review or edit the DAG below, then click Build to run.\n"),
+				Dag.Nodes.Num()));
+			ParentSink->OnPlanDraftReady(PlannerText);
+		}
+		return;
 	}
 	if (ParentSink.IsValid())
 	{
-		ParentSink->OnAssistantDelta(FString::Printf(TEXT("Orchestrate plan ready: %d nodes. Executing serially.\n"), Dag.Nodes.Num()));
+		ParentSink->OnAssistantDelta(FString::Printf(TEXT("Plan ready: %d nodes. Executing serially.\n"), Dag.Nodes.Num()));
+		const int32 TotalPhases = 1 + Dag.Nodes.Num();
+		ParentSink->OnRunContinuation(0, TotalPhases);
 	}
 	BeginNextReadyNode();
 }
 
-void FUnrealAiOrchestrateExecutor::BeginNextReadyNode()
+void FUnrealAiPlanExecutor::BeginNextReadyNode()
 {
 	if (bCancelled)
 	{
-		Finish(false, TEXT("Orchestrate cancelled."));
+		Finish(false, TEXT("Plan cancelled."));
 		return;
 	}
 	if (ContextService)
@@ -213,7 +315,7 @@ void FUnrealAiOrchestrateExecutor::BeginNextReadyNode()
 		ContextService->LoadOrCreate(ParentRequest.ProjectId, ParentRequest.ThreadId);
 		if (Harness && !Harness->IsTurnInProgress())
 		{
-			ContextService->ClearOrchestrateStaleRunningMarkers(ParentRequest.ProjectId, ParentRequest.ThreadId);
+			ContextService->ClearPlanStaleRunningMarkers(ParentRequest.ProjectId, ParentRequest.ThreadId);
 		}
 	}
 	const FAgentContextState* State = nullptr;
@@ -223,10 +325,10 @@ void FUnrealAiOrchestrateExecutor::BeginNextReadyNode()
 		State = ContextService->GetState(ParentRequest.ProjectId, ParentRequest.ThreadId);
 		if (State)
 		{
-			Statuses = State->OrchestrateNodeStatusById;
+			Statuses = State->PlanNodeStatusById;
 		}
 	}
-	UnrealAiOrchestrateDag::GetReadyNodeIds(Dag, Statuses, ReadyNodeIds);
+	UnrealAiPlanDag::GetReadyNodeIds(Dag, Statuses, ReadyNodeIds);
 	if (ReadyNodeIds.Num() == 0)
 	{
 		Finish(true, FString());
@@ -241,28 +343,34 @@ void FUnrealAiOrchestrateExecutor::BeginNextReadyNode()
 	}
 	if (ContextService)
 	{
-		ContextService->SetOrchestrateNodeStatus(NodeId, TEXT("running"));
+		ContextService->SetPlanNodeStatus(NodeId, TEXT("running"));
+	}
+
+	++PlanExecutionPhase;
+	if (ParentSink.IsValid())
+	{
+		const int32 TotalPhases = 1 + Dag.Nodes.Num();
+		ParentSink->OnRunContinuation(PlanExecutionPhase, TotalPhases);
 	}
 
 	FUnrealAiAgentTurnRequest ChildReq = ParentRequest;
 	ChildReq.Mode = EUnrealAiAgentMode::Agent;
-	/** Worker nodes often need many tool↔model iterations; floor well above the default profile (16). */
 	ChildReq.LlmRoundBudgetFloor = 64;
-	ChildReq.ThreadId = FString::Printf(TEXT("%s_orch_%s"), *ParentRequest.ThreadId, *NodeId);
+	ChildReq.ThreadId = FString::Printf(TEXT("%s_plan_%s"), *ParentRequest.ThreadId, *NodeId);
 	ChildReq.UserText = FString::Printf(
-		TEXT("Execute orchestrate node '%s'.\nTitle: %s\nHint: %s"),
+		TEXT("Execute plan node '%s'.\nTitle: %s\nHint: %s"),
 		*Node->Id,
 		Node->Title.IsEmpty() ? *Node->Id : *Node->Title,
 		*Node->Hint);
 
-	const TSharedRef<UnrealAiOrchestrateExecutorPriv::FCollectingSink> Sink = MakeShared<UnrealAiOrchestrateExecutorPriv::FCollectingSink>();
-	const TWeakPtr<FUnrealAiOrchestrateExecutor> WeakExec = AsShared();
+	const TSharedRef<UnrealAiPlanExecutorPriv::FCollectingSink> Sink = MakeShared<UnrealAiPlanExecutorPriv::FCollectingSink>();
+	const TWeakPtr<FUnrealAiPlanExecutor> WeakExec = AsShared();
 	Sink->ForwardTarget = ParentSink;
 	Sink->WorkerNodeId = NodeId;
 	Sink->bForwardStreamToParent = true;
 	Sink->OnFinished = [WeakExec, NodeId](bool bSuccess, const FString& Error, const FString& AssistantText)
 	{
-		if (const TSharedPtr<FUnrealAiOrchestrateExecutor> Self = WeakExec.Pin())
+		if (const TSharedPtr<FUnrealAiPlanExecutor> Self = WeakExec.Pin())
 		{
 			Self->OnNodeFinished(NodeId, bSuccess, Error, AssistantText);
 		}
@@ -270,24 +378,24 @@ void FUnrealAiOrchestrateExecutor::BeginNextReadyNode()
 	Harness->RunTurn(ChildReq, Sink);
 }
 
-void FUnrealAiOrchestrateExecutor::OnNodeFinished(const FString& NodeId, bool bSuccess, const FString& ErrorText, const FString& AssistantText)
+void FUnrealAiPlanExecutor::OnNodeFinished(const FString& NodeId, bool bSuccess, const FString& ErrorText, const FString& AssistantText)
 {
 	const FString Summary = AssistantText.Left(300);
 	if (ContextService)
 	{
-		ContextService->SetOrchestrateNodeStatus(NodeId, bSuccess ? TEXT("success") : TEXT("failed"), Summary);
+		ContextService->SetPlanNodeStatus(NodeId, bSuccess ? TEXT("success") : TEXT("failed"), Summary);
 	}
 	if (ParentSink.IsValid() && !bSuccess)
 	{
 		ParentSink->OnAssistantDelta(FString::Printf(
-			TEXT("Orchestrate node \"%s\" failed: %s\n"),
+			TEXT("Plan node \"%s\" failed: %s\n"),
 			*NodeId,
 			*ErrorText));
 	}
 	BeginNextReadyNode();
 }
 
-void FUnrealAiOrchestrateExecutor::Finish(bool bSuccess, const FString& ErrorText)
+void FUnrealAiPlanExecutor::Finish(bool bSuccess, const FString& ErrorText)
 {
 	if (!bRunning)
 	{
@@ -299,4 +407,3 @@ void FUnrealAiOrchestrateExecutor::Finish(bool bSuccess, const FString& ErrorTex
 		ParentSink->OnRunFinished(bSuccess, ErrorText);
 	}
 }
-

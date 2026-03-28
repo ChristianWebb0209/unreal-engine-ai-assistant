@@ -39,6 +39,11 @@ namespace UnrealAiModelProfileRegistryUtil
 		{
 			Out.MaxAgentLlmRounds = static_cast<int32>(Mar);
 		}
+		double Matt = 0;
+		if (O->TryGetNumberField(TEXT("maxAgentTurnTokens"), Matt))
+		{
+			Out.MaxAgentTurnTokens = static_cast<int32>(Matt);
+		}
 	}
 
 	static FUnrealAiModelCapabilities DefaultsForId(const FString& ModelId)
@@ -50,7 +55,8 @@ namespace UnrealAiModelProfileRegistryUtil
 		C.bSupportsNativeTools = true;
 		C.bSupportsParallelToolCalls = true;
 		C.bSupportsImages = true;
-		C.MaxAgentLlmRounds = 32;
+		C.MaxAgentLlmRounds = 512;
+		C.MaxAgentTurnTokens = 0;
 		return C;
 	}
 }

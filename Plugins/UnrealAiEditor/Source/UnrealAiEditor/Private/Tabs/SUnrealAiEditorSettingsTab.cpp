@@ -5,6 +5,7 @@
 #include "Backend/FUnrealAiUsageTracker.h"
 #include "Context/UnrealAiProjectId.h"
 #include "Retrieval/IUnrealAiRetrievalService.h"
+#include "Retrieval/UnrealAiRetrievalTypes.h"
 #include "Backend/IUnrealAiModelConnector.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Backend/UnrealAiBackendRegistry.h"
@@ -20,6 +21,7 @@
 #include "Serialization/JsonWriter.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "Misc/Paths.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Input/SButton.h"
@@ -27,6 +29,7 @@
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Colors/SColorBlock.h"
 #include "Widgets/Layout/SBorder.h"
@@ -38,6 +41,76 @@
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
+
+namespace UnrealAiVectorDbOverviewUi
+{
+	static FString FormatOverviewText(const FUnrealAiRetrievalVectorDbOverview& O)
+	{
+		FString S;
+		S += TEXT("Local vector index — overview\n\n");
+		S += TEXT(
+			"What is indexed: UTF-8 text for whitelisted extensions under the chosen root preset, optional Asset Registry "
+			"metadata shards (virtual paths), Blueprint-derived lines, and optionally memory chunks. Chat transcripts are not embedded here.\n");
+		S += TEXT("At query time: embed the query → cosine Top-K in SQLite → lexical fallback when needed.\n\n");
+
+		S += FString::Printf(TEXT("Retrieval enabled in settings: %s\n"), O.bRetrievalEnabledInSettings ? TEXT("yes") : TEXT("no"));
+		S += FString::Printf(TEXT("Root preset: %s\n"), *O.RootPresetLabel);
+		S += FString::Printf(
+			TEXT("Indexed extensions (%d): %s\n"),
+			O.IndexedExtensionCount,
+			O.IndexedExtensionsPreview.IsEmpty() ? TEXT("(none)") : *O.IndexedExtensionsPreview);
+		S += FString::Printf(TEXT("Asset Registry corpus: %s\n"), O.bAssetRegistryCorpusEnabled ? TEXT("on") : TEXT("off"));
+		S += FString::Printf(TEXT("Memory chunks in index: %s\n"), O.bMemoryCorpusEnabled ? TEXT("on") : TEXT("off"));
+		if (O.bBlueprintCapCustom)
+		{
+			S += FString::Printf(TEXT("Blueprint feature cap: %d\n"), O.BlueprintMaxFeatureRecords);
+		}
+		else
+		{
+			S += TEXT("Blueprint feature cap: default (extractor internal limit)\n");
+		}
+		S += LINE_TERMINATOR;
+
+		if (!O.bStoreAvailable)
+		{
+			S += FString::Printf(
+				TEXT("Index store: unavailable (%s)\n"),
+				O.StoreError.IsEmpty() ? TEXT("unknown error") : *O.StoreError);
+			return S;
+		}
+
+		S += TEXT("Index store: available\n");
+		S += FString::Printf(TEXT("SQLite: %s\n"), *O.IndexDbPath);
+		S += FString::Printf(TEXT("Manifest: %s\n"), *O.ManifestPath);
+		S += FString::Printf(TEXT("Status: %s\n"), *O.ManifestStatus);
+		if (!O.ManifestEmbeddingModel.IsEmpty())
+		{
+			S += FString::Printf(TEXT("Embedding model (manifest): %s\n"), *O.ManifestEmbeddingModel);
+		}
+		S += FString::Printf(TEXT("Migration state: %s\n"), *O.MigrationState);
+		S += FString::Printf(TEXT("Rebuild in progress: %s\n"), O.bIndexBusy ? TEXT("yes") : TEXT("no"));
+		S += FString::Printf(TEXT("Sources (rows) in DB: %d\n"), O.FilesIndexed);
+		S += FString::Printf(TEXT("Chunks in DB: %d\n"), O.ChunksIndexed);
+		if (O.LastFullScanUtc > FDateTime::MinValue())
+		{
+			S += FString::Printf(TEXT("Last full scan (UTC): %s\n"), *O.LastFullScanUtc.ToIso8601());
+		}
+		S += FString::Printf(TEXT("SQLite integrity check: %s\n"), O.bIntegrityOk ? TEXT("ok") : TEXT("failed"));
+		if (!O.bIntegrityOk && !O.IntegrityError.IsEmpty())
+		{
+			S += FString::Printf(TEXT("Integrity detail: %s\n"), *O.IntegrityError);
+		}
+		if (O.TopSourcesByChunkCount.Num() > 0)
+		{
+			S += TEXT("\nTop sources by chunk count:\n");
+			for (const TPair<FString, int32>& P : O.TopSourcesByChunkCount)
+			{
+				S += FString::Printf(TEXT("  %d  %s\n"), P.Value, *P.Key);
+			}
+		}
+		return S;
+	}
+}
 
 namespace UnrealAiSettingsTemplate
 {
@@ -76,7 +149,20 @@ namespace UnrealAiSettingsTemplate
 		"\t\t\"maxSnippetTokens\": 256,\n"
 		"\t\t\"autoIndexOnProjectOpen\": true,\n"
 		"\t\t\"periodicScrubMinutes\": 30,\n"
-		"\t\t\"allowMixedModelCompatibility\": false\n"
+		"\t\t\"allowMixedModelCompatibility\": false,\n"
+		"\t\t\"rootPreset\": \"minimal\",\n"
+		"\t\t\"indexedExtensions\": [],\n"
+		"\t\t\"maxFilesPerRebuild\": 0,\n"
+		"\t\t\"maxTotalChunksPerRebuild\": 0,\n"
+		"\t\t\"maxEmbeddingCallsPerRebuild\": 0,\n"
+		"\t\t\"chunkChars\": 1200,\n"
+		"\t\t\"chunkOverlap\": 200,\n"
+		"\t\t\"assetRegistryMaxAssets\": 0,\n"
+		"\t\t\"assetRegistryIncludeEngineAssets\": false,\n"
+		"\t\t\"embeddingBatchSize\": 8,\n"
+		"\t\t\"minDelayMsBetweenEmbeddingBatches\": 0,\n"
+		"\t\t\"indexMemoryRecordsInVectorStore\": false,\n"
+		"\t\t\"blueprintMaxFeatureRecords\": 0\n"
 		"\t}\n"
 		"}\n");
 }
@@ -475,6 +561,10 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 	CompanyPresetOptions.Add(MakeShared<FString>(TEXT("xai")));
 	CompanyPresetOptions.Add(MakeShared<FString>(TEXT("azure")));
 
+	RetrievalRootPresetOptions.Add(MakeShared<FString>(TEXT("minimal")));
+	RetrievalRootPresetOptions.Add(MakeShared<FString>(TEXT("standard")));
+	RetrievalRootPresetOptions.Add(MakeShared<FString>(TEXT("extended")));
+
 	ChildSlot
 		[SNew(SBorder)
 				.Padding(FMargin(12.f))
@@ -522,6 +612,15 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 								.OnClicked_Lambda([this]()
 								{
 									return OnSettingsSegmentClicked(2);
+								})
+						]
+						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(8.f, 0.f, 0.f, 0.f))
+						[
+							SNew(SButton)
+								.Text(LOCTEXT("SettingsVectorDb", "Vector DB"))
+								.OnClicked_Lambda([this]()
+								{
+									return OnSettingsSegmentClicked(3);
 								})
 						]
 					]
@@ -731,6 +830,220 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 														{
 															bRetrievalAllowMixedModelCompatibility = (S == ECheckBoxState::Checked);
 															OnAnySettingsChanged(FText::GetEmpty());
+														})
+												]
+												+ SGridPanel::Slot(0, 7).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalRootPresetLbl", "Index root preset"))
+												]
+												+ SGridPanel::Slot(1, 7).Padding(4.f)
+												[
+													SAssignNew(RetrievalRootPresetCombo, SComboBox<TSharedPtr<FString>>)
+														.OptionsSource(&RetrievalRootPresetOptions)
+														.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+														{
+															return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : FString()));
+														})
+														.OnSelectionChanged_Lambda([this](TSharedPtr<FString> Sel, ESelectInfo::Type)
+														{
+															if (Sel.IsValid())
+															{
+																RetrievalRootPresetStr = *Sel;
+																OnAnySettingsChanged(FText::GetEmpty());
+															}
+														})
+														.Content()
+														[
+															SNew(STextBlock)
+																.Text_Lambda([this]()
+																{
+																	return FText::FromString(RetrievalRootPresetStr);
+																})
+														]
+												]
+												+ SGridPanel::Slot(0, 8).Padding(4.f).VAlign(VAlign_Top)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalIndexedExtLbl", "Indexed extensions (whitelist)"))
+												]
+												+ SGridPanel::Slot(1, 8).Padding(4.f)
+												[
+													SNew(SBox).MinDesiredHeight(72.f)
+													[
+														SAssignNew(RetrievalIndexedExtensionsBox, SMultiLineEditableTextBox)
+															.AutoWrapText(true)
+															.OnTextChanged_Lambda([this](const FText& T)
+															{
+																RetrievalIndexedExtensionsText = T.ToString();
+																OnAnySettingsChanged(T);
+															})
+													]
+												]
+												+ SGridPanel::Slot(0, 9).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalMaxFilesLbl", "Max files per rebuild (0=unlimited)"))
+												]
+												+ SGridPanel::Slot(1, 9).Padding(4.f)
+												[
+													SNew(SEditableTextBox)
+														.Text_Lambda([this]() { return FText::FromString(RetrievalMaxFilesPerRebuildStr); })
+														.OnTextChanged_Lambda([this](const FText& T)
+														{
+															RetrievalMaxFilesPerRebuildStr = T.ToString();
+															OnAnySettingsChanged(T);
+														})
+												]
+												+ SGridPanel::Slot(0, 10).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalMaxChunksLbl", "Max chunks per rebuild (0=unlimited)"))
+												]
+												+ SGridPanel::Slot(1, 10).Padding(4.f)
+												[
+													SNew(SEditableTextBox)
+														.Text_Lambda([this]() { return FText::FromString(RetrievalMaxTotalChunksPerRebuildStr); })
+														.OnTextChanged_Lambda([this](const FText& T)
+														{
+															RetrievalMaxTotalChunksPerRebuildStr = T.ToString();
+															OnAnySettingsChanged(T);
+														})
+												]
+												+ SGridPanel::Slot(0, 11).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalMaxEmbLbl", "Max embedding calls per rebuild (0=unlimited)"))
+												]
+												+ SGridPanel::Slot(1, 11).Padding(4.f)
+												[
+													SNew(SEditableTextBox)
+														.Text_Lambda([this]() { return FText::FromString(RetrievalMaxEmbeddingCallsPerRebuildStr); })
+														.OnTextChanged_Lambda([this](const FText& T)
+														{
+															RetrievalMaxEmbeddingCallsPerRebuildStr = T.ToString();
+															OnAnySettingsChanged(T);
+														})
+												]
+												+ SGridPanel::Slot(0, 12).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalChunkCharsLbl", "Chunk chars / overlap"))
+												]
+												+ SGridPanel::Slot(1, 12).Padding(4.f)
+												[
+													SNew(SHorizontalBox)
+													+ SHorizontalBox::Slot().FillWidth(1.f).Padding(FMargin(0.f, 0.f, 6.f, 0.f))
+													[
+														SNew(SEditableTextBox)
+															.HintText(LOCTEXT("RetrievalChunkCharsHint", "Chars"))
+															.Text_Lambda([this]() { return FText::FromString(RetrievalChunkCharsStr); })
+															.OnTextChanged_Lambda([this](const FText& T)
+															{
+																RetrievalChunkCharsStr = T.ToString();
+																OnAnySettingsChanged(T);
+															})
+													]
+													+ SHorizontalBox::Slot().FillWidth(1.f)
+													[
+														SNew(SEditableTextBox)
+															.HintText(LOCTEXT("RetrievalChunkOvHint", "Overlap"))
+															.Text_Lambda([this]() { return FText::FromString(RetrievalChunkOverlapStr); })
+															.OnTextChanged_Lambda([this](const FText& T)
+															{
+																RetrievalChunkOverlapStr = T.ToString();
+																OnAnySettingsChanged(T);
+															})
+													]
+												]
+												+ SGridPanel::Slot(0, 13).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalArMaxLbl", "Asset registry max assets (0=off)"))
+												]
+												+ SGridPanel::Slot(1, 13).Padding(4.f)
+												[
+													SNew(SHorizontalBox)
+													+ SHorizontalBox::Slot().FillWidth(1.f).Padding(FMargin(0.f, 0.f, 6.f, 0.f))
+													[
+														SNew(SEditableTextBox)
+															.Text_Lambda([this]() { return FText::FromString(RetrievalAssetRegistryMaxAssetsStr); })
+															.OnTextChanged_Lambda([this](const FText& T)
+															{
+																RetrievalAssetRegistryMaxAssetsStr = T.ToString();
+																OnAnySettingsChanged(T);
+															})
+													]
+													+ SHorizontalBox::Slot().AutoWidth()
+													[
+														SNew(SCheckBox)
+															.Content()
+															[
+																SNew(STextBlock).Text(LOCTEXT("RetrievalArEngineLbl", "Include /Engine"))
+															]
+															.IsChecked_Lambda([this]()
+															{
+																return bRetrievalAssetRegistryIncludeEngineAssets ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+															})
+															.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+															{
+																bRetrievalAssetRegistryIncludeEngineAssets = (S == ECheckBoxState::Checked);
+																OnAnySettingsChanged(FText::GetEmpty());
+															})
+													]
+												]
+												+ SGridPanel::Slot(0, 14).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalEmbedThrottleLbl", "Embed batch size / delay ms"))
+												]
+												+ SGridPanel::Slot(1, 14).Padding(4.f)
+												[
+													SNew(SHorizontalBox)
+													+ SHorizontalBox::Slot().FillWidth(1.f).Padding(FMargin(0.f, 0.f, 6.f, 0.f))
+													[
+														SNew(SEditableTextBox)
+															.HintText(LOCTEXT("RetrievalBatchHint", "Batch"))
+															.Text_Lambda([this]() { return FText::FromString(RetrievalEmbeddingBatchSizeStr); })
+															.OnTextChanged_Lambda([this](const FText& T)
+															{
+																RetrievalEmbeddingBatchSizeStr = T.ToString();
+																OnAnySettingsChanged(T);
+															})
+													]
+													+ SHorizontalBox::Slot().FillWidth(1.f)
+													[
+														SNew(SEditableTextBox)
+															.HintText(LOCTEXT("RetrievalDelayHint", "Delay ms"))
+															.Text_Lambda([this]() { return FText::FromString(RetrievalMinDelayMsBetweenBatchesStr); })
+															.OnTextChanged_Lambda([this](const FText& T)
+															{
+																RetrievalMinDelayMsBetweenBatchesStr = T.ToString();
+																OnAnySettingsChanged(T);
+															})
+													]
+												]
+												+ SGridPanel::Slot(0, 15).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalMemVecLbl", "Index memory records in vector store"))
+												]
+												+ SGridPanel::Slot(1, 15).Padding(4.f)
+												[
+													SNew(SCheckBox)
+														.IsChecked_Lambda([this]()
+														{
+															return bRetrievalIndexMemoryRecordsInVectorStore ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+														})
+														.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+														{
+															bRetrievalIndexMemoryRecordsInVectorStore = (S == ECheckBoxState::Checked);
+															OnAnySettingsChanged(FText::GetEmpty());
+														})
+												]
+												+ SGridPanel::Slot(0, 16).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalBpMaxLbl", "Blueprint feature cap (0=default)"))
+												]
+												+ SGridPanel::Slot(1, 16).Padding(4.f)
+												[
+													SNew(SEditableTextBox)
+														.Text_Lambda([this]() { return FText::FromString(RetrievalBlueprintMaxFeatureRecordsStr); })
+														.OnTextChanged_Lambda([this](const FText& T)
+														{
+															RetrievalBlueprintMaxFeatureRecordsStr = T.ToString();
+															OnAnySettingsChanged(T);
 														})
 												]
 											]
@@ -951,6 +1264,40 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 								]
 							]
 						]
+						+ SWidgetSwitcher::Slot()
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+							[
+								SNew(STextBlock)
+									.AutoWrapText(true)
+									.Text(LOCTEXT(
+										"VectorDbOverviewHelp",
+										"Read-only snapshot of the local vector index: what the indexer is configured to ingest, on-disk paths, "
+										"chunk/source counts, integrity, and top indexed sources. Tune ingestion under Configuration → Retrieval."))
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+								[
+									SNew(SButton)
+										.Text(LOCTEXT("VectorDbOverviewRefresh", "Refresh overview"))
+										.OnClicked(this, &SUnrealAiEditorSettingsTab::OnVectorDbOverviewRefreshClicked)
+								]
+							]
+							+ SVerticalBox::Slot().FillHeight(1.f)
+							[
+								SNew(SScrollBox)
+								+ SScrollBox::Slot()
+								[
+									SAssignNew(VectorDbOverviewBlock, STextBlock)
+										.AutoWrapText(true)
+										.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+										.Text(LOCTEXT("VectorDbOverviewPlaceholder", "Loading…"))
+								]
+							]
+						]
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 16.f, 0.f, 0.f))
 					[
@@ -995,15 +1342,30 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 		{
 			if (TSharedPtr<SUnrealAiEditorSettingsTab> Tab = WeakTab.Pin())
 			{
-				Tab->RefreshUsageHeaderText();
+				Tab->TickSlowUiRefresh();
 			}
 			return true;
 		}),
 		1.5f);
 }
 
+void SUnrealAiEditorSettingsTab::TickSlowUiRefresh()
+{
+	RefreshUsageHeaderText();
+	if (ActiveSettingsSegmentIndex == 3)
+	{
+		const double Now = FPlatformTime::Seconds();
+		if (Now - LastVectorDbOverviewPollSeconds >= 3.0)
+		{
+			LastVectorDbOverviewPollSeconds = Now;
+			RefreshVectorDbOverviewUi();
+		}
+	}
+}
+
 FReply SUnrealAiEditorSettingsTab::OnSettingsSegmentClicked(const int32 Index)
 {
+	ActiveSettingsSegmentIndex = Index;
 	if (SettingsMainSwitcher.IsValid())
 	{
 		SettingsMainSwitcher->SetActiveWidgetIndex(Index);
@@ -1016,7 +1378,39 @@ FReply SUnrealAiEditorSettingsTab::OnSettingsSegmentClicked(const int32 Index)
 	{
 		RebuildMemoryListUi();
 	}
+	else if (Index == 3)
+	{
+		LastVectorDbOverviewPollSeconds = 0.0;
+		RefreshVectorDbOverviewUi();
+	}
 	return FReply::Handled();
+}
+
+FReply SUnrealAiEditorSettingsTab::OnVectorDbOverviewRefreshClicked()
+{
+	RefreshVectorDbOverviewUi();
+	return FReply::Handled();
+}
+
+void SUnrealAiEditorSettingsTab::RefreshVectorDbOverviewUi()
+{
+	if (!VectorDbOverviewBlock.IsValid())
+	{
+		return;
+	}
+	if (!BackendRegistry.IsValid() || !BackendRegistry->GetRetrievalService())
+	{
+		VectorDbOverviewBlock->SetText(LOCTEXT("VectorDbOverviewNoService", "Retrieval service is not available."));
+		return;
+	}
+	FUnrealAiRetrievalVectorDbOverview Overview;
+	FString Err;
+	if (!BackendRegistry->GetRetrievalService()->GetVectorDbOverview(UnrealAiProjectId::GetCurrentProjectId(), Overview, Err))
+	{
+		VectorDbOverviewBlock->SetText(FText::FromString(FString::Printf(TEXT("Could not load overview: %s"), *Err)));
+		return;
+	}
+	VectorDbOverviewBlock->SetText(FText::FromString(UnrealAiVectorDbOverviewUi::FormatOverviewText(Overview)));
 }
 
 FReply SUnrealAiEditorSettingsTab::OnChatHistoryRefreshClicked()
@@ -1135,6 +1529,19 @@ bool SUnrealAiEditorSettingsTab::LoadRetrievalSettingsFromRoot(const TSharedPtr<
 	bRetrievalAutoIndexOnProjectOpen = true;
 	RetrievalPeriodicScrubMinutesStr = TEXT("30");
 	bRetrievalAllowMixedModelCompatibility = false;
+	RetrievalRootPresetStr = TEXT("minimal");
+	RetrievalIndexedExtensionsText.Reset();
+	RetrievalMaxFilesPerRebuildStr = TEXT("0");
+	RetrievalMaxTotalChunksPerRebuildStr = TEXT("0");
+	RetrievalMaxEmbeddingCallsPerRebuildStr = TEXT("0");
+	RetrievalChunkCharsStr = TEXT("1200");
+	RetrievalChunkOverlapStr = TEXT("200");
+	RetrievalAssetRegistryMaxAssetsStr = TEXT("0");
+	bRetrievalAssetRegistryIncludeEngineAssets = false;
+	RetrievalEmbeddingBatchSizeStr = TEXT("8");
+	RetrievalMinDelayMsBetweenBatchesStr = TEXT("0");
+	bRetrievalIndexMemoryRecordsInVectorStore = false;
+	RetrievalBlueprintMaxFeatureRecordsStr = TEXT("0");
 	if (!Root.IsValid())
 	{
 		return false;
@@ -1160,6 +1567,69 @@ bool SUnrealAiEditorSettingsTab::LoadRetrievalSettingsFromRoot(const TSharedPtr<
 	if ((*RetrievalObj)->TryGetNumberField(TEXT("periodicScrubMinutes"), Number))
 	{
 		RetrievalPeriodicScrubMinutesStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
+	}
+
+	FString PresetStr;
+	if ((*RetrievalObj)->TryGetStringField(TEXT("rootPreset"), PresetStr) && !PresetStr.IsEmpty())
+	{
+		RetrievalRootPresetStr = PresetStr.ToLower();
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* ExtArr = nullptr;
+	if ((*RetrievalObj)->TryGetArrayField(TEXT("indexedExtensions"), ExtArr) && ExtArr)
+	{
+		RetrievalIndexedExtensionsText.Reset();
+		for (int32 i = 0; i < ExtArr->Num(); ++i)
+		{
+			const TSharedPtr<FJsonValue>& V = (*ExtArr)[i];
+			if (V.IsValid() && V->Type == EJson::String)
+			{
+				if (!RetrievalIndexedExtensionsText.IsEmpty())
+				{
+					RetrievalIndexedExtensionsText += LINE_TERMINATOR;
+				}
+				RetrievalIndexedExtensionsText += V->AsString();
+			}
+		}
+	}
+
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("maxFilesPerRebuild"), Number))
+	{
+		RetrievalMaxFilesPerRebuildStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("maxTotalChunksPerRebuild"), Number))
+	{
+		RetrievalMaxTotalChunksPerRebuildStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("maxEmbeddingCallsPerRebuild"), Number))
+	{
+		RetrievalMaxEmbeddingCallsPerRebuildStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("chunkChars"), Number))
+	{
+		RetrievalChunkCharsStr = FString::FromInt(static_cast<int32>(Number));
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("chunkOverlap"), Number))
+	{
+		RetrievalChunkOverlapStr = FString::FromInt(static_cast<int32>(Number));
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("assetRegistryMaxAssets"), Number))
+	{
+		RetrievalAssetRegistryMaxAssetsStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
+	}
+	(*RetrievalObj)->TryGetBoolField(TEXT("assetRegistryIncludeEngineAssets"), bRetrievalAssetRegistryIncludeEngineAssets);
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("embeddingBatchSize"), Number))
+	{
+		RetrievalEmbeddingBatchSizeStr = FString::FromInt(FMath::Max(1, static_cast<int32>(Number)));
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("minDelayMsBetweenEmbeddingBatches"), Number))
+	{
+		RetrievalMinDelayMsBetweenBatchesStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
+	}
+	(*RetrievalObj)->TryGetBoolField(TEXT("indexMemoryRecordsInVectorStore"), bRetrievalIndexMemoryRecordsInVectorStore);
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("blueprintMaxFeatureRecords"), Number))
+	{
+		RetrievalBlueprintMaxFeatureRecordsStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
 	}
 	return true;
 }
@@ -1193,6 +1663,48 @@ void SUnrealAiEditorSettingsTab::WriteRetrievalSettingsToRoot(TSharedPtr<FJsonOb
 	RetrievalObj->SetBoolField(TEXT("autoIndexOnProjectOpen"), bRetrievalAutoIndexOnProjectOpen);
 	RetrievalObj->SetBoolField(TEXT("allowMixedModelCompatibility"), bRetrievalAllowMixedModelCompatibility);
 	RetrievalObj->SetNumberField(TEXT("periodicScrubMinutes"), FMath::Max(0, FCString::Atoi(*RetrievalPeriodicScrubMinutesStr)));
+
+	FString PresetOut = RetrievalRootPresetStr.ToLower();
+	if (!PresetOut.Equals(TEXT("minimal")) && !PresetOut.Equals(TEXT("standard")) && !PresetOut.Equals(TEXT("extended")))
+	{
+		PresetOut = TEXT("minimal");
+	}
+	RetrievalObj->SetStringField(TEXT("rootPreset"), PresetOut);
+
+	TArray<TSharedPtr<FJsonValue>> ExtJson;
+	{
+		FString Tmp = RetrievalIndexedExtensionsText;
+		Tmp.ReplaceInline(TEXT("\r"), TEXT(""));
+		TArray<FString> Lines;
+		Tmp.ParseIntoArrayLines(Lines, false);
+		for (FString& Line : Lines)
+		{
+			TArray<FString> Parts;
+			Line.ParseIntoArray(Parts, TEXT(","), true);
+			for (FString& P : Parts)
+			{
+				P.TrimStartAndEndInline();
+				if (!P.IsEmpty())
+				{
+					ExtJson.Add(MakeShared<FJsonValueString>(P));
+				}
+			}
+		}
+	}
+	RetrievalObj->SetArrayField(TEXT("indexedExtensions"), ExtJson);
+
+	RetrievalObj->SetNumberField(TEXT("maxFilesPerRebuild"), FMath::Max(0, FCString::Atoi(*RetrievalMaxFilesPerRebuildStr)));
+	RetrievalObj->SetNumberField(TEXT("maxTotalChunksPerRebuild"), FMath::Max(0, FCString::Atoi(*RetrievalMaxTotalChunksPerRebuildStr)));
+	RetrievalObj->SetNumberField(TEXT("maxEmbeddingCallsPerRebuild"), FMath::Max(0, FCString::Atoi(*RetrievalMaxEmbeddingCallsPerRebuildStr)));
+	RetrievalObj->SetNumberField(TEXT("chunkChars"), FCString::Atoi(*RetrievalChunkCharsStr));
+	RetrievalObj->SetNumberField(TEXT("chunkOverlap"), FCString::Atoi(*RetrievalChunkOverlapStr));
+	RetrievalObj->SetNumberField(TEXT("assetRegistryMaxAssets"), FMath::Max(0, FCString::Atoi(*RetrievalAssetRegistryMaxAssetsStr)));
+	RetrievalObj->SetBoolField(TEXT("assetRegistryIncludeEngineAssets"), bRetrievalAssetRegistryIncludeEngineAssets);
+	RetrievalObj->SetNumberField(TEXT("embeddingBatchSize"), FMath::Max(1, FCString::Atoi(*RetrievalEmbeddingBatchSizeStr)));
+	RetrievalObj->SetNumberField(TEXT("minDelayMsBetweenEmbeddingBatches"), FMath::Max(0, FCString::Atoi(*RetrievalMinDelayMsBetweenBatchesStr)));
+	RetrievalObj->SetBoolField(TEXT("indexMemoryRecordsInVectorStore"), bRetrievalIndexMemoryRecordsInVectorStore);
+	RetrievalObj->SetNumberField(TEXT("blueprintMaxFeatureRecords"), FMath::Max(0, FCString::Atoi(*RetrievalBlueprintMaxFeatureRecordsStr)));
+
 	Root->SetObjectField(TEXT("retrieval"), RetrievalObj);
 }
 
@@ -1211,6 +1723,10 @@ FReply SUnrealAiEditorSettingsTab::OnRetrievalRebuildNowClicked()
 	}
 	BackendRegistry->GetRetrievalService()->RequestRebuild(UnrealAiProjectId::GetCurrentProjectId());
 	StatusText = LOCTEXT("RetrievalRebuildQueued", "Queued retrieval index rebuild.");
+	if (ActiveSettingsSegmentIndex == 3)
+	{
+		RefreshVectorDbOverviewUi();
+	}
 	return FReply::Handled();
 }
 
@@ -1603,6 +2119,27 @@ void SUnrealAiEditorSettingsTab::LoadSettingsIntoUi()
 	LoadMemorySettingsFromRoot(Root);
 	LoadRetrievalSettingsFromRoot(Root);
 
+	if (RetrievalIndexedExtensionsBox.IsValid())
+	{
+		RetrievalIndexedExtensionsBox->SetText(FText::FromString(RetrievalIndexedExtensionsText));
+	}
+	if (RetrievalRootPresetCombo.IsValid())
+	{
+		TSharedPtr<FString> Match;
+		for (const TSharedPtr<FString>& Opt : RetrievalRootPresetOptions)
+		{
+			if (Opt.IsValid() && Opt->Equals(RetrievalRootPresetStr, ESearchCase::IgnoreCase))
+			{
+				Match = Opt;
+				break;
+			}
+		}
+		if (Match.IsValid())
+		{
+			RetrievalRootPresetCombo->SetSelectedItem(Match);
+		}
+	}
+
 	const TSharedPtr<FJsonObject>* ApiObj = nullptr;
 	if (Root->TryGetObjectField(TEXT("api"), ApiObj) && ApiObj->IsValid())
 	{
@@ -1684,7 +2221,7 @@ void SUnrealAiEditorSettingsTab::LoadSettingsIntoUi()
 					}
 					else
 					{
-						Mr.MaxAgentLlmRoundsStr = TEXT("32");
+						Mr.MaxAgentLlmRoundsStr = TEXT("512");
 					}
 					(*Mo)->TryGetBoolField(TEXT("supportsNativeTools"), Mr.bSupportsNativeTools);
 					(*Mo)->TryGetBoolField(TEXT("supportsParallelToolCalls"), Mr.bSupportsParallelToolCalls);
@@ -1714,7 +2251,7 @@ void SUnrealAiEditorSettingsTab::LoadSettingsIntoUi()
 		Mr.ProfileKey = TEXT("openai/gpt-4o-mini");
 		Mr.MaxContextStr = TEXT("128000");
 		Mr.MaxOutputStr = TEXT("4096");
-		Mr.MaxAgentLlmRoundsStr = TEXT("32");
+		Mr.MaxAgentLlmRoundsStr = TEXT("512");
 		UpdateModelPricingHint(Mr);
 		R.Models.Add(Mr);
 		SectionRows.Add(MoveTemp(R));
@@ -2335,10 +2872,10 @@ bool SUnrealAiEditorSettingsTab::BuildJsonFromUi(FString& OutJson, FString& OutE
 			}
 			const int32 Ctx = UnrealAiSettingsTabUtil::ParsePositiveInt(Mr.MaxContextStr, 128000);
 			const int32 MaxOutTok = UnrealAiSettingsTabUtil::ParsePositiveInt(Mr.MaxOutputStr, 4096);
-			int32 MaxRounds = UnrealAiSettingsTabUtil::ParsePositiveInt(Mr.MaxAgentLlmRoundsStr, 32);
+			int32 MaxRounds = UnrealAiSettingsTabUtil::ParsePositiveInt(Mr.MaxAgentLlmRoundsStr, 512);
 			if (MaxRounds <= 0)
 			{
-				MaxRounds = 32;
+				MaxRounds = 512;
 			}
 			MaxRounds = FMath::Clamp(MaxRounds, 1, 512);
 			Mo->SetNumberField(TEXT("maxContextTokens"), Ctx);
@@ -2473,7 +3010,7 @@ FReply SUnrealAiEditorSettingsTab::OnAddModelClicked(int32 SectionIndex)
 	Mr.ProfileKey = TEXT("openai/gpt-4o-mini");
 	Mr.MaxContextStr = TEXT("128000");
 	Mr.MaxOutputStr = TEXT("4096");
-	Mr.MaxAgentLlmRoundsStr = TEXT("32");
+	Mr.MaxAgentLlmRoundsStr = TEXT("512");
 	UpdateModelPricingHint(Mr);
 	SectionRows[SectionIndex].Models.Add(MoveTemp(Mr));
 	RebuildDynamicRows();

@@ -65,7 +65,7 @@ FUnrealAiComplexityAssessment UnrealAiComplexityAssessor::Assess(const FUnrealAi
 	case EUnrealAiAgentMode::Agent:
 		S += 0.14f;
 		break;
-	case EUnrealAiAgentMode::Orchestrate:
+	case EUnrealAiAgentMode::Plan:
 		S += 0.20f;
 		break;
 	}
@@ -110,8 +110,8 @@ FUnrealAiComplexityAssessment UnrealAiComplexityAssessor::Assess(const FUnrealAi
 	case EUnrealAiAgentMode::Agent:
 		R.Signals.Add(TEXT("agent_mode"));
 		break;
-	case EUnrealAiAgentMode::Orchestrate:
-		R.Signals.Add(TEXT("orchestrate_mode"));
+	case EUnrealAiAgentMode::Plan:
+		R.Signals.Add(TEXT("plan_mode"));
 		break;
 	case EUnrealAiAgentMode::Ask:
 		R.Signals.Add(TEXT("ask_mode"));

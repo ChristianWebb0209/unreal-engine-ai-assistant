@@ -1,11 +1,11 @@
-#include "Harness/UnrealAiOrchestrateDag.h"
+#include "Harness/UnrealAiPlanDag.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
-namespace UnrealAiOrchestrateDag
+namespace UnrealAiPlanDag
 {
 	static void ParseDependsArray(const FJsonObject& O, TArray<FString>& OutDeps)
 	{
@@ -46,7 +46,6 @@ namespace UnrealAiOrchestrateDag
 		O->TryGetStringField(TEXT("hint"), OutNode.Hint);
 		if (OutNode.Hint.IsEmpty())
 		{
-			// Planner "steps" often use `detail` for the work hint.
 			O->TryGetStringField(TEXT("detail"), OutNode.Hint);
 		}
 		ParseDependsArray(*O, OutNode.DependsOn);
@@ -81,12 +80,11 @@ namespace UnrealAiOrchestrateDag
 		return Status == TEXT("success") || Status == TEXT("skipped");
 	}
 
-	bool ParseDagJson(const FString& DagJson, FUnrealAiOrchestrateDag& OutDag, FString& OutError)
+	bool ParseDagJson(const FString& DagJson, FUnrealAiPlanDag& OutDag, FString& OutError)
 	{
-		OutDag = FUnrealAiOrchestrateDag();
+		OutDag = FUnrealAiPlanDag();
 		OutError.Empty();
 
-		// Models often append `<chat-name: "...">` after the JSON object; strip it so the payload parses.
 		FString NormalizedDagJson = DagJson.TrimStartAndEnd();
 		{
 			const int32 TagStart = NormalizedDagJson.Find(TEXT("<chat-name"), ESearchCase::IgnoreCase, ESearchDir::FromEnd);
@@ -96,9 +94,6 @@ namespace UnrealAiOrchestrateDag
 			}
 		}
 
-		// Planner text is supposed to be "DAG-only JSON", but in practice many models wrap it in markdown
-		// code fences (```json ... ```) or include leading/trailing prose. Be tolerant and try to extract
-		// the first JSON object.
 		auto TryParseObject = [](const FString& Candidate, TSharedPtr<FJsonObject>& InOutRoot) -> bool
 		{
 			InOutRoot.Reset();
@@ -119,7 +114,6 @@ namespace UnrealAiOrchestrateDag
 			}
 		}
 
-		// Strip code fences if present.
 		FenceStripped = NormalizedDagJson;
 		FenceStripped = FenceStripped.Replace(TEXT("```json"), TEXT(""), ESearchCase::IgnoreCase);
 		FenceStripped = FenceStripped.Replace(TEXT("```"), TEXT(""), ESearchCase::IgnoreCase);
@@ -129,7 +123,6 @@ namespace UnrealAiOrchestrateDag
 			goto ParsedOk;
 		}
 
-		// Fallback: find first '{' and last '}' and parse the substring.
 		{
 			const int32 FirstBrace = FenceStripped.Find(TEXT("{"), ESearchCase::CaseSensitive, ESearchDir::FromStart);
 			const int32 LastBrace = FenceStripped.Find(TEXT("}"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
@@ -149,7 +142,7 @@ namespace UnrealAiOrchestrateDag
 	ParsedOk:
 		FString Schema;
 		Root->TryGetStringField(TEXT("schema"), Schema);
-		if (!Schema.IsEmpty() && Schema != TEXT("unreal_ai.orchestrate_dag"))
+		if (!Schema.IsEmpty() && Schema != TEXT("unreal_ai.plan_dag"))
 		{
 			OutError = FString::Printf(TEXT("Unexpected DAG schema: %s"), *Schema);
 			return false;
@@ -157,7 +150,6 @@ namespace UnrealAiOrchestrateDag
 		Root->TryGetStringField(TEXT("title"), OutDag.Title);
 		if (OutDag.Title.IsEmpty())
 		{
-			// Planner payloads sometimes use definitionOfDone as the human title.
 			Root->TryGetStringField(TEXT("definitionOfDone"), OutDag.Title);
 		}
 
@@ -167,6 +159,7 @@ namespace UnrealAiOrchestrateDag
 			OutDag.Nodes.Reserve(Nodes->Num());
 			AppendNodesFromJsonArray(*Nodes, OutDag.Nodes);
 		}
+		// Legacy `steps[]` (same shape as nodes) — prefer `nodes[]` in new prompts; removal tracked for a future release.
 		if (OutDag.Nodes.Num() == 0)
 		{
 			const TArray<TSharedPtr<FJsonValue>>* Steps = nullptr;
@@ -185,7 +178,7 @@ namespace UnrealAiOrchestrateDag
 		return true;
 	}
 
-	bool ValidateDag(const FUnrealAiOrchestrateDag& Dag, int32 MaxNodes, FString& OutError)
+	bool ValidateDag(const FUnrealAiPlanDag& Dag, int32 MaxNodes, FString& OutError)
 	{
 		OutError.Empty();
 		if (Dag.Nodes.Num() <= 0)
@@ -226,7 +219,7 @@ namespace UnrealAiOrchestrateDag
 			}
 		}
 
-		TMap<FString, int32> State; // 0 unvisited, 1 visiting, 2 done
+		TMap<FString, int32> State;
 		TFunction<bool(const FString&)> Dfs;
 		Dfs = [&](const FString& Id) -> bool
 		{
@@ -268,7 +261,7 @@ namespace UnrealAiOrchestrateDag
 	}
 
 	void GetReadyNodeIds(
-		const FUnrealAiOrchestrateDag& Dag,
+		const FUnrealAiPlanDag& Dag,
 		const TMap<FString, FString>& NodeStatusById,
 		TArray<FString>& OutNodeIds)
 	{
@@ -299,4 +292,3 @@ namespace UnrealAiOrchestrateDag
 		}
 	}
 }
-

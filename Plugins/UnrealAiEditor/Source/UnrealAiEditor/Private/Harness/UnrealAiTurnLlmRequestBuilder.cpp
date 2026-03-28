@@ -31,6 +31,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	const FUnrealAiAgentTurnRequest& Request,
 	int32 LlmRound,
 	int32 MaxLlmRounds,
+	const FString& RetrievalTurnKey,
 	IAgentContextService* ContextService,
 	FUnrealAiModelProfileRegistry* Profiles,
 	FUnrealAiToolCatalog* Catalog,
@@ -53,6 +54,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	FAgentContextBuildOptions Opt;
 	Opt.Mode = Request.Mode;
 	Opt.UserMessageForComplexity = Request.UserText;
+	Opt.RetrievalTurnKey = RetrievalTurnKey;
 	Opt.bModelSupportsImages = Caps.bSupportsImages;
 	Opt.ContextBuildInvocationReason = TEXT("request_build");
 	const FAgentContextBuildResult Built = ContextService->BuildContextWindow(Opt);
@@ -72,7 +74,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 			P.bIncludeExecutionSubturnChunk = !St->ActiveTodoPlanJson.IsEmpty();
 		}
 	}
-	P.bIncludeOrchestrationChunk = (Request.Mode == EUnrealAiAgentMode::Orchestrate);
+	P.bIncludePlanDagChunk = (Request.Mode == EUnrealAiAgentMode::Plan);
 
 	const FString SystemContent = UnrealAiPromptBuilder::BuildSystemDeveloperContent(P);
 
@@ -110,7 +112,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	const FString SurfaceEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_TOOL_SURFACE")).TrimStartAndEnd();
 	const bool bWantDispatchSurface = !SurfaceEnv.Equals(TEXT("native"), ESearchCase::IgnoreCase);
 	bool bUsingDispatchSurface = false;
-	if (Request.Mode != EUnrealAiAgentMode::Orchestrate && Caps.bSupportsNativeTools && bWantDispatchSurface)
+	if (Request.Mode != EUnrealAiAgentMode::Plan && Caps.bSupportsNativeTools && bWantDispatchSurface)
 	{
 		FString ToolIndexMd;
 		Catalog->BuildCompactToolIndexAppendix(Request.Mode, Caps, PackPtr, ToolIndexMd);
@@ -144,7 +146,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 		ApiMsgs.RemoveAt(1);
 	}
 
-	if (Request.Mode == EUnrealAiAgentMode::Orchestrate)
+	if (Request.Mode == EUnrealAiAgentMode::Plan)
 	{
 		// Planner pass must be DAG-only in v1; executor child turns run in Agent mode.
 		ToolsJson = TEXT("[]");
