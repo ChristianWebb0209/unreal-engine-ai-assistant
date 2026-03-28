@@ -7,7 +7,21 @@
 
 **This Markdown file** remains the **human-readable** narrative, Epic links, and engineering notes.
 
-**Related:** [`context-management.md`](context-management.md), [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md), [`tool-catalog-audit-guide.md`](tool-catalog-audit-guide.md) (iterative catalog review using harness results), repo [`README.md`](../README.md).
+**Related:** [`context-management.md`](context-management.md), [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md), [`tools-expansion.md`](tools-expansion.md) (tool surface pipeline, env flags, architecture map), [`tool-catalog-audit-guide.md`](tool-catalog-audit-guide.md) (iterative catalog review using harness results), repo [`README.md`](../README.md).
+
+---
+
+## Runtime tool surface (wire format + optional eligibility)
+
+The catalog is still the **single schema source**, but **how much** of it reaches the model depends on mode and env:
+
+| Mechanism | What it does |
+|-----------|----------------|
+| **Native `tools[]`** | Set `UNREAL_AI_TOOL_SURFACE=native` — full function definitions per enabled tool (large payload). |
+| **Dispatch (default)** | Tiny `tools[]` with `unreal_ai_dispatch` + **markdown tool index** in the system/developer text (`UnrealAiTurnLlmRequestBuilder`). |
+| **Tiered eligibility** | **Default on** for Agent + dispatch + **LLM round 1** (`UnrealAiToolSurfacePipeline` ranks via **BM25 + domain bias + session prior blend**, **dynamic K**, guardrail merge, **budgeted** index). Set `UNREAL_AI_TOOL_ELIGIBILITY=0` or `legacy` for the old full sorted list. See [`tools-expansion.md`](tools-expansion.md) §10 and [`architecture-maps/architecture.dsl`](architecture-maps/architecture.dsl) view **`tool-surface-graph`**. |
+
+Optional per-tool metadata: `tools[].tool_surface.domain_tags` (see `meta.tool_surface` in the catalog JSON). **Docs/project vector retrieval** (`Retrieval Service`) is unrelated; it feeds **context**, not the tool roster.
 
 ---
 

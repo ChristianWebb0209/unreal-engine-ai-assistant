@@ -15,9 +15,29 @@
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "HAL/PlatformTime.h"
 
 namespace UnrealAiToolDispatchSearchInternal
 {
+	static constexpr int32 SearchWallMsDefault = 12000;
+	static constexpr int32 SearchWallMsMin = 500;
+	static constexpr int32 SearchWallMsMax = 120000;
+	static constexpr uint32 SearchTimeCheckMask = 127u;
+
+	static int32 ParseMaxWallMs(const TSharedPtr<FJsonObject>& Args, const int32 DefaultMs)
+	{
+		double V = 0.0;
+		if (Args.IsValid() && Args->TryGetNumberField(TEXT("max_wall_ms"), V))
+		{
+			return FMath::Clamp(static_cast<int32>(V), SearchWallMsMin, SearchWallMsMax);
+		}
+		if (Args.IsValid() && Args->TryGetNumberField(TEXT("time_budget_ms"), V))
+		{
+			return FMath::Clamp(static_cast<int32>(V), SearchWallMsMin, SearchWallMsMax);
+		}
+		return DefaultMs;
+	}
+
 	static void CollectProjectSourceRoots(const FString& ProjectDir, TArray<FString>& OutRoots)
 	{
 		const FString S = FPaths::Combine(ProjectDir, TEXT("Source"));
@@ -179,6 +199,17 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 	bool bIncludeHidden = false;
 	Args->TryGetBoolField(TEXT("include_hidden"), bIncludeHidden);
 
+	const int32 MaxWallMs = ParseMaxWallMs(Args, SearchWallMsDefault);
+	const double StartSec = FPlatformTime::Seconds();
+	const double DeadlineSec = StartSec + static_cast<double>(MaxWallMs) / 1000.0;
+
+	int32 MaxActorsToVisit = 500000;
+	double MAV = 0.0;
+	if (Args->TryGetNumberField(TEXT("max_actors_to_visit"), MAV))
+	{
+		MaxActorsToVisit = FMath::Clamp(static_cast<int32>(MAV), 5000, 2000000);
+	}
+
 	if (!GEditor)
 	{
 		return UnrealAiToolJson::Error(TEXT("scene_fuzzy_search: Unreal Editor API unavailable (GEditor is null)."));
@@ -200,8 +231,25 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 
 	TArray<FHit> Hits;
 	Hits.Reserve(256);
+	int32 ActorsVisited = 0;
+	bool bTimedOut = false;
+	bool bActorsTruncated = false;
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
+		++ActorsVisited;
+		if ((static_cast<uint32>(ActorsVisited) & SearchTimeCheckMask) == 0u)
+		{
+			if (FPlatformTime::Seconds() >= DeadlineSec)
+			{
+				bTimedOut = true;
+				break;
+			}
+		}
+		if (ActorsVisited > MaxActorsToVisit)
+		{
+			bActorsTruncated = true;
+			break;
+		}
 		AActor* A = *It;
 		if (!A)
 		{
@@ -278,6 +326,17 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 	O->SetStringField(TEXT("tool"), TEXT("scene_fuzzy_search"));
 	O->SetStringField(TEXT("query"), Query);
 	O->SetBoolField(TEXT("query_coerced"), bQueryCoerced);
+	O->SetNumberField(TEXT("max_wall_ms"), static_cast<double>(MaxWallMs));
+	O->SetNumberField(TEXT("elapsed_ms"), (FPlatformTime::Seconds() - StartSec) * 1000.0);
+	O->SetBoolField(TEXT("timed_out"), bTimedOut);
+	O->SetBoolField(TEXT("actors_truncated"), bActorsTruncated);
+	O->SetNumberField(TEXT("actors_visited"), static_cast<double>(ActorsVisited));
+	O->SetNumberField(TEXT("max_actors_to_visit"), static_cast<double>(MaxActorsToVisit));
+	if (bTimedOut)
+	{
+		O->SetStringField(TEXT("timeout_notice"),
+						  TEXT("Wall-clock budget exceeded; matches may be incomplete. Narrow the query, raise max_wall_ms (cap 120s), or raise max_actors_to_visit."));
+	}
 	O->SetArrayField(TEXT("matches"), Arr);
 	O->SetNumberField(TEXT("count"), static_cast<double>(Arr.Num()));
 	return UnrealAiToolJson::Ok(O);
@@ -404,6 +463,9 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 	{
 		MaxAssetsToScan = FMath::Clamp(static_cast<int32>(MS), 100, 500000);
 	}
+	const int32 MaxWallMs = ParseMaxWallMs(Args, SearchWallMsDefault);
+	const double StartSec = FPlatformTime::Seconds();
+	const double DeadlineSec = StartSec + static_cast<double>(MaxWallMs) / 1000.0;
 	FString ClassSubstring;
 	Args->TryGetStringField(TEXT("class_name_substring"), ClassSubstring);
 	const FString QLower = Query.ToLower();
@@ -430,6 +492,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 
 	int32 VisitCount = 0;
 	bool bTruncated = false;
+	bool bTimedOut = false;
 
 	const auto OnAsset = [&](const FAssetData& AD)
 	{
@@ -451,6 +514,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 		[&](const FAssetData& AD) -> bool
 		{
 			++VisitCount;
+			if ((static_cast<uint32>(VisitCount) & SearchTimeCheckMask) == 0u)
+			{
+				if (FPlatformTime::Seconds() >= DeadlineSec)
+				{
+					bTimedOut = true;
+					return false;
+				}
+			}
 			if (VisitCount > MaxAssetsToScan)
 			{
 				bTruncated = true;
@@ -485,7 +556,16 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 	O->SetBoolField(TEXT("query_coerced"), bQueryCoerced);
 	O->SetStringField(TEXT("path_prefix"), PathPrefix);
 	O->SetBoolField(TEXT("truncated"), bTruncated);
+	O->SetBoolField(TEXT("timed_out"), bTimedOut);
+	O->SetNumberField(TEXT("max_wall_ms"), static_cast<double>(MaxWallMs));
+	O->SetNumberField(TEXT("elapsed_ms"), (FPlatformTime::Seconds() - StartSec) * 1000.0);
 	O->SetNumberField(TEXT("assets_visited"), static_cast<double>(VisitCount));
+	if (bTimedOut)
+	{
+		O->SetStringField(TEXT("timeout_notice"),
+						  TEXT("Wall-clock budget exceeded while scanning the asset registry; matches may be incomplete. Narrow path_prefix, add class_name_substring, "
+							   "raise max_wall_ms (cap 120s), or raise max_assets_to_scan."));
+	}
 	if (bLowConfidence)
 	{
 		O->SetStringField(TEXT("low_confidence_notice"), TEXT("Top matches are low confidence. Try a narrower query or set class_name_substring."));
@@ -538,6 +618,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SourceSearchFuzzy(const TSharedPt
 	bool bIncludeLineMatches = true;
 	Args->TryGetBoolField(TEXT("include_line_matches"), bIncludeLineMatches);
 
+	const int32 MaxWallMs = ParseMaxWallMs(Args, SearchWallMsDefault);
+	const double StartSec = FPlatformTime::Seconds();
+	const double DeadlineSec = StartSec + static_cast<double>(MaxWallMs) / 1000.0;
+	bool bTimedOut = false;
+	bool bRootsEnumerationPartial = false;
+
 	TArray<FString> ExtAllow;
 	ParseGlobList(Glob, ExtAllow);
 
@@ -547,14 +633,36 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SourceSearchFuzzy(const TSharedPt
 	TArray<FString> AllFiles;
 	for (const FString& Root : Roots)
 	{
+		if (FPlatformTime::Seconds() >= DeadlineSec)
+		{
+			bTimedOut = true;
+			bRootsEnumerationPartial = true;
+			break;
+		}
 		TArray<FString> Files;
 		IFileManager::Get().FindFilesRecursive(Files, *Root, TEXT("*"), true, false);
 		AllFiles.Append(Files);
+		if (FPlatformTime::Seconds() >= DeadlineSec)
+		{
+			bTimedOut = true;
+			bRootsEnumerationPartial = true;
+			break;
+		}
 	}
 
 	TArray<FPathHit> PathHits;
+	int32 PathPhaseIterations = 0;
 	for (const FString& Full : AllFiles)
 	{
+		++PathPhaseIterations;
+		if ((static_cast<uint32>(PathPhaseIterations) & SearchTimeCheckMask) == 0u)
+		{
+			if (FPlatformTime::Seconds() >= DeadlineSec)
+			{
+				bTimedOut = true;
+				break;
+			}
+		}
 		if (!FileMatchesExtList(Full, ExtAllow))
 		{
 			continue;
@@ -609,6 +717,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SourceSearchFuzzy(const TSharedPt
 		const int32 MaxLineHits = FMath::Max(10, MaxHits);
 		for (int32 Fi = 0; Fi < FilesToRead && LineHits.Num() < MaxLineHits; ++Fi)
 		{
+			if ((Fi & 31) == 0 && FPlatformTime::Seconds() >= DeadlineSec)
+			{
+				bTimedOut = true;
+				break;
+			}
 			FString RelComb = PathHits[Fi].RelativePath;
 			RelComb.TrimStartAndEndInline();
 			while (RelComb.StartsWith(TEXT("/")))
@@ -630,6 +743,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SourceSearchFuzzy(const TSharedPt
 			const int32 MaxLinesPerFile = 400;
 			for (int32 Li = 0; Li < Lines.Num() && Li < MaxLinesPerFile; ++Li)
 			{
+				if ((Li & 63) == 0 && FPlatformTime::Seconds() >= DeadlineSec)
+				{
+					bTimedOut = true;
+					break;
+				}
 				const float Ls = UnrealAiFuzzySearch::Score(Query, Lines[Li]);
 				if (Ls < 35.f)
 				{
@@ -641,6 +759,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SourceSearchFuzzy(const TSharedPt
 				Lh.LineNumber = Li + 1;
 				Lh.LineText = Lines[Li].Left(400);
 				LineHits.Add(MoveTemp(Lh));
+			}
+			if (bTimedOut)
+			{
+				break;
 			}
 		}
 		LineHits.Sort([](const FLineHit& A, const FLineHit& B) { return A.Score > B.Score; });
@@ -666,5 +788,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SourceSearchFuzzy(const TSharedPt
 	O->SetArrayField(TEXT("line_matches"), LineArr);
 	O->SetNumberField(TEXT("files_considered"), static_cast<double>(AllFiles.Num()));
 	O->SetNumberField(TEXT("path_candidates"), static_cast<double>(PathHits.Num()));
+	O->SetNumberField(TEXT("max_wall_ms"), static_cast<double>(MaxWallMs));
+	O->SetNumberField(TEXT("elapsed_ms"), (FPlatformTime::Seconds() - StartSec) * 1000.0);
+	O->SetBoolField(TEXT("timed_out"), bTimedOut);
+	O->SetBoolField(TEXT("roots_enumeration_partial"), bRootsEnumerationPartial);
+	if (bTimedOut)
+	{
+		O->SetStringField(TEXT("timeout_notice"),
+						  TEXT("Wall-clock budget exceeded; path/line matches may be incomplete. Tighten glob, raise max_wall_ms (cap 120s), or reduce max_files_to_scan scope."));
+	}
 	return UnrealAiToolJson::Ok(O);
 }

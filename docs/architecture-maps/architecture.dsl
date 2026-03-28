@@ -29,15 +29,15 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
 
             promptLibrary = container "Prompt Chunk Library" "Prompt chunk templates and token replacement contracts." "Markdown + C++" "Core"
 
-            requestBuilder = container "Turn Request Builder" "Builds request payloads from context, conversation, profile caps, and prompt chunks." "C++" "Core" {
+            requestBuilder = container "Turn Request Builder" "Builds request payloads from context, conversation, profile caps, prompt chunks, and **tool wire format** (native `tools[]` vs `unreal_ai_dispatch` + markdown index)." "C++" "Core" {
                 promptAssembler = component "Prompt Assembler" "Combines chunks/tokens and context block placeholders." "UnrealAiPromptBuilder" "Core"
-                messageBudgeter = component "Message Budgeter" "Character/token approximation and message trimming." "UnrealAiTurnLlmRequestBuilder" "Policy"
+                messageBudgeter = component "Message Budgeter + Tool Wire" "`UnrealAiTurnLlmRequestBuilder`: conversation + system text, **optional tiered tool surface** (`TryBuildTieredToolSurface`), message trimming." "UnrealAiTurnLlmRequestBuilder" "Policy"
                 capabilityRouter = component "Capability Router" "Model image/tool constraints and include flags." "UnrealAiTurnLlmRequestBuilder" "Policy"
             }
 
-            harness = container "Agent Harness" "Turn loop orchestration, tool rounds, continuation logic, and cancellation handling." "C++" "Core" {
+            harness = container "Agent Harness" "Turn loop orchestration, tool rounds, continuation logic, cancellation handling, **tool surface telemetry**, usage logging, optional **repair nudge** after bad `unreal_ai_dispatch` unwrap." "C++" "Core" {
                 turnOrchestrator = component "Turn Orchestrator" "Controls request rounds and stop conditions." "FUnrealAiAgentHarness" "Core"
-                toolLoop = component "Tool Loop Coordinator" "Captures tool call results and continuation transitions." "FUnrealAiAgentHarness" "Core"
+                toolLoop = component "Tool Loop Coordinator" "Streams tool calls, executes via host, **`tool_surface_metrics` enforcement events**, JSONL usage events + session prior, bounded repair user line." "FUnrealAiAgentHarness" "Core"
                 continuationRails = component "Continuation Rails" "Round/time/cancel guard rails and mode behavior." "FUnrealAiAgentHarness" "Policy"
                 workerOrchestration = component "Worker/Subagent Coordination" "Parent-worker flows and merge points (Agent mode)." "FUnrealAiAgentHarness" "Core"
                 runSink = component "Run Artifact Sink" "Writes run artifacts and step status metadata." "FAgentRunFileSink" "Core"
@@ -48,8 +48,15 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
                 streamParser = component "Stream Event Parser" "Normalizes deltas, tool calls, finish reasons, usage." "FOpenAiCompatibleHttpTransport" "Core"
             }
 
-            tools = container "Tooling Runtime" "Tool catalog, dispatch, and execution host for editor-facing operations." "C++" "Core" {
-                catalogLoader = component "Tool Catalog Loader" "Loads/parses UnrealAiToolCatalog.json metadata." "UnrealAiToolCatalog" "Core"
+            tools = container "Tooling Runtime" "Tool catalog, dispatch, execution host, and optional **tool surface pipeline** (lexical eligibility + tiered markdown for `unreal_ai_dispatch`)." "C++" "Core" {
+                catalogLoader = component "Tool Catalog Loader" "Loads/parses UnrealAiToolCatalog.json; builds native `tools[]` or dispatch index; **tiered** appendix = roster lines + expanded parameter excerpts under budget (`BuildCompactToolIndexAppendixTiered`)." "FUnrealAiToolCatalog" "Core"
+                toolSurfacePipeline = component "Tool Surface Pipeline" "**Default on** (opt out with `UNREAL_AI_TOOL_ELIGIBILITY=0`). Agent + dispatch round 1: shaping, BM25 scores, bias, session prior blend, dynamic K, guardrails, tiered markdown. **Separate from** docs vector retrieval." "UnrealAiToolSurfacePipeline" "Core"
+                toolQueryShaper = component "Tool Query Shaper" "Cheap heuristic intent line (verbs/objects) + hybrid query string so a bad extractor cannot dominate raw user text." "UnrealAiToolQueryShaper" "Core"
+                toolLexicalIndex = component "Tool Lexical Index (BM25)" "In-memory BM25 over enabled tool text (id/summary/category/tags); keyword leg for hybrid retrieval—not embeddings." "FUnrealAiToolBm25Index" "Core"
+                toolDynamicKPolicy = component "Dynamic K Policy" "Chooses effective K from score margin between top candidates (min/max env caps), then caps by available scores." "UnrealAiToolKPolicy" "Core"
+                toolDomainBias = component "Tool Domain Bias" "Maps editor snapshot/recent UI + optional `tool_surface.domain_tags` to a score multiplier; **boost**, not hard mask." "UnrealAiToolContextBias" "Core"
+                toolUsagePrior = component "Operational Usage Prior" "Session-only ok/fail rates per `tool_id`; **0.7/0.3 blend on by default** (`UNREAL_AI_TOOL_USAGE_PRIOR=0` to disable). Operational signal only, not user satisfaction." "UnrealAiToolUsagePrior" "Core"
+                toolUsageEventLogger = component "Tool Usage Event Logger" "Append `(query_hash, tool_id, operational_ok)` JSONL for offline prior training (`UNREAL_AI_TOOL_USAGE_LOG`)." "UnrealAiToolUsageEventLogger" "Core"
                 executionHost = component "Tool Execution Host" "Permission checks, dispatch invocation, result envelope shaping." "FUnrealAiToolExecutionHost" "Core"
                 dispatchActors = component "Actors + World Dispatch" "Actor/transform/world operations." "UnrealAiToolDispatch_Actors" "Core"
                 dispatchAssets = component "Assets + Content Dispatch" "Asset CRUD, browser sync/navigation, metadata." "UnrealAiToolDispatch_*Assets*" "Core"
@@ -118,6 +125,7 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
             vectorDb = container "vector/<project>/index.db" "Optional local vector chunk + embedding store." "SQLite" "Optional"
             vectorManifest = container "vector/<project>/manifest.json" "Index/migration/status metadata." "JSON file" "Optional"
             diagnostics = container "Saved/UnrealAiEditor/*" "Tool audit, context decisions, workflow status artifacts." "Logs/JSONL/Markdown" "Data"
+            toolUsageEventsJsonl = container "Saved/UnrealAi/tool_usage_events.jsonl" "Append-only operational tool usage lines for optional prior training (`query_hash`, `tool_id`, `operational_ok`)." "JSONL" "Data"
         }
 
         dev -> plugin "Uses in editor"
@@ -142,6 +150,16 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
         plugin.harness -> plugin.requestBuilder "Build request each round"
         plugin.harness -> plugin.transport "Send model call"
         plugin.harness -> plugin.tools "Execute tool calls"
+        plugin.requestBuilder.messageBudgeter -> plugin.tools.toolSurfacePipeline "Optional tiered tool index (Agent+dispatch+env)"
+        plugin.tools.toolSurfacePipeline -> plugin.tools.toolQueryShaper "Heuristic + hybrid retrieval text"
+        plugin.tools.toolSurfacePipeline -> plugin.tools.toolLexicalIndex "BM25 ranking over enabled tools"
+        plugin.tools.toolSurfacePipeline -> plugin.tools.toolDomainBias "Editor snapshot → tag multiplier"
+        plugin.tools.toolSurfacePipeline -> plugin.tools.toolUsagePrior "Optional 0.7/0.3 blend"
+        plugin.tools.toolSurfacePipeline -> plugin.tools.toolDynamicKPolicy "Margin-based K inside caps"
+        plugin.tools.toolSurfacePipeline -> plugin.tools.catalogLoader "Tiered markdown + schemas"
+        plugin.tools.toolSurfacePipeline -> plugin.contextService "Read thread state for bias (not docs retrieval)"
+        plugin.harness.toolLoop -> plugin.tools.toolUsageEventLogger "Log operational_ok per invoke"
+        plugin.harness.toolLoop -> plugin.tools.toolUsagePrior "Update session counts"
         plugin.harness -> plugin.contextService "Record bounded tool results"
         plugin.harness -> plugin.observability "Emit run diagnostics"
 
@@ -190,6 +208,8 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
         plugin.dataRoot -> localData.vectorDb "Owns optional"
         plugin.dataRoot -> localData.vectorManifest "Owns optional"
         plugin.dataRoot -> localData.diagnostics "Owns"
+        plugin.dataRoot -> localData.toolUsageEventsJsonl "Owns"
+        plugin.harness.toolLoop -> localData.toolUsageEventsJsonl "Append JSONL"
 
         plugin.modelProfiles -> localData.settingsJson "Load settings"
         plugin.observability.usageTracker -> plugin.observability.pricingCatalog "Estimate rough USD totals"
@@ -227,6 +247,31 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
 
         component plugin.tools "tooling-components" "Tool host and dispatch decomposition." {
             include *
+            autoLayout lr
+        }
+
+        component plugin.tools "tool-surface-graph" "Tool surface pipeline (dispatch eligibility): `UnrealAiToolSurfacePipeline` composes query shaping, BM25 lexical rank, editor domain bias, optional session usage prior, dynamic K, then tiered markdown from `FUnrealAiToolCatalog`. **Not** the docs/project vector index (`Retrieval Service`). See `docs/tools-expansion.md`." {
+            include plugin.tools.toolSurfacePipeline
+            include plugin.tools.toolQueryShaper
+            include plugin.tools.toolLexicalIndex
+            include plugin.tools.toolDynamicKPolicy
+            include plugin.tools.toolDomainBias
+            include plugin.tools.toolUsagePrior
+            include plugin.tools.toolUsageEventLogger
+            include plugin.tools.catalogLoader
+            include plugin.requestBuilder.messageBudgeter
+            include plugin.contextService.editorSnapshot
+            include plugin.harness.toolLoop
+            include localData.toolUsageEventsJsonl
+            autoLayout tb
+        }
+
+        dynamic plugin "tool-surface-sequence" "Round 1 Agent + `unreal_ai_dispatch`: turn builder may run eligibility before HTTP; tiered tool index in system message; harness logs `tool_surface_metrics`, usage JSONL, session prior; optional repair nudge after bad dispatch unwrap." {
+            plugin.requestBuilder.messageBudgeter -> plugin.tools.toolSurfacePipeline "TryBuildTieredToolSurface (env)"
+            plugin.tools.toolSurfacePipeline -> plugin.tools.catalogLoader "Ranked tool ids → markdown appendix"
+            plugin.harness -> plugin.transport "Chat completion (compact tools[] + index)"
+            plugin.harness.toolLoop -> plugin.tools.toolUsageEventLogger "operational_ok per tool"
+            plugin.harness.toolLoop -> localData.toolUsageEventsJsonl "Append JSONL line"
             autoLayout lr
         }
 

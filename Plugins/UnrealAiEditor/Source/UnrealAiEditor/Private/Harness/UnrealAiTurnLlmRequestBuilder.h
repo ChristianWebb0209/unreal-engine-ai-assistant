@@ -8,6 +8,7 @@ class FUnrealAiToolCatalog;
 class FUnrealAiConversationStore;
 struct FUnrealAiAgentTurnRequest;
 struct FUnrealAiLlmRequest;
+struct FUnrealAiToolSurfaceTelemetry;
 
 /**
  * Assembles a chat request for ILlmTransport: prompt chunks + context + conversation + tools + model/endpoint fields.
@@ -27,5 +28,6 @@ namespace UnrealAiTurnLlmRequestBuilder
 		int32 CharPerTokenApprox,
 		FUnrealAiLlmRequest& OutRequest,
 		TArray<FString>& OutContextUserMessages,
-		FString& OutError);
+		FString& OutError,
+		FUnrealAiToolSurfaceTelemetry* OutToolSurfaceTelemetry = nullptr);
 }

@@ -28,6 +28,15 @@
       "exec"
     ],
     "tool_count": 81,
+    "tool_surface": {
+      "description": "Optional per-tool overrides under tools[].tool_surface — domain_tags, centrality, worst_case_cost, requires_strict_args (tools-expansion.md).",
+      "env": {
+        "UNREAL_AI_TOOL_ELIGIBILITY": "Default ON (BM25 tiered index + dynamic K for Agent+dispatch round 1). Set 0|off|false|legacy to use the legacy full sorted tool list.",
+        "UNREAL_AI_TOOL_USAGE_PRIOR": "Default ON — 0.7/0.3 blend with session operational prior. Set 0|off|false to disable blend.",
+        "UNREAL_AI_TOOL_USAGE_LOG": "Default ON — JSONL under Saved/UnrealAi/tool_usage_events.jsonl. Set 0|off|false to disable.",
+        "UNREAL_AI_TOOL_REPAIR": "Default ON — schema repair nudge after bad dispatch unwrap. Set 0|off|false to disable."
+      }
+    },
     "invocation": {
       "focused_flag": "Optional JSON field \"focused\": true on supported tools. Stripped before handlers; after a successful run the editor opens or foregrounds the related Blueprint, asset, Content Browser selection, or project source file in the IDE. Tools list this property explicitly where the catalog schema is strict (additionalProperties: false)."
     }
@@ -2821,7 +2830,7 @@
     },
     {
       "tool_id": "source_search_symbol",
-      "summary": "Fuzzy grep project text files under Source/, Config/, and Plugins/*/Source/ (Cursor-style): typo-tolerant; ranks paths and filenames even when the user misspells or only partially remembers a name. Returns path_matches plus optional line_matches inside files. For Content assets under /Game, use asset_index_fuzzy_search (Asset Registry index).",
+      "summary": "Fuzzy grep project text files under Source/, Config/, and Plugins/*/Source/ (Cursor-style): typo-tolerant; ranks paths and filenames even when the user misspells or only partially remembers a name. Returns path_matches plus optional line_matches inside files. Stops after a wall-clock budget (max_wall_ms, default 12s, max 120s) with timed_out partial results. For Content assets under /Game, use asset_index_fuzzy_search (Asset Registry index).",
       "category": "project_files_search",
       "tags": [
         "source",
@@ -2864,6 +2873,14 @@
           "include_line_matches": {
             "type": "boolean",
             "description": "If true, scan text inside top-ranked files for fuzzy line hits."
+          },
+          "max_wall_ms": {
+            "type": "integer",
+            "description": "Wall-clock time budget in milliseconds (default 12000, clamped 500–120000). Stops early with timed_out and partial matches."
+          },
+          "time_budget_ms": {
+            "type": "integer",
+            "description": "Alias for max_wall_ms."
           }
         },
         "required": [
@@ -2874,13 +2891,16 @@
       "permission": "read",
       "ue_entry_points": "IFileManager::FindFilesRecursive; FFileHelper",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "timed_out true: partial path/line results; tighten glob, raise max_wall_ms, or reduce max_files_to_scan.",
+        "roots_enumeration_partial true: file list was cut short while discovering roots; narrow scope or raise max_wall_ms."
+      ],
       "doc_links": [],
       "status": "implemented"
     },
     {
       "tool_id": "scene_fuzzy_search",
-      "summary": "Fuzzy-search actors across the loaded editor world/level (not Content Browser assets). For /Game assets use asset_index_fuzzy_search. If query is missing or blank, the handler applies a safe default (query_coerced:true)—still pass an explicit non-empty query when possible.",
+      "summary": "Fuzzy-search actors across the loaded editor world/level (not Content Browser assets). For /Game assets use asset_index_fuzzy_search. Stops after max_wall_ms (default 12s) or max_actors_to_visit with timed_out/actors_truncated partial results. If query is missing or blank, the handler applies a safe default (query_coerced:true)—still pass an explicit non-empty query when possible.",
       "category": "world_actors",
       "tags": [
         "actor",
@@ -2917,6 +2937,18 @@
           "include_hidden": {
             "type": "boolean",
             "description": "If true, include actors hidden in the editor."
+          },
+          "max_wall_ms": {
+            "type": "integer",
+            "description": "Wall-clock time budget in milliseconds (default 12000, clamped 500–120000)."
+          },
+          "time_budget_ms": {
+            "type": "integer",
+            "description": "Alias for max_wall_ms."
+          },
+          "max_actors_to_visit": {
+            "type": "integer",
+            "description": "Max actor iterator steps (default 500000, clamped 5000–2000000); stops with actors_truncated."
           }
         },
         "required": [
@@ -2928,14 +2960,16 @@
       "ue_entry_points": "TActorIterator; AActor::GetActorLabel",
       "threading": "game_thread",
       "failure_modes": [
-        "Missing or empty query is coerced to a default search; prefer explicit query strings to avoid irrelevant matches."
+        "Missing or empty query is coerced to a default search; prefer explicit query strings to avoid irrelevant matches.",
+        "timed_out true: partial matches; narrow query, raise max_wall_ms, or raise max_actors_to_visit.",
+        "actors_truncated true: iterator cap hit; raise max_actors_to_visit or narrow search."
       ],
       "doc_links": [],
       "status": "implemented"
     },
     {
       "tool_id": "asset_index_fuzzy_search",
-      "summary": "Fuzzy-search the Asset Registry under path_prefix (default /Game). If query is missing or empty, you must pass a narrow path_prefix (e.g. /Game/Blueprints)—otherwise the tool errors instead of scanning the whole project. Enumeration stops after max_assets_to_scan (see truncated, assets_visited). Prefer explicit query + path_prefix for performance.",
+      "summary": "Fuzzy-search the Asset Registry under path_prefix (default /Game). If query is missing or empty, you must pass a narrow path_prefix (e.g. /Game/Blueprints)—otherwise the tool errors instead of scanning the whole project. Enumeration stops after max_assets_to_scan or max_wall_ms (default 12s, max 120s)—see truncated, timed_out, assets_visited. Prefer explicit query + path_prefix for performance.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -2991,6 +3025,14 @@
           "class_name_substring": {
             "type": "string",
             "description": "Optional filter: asset class path must contain this substring (e.g. Texture2D, StaticMesh, SoundBase, Material)."
+          },
+          "max_wall_ms": {
+            "type": "integer",
+            "description": "Wall-clock time budget in milliseconds (default 12000, clamped 500–120000). Stops enumeration early with timed_out and partial ranked matches."
+          },
+          "time_budget_ms": {
+            "type": "integer",
+            "description": "Alias for max_wall_ms."
           }
         }
       },
@@ -3000,7 +3042,8 @@
       "threading": "game_thread",
       "failure_modes": [
         "Missing query without path_prefix: pass path_prefix or an explicit query.",
-        "truncated true: raise max_assets_to_scan or narrow path_prefix."
+        "truncated true: raise max_assets_to_scan or narrow path_prefix.",
+        "timed_out true: partial matches; narrow path_prefix, add class_name_substring, raise max_wall_ms, or raise max_assets_to_scan."
       ],
       "doc_links": [],
       "status": "implemented"

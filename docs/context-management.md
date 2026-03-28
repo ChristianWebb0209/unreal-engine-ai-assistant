@@ -12,6 +12,8 @@ In-editor **context management** is a **logical service** in the plugin process�
 
 Optional: when local retrieval is enabled, the candidate pipeline may also include **`retrieval_snippet`** candidates sourced from the per-project local vector index (see `docs/vector-db-implementation-plan.md`, including **§2.1–2.2** for Structurizr views and **what is / is not indexed**). Retrieval remains **disabled by default** and must degrade safely to deterministic-only behavior.
 
+**Tool surface (orthogonal):** narrowing or tiering **which tools appear in the LLM tool index** (`unreal_ai_dispatch` + markdown, or native `tools[]`) is handled by the **tool surface pipeline** in `UnrealAiToolSurfacePipeline` / `UnrealAiTurnLlmRequestBuilder`, not by `BuildContextWindow`. It uses a **separate** lexical (BM25) index over catalog text and editor snapshot hints for **domain bias** — not the SQLite vector store used for docs/snippets. See [`tools-expansion.md`](tools-expansion.md) and Structurizr view **`tool-surface-graph`** in [`architecture-maps/architecture.dsl`](architecture-maps/architecture.dsl).
+
 | Responsibility | Owner |
 |----------------|--------|
 | Curated per-thread state (attachments, tool-result memory, editor snapshot, plans) | **`IAgentContextService` / `FUnrealAiContextService`** |

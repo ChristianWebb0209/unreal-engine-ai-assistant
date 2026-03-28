@@ -8,6 +8,7 @@
 #include "HAL/PlatformMisc.h"
 #include "Prompt/UnrealAiPromptBuilder.h"
 #include "Tools/UnrealAiToolCatalog.h"
+#include "Tools/UnrealAiToolSurfacePipeline.h"
 #include "UnrealAiEditorSettings.h"
 
 namespace UnrealAiTurnLlmRequestBuilderPriv
@@ -39,9 +40,15 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	int32 CharPerTokenApprox,
 	FUnrealAiLlmRequest& OutRequest,
 	TArray<FString>& OutContextUserMessages,
-	FString& OutError)
+	FString& OutError,
+	FUnrealAiToolSurfaceTelemetry* OutToolSurfaceTelemetry)
 {
 	OutContextUserMessages.Reset();
+	if (OutToolSurfaceTelemetry)
+	{
+		*OutToolSurfaceTelemetry = FUnrealAiToolSurfaceTelemetry();
+		OutToolSurfaceTelemetry->ToolSurfaceMode = TEXT("off");
+	}
 	if (!ContextService || !Profiles || !Catalog || !Conv)
 	{
 		OutError = TEXT("Turn builder: missing dependency.");
@@ -115,7 +122,25 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	if (Request.Mode != EUnrealAiAgentMode::Plan && Caps.bSupportsNativeTools && bWantDispatchSurface)
 	{
 		FString ToolIndexMd;
-		Catalog->BuildCompactToolIndexAppendix(Request.Mode, Caps, PackPtr, ToolIndexMd);
+		FUnrealAiToolSurfaceTelemetry Tel;
+		const bool bTiered = UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
+			Request,
+			LlmRound,
+			ContextService,
+			Catalog,
+			Caps,
+			PackPtr,
+			true,
+			ToolIndexMd,
+			Tel);
+		if (!bTiered)
+		{
+			Catalog->BuildCompactToolIndexAppendix(Request.Mode, Caps, PackPtr, ToolIndexMd);
+		}
+		if (OutToolSurfaceTelemetry)
+		{
+			*OutToolSurfaceTelemetry = Tel;
+		}
 		if (!ToolIndexMd.IsEmpty())
 		{
 			Catalog->BuildUnrealAiDispatchToolsJson(Request.Mode, Caps, PackPtr, ToolsJson);

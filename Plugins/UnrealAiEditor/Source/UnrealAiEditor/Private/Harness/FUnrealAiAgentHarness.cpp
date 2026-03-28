@@ -12,6 +12,9 @@
 #include "Harness/IToolExecutionHost.h"
 #include "Context/IAgentContextService.h"
 #include "Context/AgentContextTypes.h"
+#include "Misc/SecureHash.h"
+#include "Tools/UnrealAiToolUsageEventLogger.h"
+#include "Tools/UnrealAiToolUsagePrior.h"
 #include "Backend/FUnrealAiUsageTracker.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Memory/FUnrealAiMemoryCompactor.h"
@@ -48,6 +51,66 @@ namespace UnrealAiAgentHarnessPriv
 		}
 		const int32 Parsed = FCString::Atoi(*Raw);
 		return FMath::Clamp(Parsed, MinValue, MaxValue);
+	}
+
+	static FString HashUtf8Query(const FString& S)
+	{
+		FTCHARToUTF8 Utf(*S);
+		FMD5 Md5;
+		Md5.Update(reinterpret_cast<const uint8*>(Utf.Get()), Utf.Length());
+		uint8 Digest[16];
+		Md5.Final(Digest);
+		return BytesToHex(Digest, 16);
+	}
+
+	static bool EnvToolUsageLogEnabled()
+	{
+		const FString E = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_TOOL_USAGE_LOG")).TrimStartAndEnd().ToLower();
+		if (E.IsEmpty())
+		{
+			return true;
+		}
+		return E == TEXT("1") || E == TEXT("true") || E == TEXT("yes") || E == TEXT("on");
+	}
+
+	static bool EnvToolRepairNudgeEnabled()
+	{
+		const FString E = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_TOOL_REPAIR")).TrimStartAndEnd().ToLower();
+		if (E.IsEmpty())
+		{
+			return true;
+		}
+		return !(E == TEXT("0") || E == TEXT("off") || E == TEXT("false") || E == TEXT("no"));
+	}
+
+	static FString BuildToolRepairUserLine(FUnrealAiToolCatalog* InCatalog, const TArray<FUnrealAiToolCallSpec>& Calls)
+	{
+		if (!InCatalog)
+		{
+			return FString();
+		}
+		FString Msg = TEXT(
+			"[Harness][tool_call_repair] Use `unreal_ai_dispatch` with valid JSON: {\"tool_id\":\"<catalog id>\",\"arguments\":{...}}. ");
+		if (Calls.Num() == 1 && Calls[0].Name == GUnrealAiDispatchToolName)
+		{
+			TSharedPtr<FJsonObject> Root;
+			const TSharedRef<TJsonReader<>> Jr = TJsonReaderFactory<>::Create(Calls[0].ArgumentsJson);
+			if (FJsonSerializer::Deserialize(Jr, Root) && Root.IsValid())
+			{
+				FString InnerId;
+				if (Root->TryGetStringField(TEXT("tool_id"), InnerId) && !InnerId.IsEmpty())
+				{
+					FString P;
+					if (InCatalog->TryGetToolParametersJsonString(InnerId, P))
+					{
+						Msg += FString::Printf(TEXT("Inner tool `%s` parameters schema excerpt: %s"), *InnerId, *P);
+						return Msg;
+					}
+				}
+			}
+		}
+		Msg += TEXT("Arguments must be complete JSON objects.");
+		return Msg;
 	}
 
 	static bool IsHarnessSyntheticUserMessage(const FString& Content)
@@ -363,6 +426,10 @@ namespace UnrealAiAgentHarnessPriv
 		TArray<FString> CurrentRoundExecutedToolNames;
 		std::atomic<bool> bCancelled{false};
 		std::atomic<bool> bTerminal{false};
+		/** Best-effort query fingerprint for tool usage JSONL (tools-expansion §2.5). */
+		FString UsageQueryHash;
+		int32 UnwrapFailuresThisRound = 0;
+		int32 ToolRepairNudgesThisRun = 0;
 
 		void HandleEvent(const FUnrealAiLlmStreamEvent& Ev);
 		void DispatchLlm(bool bRetrySameRound = false);
@@ -672,6 +739,7 @@ namespace UnrealAiAgentHarnessPriv
 		bCurrentRoundRepeatedToolLoop = false;
 		bCurrentRoundRepeatedEmptySearch = false;
 		CurrentRoundExecutedToolNames.Reset();
+		UnwrapFailuresThisRound = 0;
 
 		FUnrealAiLlmRequest LlmReq;
 		FString BuildErr;
@@ -682,6 +750,7 @@ namespace UnrealAiAgentHarnessPriv
 			*RunId.ToString(EGuidFormats::DigitsWithHyphens),
 			LlmRound);
 		ContextService->StartRetrievalPrefetch(RetrievalTurnKey, Request.UserText);
+		FUnrealAiToolSurfaceTelemetry ToolSurfaceTel;
 		if (!UnrealAiTurnLlmRequestBuilder::Build(
 				Request,
 				LlmRound,
@@ -694,10 +763,41 @@ namespace UnrealAiAgentHarnessPriv
 				CharPerTokenApprox,
 				LlmReq,
 				ContextUserMsgs,
-				BuildErr))
+				BuildErr,
+				&ToolSurfaceTel))
 		{
 			Fail(BuildErr);
 			return;
+		}
+		UsageQueryHash = ToolSurfaceTel.QueryHash;
+		if (UsageQueryHash.IsEmpty())
+		{
+			UsageQueryHash = UnrealAiAgentHarnessPriv::HashUtf8Query(Request.UserText);
+		}
+		if (Sink.IsValid() && !ToolSurfaceTel.ToolSurfaceMode.Equals(TEXT("off")))
+		{
+			FString ExpandedCsv;
+			for (const FString& Id : ToolSurfaceTel.ExpandedToolIds)
+			{
+				if (!ExpandedCsv.IsEmpty())
+				{
+					ExpandedCsv += TEXT(",");
+				}
+				ExpandedCsv += Id;
+			}
+			Sink->OnEnforcementEvent(
+				TEXT("tool_surface_metrics"),
+				FString::Printf(
+					TEXT("mode=%s eligible=%d roster_chars=%d budget_left=%d latency_ms=%d k=%d qshape=%s qhash=%s expanded=%s"),
+					*ToolSurfaceTel.ToolSurfaceMode,
+					ToolSurfaceTel.EligibleCount,
+					ToolSurfaceTel.RosterChars,
+					ToolSurfaceTel.BudgetRemaining,
+					ToolSurfaceTel.RetrievalLatencyMs,
+					ToolSurfaceTel.KEffective,
+					*ToolSurfaceTel.QueryShape,
+					*ToolSurfaceTel.QueryHash,
+					*ExpandedCsv));
 		}
 		if (Sink.IsValid() && ContextUserMsgs.Num() > 0)
 		{
@@ -963,6 +1063,7 @@ namespace UnrealAiAgentHarnessPriv
 		FString UnwrapErr;
 		if (!UnwrapDispatchToolCall(Tc, InvokeName, InvokeArgs, UnwrapErr))
 		{
+			++UnwrapFailuresThisRound;
 			if (Sink.IsValid())
 			{
 				Sink->OnToolCallStarted(Tc.Name, Tc.Id, Tc.ArgumentsJson);
@@ -982,6 +1083,11 @@ namespace UnrealAiAgentHarnessPriv
 				ExecutedToolCallIds.Add(Tc.Id);
 			}
 			EmitEnforcementEvent(TEXT("stream_tool_exec_done"), FString::Printf(TEXT("id=%s ok=0"), *Tc.Id));
+			if (UnrealAiAgentHarnessPriv::EnvToolUsageLogEnabled())
+			{
+				UnrealAiToolUsageEventLogger::AppendOperationalEvent(UsageQueryHash, Tc.Name, false, Request.ThreadId);
+			}
+			UnrealAiToolUsagePrior::NoteSessionOutcome(Tc.Name, false);
 			return;
 		}
 		if (Sink.IsValid())
@@ -1109,6 +1215,11 @@ namespace UnrealAiAgentHarnessPriv
 			ExecutedToolCallIds.Add(Tc.Id);
 		}
 		EmitEnforcementEvent(TEXT("stream_tool_exec_done"), FString::Printf(TEXT("id=%s ok=%d"), *Tc.Id, Inv.bOk ? 1 : 0));
+		if (UnrealAiAgentHarnessPriv::EnvToolUsageLogEnabled())
+		{
+			UnrealAiToolUsageEventLogger::AppendOperationalEvent(UsageQueryHash, InvokeName, Inv.bOk, Request.ThreadId);
+		}
+		UnrealAiToolUsagePrior::NoteSessionOutcome(InvokeName, Inv.bOk);
 	}
 
 	void FAgentTurnRunner::CompleteToolPath()
@@ -1308,6 +1419,24 @@ namespace UnrealAiAgentHarnessPriv
 					EmitEnforcementEvent(
 						TEXT("mutation_read_only_note"),
 						TEXT("mutation-intent user message but only read/discovery tools this round; harness not injecting follow-up nudge"));
+				}
+			}
+		}
+		if (UnwrapFailuresThisRound > 0 && UnrealAiAgentHarnessPriv::EnvToolRepairNudgeEnabled()
+			&& Request.Mode == EUnrealAiAgentMode::Agent && Conv.IsValid() && Catalog)
+		{
+			const int32 MaxRepair = UnrealAiAgentHarnessPriv::ReadEnvInt(TEXT("UNREAL_AI_TOOL_REPAIR_MAX_PER_USER_SEND"), 1, 0, 4);
+			if (ToolRepairNudgesThisRun < MaxRepair)
+			{
+				const FString RepairLine = UnrealAiAgentHarnessPriv::BuildToolRepairUserLine(Catalog, PendingToolCalls);
+				if (!RepairLine.IsEmpty())
+				{
+					FUnrealAiConversationMessage R;
+					R.Role = TEXT("user");
+					R.Content = RepairLine;
+					Conv->GetMessagesMutable().Add(R);
+					++ToolRepairNudgesThisRun;
+					EmitEnforcementEvent(TEXT("tool_call_repair_nudge"), TEXT("injected_schema_help"));
 				}
 			}
 		}

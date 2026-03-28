@@ -81,6 +81,23 @@ struct FUnrealAiLlmStreamEvent
 	FString ErrorMessage;
 };
 
+/** Observability for tool surface assembly (tools-expansion.md §2.8). */
+struct FUnrealAiToolSurfaceTelemetry
+{
+	/** off | dispatch_eligibility | native_eligibility */
+	FString ToolSurfaceMode;
+	int32 EligibleCount = 0;
+	int32 RosterChars = 0;
+	TArray<FString> ExpandedToolIds;
+	int32 BudgetRemaining = 0;
+	int32 RetrievalLatencyMs = 0;
+	int32 KEffective = 0;
+	/** raw | heuristic | hybrid */
+	FString QueryShape;
+	/** Fingerprint of hybrid retrieval query for usage logging (may be empty when eligibility off). */
+	FString QueryHash;
+};
+
 /** Request into the harness from UI / tabs. */
 struct FUnrealAiAgentTurnRequest
 {
