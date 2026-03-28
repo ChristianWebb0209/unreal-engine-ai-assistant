@@ -1914,10 +1914,16 @@ static FString UnrealAiBlueprintLoadHint(const FString& BlueprintPath)
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompile(const TSharedPtr<FJsonObject>& Args)
 {
+	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
 	FString Path;
 	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("blueprint_path is required"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("blueprint_path is required. Discover Blueprints with asset_index_fuzzy_search (query + path_prefix) or asset_registry_query with path_filter/class_name."),
+			TEXT("blueprint_compile"),
+			SuggestedArgs);
 	}
 	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path);
 	if (!BP)
@@ -1983,6 +1989,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompile(const TSharedPtr
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportIr(const TSharedPtr<FJsonObject>& Args)
 {
 	using namespace UnrealAiBlueprintToolsPriv;
+	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
 	FString Path;
 	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
 	{
@@ -2585,6 +2592,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintFormatGraph(const TSharedPtr<FJsonObject>& Args)
 {
 	using namespace UnrealAiBlueprintToolsPriv;
+	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
 	FString Path;
 	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
 	{
@@ -2650,10 +2658,16 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintFormatGraph(const TShare
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGetGraphSummary(const TSharedPtr<FJsonObject>& Args)
 {
+	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
 	FString Path;
 	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("blueprint_path is required"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("blueprint_path is required. Discover Blueprints with asset_index_fuzzy_search (query + path_prefix) or asset_registry_query with path_filter/class_name."),
+			TEXT("blueprint_get_graph_summary"),
+			SuggestedArgs);
 	}
 	FString GraphName;
 	Args->TryGetStringField(TEXT("graph_name"), GraphName);
@@ -2743,6 +2757,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGetGraphSummary(const TS
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintOpenGraphTab(const TSharedPtr<FJsonObject>& Args)
 {
+	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
 	FString Path;
 	FString GraphName;
 	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty()
@@ -2802,6 +2817,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintOpenGraphTab(const TShar
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintAddVariable(const TSharedPtr<FJsonObject>& Args)
 {
+	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
 	FString Path;
 	FString VarName;
 	FString TypeStr;

@@ -37,7 +37,8 @@ namespace UnrealAiEditorSetSelectionInternal
 	{
 		const FString Msg = TEXT(
 			"editor_set_selection: path(s) look like content asset object paths (/Game/.../Name.Name), not level actor paths. "
-			"To work with assets, use content_browser_sync_asset or asset_open_editor; editor_set_selection only selects actors in the loaded level.");
+			"Use content_browser_sync_asset or asset_open_editor to focus assets; use asset_index_fuzzy_search to discover /Game paths. "
+			"editor_set_selection only selects actors in the loaded level (paths containing PersistentLevel).");
 		FUnrealAiToolInvocationResult R;
 		R.bOk = false;
 		R.ErrorMessage = Msg;

@@ -208,7 +208,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameActors(const TShared
 	const TArray<TSharedPtr<FJsonValue>>* Paths = nullptr;
 	if (!Args->TryGetArrayField(TEXT("actor_paths"), Paths) || !Paths || Paths->Num() == 0)
 	{
-		return UnrealAiToolJson::Error(TEXT("actor_paths array is required"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("viewport_frame_actors: actor_paths must be a non-empty array of level actor paths. "
+				 "Use editor_get_selection or scene_fuzzy_search to obtain paths first; or use viewport_frame_selection if the editor selection is already set."),
+			TEXT("editor_get_selection"),
+			SuggestedArgs);
 	}
 	FEditorViewportClient* VC = GetVc();
 	UWorld* World = UnrealAiGetEditorWorld();

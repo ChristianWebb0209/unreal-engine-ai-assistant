@@ -365,7 +365,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialGetUsageSummary(const TSh
 	}
 	if (MaterialPath.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("material_path is required"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("query"), TEXT("M_"));
+		SuggestedArgs->SetStringField(TEXT("path_prefix"), TEXT("/Game"));
+		SuggestedArgs->SetStringField(TEXT("class_name_substring"), TEXT("Material"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("material_path is required (aliases: object_path, path). Find a material or MI with asset_index_fuzzy_search, then pass its object path."),
+			TEXT("asset_index_fuzzy_search"),
+			SuggestedArgs);
 	}
 	UnrealAiToolDispatchArgRepair::NormalizeAssetLikeObjectPath(MaterialPath);
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
@@ -426,7 +433,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetScalarParamete
 				TEXT("asset_open_editor"),
 				SuggestedArgs);
 		}
-		return UnrealAiToolJson::Error(TEXT("Could not load UMaterialInstanceConstant"));
+		return UnrealAiToolJson::Error(
+			TEXT("Could not load UMaterialInstanceConstant at material_path. Verify the object path (no bare .uasset file paths); use asset_index_fuzzy_search for MI assets."));
 	}
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnMatScalar", "Unreal AI: MID scalar"));
 	MI->SetScalarParameterValueEditorOnly(FName(*Param), static_cast<float>(Val));
@@ -481,7 +489,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetVectorParamete
 				TEXT("asset_open_editor"),
 				SuggestedArgs);
 		}
-		return UnrealAiToolJson::Error(TEXT("Could not load UMaterialInstanceConstant"));
+		return UnrealAiToolJson::Error(
+			TEXT("Could not load UMaterialInstanceConstant at material_path. Verify the object path (no bare .uasset file paths); use asset_index_fuzzy_search for MI assets."));
 	}
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnMatVec", "Unreal AI: MID vector"));
 	MI->SetVectorParameterValueEditorOnly(FName(*Param), C);

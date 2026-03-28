@@ -217,7 +217,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetOpenEditor(const TSharedPtr<
 		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
 		SuggestedArgs->SetStringField(TEXT("object_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
 		return UnrealAiToolJson::ErrorWithSuggestedCall(
-			TEXT("object_path is required (alias: asset_path)."),
+			TEXT("object_path is required (alias: asset_path). Discover paths with asset_index_fuzzy_search or asset_registry_query before opening."),
 			TEXT("asset_open_editor"),
 			SuggestedArgs);
 	}

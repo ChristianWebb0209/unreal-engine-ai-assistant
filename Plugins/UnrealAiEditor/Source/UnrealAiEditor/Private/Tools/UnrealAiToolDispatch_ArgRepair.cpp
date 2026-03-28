@@ -36,4 +36,31 @@ namespace UnrealAiToolDispatchArgRepair
 		}
 		UnrealAiNormalizeBlueprintObjectPath(Path);
 	}
+
+	void RepairBlueprintAssetPathArgs(const TSharedPtr<FJsonObject>& Args)
+	{
+		if (!Args.IsValid())
+		{
+			return;
+		}
+		FString Path;
+		Args->TryGetStringField(TEXT("blueprint_path"), Path);
+		if (Path.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("object_path"), Path);
+		}
+		if (Path.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("asset_path"), Path);
+		}
+		if (Path.IsEmpty())
+		{
+			return;
+		}
+		NormalizeAssetLikeObjectPath(Path);
+		if (!Path.IsEmpty())
+		{
+			Args->SetStringField(TEXT("blueprint_path"), Path);
+		}
+	}
 } // namespace UnrealAiToolDispatchArgRepair

@@ -23,6 +23,12 @@ namespace UnrealAiToolDispatchArgRepair
 	 */
 	void NormalizeAssetLikeObjectPath(FString& Path);
 
+	/**
+	 * Canonicalize blueprint_path: merge object_path/asset_path aliases, strip quotes / .uasset,
+	 * apply Blueprint path normalization, write back blueprint_path.
+	 */
+	void RepairBlueprintAssetPathArgs(const TSharedPtr<FJsonObject>& Args);
+
 	static bool TryGetStringFieldCanonical(
 		const TSharedPtr<FJsonObject>& Args,
 		const TCHAR* CanonicalKey,
