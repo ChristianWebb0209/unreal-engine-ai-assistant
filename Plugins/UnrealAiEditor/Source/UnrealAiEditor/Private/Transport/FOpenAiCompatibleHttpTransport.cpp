@@ -22,6 +22,24 @@ namespace OpenAiTransportUtil
 		OnEvent.ExecuteIfBound(Ev);
 	}
 
+	/** When the provider returns 400 invalid JSON, log whether our outbound body parses and show head/tail for debugging. */
+	static void LogHttp400InvalidJsonDiagnostics(const FString& RequestBodyStr, const FString& RespBody)
+	{
+		TSharedPtr<FJsonObject> Tmp;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(RequestBodyStr);
+		const bool bParseOk = FJsonSerializer::Deserialize(Reader, Tmp) && Tmp.IsValid();
+		const int32 Len = RequestBodyStr.Len();
+		const FString Head = RequestBodyStr.Left(280);
+		const FString Tail = Len > 560 ? RequestBodyStr.Right(280) : FString();
+		UE_LOG(LogTemp, Warning,
+			TEXT("UnrealAi HTTP 400 (invalid JSON): outbound_parse_ok=%d outbound_len=%d head=%s ... tail=%s | resp=%s"),
+			bParseOk ? 1 : 0,
+			Len,
+			*Head,
+			Tail.IsEmpty() ? TEXT("") : *Tail,
+			*RespBody.Left(480));
+	}
+
 	static void ParseUsage(const TSharedPtr<FJsonObject>& Root, FUnrealAiTokenUsage& OutUsage)
 	{
 		const TSharedPtr<FJsonObject>* U = nullptr;
@@ -544,7 +562,7 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 
 		ActiveRequest = HttpRequest2;
 		HttpRequest2->OnProcessRequestComplete().BindLambda(
-			[this, OnEvent, bStream, Url, Attempt, MaxAttempts, SendAttempt](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bOk)
+			[this, OnEvent, bStream, Url, Attempt, MaxAttempts, SendAttempt, BodyStr](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bOk)
 			{
 				ActiveRequest.Reset();
 				if (!bOk)
@@ -597,6 +615,10 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 
 				if (Code < 200 || Code >= 300)
 				{
+					if (Code == 400)
+					{
+						OpenAiTransportUtil::LogHttp400InvalidJsonDiagnostics(BodyStr, RespBody);
+					}
 					OpenAiTransportUtil::EmitError(OnEvent, FString::Printf(TEXT("HTTP %d: %s"), Code, *RespBody.Left(500)));
 					return;
 				}
