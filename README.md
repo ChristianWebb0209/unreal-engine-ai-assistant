@@ -82,6 +82,24 @@ For **tooling breadth** and known gaps, see [`docs/asset-type-coverage-matrix.md
 
 [![Request lifecycle](docs/architecture-maps/structurizr-request-lifecycle.svg)](docs/architecture-maps/structurizr-request-lifecycle.svg)
 
+### Vector db end to end
+
+[Open full-size SVG](docs/architecture-maps/structurizr-vector-db-end-to-end.svg)
+
+[![Vector db end to end](docs/architecture-maps/structurizr-vector-db-end-to-end.svg)](docs/architecture-maps/structurizr-vector-db-end-to-end.svg)
+
+### Vector db index build
+
+[Open full-size SVG](docs/architecture-maps/structurizr-vector-db-index-build.svg)
+
+[![Vector db index build](docs/architecture-maps/structurizr-vector-db-index-build.svg)](docs/architecture-maps/structurizr-vector-db-index-build.svg)
+
+### Vector db query sequence
+
+[Open full-size SVG](docs/architecture-maps/structurizr-vector-db-query-sequence.svg)
+
+[![Vector db query sequence](docs/architecture-maps/structurizr-vector-db-query-sequence.svg)](docs/architecture-maps/structurizr-vector-db-query-sequence.svg)
+
 </details>
 <!-- ARCHITECTURE_MAPS_END -->
 
