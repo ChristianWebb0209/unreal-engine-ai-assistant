@@ -1,5 +1,6 @@
 #include "Tools/UnrealAiToolDispatch_Viewport.h"
 
+#include "UnrealAiEditorModule.h"
 #include "Tools/UnrealAiToolActorLookup.h"
 #include "Tools/UnrealAiToolJson.h"
 #include "Tools/UnrealAiToolViewportHelpers.h"
@@ -238,9 +239,21 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameActors(const TShared
 	{
 		return UnrealAiToolJson::Error(TEXT("No resolvable actors for framing"));
 	}
-	VC->FocusViewportOnBox(Bounds, true);
+	bool bUiSuppressed = false;
+	if (FUnrealAiEditorModule::IsEditorFocusEnabled())
+	{
+		VC->FocusViewportOnBox(Bounds, true);
+	}
+	else
+	{
+		bUiSuppressed = true;
+	}
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
+	if (bUiSuppressed)
+	{
+		O->SetBoolField(TEXT("ui_suppressed"), true);
+	}
 	return UnrealAiToolJson::Ok(O);
 }
 
@@ -269,9 +282,21 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameSelection(const TSha
 	{
 		return UnrealAiToolJson::Error(TEXT("Empty selection or not enough geometry to frame"));
 	}
-	VC->FocusViewportOnBox(Bounds, true);
+	bool bUiSuppressed = false;
+	if (FUnrealAiEditorModule::IsEditorFocusEnabled())
+	{
+		VC->FocusViewportOnBox(Bounds, true);
+	}
+	else
+	{
+		bUiSuppressed = true;
+	}
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
+	if (bUiSuppressed)
+	{
+		O->SetBoolField(TEXT("ui_suppressed"), true);
+	}
 	return UnrealAiToolJson::Ok(O);
 }
 

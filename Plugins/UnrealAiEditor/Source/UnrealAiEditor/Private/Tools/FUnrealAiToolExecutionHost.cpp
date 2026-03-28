@@ -1,5 +1,6 @@
 #include "Tools/FUnrealAiToolExecutionHost.h"
 
+#include "UnrealAiEditorModule.h"
 #include "Backend/UnrealAiBackendRegistry.h"
 #include "Tools/UnrealAiToolDispatch.h"
 #include "Tools/UnrealAiToolFocus.h"
@@ -47,7 +48,7 @@ FUnrealAiToolInvocationResult FUnrealAiToolExecutionHost::InvokeTool(
 	const TSharedPtr<FJsonObject> Entry = Catalog.FindToolDefinition(ToolName);
 	FUnrealAiToolInvocationResult Result =
 		UnrealAiDispatchTool(ToolName, Args, Entry, Registry, SessionProjectId, SessionThreadId);
-	if (Result.bOk && bFocused)
+	if (Result.bOk && bFocused && FUnrealAiEditorModule::IsEditorFocusEnabled())
 	{
 		UnrealAiApplyPostToolEditorFocus(ToolName, Args, Result);
 	}

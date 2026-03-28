@@ -1,6 +1,7 @@
 #include "Tabs/SUnrealAiEditorSettingsTab.h"
 
 #include "UnrealAiEditorModule.h"
+#include "Style/UnrealAiEditorStyle.h"
 #include "UnrealAiEditorSettings.h"
 #include "Backend/FUnrealAiUsageTracker.h"
 #include "Context/UnrealAiProjectId.h"
@@ -163,6 +164,9 @@ namespace UnrealAiSettingsTemplate
 		"\t\t\"minDelayMsBetweenEmbeddingBatches\": 0,\n"
 		"\t\t\"indexMemoryRecordsInVectorStore\": false,\n"
 		"\t\t\"blueprintMaxFeatureRecords\": 0\n"
+		"\t},\n"
+		"\t\"ui\": {\n"
+		"\t\t\"editorFocus\": false\n"
 		"\t}\n"
 		"}\n");
 }
@@ -573,8 +577,8 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 4.f))
 					[
 						SAssignNew(UsageSummaryBlock, STextBlock)
-							.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
-							.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.58f, 1.f)))
+							.Font(FUnrealAiEditorStyle::FontBodySmall())
+							.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 							.WrapTextAt(560.f)
 							.Text(LOCTEXT("UsagePlaceholder", "Usage: loading…"))
 					]
@@ -582,7 +586,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 					[
 						SNew(STextBlock)
 							.Text(LOCTEXT("SettingsTitle", "AI Settings"))
-							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
+							.Font(FUnrealAiEditorStyle::FontWindowTitle())
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
 					[
@@ -653,7 +657,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
 											[
 												SNew(STextBlock)
-													.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+													.Font(FUnrealAiEditorStyle::FontSectionHeading())
 													.Text(LOCTEXT("SecGlobal", "Global API defaults"))
 											]
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
@@ -728,7 +732,40 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
 											[
 												SNew(STextBlock)
-													.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+													.Font(FUnrealAiEditorStyle::FontSectionHeading())
+													.Text(LOCTEXT("SecEditorUi", "Editor integration"))
+											]
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
+											[
+												SNew(SHorizontalBox)
+												+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+												[
+													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
+														.IsChecked_Lambda([]()
+														{
+															return FUnrealAiEditorModule::IsEditorFocusEnabled()
+																? ECheckBoxState::Checked
+																: ECheckBoxState::Unchecked;
+														})
+														.OnCheckStateChanged_Lambda([](ECheckBoxState S)
+														{
+															FUnrealAiEditorModule::SetEditorFocusEnabled(S == ECheckBoxState::Checked);
+														})
+												]
+												+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+												[
+													SNew(STextBlock)
+														.AutoWrapText(true)
+														.WrapTextAt(520.f)
+														.Text(LOCTEXT(
+															"EditorFocusHelp",
+															"Editor focus: when on, the agent may follow along in the editor (Content Browser sync, viewport framing, post-tool navigation). When off, optional UI is skipped; tools that must open an editor still open."))
+												]
+											]
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+											[
+												SNew(STextBlock)
+													.Font(FUnrealAiEditorStyle::FontSectionHeading())
 													.Text(LOCTEXT("SecRetrieval", "Retrieval (local vector index)"))
 											]
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
@@ -740,7 +777,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 												]
 												+ SGridPanel::Slot(1, 0).Padding(4.f)
 												[
-													SNew(SCheckBox)
+													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
 														.IsChecked_Lambda([this]() { return bRetrievalEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
 														.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
 														{
@@ -796,7 +833,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 												]
 												+ SGridPanel::Slot(1, 4).Padding(4.f)
 												[
-													SNew(SCheckBox)
+													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
 														.IsChecked_Lambda([this]() { return bRetrievalAutoIndexOnProjectOpen ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
 														.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
 														{
@@ -824,7 +861,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 												]
 												+ SGridPanel::Slot(1, 6).Padding(4.f)
 												[
-													SNew(SCheckBox)
+													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
 														.IsChecked_Lambda([this]() { return bRetrievalAllowMixedModelCompatibility ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
 														.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
 														{
@@ -969,7 +1006,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 													]
 													+ SHorizontalBox::Slot().AutoWidth()
 													[
-														SNew(SCheckBox)
+														SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
 															.Content()
 															[
 																SNew(STextBlock).Text(LOCTEXT("RetrievalArEngineLbl", "Include /Engine"))
@@ -1021,7 +1058,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 												]
 												+ SGridPanel::Slot(1, 15).Padding(4.f)
 												[
-													SNew(SCheckBox)
+													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
 														.IsChecked_Lambda([this]()
 														{
 															return bRetrievalIndexMemoryRecordsInVectorStore ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
@@ -1059,7 +1096,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 												+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 												[
 													SNew(STextBlock)
-														.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+														.Font(FUnrealAiEditorStyle::FontSectionHeading())
 														.Text(LOCTEXT("SecSections", "API key sections"))
 												]
 												+ SHorizontalBox::Slot().AutoWidth()
@@ -1151,7 +1188,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 								]
 								+ SGridPanel::Slot(1, 0).Padding(4.f)
 								[
-									SNew(SCheckBox)
+									SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
 										.IsChecked_Lambda([this]() { return bMemoryEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
 										.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
 										{
@@ -1165,7 +1202,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 								]
 								+ SGridPanel::Slot(1, 1).Padding(4.f)
 								[
-									SNew(SCheckBox)
+									SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
 										.IsChecked_Lambda([this]() { return bMemoryAutoExtract ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
 										.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
 										{
@@ -1293,7 +1330,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 								[
 									SAssignNew(VectorDbOverviewBlock, STextBlock)
 										.AutoWrapText(true)
-										.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+										.Font(FUnrealAiEditorStyle::FontBodySmall())
 										.Text(LOCTEXT("VectorDbOverviewPlaceholder", "Loading…"))
 								]
 							]
@@ -1315,8 +1352,8 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 						[
 							SNew(STextBlock)
 								.AutoWrapText(true)
-								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-								.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.55f, 1.f)))
+								.Font(FUnrealAiEditorStyle::FontCaption())
+								.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextFooter())
 								.Text_Lambda([this]()
 								{
 									if (!BackendRegistry.IsValid())
@@ -1453,7 +1490,7 @@ void SUnrealAiEditorSettingsTab::RebuildChatHistoryListUi()
 		ChatHistoryListVBox->AddSlot().AutoHeight()
 		[
 			SNew(STextBlock)
-				.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.58f, 1.f)))
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 				.Text(LOCTEXT("ChatHistoryEmpty", "No saved chats indexed yet for this project."))
 		];
 		return;
@@ -2116,6 +2153,7 @@ void SUnrealAiEditorSettingsTab::LoadSettingsIntoUi()
 	}
 
 	CachedSettingsRoot = UnrealAiSettingsTabUtil::CloneJsonObject(Root);
+	FUnrealAiEditorModule::HydrateEditorFocusFromJsonRoot(Root);
 	LoadMemorySettingsFromRoot(Root);
 	LoadRetrievalSettingsFromRoot(Root);
 
@@ -2368,7 +2406,7 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 							SNew(SHorizontalBox)
 							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 							[
-								SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Bold", 11)).Text(FText::Format(LOCTEXT("SecTitle", "Section: {0}"), FText::FromString(Sec.Label.IsEmpty() ? Sec.Id : Sec.Label)))
+								SNew(STextBlock).Font(FUnrealAiEditorStyle::FontComposerBadge()).Text(FText::Format(LOCTEXT("SecTitle", "Section: {0}"), FText::FromString(Sec.Label.IsEmpty() ? Sec.Id : Sec.Label)))
 							]
 							+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 							[
@@ -2418,8 +2456,8 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 						[
 							SNew(STextBlock)
 								.AutoWrapText(true)
-								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
-								.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.58f, 1.f)))
+								.Font(FUnrealAiEditorStyle::FontBodySmall())
+								.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 								.Text_Lambda([this, SectionIdx]()
 								{
 									const FString P = SectionRows.IsValidIndex(SectionIdx) ? SectionRows[SectionIdx].CompanyPreset : FString();
@@ -2634,8 +2672,8 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 											.ButtonContent()
 											[
 												SNew(STextBlock)
-													.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-													.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.58f, 1.f)))
+													.Font(FUnrealAiEditorStyle::FontCaption())
+													.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 													.Text_Lambda([this, SectionIdx, ModelIdx]()
 													{
 														if (!BackendRegistry.IsValid())
@@ -2693,7 +2731,7 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 													.Padding(FMargin(10.f))
 													[
 														SNew(STextBlock)
-															.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+															.Font(FUnrealAiEditorStyle::FontBodySmall())
 															.WrapTextAt(280.f)
 															.Text(FText::FromString(Line.IsEmpty() ? TEXT("No usage recorded yet for this profile key.") : Line))
 													];
@@ -2703,8 +2741,8 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 								+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(6.f, 2.f))
 								[
 									SNew(STextBlock)
-										.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-										.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.55f, 1.f)))
+										.Font(FUnrealAiEditorStyle::FontCaption())
+										.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextFooter())
 										.Text_Lambda([this, SectionIdx, ModelIdx]()
 										{
 											if (!SectionRows.IsValidIndex(SectionIdx)
@@ -2721,7 +2759,7 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 									SNew(SHorizontalBox)
 									+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 16.f, 0.f))
 									[
-										SNew(SCheckBox)
+										SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
 											.IsChecked_Lambda([this, SectionIdx, ModelIdx]()
 											{
 												return SectionRows.IsValidIndex(SectionIdx)
@@ -2745,7 +2783,7 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 									]
 									+ SHorizontalBox::Slot().AutoWidth()
 									[
-										SNew(SCheckBox)
+										SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
 											.IsChecked_Lambda([this, SectionIdx, ModelIdx]()
 											{
 												return SectionRows.IsValidIndex(SectionIdx)
@@ -2769,7 +2807,7 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 									]
 									+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(16.f, 0.f, 0.f, 0.f))
 									[
-										SNew(SCheckBox)
+										SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
 											.IsChecked_Lambda([this, SectionIdx, ModelIdx]()
 											{
 												return SectionRows.IsValidIndex(SectionIdx)
@@ -2842,6 +2880,20 @@ bool SUnrealAiEditorSettingsTab::BuildJsonFromUi(FString& OutJson, FString& OutE
 	Root->SetObjectField(TEXT("api"), Api);
 	WriteMemorySettingsToRoot(Root);
 	WriteRetrievalSettingsToRoot(Root);
+
+	{
+		TSharedPtr<FJsonObject> UiObj = MakeShared<FJsonObject>();
+		const TSharedPtr<FJsonObject>* ExistingUi = nullptr;
+		if (Root->TryGetObjectField(TEXT("ui"), ExistingUi) && ExistingUi && ExistingUi->IsValid())
+		{
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*ExistingUi)->Values)
+			{
+				UiObj->SetField(Pair.Key, Pair.Value);
+			}
+		}
+		UiObj->SetBoolField(TEXT("editorFocus"), FUnrealAiEditorModule::IsEditorFocusEnabled());
+		Root->SetObjectField(TEXT("ui"), UiObj);
+	}
 
 	TArray<TSharedPtr<FJsonValue>> SecArr;
 	for (const FDynSectionRow& Sec : SectionRows)

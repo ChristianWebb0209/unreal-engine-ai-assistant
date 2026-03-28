@@ -62,6 +62,10 @@
 #include "Retrieval/IUnrealAiRetrievalService.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
@@ -125,6 +129,20 @@ void FUnrealAiEditorModule::StartupModule()
 	GUnrealAiModule = this;
 
 	BackendRegistry = MakeShared<FUnrealAiBackendRegistry>();
+
+	if (IUnrealAiPersistence* P = BackendRegistry->GetPersistence())
+	{
+		FString Json;
+		if (P->LoadSettingsJson(Json) && !Json.IsEmpty())
+		{
+			TSharedPtr<FJsonObject> Root;
+			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+			if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
+			{
+				FUnrealAiEditorModule::HydrateEditorFocusFromJsonRoot(Root);
+			}
+		}
+	}
 
 	FUnrealAiEditorStyle::Initialize();
 
@@ -729,6 +747,104 @@ void FUnrealAiEditorModule::NotifyContextAttachmentsChanged()
 }
 
 FSimpleMulticastDelegate& FUnrealAiEditorModule::OnContextAttachmentsChanged()
+{
+	static FSimpleMulticastDelegate Delegate;
+	return Delegate;
+}
+
+namespace UnrealAiEditorModulePriv
+{
+	static TSharedPtr<FJsonObject> CloneJsonObjectShallow(const TSharedPtr<FJsonObject>& Src)
+	{
+		if (!Src.IsValid())
+		{
+			return MakeShared<FJsonObject>();
+		}
+		FString Out;
+		TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
+		if (!FJsonSerializer::Serialize(Src.ToSharedRef(), W))
+		{
+			return MakeShared<FJsonObject>();
+		}
+		TSharedPtr<FJsonObject> Dst;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Out);
+		if (!FJsonSerializer::Deserialize(Reader, Dst) || !Dst.IsValid())
+		{
+			return MakeShared<FJsonObject>();
+		}
+		return Dst;
+	}
+}
+
+bool FUnrealAiEditorModule::IsEditorFocusEnabled()
+{
+	return GUnrealAiModule ? GUnrealAiModule->bEditorFocusEnabled : false;
+}
+
+void FUnrealAiEditorModule::HydrateEditorFocusFromJsonRoot(const TSharedPtr<FJsonObject>& Root)
+{
+	if (!GUnrealAiModule || !Root.IsValid())
+	{
+		return;
+	}
+	bool b = false;
+	const TSharedPtr<FJsonObject>* UiObj = nullptr;
+	if (Root->TryGetObjectField(TEXT("ui"), UiObj) && UiObj && UiObj->IsValid())
+	{
+		if (!(*UiObj)->TryGetBoolField(TEXT("editorFocus"), b))
+		{
+			b = false;
+		}
+	}
+	GUnrealAiModule->bEditorFocusEnabled = b;
+}
+
+void FUnrealAiEditorModule::SetEditorFocusEnabled(bool bEnabled)
+{
+	if (!GUnrealAiModule)
+	{
+		return;
+	}
+	if (GUnrealAiModule->bEditorFocusEnabled == bEnabled)
+	{
+		return;
+	}
+	GUnrealAiModule->bEditorFocusEnabled = bEnabled;
+
+	if (GUnrealAiModule->BackendRegistry.IsValid())
+	{
+		if (IUnrealAiPersistence* P = GUnrealAiModule->BackendRegistry->GetPersistence())
+		{
+			FString Json;
+			if (P->LoadSettingsJson(Json) && !Json.IsEmpty())
+			{
+				TSharedPtr<FJsonObject> Root;
+				const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+				if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
+				{
+					TSharedPtr<FJsonObject> UiObj = MakeShared<FJsonObject>();
+					const TSharedPtr<FJsonObject>* ExistingUi = nullptr;
+					if (Root->TryGetObjectField(TEXT("ui"), ExistingUi) && ExistingUi && ExistingUi->IsValid())
+					{
+						UiObj = UnrealAiEditorModulePriv::CloneJsonObjectShallow(*ExistingUi);
+					}
+					UiObj->SetBoolField(TEXT("editorFocus"), bEnabled);
+					Root->SetObjectField(TEXT("ui"), UiObj);
+					FString Out;
+					const TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
+					if (FJsonSerializer::Serialize(Root.ToSharedRef(), W))
+					{
+						P->SaveSettingsJson(Out);
+					}
+				}
+			}
+		}
+	}
+
+	OnEditorFocusPolicyChanged().Broadcast();
+}
+
+FSimpleMulticastDelegate& FUnrealAiEditorModule::OnEditorFocusPolicyChanged()
 {
 	static FSimpleMulticastDelegate Delegate;
 	return Delegate;

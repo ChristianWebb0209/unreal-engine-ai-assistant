@@ -1,5 +1,6 @@
 #include "Tools/UnrealAiToolDispatch_Context.h"
 
+#include "UnrealAiEditorModule.h"
 #include "Backend/UnrealAiBackendRegistry.h"
 #include "Context/AgentContextTypes.h"
 #include "Context/IAgentContextService.h"
@@ -420,14 +421,26 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ContentBrowserSyncAsset(const TSh
 		return UnrealAiToolJson::Error(FString::Printf(TEXT("Asset not found: %s"), *Path));
 	}
 
-	FContentBrowserModule& CBM = FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser"));
-	TArray<FAssetData> List;
-	List.Add(AD);
-	CBM.Get().SyncBrowserToAssets(List);
+	bool bUiSuppressed = false;
+	if (FUnrealAiEditorModule::IsEditorFocusEnabled())
+	{
+		FContentBrowserModule& CBM = FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser"));
+		TArray<FAssetData> List;
+		List.Add(AD);
+		CBM.Get().SyncBrowserToAssets(List);
+	}
+	else
+	{
+		bUiSuppressed = true;
+	}
 
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("synced_path"), Path);
+	if (bUiSuppressed)
+	{
+		O->SetBoolField(TEXT("ui_suppressed"), true);
+	}
 	return UnrealAiToolJson::Ok(O);
 }
 

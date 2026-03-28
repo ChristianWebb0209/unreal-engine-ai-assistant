@@ -1,5 +1,6 @@
 #include "Tools/UnrealAiToolDispatch_ContentBrowserEx.h"
 
+#include "UnrealAiEditorModule.h"
 #include "Tools/UnrealAiToolJson.h"
 
 #include "ContentBrowserModule.h"
@@ -16,10 +17,22 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ContentBrowserNavigateFolder(cons
 	{
 		return UnrealAiToolJson::Error(TEXT("folder_path is required"));
 	}
-	FContentBrowserModule& CBM = FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser"));
-	CBM.Get().SyncBrowserToFolders({FolderPath});
+	bool bUiSuppressed = false;
+	if (FUnrealAiEditorModule::IsEditorFocusEnabled())
+	{
+		FContentBrowserModule& CBM = FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser"));
+		CBM.Get().SyncBrowserToFolders({FolderPath});
+	}
+	else
+	{
+		bUiSuppressed = true;
+	}
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("folder_path"), FolderPath);
+	if (bUiSuppressed)
+	{
+		O->SetBoolField(TEXT("ui_suppressed"), true);
+	}
 	return UnrealAiToolJson::Ok(O);
 }

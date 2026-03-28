@@ -9,6 +9,7 @@ class FUnrealAiBackendRegistry;
 struct FUnrealAiChatUiSession;
 class SUnrealAiEditorChatTab;
 class SWidget;
+class FJsonObject;
 
 class FUnrealAiEditorModule final : public IModuleInterface
 {
@@ -24,6 +25,12 @@ public:
 	static TSharedPtr<FUnrealAiChatUiSession> GetActiveChatSession();
 	static void NotifyContextAttachmentsChanged();
 	static FSimpleMulticastDelegate& OnContextAttachmentsChanged();
+
+	/** Global: allow optional post-tool editor navigation (focused flag) and non-essential UI (e.g. Content Browser sync). Default false. Persisted in plugin_settings.json under ui.editorFocus. */
+	static bool IsEditorFocusEnabled();
+	static void SetEditorFocusEnabled(bool bEnabled);
+	static void HydrateEditorFocusFromJsonRoot(const TSharedPtr<FJsonObject>& Root);
+	static FSimpleMulticastDelegate& OnEditorFocusPolicyChanged();
 
 	/**
 	 * Opens a new Agent Chat dock tab immediately to the right of the tab that contains FromWidget (same tab stack).
@@ -86,4 +93,6 @@ private:
 	/** Remaining threads to open after the first restored tab finishes spawning (left-to-right). */
 	TArray<FGuid> PendingRestoreTail;
 	bool bAgentChatRestoreChainBusy = false;
+
+	bool bEditorFocusEnabled = false;
 };
