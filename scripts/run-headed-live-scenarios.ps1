@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
   Live headed qualitative tier: launch headed Unreal Editor and run manifest-driven UnrealAi.RunAgentTurn
-  (real API — do NOT set UNREAL_AI_LLM_FIXTURE). Copies each harness output to tests/out/live_runs/<suite>/<scenario_id>/.
+  (real API). Copies each harness output to tests/out/live_runs/<suite>/<scenario_id>/.
 
   Default: one editor launch per scenario (isolates failures). Use -SingleSession to chain all turns in one ExecCmds (faster; on failure later scenarios may not run).
 
@@ -24,7 +24,6 @@ param(
     [switch]$SingleSession,
     [switch]$DumpContext,
     [switch]$DryRun,
-    [switch]$AllowFixture,
     [switch]$KillPreExistingEditors,
     [switch]$TakeoverLock,
     [int]$MaxLlmRounds = 8,
@@ -71,17 +70,9 @@ if (-not (Test-Path $EditorExe)) {
     Write-Error "UnrealEditor.exe not found: $EditorExe (set UE_ENGINE_ROOT or -EngineRoot)"
 }
 
-if (-not $AllowFixture) {
-    if ($env:UNREAL_AI_LLM_FIXTURE) {
-        Write-Warning "UNREAL_AI_LLM_FIXTURE was set ($($env:UNREAL_AI_LLM_FIXTURE)); clearing for live API run (use -AllowFixture to keep fixture)."
-        Remove-Item Env:\UNREAL_AI_LLM_FIXTURE -ErrorAction SilentlyContinue
-    }
-}
-elseif ($env:UNREAL_AI_LLM_FIXTURE) {
-    Write-Host "Using UNREAL_AI_LLM_FIXTURE=$($env:UNREAL_AI_LLM_FIXTURE)" -ForegroundColor DarkGray
-}
-else {
-    Write-Warning "-AllowFixture was passed but UNREAL_AI_LLM_FIXTURE is not set."
+if ($env:UNREAL_AI_LLM_FIXTURE) {
+    Write-Warning "UNREAL_AI_LLM_FIXTURE is no longer supported; ignoring: $($env:UNREAL_AI_LLM_FIXTURE)"
+    Remove-Item Env:\UNREAL_AI_LLM_FIXTURE -ErrorAction SilentlyContinue
 }
 
 $manifestDir = Split-Path -Parent $Manifest

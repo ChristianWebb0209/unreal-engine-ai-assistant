@@ -66,8 +66,8 @@ def tool_included_for_mode(modes_obj: dict[str, Any] | None, mode: str) -> bool:
         if bool(modes_obj.get("agent")):
             return True
         return bool(modes_obj.get("fast"))
-    if m == "orchestrate":
-        if bool(modes_obj.get("orchestrate")):
+    if m == "plan":
+        if bool(modes_obj.get("plan")):
             return True
         return bool(modes_obj.get("agent"))
     return False
@@ -124,7 +124,7 @@ def build_openai_tools_array(
 
 def parse_mode(s: str) -> str:
     x = (s or "agent").strip().lower()
-    if x in ("ask", "agent", "orchestrate"):
+    if x in ("ask", "agent", "plan"):
         return x
     return "agent"
 
@@ -166,8 +166,8 @@ def generate_cases_from_catalog(catalog: dict[str, Any]) -> list[dict[str, Any]]
         mode = "agent"
         if modes.get("agent") or modes.get("fast"):
             mode = "agent"
-        elif modes.get("orchestrate"):
-            mode = "orchestrate"
+        elif modes.get("plan"):
+            mode = "plan"
         elif modes.get("ask"):
             mode = "ask"
         else:
@@ -250,7 +250,7 @@ def assess_complexity(
     m = mode.lower()
     if m == "agent":
         s += 0.14
-    elif m == "orchestrate":
+    elif m == "plan":
         s += 0.20
     score = max(0.0, min(1.0, s))
     if score < 0.34:
@@ -272,8 +272,8 @@ def assess_complexity(
         signals.append("many_asset_selections")
     if m == "agent":
         signals.append("agent_mode")
-    elif m == "orchestrate":
-        signals.append("orchestrate_mode")
+    elif m == "plan":
+        signals.append("plan_mode")
     else:
         signals.append("ask_mode")
     hard_multi = length > 1600 or bullets >= 5 or tool_result_count >= 4
@@ -300,8 +300,8 @@ def agent_mode_string(mode: str) -> str:
     m = mode.lower()
     if m == "ask":
         return "ask"
-    if m == "orchestrate":
-        return "orchestrate"
+    if m == "plan":
+        return "plan"
     return "agent"
 
 
@@ -309,12 +309,12 @@ def extract_operating_mode_section(chunk02: str, mode: str) -> str:
     starts = {
         "ask": "## Mode: Ask (`ask`)",
         "agent": "## Mode: Agent (`agent`)",
-        "orchestrate": "## Mode: Orchestrate (`orchestrate`)",
+        "plan": "## Mode: Plan (`plan`)",
     }
     ends = {
         "ask": "## Mode: Agent (`agent`)",
-        "agent": "## Mode: Orchestrate (`orchestrate`)",
-        "orchestrate": None,
+        "agent": "## Mode: Plan (`plan`)",
+        "plan": None,
     }
     m = mode.lower()
     if m not in starts:
@@ -383,7 +383,7 @@ def build_system_developer_content(
         append_chunk("06-execution-subturn.md")
     append_chunk("07-safety-banned.md")
     append_chunk("08-output-style.md")
-    if mode.lower() == "orchestrate":
+    if mode.lower() == "plan":
         append_chunk("09-orchestration-workers.md")
 
     acc = "".join(acc_parts)
@@ -636,10 +636,10 @@ def run_llm_cases(
             _audit(audit, f"\nStopped early: hit llm_max={llm_max} after {n_done} LLM request(s).")
             break
         mode = c["mode"]
-        if mode == "orchestrate":
+        if mode == "plan":
             _audit(
                 audit,
-                f"\n--- Case {case_idx} SKIP (orchestrate; editor uses empty tools for planner) ---",
+                f"\n--- Case {case_idx} SKIP (plan; editor uses empty tools for planner) ---",
             )
             continue
         prompt = c["prompt"]
@@ -751,7 +751,7 @@ def main() -> int:
         "--llm-max",
         type=int,
         default=5,
-        help="Max LLM cases to run (ask/agent only; orchestrate skipped). 0 = no limit.",
+        help="Max LLM cases to run (ask/agent only; plan skipped). 0 = no limit.",
     )
     parser.add_argument(
         "--settings",

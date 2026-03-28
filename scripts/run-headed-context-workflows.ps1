@@ -7,8 +7,6 @@
   Use -SuiteManifest tests\context_workflows\suite.json or -WorkflowManifest for one workflow.
   Set -DumpContext or UNREAL_AI_HARNESS_DUMP_CONTEXT=1 for context_window_*.txt dumps.
 
-  Do NOT set UNREAL_AI_LLM_FIXTURE for realistic runs (use -AllowFixture to override).
-
   See docs\AGENT_HARNESS_HANDOFF.md and tests\context_workflows\README.md
 #>
 [CmdletBinding()]
@@ -25,7 +23,6 @@ param(
     [switch]$DumpContext,
     [switch]$ContextVerbose,
     [switch]$DryRun,
-    [switch]$AllowFixture,
     [switch]$TakeoverLock,
     [int]$MaxLlmRounds = 4,
     [int]$EditorExitTimeoutSec = 0,
@@ -66,14 +63,9 @@ if (-not (Test-Path $EditorExe)) {
     Write-Error "UnrealEditor.exe not found: $EditorExe (set UE_ENGINE_ROOT or -EngineRoot)"
 }
 
-if (-not $AllowFixture) {
-    if ($env:UNREAL_AI_LLM_FIXTURE) {
-        Write-Warning "UNREAL_AI_LLM_FIXTURE was set - clearing for live API (use -AllowFixture to keep)."
-        Remove-Item Env:\UNREAL_AI_LLM_FIXTURE -ErrorAction SilentlyContinue
-    }
-}
-elseif (-not $env:UNREAL_AI_LLM_FIXTURE) {
-    Write-Warning '-AllowFixture passed but UNREAL_AI_LLM_FIXTURE is unset.'
+if ($env:UNREAL_AI_LLM_FIXTURE) {
+    Write-Warning "UNREAL_AI_LLM_FIXTURE is no longer supported; ignoring: $($env:UNREAL_AI_LLM_FIXTURE)"
+    Remove-Item Env:\UNREAL_AI_LLM_FIXTURE -ErrorAction SilentlyContinue
 }
 
 if ($WorkflowManifest -and $SuiteManifest) {

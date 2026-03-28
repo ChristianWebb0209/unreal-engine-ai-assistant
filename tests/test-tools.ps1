@@ -65,8 +65,8 @@ foreach ($t in $tools) {
     $mode = 'agent'
     if ($t.modes.agent -eq $true -or $t.modes.fast -eq $true) {
         $mode = 'agent'
-    } elseif ($t.modes.orchestrate -eq $true) {
-        $mode = 'orchestrate'
+    } elseif ($t.modes.plan -eq $true) {
+        $mode = 'plan'
     } elseif ($t.modes.ask -eq $true) {
         $mode = 'ask'
     } else {

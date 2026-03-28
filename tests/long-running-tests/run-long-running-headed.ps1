@@ -4,15 +4,25 @@
 
   Purpose
   - Run many multi-turn conversations in headed Unreal Editor using UnrealAi.RunAgentTurn.
-  - Keep each JSON file's prompts on one stable thread id (context accumulates across turns).
-  - Emit detailed artifacts next to the test data folder so iterative analysis is easy.
+  - Recursively finds suite JSON files (default name: suite.json) under -ScenarioFolder.
+  - Runs exactly ONE editor process for the whole batch: all suites execute in one ExecCmds chain (sequential).
+  - Each suite gets a fresh thread id; before the next suite, UnrealAi.ForgetThread removes the previous thread.
+  - The batch fails (nonzero exit) if the editor exits nonzero OR any turn does not reach run_finished in run.jsonl.
+
+  Windows command-line limit
+  - A very long -ExecCmds string can exceed CreateProcess limits; paths are shortened (8.3) where possible.
+  - If the combined command is still over -MaxExecCmdChars, the script falls back to one editor launch per suite
+    (same strict per-suite completion checks). Use -ForceSingleSession to error instead of falling back.
 
   Usage (from repo root):
-    .\tests\long-running-tests\run-long-running-headed.ps1 -ScenarioFolder my-suite
-    .\tests\long-running-tests\run-long-running-headed.ps1 -ScenarioFolder tests\long-running-tests\my-suite
+    .\tests\long-running-tests\run-long-running-headed.ps1 -ScenarioFolder tests\long-running-tests
+    .\tests\long-running-tests\run-long-running-headed.ps1 -ScenarioFolder fine-tune-01-tool-definitions
     .\tests\long-running-tests\run-long-running-headed.ps1 -ScenarioFolder my-suite -DryRun
+  Budget (harness): primary stop = 4 consecutive identical tool failures OR per-turn token cap (default 500k);
+    round cap is a 512 backstop. -MaxLlmRounds 0 = do not set UNREAL_AI_HARNESS_MAX_LLM_ROUNDS (use profile/backstop).
+    -MaxTurnTokens 0 = omit UNREAL_AI_HARNESS_MAX_TOKENS_PER_TURN (harness default); -1 = unlimited tokens.
 
-  JSON schema (one file can contain many turns):
+  JSON schema (suite files):
   {
     "suite_id": "optional_suite_name",
     "default_type": "agent",
@@ -25,10 +35,9 @@
 
   Notes
   - "type" values allowed: ask, agent, plan.
-  - "plan" is mapped to harness mode "orchestrate".
-  - One .json file = one headed editor run with many consecutive RunAgentTurn commands.
-  - Output location:
-      <scenario-folder>\runs\<json-name>\run_<timestamp>\
+  - "plan" is mapped to harness mode "plan".
+  - Output per suite:
+      <scenario-folder>\runs\<path-slug>\run_<timestamp>\
         - summary.json
         - workflow-input.json (copy of source)
         - thread_id.txt
@@ -40,11 +49,7 @@
   - UNREAL_AI_HARNESS_DUMP_CONTEXT=1
   - UNREAL_AI_CONTEXT_DECISION_LOG=1
   - UNREAL_AI_CONTEXT_VERBOSE=1
-
-  Important
-  - Candidate "considered but not selected" details depend on plugin-side decision logging.
-    If you want richer "near misses" than current logs provide, extend context decision events
-    in plugin context ranking code and this runner will capture those files automatically.
+  - UNREAL_AI_HARNESS_RUN_FINISHED_CONTEXT_DUMP=0 (default; set to 1 for full final context dump — can block on retrieval/vector index)
 #>
 [CmdletBinding()]
 param(
@@ -52,10 +57,14 @@ param(
     [string]$ScenarioFolder,
     [string]$EngineRoot = '',
     [string]$ProjectRoot = '',
-    [int]$MaxLlmRounds = 8,
+    [string]$SuiteFileName = 'suite.json',
+    [int]$MaxLlmRounds = 0,
+    [int]$MaxTurnTokens = 0,
     [int]$SyncWaitMs = 60000,
     [int]$HttpTimeoutSec = 20,
     [int]$EditorExitTimeoutSec = 0,
+    [int]$MaxExecCmdChars = 7000,
+    [switch]$ForceSingleSession,
     [switch]$CloseAllUnrealEditorsOnExit,
     [switch]$DryRun
 )
@@ -97,6 +106,20 @@ if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_CONTEXT_VERBOSE)) {
 if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_LLM_STREAM)) {
     $env:UNREAL_AI_LLM_STREAM = '0'
 }
+# Final context dump after each turn can block on retrieval/vector DB and delays DoneEvent + Quit.
+# Default off; set UNREAL_AI_HARNESS_RUN_FINISHED_CONTEXT_DUMP=1 to enable (see FAgentRunFileSink).
+if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HARNESS_RUN_FINISHED_CONTEXT_DUMP)) {
+    $env:UNREAL_AI_HARNESS_RUN_FINISHED_CONTEXT_DUMP = '0'
+}
+if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_EMBEDDING_HTTP_TIMEOUT_SEC)) {
+    $env:UNREAL_AI_EMBEDDING_HTTP_TIMEOUT_SEC = '3'
+}
+if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HARNESS_ROUND_MIN_DELAY_MS)) {
+    $env:UNREAL_AI_HARNESS_ROUND_MIN_DELAY_MS = '800'
+}
+if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HTTP_429_MAX_ATTEMPTS)) {
+    $env:UNREAL_AI_HTTP_429_MAX_ATTEMPTS = '2'
+}
 $env:UNREAL_AI_HARNESS_SYNC_WAIT_MS = [string]([Math]::Max(10000, $SyncWaitMs))
 $env:UNREAL_AI_HTTP_REQUEST_TIMEOUT_SEC = [string]([Math]::Max(5, $HttpTimeoutSec))
 
@@ -119,6 +142,45 @@ function Resolve-ScenarioFolder {
     Write-Error "ScenarioFolder not found: $PathLike"
 }
 
+function Get-SuitePathSlug {
+    param(
+        [string]$ScenarioRootAbs,
+        [string]$SuiteFileFullPath
+    )
+    $root = $ScenarioRootAbs.TrimEnd('\')
+    $full = $SuiteFileFullPath
+    if ($full.Length -le $root.Length) {
+        return 'suite'
+    }
+    $rel = $full.Substring($root.Length).TrimStart('\')
+    $slug = $rel -replace '\\', '__' -replace '/', '__'
+    $slug = [System.IO.Path]::GetFileNameWithoutExtension($slug)
+    if ([string]::IsNullOrWhiteSpace($slug)) {
+        $slug = 'suite'
+    }
+    foreach ($ch in [System.IO.Path]::GetInvalidFileNameChars()) {
+        $slug = $slug.Replace([string]$ch, '_')
+    }
+    return $slug
+}
+
+function ConvertTo-ShortWinPath {
+    param([string]$LiteralPath)
+    if ([string]::IsNullOrWhiteSpace($LiteralPath)) { return $LiteralPath }
+    try {
+        if (-not (Test-Path -LiteralPath $LiteralPath)) { return $LiteralPath }
+        $full = (Resolve-Path -LiteralPath $LiteralPath).Path
+        $fso = New-Object -ComObject Scripting.FileSystemObject
+        if ((Get-Item -LiteralPath $full).PSIsContainer) {
+            return $fso.GetFolder($full).ShortPath
+        }
+        return $fso.GetFile($full).ShortPath
+    }
+    catch {
+        return $LiteralPath
+    }
+}
+
 function Map-TypeToMode {
     param([string]$TypeValue, [string]$FallbackType)
     $t = if ([string]::IsNullOrWhiteSpace($TypeValue)) { $FallbackType } else { $TypeValue }
@@ -126,7 +188,7 @@ function Map-TypeToMode {
     switch ($v) {
         'ask' { return 'ask' }
         'agent' { return 'agent' }
-        'plan' { return 'orchestrate' }
+        'plan' { return 'plan' }
         default { throw "Unsupported type '$t'. Allowed: ask, agent, plan." }
     }
 }
@@ -169,15 +231,47 @@ function Test-RunJsonlFinished {
     }
 }
 
+function Get-RunJsonlQuickStats {
+    param([string]$RunJsonlPath)
+    $stats = [ordered]@{
+        exists = $false
+        has_run_started = $false
+        has_run_finished = $false
+        tool_fail_count = 0
+        blocker_hint_count = 0
+        line_count = 0
+    }
+    if ([string]::IsNullOrWhiteSpace($RunJsonlPath)) {
+        return $stats
+    }
+    if (-not (Test-Path -LiteralPath $RunJsonlPath)) {
+        return $stats
+    }
+    $stats.exists = $true
+    try {
+        $raw = Get-Content -LiteralPath $RunJsonlPath -Raw -Encoding UTF8 -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            return $stats
+        }
+        $stats.has_run_started = ($raw -match '"type"\s*:\s*"run_started"')
+        $stats.has_run_finished = ($raw -match '"type"\s*:\s*"run_finished"')
+        $stats.tool_fail_count = [regex]::Matches($raw, '"type":"tool_finish"[^\r\n]*"success":false').Count
+        $stats.blocker_hint_count = [regex]::Matches($raw, 'Blocked Summary|explicit_blocker').Count
+        $stats.line_count = [regex]::Matches($raw, '\r?\n').Count + 1
+    }
+    catch {}
+    return $stats
+}
+
 function Stop-TrackedEditors {
-    foreach ($pid in @($Script:SpawnedEditorPids)) {
+    foreach ($editorPid in @($Script:SpawnedEditorPids)) {
         try {
-            $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+            $proc = Get-Process -Id $editorPid -ErrorAction SilentlyContinue
             if ($proc) {
                 try { [void]$proc.CloseMainWindow() } catch {}
+                try { $proc.Refresh() } catch {}
                 if (-not $proc.WaitForExit(1500)) {
-                    try { $proc.Kill() } catch {}
-                    try { $proc.WaitForExit(4000) } catch {}
+                    Stop-UnrealEditorProcessTree -Proc $proc
                 }
             }
         } catch {}
@@ -194,6 +288,25 @@ function Stop-AllUnrealEditorsHard {
             }
         } catch {}
     }
+}
+
+function Stop-UnrealEditorProcessTree {
+    param(
+        [System.Diagnostics.Process]$Proc
+    )
+    if (-not $Proc) { return }
+    try { $Proc.Refresh() } catch {}
+    $id = $Proc.Id
+    if ($id -le 0) { return }
+    try {
+        # Prefer tree kill on Windows so child tasks do not keep the session alive.
+        $tk = Start-Process -FilePath 'taskkill.exe' -ArgumentList @('/PID', [string]$id, '/T', '/F') -PassThru -NoNewWindow -Wait -ErrorAction SilentlyContinue
+    } catch {}
+    try { $Proc.Refresh() } catch {}
+    if (-not $Proc.HasExited) {
+        try { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue } catch {}
+    }
+    try { $null = $Proc.WaitForExit(8000) } catch {}
 }
 
 function Invoke-HeadedEditorDynamic {
@@ -215,11 +328,35 @@ function Invoke-HeadedEditorDynamic {
     $useWatchdog = ($EditorExitTimeoutSec -gt 0)
     $watchdogDeadlineUtc = if ($useWatchdog) { (Get-Date).ToUniversalTime().AddSeconds($EditorExitTimeoutSec) } else { $null }
     Write-Host ("Running headed editor... mode={0}" -f $(if ($useWatchdog) { "dynamic+watchdog" } else { "dynamic-no-watchdog" })) -ForegroundColor Cyan
-    $p = Start-Process -FilePath $EditorExe -ArgumentList $args -PassThru -NoNewWindow
-    $Script:SpawnedEditorPids += $p.Id
+    $existingEditorPids = @((Get-Process -Name 'UnrealEditor' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id))
+    $launcher = Start-Process -FilePath $EditorExe -ArgumentList $args -PassThru -NoNewWindow
+    Start-Sleep -Milliseconds 600
+    try { $launcher.Refresh() } catch {}
+
+    $p = $launcher
+    if ($launcher.HasExited) {
+        # UE may hand off to another editor process and exit immediately.
+        $currentEditors = @(Get-Process -Name 'UnrealEditor' -ErrorAction SilentlyContinue | Sort-Object StartTime -Descending)
+        $newCandidates = @($currentEditors | Where-Object { $existingEditorPids -notcontains $_.Id })
+        if ($newCandidates.Count -gt 0) {
+            $p = $newCandidates[0]
+            Write-Host ("Launcher exited quickly; attached to new UnrealEditor pid={0}" -f $p.Id) -ForegroundColor DarkYellow
+        } elseif ($currentEditors.Count -gt 0) {
+            # Handoff may target an already-running process (single-instance behavior).
+            $p = $currentEditors[0]
+            Write-Host ("Launcher exited quickly; attached to existing UnrealEditor pid={0}" -f $p.Id) -ForegroundColor DarkYellow
+        } else {
+            $exitCodeText = if ($null -ne $launcher.ExitCode) { [string]$launcher.ExitCode } else { "<unknown>" }
+            Write-Warning ("UnrealEditor launcher exited immediately with code {0}; no editor process found." -f $exitCodeText)
+        }
+    }
+    if ($Script:SpawnedEditorPids -notcontains $p.Id) {
+        $Script:SpawnedEditorPids += $p.Id
+    }
 
     $allFinished = $false
     while ($true) {
+        try { $p.Refresh() } catch {}
         if ($p.HasExited) { break }
         $now = (Get-Date).ToUniversalTime()
         $done = 0
@@ -239,13 +376,14 @@ function Invoke-HeadedEditorDynamic {
 
     if (-not $p.HasExited) {
         try { [void]$p.CloseMainWindow() } catch {}
+        try { $p.Refresh() } catch {}
         if (-not $p.WaitForExit(2500)) {
-            try { $p.Kill() } catch {}
-            try { $p.WaitForExit(6000) } catch {}
+            Stop-UnrealEditorProcessTree -Proc $p
         }
     }
+    try { $p.Refresh() } catch {}
     if (-not $p.HasExited) {
-        try { $p.Kill() } catch {}
+        Stop-UnrealEditorProcessTree -Proc $p
     }
 
     $exitCode = if ($p.HasExited) { [int]$p.ExitCode } else { -1003 }
@@ -256,29 +394,50 @@ function Invoke-HeadedEditorDynamic {
 }
 
 $scenarioAbs = Resolve-ScenarioFolder $ScenarioFolder
-$jsonFiles = Get-ChildItem -LiteralPath $scenarioAbs -File -Filter '*.json' | Sort-Object Name
-if ($jsonFiles.Count -eq 0) {
-    Write-Error "No .json scenario files in: $scenarioAbs"
+$filter = [System.IO.Path]::GetFileName($SuiteFileName)
+if ([string]::IsNullOrWhiteSpace($filter)) {
+    $filter = 'suite.json'
 }
 
+$suiteFiles = @(
+    Get-ChildItem -LiteralPath $scenarioAbs -Recurse -File -Filter $filter -ErrorAction Stop |
+        Sort-Object FullName
+)
+if ($suiteFiles.Count -eq 0) {
+    Write-Error "No '$filter' files found under: $scenarioAbs"
+}
+
+$batchStamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
 $allStatuses = @()
-try {
-foreach ($jf in $jsonFiles) {
+$previousThreadId = $null
+
+foreach ($jf in $suiteFiles) {
     $raw = Get-Content -LiteralPath $jf.FullName -Raw -Encoding UTF8
     $doc = $raw | ConvertFrom-Json
     $turns = @($doc.turns)
     if ($turns.Count -eq 0) {
-        Write-Warning "Skipping $($jf.Name): no turns[]"
+        Write-Warning "Skipping $($jf.FullName): no turns[]"
         continue
+    }
+
+    $suiteExecParts = [System.Collections.Generic.List[string]]::new()
+    $suiteExpectedRunJsonls = [System.Collections.Generic.List[string]]::new()
+    if ($null -ne $previousThreadId) {
+        $suiteExecParts.Add(('UnrealAi.ForgetThread "{0}"' -f $previousThreadId))
     }
 
     $suiteId = if ($doc.suite_id) { [string]$doc.suite_id } else { 'long_running_suite' }
     $defaultType = if ($doc.default_type) { [string]$doc.default_type } else { 'agent' }
     $threadId = [guid]::NewGuid().ToString()
-    $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
+    $pathSlug = Get-SuitePathSlug -ScenarioRootAbs $scenarioAbs -SuiteFileFullPath $jf.FullName
 
-    $fileBase = [System.IO.Path]::GetFileNameWithoutExtension($jf.Name)
-    $runRoot = Join-Path $scenarioAbs ("runs\{0}\run_{1}" -f $fileBase, $stamp)
+    $suiteRunsRoot = Join-Path $scenarioAbs ("runs\{0}" -f $pathSlug)
+    if (Test-Path -LiteralPath $suiteRunsRoot) {
+        Write-Host ("Deleting existing runs for suite: {0}" -f $pathSlug) -ForegroundColor DarkYellow
+        Remove-Item -LiteralPath $suiteRunsRoot -Recurse -Force -ErrorAction Stop
+    }
+
+    $runRoot = Join-Path $suiteRunsRoot ("run_{0}" -f $batchStamp)
     $turnsRoot = Join-Path $runRoot 'turns'
     $msgRoot = Join-Path $runRoot 'turn_messages'
     New-Item -ItemType Directory -Force -Path $turnsRoot | Out-Null
@@ -286,7 +445,6 @@ foreach ($jf in $jsonFiles) {
     Copy-Item -LiteralPath $jf.FullName -Destination (Join-Path $runRoot 'workflow-input.json') -Force
     [System.IO.File]::WriteAllText((Join-Path $runRoot 'thread_id.txt'), $threadId, (New-Object System.Text.UTF8Encoding($false)))
 
-    $execParts = @()
     $turnStatus = @()
     $i = 0
     foreach ($t in $turns) {
@@ -300,7 +458,10 @@ foreach ($jf in $jsonFiles) {
         $stepDir = Join-Path $turnsRoot ("step_{0:D2}" -f $i)
         New-Item -ItemType Directory -Force -Path $stepDir | Out-Null
         [System.IO.File]::WriteAllText($msgPath, $req, (New-Object System.Text.UTF8Encoding($false)))
-        $execParts += ('UnrealAi.RunAgentTurn "{0}" "{1}" "{2}" "{3}"' -f $msgPath, $threadId, $mode, $stepDir)
+        $msgForCmd = ConvertTo-ShortWinPath $msgPath
+        $stepForCmd = ConvertTo-ShortWinPath $stepDir
+        $suiteExecParts.Add(('UnrealAi.RunAgentTurn "{0}" "{1}" "{2}" "{3}"' -f $msgForCmd, $threadId, $mode, $stepForCmd))
+        $suiteExpectedRunJsonls.Add((Join-Path $stepDir 'run.jsonl'))
         $turnStatus += [ordered]@{
             turn_index = $i
             type = if ($t.type) { [string]$t.type } else { $defaultType }
@@ -314,14 +475,25 @@ foreach ($jf in $jsonFiles) {
     $summary = [ordered]@{
         suite_id = $suiteId
         source_file = $jf.FullName
+        path_slug = $pathSlug
         run_root = $runRoot
         thread_id = $threadId
         started_utc = (Get-Date).ToUniversalTime().ToString('o')
         turn_count = $turnStatus.Count
         max_llm_rounds = $MaxLlmRounds
+        max_turn_tokens = $MaxTurnTokens
         editor_exit_code = $null
         dry_run = [bool]$DryRun
+        batch_stamp = $batchStamp
+        exec_parts = @($suiteExecParts)
+        expected_run_jsonls = @($suiteExpectedRunJsonls)
         turns = $turnStatus
+    }
+    if ($doc.PSObject.Properties.Name -contains 'domain_scenario_refs') {
+        $summary.domain_scenario_refs = @($doc.domain_scenario_refs)
+    }
+    if ($doc.PSObject.Properties.Name -contains 'coverage_notes') {
+        $summary.coverage_notes = [string]$doc.coverage_notes
     }
 
     if ($DryRun) {
@@ -330,37 +502,245 @@ foreach ($jf in $jsonFiles) {
         $summary.finished_utc = (Get-Date).ToUniversalTime().ToString('o')
         ($summary | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath (Join-Path $runRoot 'summary.json') -Encoding UTF8
         $allStatuses += $summary
-        Write-Host "DryRun prepared: $($jf.Name) ($($turnStatus.Count) turns)" -ForegroundColor Yellow
+        Write-Host ("DryRun prepared: {0} | turns={1} | thread={2}" -f $pathSlug, $turnStatus.Count, $threadId) -ForegroundColor Yellow
+        $previousThreadId = $threadId
         continue
     }
 
-    $env:UNREAL_AI_HARNESS_MAX_LLM_ROUNDS = [string]([Math]::Max(1, $MaxLlmRounds))
-    $execCmds = ($execParts -join ',') + ',Quit'
-    $exitCode = -1
-    $dynamicDone = $false
-    $expectedRunJsonls = @($turnStatus | ForEach-Object { Join-Path $_.step_dir 'run.jsonl' })
-    try {
-        Write-Host ("Scenario: {0} | turns={1} | thread={2}" -f $jf.Name, $turnStatus.Count, $threadId) -ForegroundColor Green
-        $runResult = Invoke-HeadedEditorDynamic -ExecCmds $execCmds -ExpectedRunJsonls $expectedRunJsonls -TurnCount $turnStatus.Count
-        $exitCode = [int]$runResult.exit_code
-        $dynamicDone = [bool]$runResult.all_finished
-    }
-    finally {
-        Remove-Item Env:\UNREAL_AI_HARNESS_MAX_LLM_ROUNDS -ErrorAction SilentlyContinue
-    }
-
-    foreach ($ts in $turnStatus) {
-        $ts.run_jsonl_exists = Test-Path -LiteralPath (Join-Path $ts.step_dir 'run.jsonl')
-        $ts.context_files = @(Get-ChildItem -LiteralPath $ts.step_dir -File -Filter 'context_window_*.txt' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
-        $ts.context_decision_logs_copied = Copy-ContextDecisionLogsForThread -ProjectRootPath $ProjectRoot -ThreadId $threadId -DestRunDir $ts.step_dir
-    }
-
-    $summary.editor_exit_code = $exitCode
-    $summary.all_turns_reached_terminal = $dynamicDone
-    $summary.finished_utc = (Get-Date).ToUniversalTime().ToString('o')
-    ($summary | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath (Join-Path $runRoot 'summary.json') -Encoding UTF8
     $allStatuses += $summary
+    $previousThreadId = $threadId
 }
+
+if (-not $DryRun -and $allStatuses.Count -eq 0) {
+    Write-Error "No runnable suite turns (all files skipped?)."
+}
+
+$exitCode = 0
+$dynamicDone = $true
+$batchExitCode = 0
+$batchAllJsonlsFinished = $false
+$failedSuiteCount = 0
+$Script:BatchSessionMode = 'single'
+$Script:ExecCmdsLengthChars = 0
+$Script:PerSuiteExitBySlug = @{}
+try {
+    if (-not $DryRun) {
+        # UE can forward launch args to an already-running editor instance and exit immediately.
+        # Ensure a clean single-editor session for deterministic headed harness execution.
+        $existingEditors = @(Get-Process -Name 'UnrealEditor' -ErrorAction SilentlyContinue)
+        if ($existingEditors.Count -gt 0) {
+            Write-Host ("Closing {0} existing UnrealEditor process(es) before run..." -f $existingEditors.Count) -ForegroundColor DarkYellow
+            Stop-AllUnrealEditorsHard
+            Start-Sleep -Milliseconds 800
+        }
+
+        Remove-Item Env:\UNREAL_AI_HARNESS_MAX_LLM_ROUNDS -ErrorAction SilentlyContinue
+        Remove-Item Env:\UNREAL_AI_HARNESS_MAX_TOKENS_PER_TURN -ErrorAction SilentlyContinue
+        if ($MaxLlmRounds -gt 0) {
+            $env:UNREAL_AI_HARNESS_MAX_LLM_ROUNDS = [string]([Math]::Max(1, $MaxLlmRounds))
+        }
+        if ($MaxTurnTokens -ne 0) {
+            $env:UNREAL_AI_HARNESS_MAX_TOKENS_PER_TURN = [string]$MaxTurnTokens
+        }
+        $totalTurns = 0
+        foreach ($suiteSummary in $allStatuses) {
+            $totalTurns += @($suiteSummary.expected_run_jsonls).Count
+        }
+        Write-Host ("Batch: suites={0} total_turns={1} stamp={2}" -f $allStatuses.Count, $totalTurns, $batchStamp) -ForegroundColor Green
+        foreach ($suiteSummary in $allStatuses) {
+            Write-Host ("  Suite: {0} | turns={1} | thread={2}" -f $suiteSummary.path_slug, $suiteSummary.turn_count, $suiteSummary.thread_id) -ForegroundColor Green
+        }
+
+        $allExecParts = [System.Collections.Generic.List[string]]::new()
+        $allExpectedRunJsonls = [System.Collections.Generic.List[string]]::new()
+        foreach ($suiteSummary in $allStatuses) {
+            foreach ($part in @($suiteSummary.exec_parts)) {
+                $allExecParts.Add([string]$part)
+            }
+            foreach ($rj in @($suiteSummary.expected_run_jsonls)) {
+                $allExpectedRunJsonls.Add([string]$rj)
+            }
+        }
+        $allExecParts.Add('Quit')
+        $execCmds = ($allExecParts -join ',')
+        $execCmdLen = $execCmds.Length
+        $batchSessionMode = 'single'
+        if ($ForceSingleSession -and $execCmdLen -gt $MaxExecCmdChars) {
+            Write-Error ("ExecCmds length is {0} chars (limit {1}). Shorten suites, raise -MaxExecCmdChars, or omit -ForceSingleSession to allow per-suite fallback." -f $execCmdLen, $MaxExecCmdChars)
+        }
+        if ($execCmdLen -gt $MaxExecCmdChars) {
+            Write-Warning ("ExecCmds length {0} exceeds -MaxExecCmdChars ({1}); Windows command-line limits require one editor launch per suite (still sequential, ForgetThread preserved)." -f $execCmdLen, $MaxExecCmdChars)
+            $batchSessionMode = 'per_suite'
+            $batchExitCode = 0
+            $batchAllJsonlsFinished = $true
+            $perSuiteExits = @{}
+            foreach ($suiteSummary in $allStatuses) {
+                $suiteExpected = @($suiteSummary.expected_run_jsonls)
+                $suiteParts = @($suiteSummary.exec_parts)
+                $chunks = New-Object System.Collections.Generic.List[object]
+                $current = New-Object System.Collections.Generic.List[string]
+                foreach ($part in $suiteParts) {
+                    $candidate = New-Object System.Collections.Generic.List[string]
+                    foreach ($p in $current) { $candidate.Add($p) }
+                    $candidate.Add([string]$part)
+                    $candidateWithQuit = New-Object System.Collections.Generic.List[string]
+                    foreach ($p in $candidate) { $candidateWithQuit.Add($p) }
+                    $candidateWithQuit.Add('Quit')
+                    $candidateLen = (($candidateWithQuit -join ',')).Length
+                    if ($candidateLen -gt $MaxExecCmdChars -and $current.Count -gt 0) {
+                        $chunks.Add(@($current))
+                        $current = New-Object System.Collections.Generic.List[string]
+                        $current.Add([string]$part)
+                    }
+                    else {
+                        if ($candidateLen -gt $MaxExecCmdChars -and $current.Count -eq 0) {
+                            Write-Error ("Suite {0}: single turn command exceeds -MaxExecCmdChars ({1}). Raise limit or shorten paths." -f $suiteSummary.path_slug, $MaxExecCmdChars)
+                        }
+                        $current = $candidate
+                    }
+                }
+                if ($current.Count -gt 0) {
+                    $chunks.Add(@($current))
+                }
+                if ($chunks.Count -eq 0) {
+                    $chunks.Add(@())
+                }
+
+                $ex = 0
+                $chunkIndex = 0
+                foreach ($chunkParts in $chunks) {
+                    $chunkIndex++
+                    $suiteExec = [System.Collections.Generic.List[string]]::new()
+                    foreach ($part in @($chunkParts)) { $suiteExec.Add([string]$part) }
+                    $suiteExec.Add('Quit')
+                    $suiteCmds = ($suiteExec -join ',')
+                    Write-Host ("Running headed editor (per-suite) {0} chunk {1}/{2}" -f $suiteSummary.path_slug, $chunkIndex, $chunks.Count) -ForegroundColor Cyan
+                    $runResult = Invoke-HeadedEditorDynamic -ExecCmds $suiteCmds -ExpectedRunJsonls $suiteExpected -TurnCount $suiteExpected.Count
+                    $chunkExit = [int]$runResult.exit_code
+                    if ($ex -eq 0 -and $chunkExit -ne 0) {
+                        $ex = $chunkExit
+                    }
+                    if (-not [bool]$runResult.all_finished) {
+                        $batchAllJsonlsFinished = $false
+                    }
+                }
+                $perSuiteExits[[string]$suiteSummary.path_slug] = $ex
+                if ($batchExitCode -eq 0 -and $ex -ne 0) {
+                    $batchExitCode = $ex
+                }
+            }
+            $Script:PerSuiteExitBySlug = $perSuiteExits
+        }
+        else {
+            Write-Host ("ExecCmds length={0} (limit {1}) - single editor session" -f $execCmdLen, $MaxExecCmdChars) -ForegroundColor DarkGray
+            $runResult = Invoke-HeadedEditorDynamic -ExecCmds $execCmds -ExpectedRunJsonls @($allExpectedRunJsonls) -TurnCount $allExpectedRunJsonls.Count
+            $batchExitCode = [int]$runResult.exit_code
+            $batchAllJsonlsFinished = [bool]$runResult.all_finished
+            $Script:PerSuiteExitBySlug = @{}
+        }
+        $Script:BatchSessionMode = $batchSessionMode
+        $Script:ExecCmdsLengthChars = $execCmdLen
+
+        $failedSuiteCount = 0
+        foreach ($suiteSummary in $allStatuses) {
+            $suiteExpected = @($suiteSummary.expected_run_jsonls)
+            $suiteTurnCount = $suiteExpected.Count
+            $suiteDone = $true
+            $suiteProducedCount = 0
+            $suiteFinishedCount = 0
+            $suiteStartedOnlyCount = 0
+            $suiteToolFailEvents = 0
+            $suiteBlockerHints = 0
+            if ($suiteTurnCount -gt 0) {
+                foreach ($j in $suiteExpected) {
+                    $quick = Get-RunJsonlQuickStats -RunJsonlPath $j
+                    if ($quick.exists) { $suiteProducedCount++ }
+                    if ($quick.has_run_finished) { $suiteFinishedCount++ }
+                    if ($quick.has_run_started -and -not $quick.has_run_finished -and $quick.line_count -le 2) {
+                        $suiteStartedOnlyCount++
+                    }
+                    $suiteToolFailEvents += [int]$quick.tool_fail_count
+                    $suiteBlockerHints += [int]$quick.blocker_hint_count
+                    if (-not $quick.has_run_finished) {
+                        $suiteDone = $false
+                    }
+                }
+            }
+
+            $tid = $suiteSummary.thread_id
+            foreach ($ts in $suiteSummary.turns) {
+                $ts.run_jsonl_exists = Test-Path -LiteralPath (Join-Path $ts.step_dir 'run.jsonl')
+                $ts.context_files = @(Get-ChildItem -LiteralPath $ts.step_dir -File -Filter 'context_window_*.txt' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+                $ts.context_decision_logs_copied = Copy-ContextDecisionLogsForThread -ProjectRootPath $ProjectRoot -ThreadId $tid -DestRunDir $ts.step_dir
+            }
+
+            $suiteProducedAny = $false
+            foreach ($ts in $suiteSummary.turns) {
+                if ($ts.run_jsonl_exists) { $suiteProducedAny = $true; break }
+            }
+            if (-not $suiteProducedAny -and $suiteTurnCount -gt 0) {
+                Write-Warning ("Suite {0}: no run.jsonl files were produced. Likely ExecCmds rejection or editor exited early." -f $suiteSummary.path_slug)
+                $suiteDone = $false
+            }
+
+            if ($batchSessionMode -eq 'per_suite' -and $Script:PerSuiteExitBySlug.ContainsKey([string]$suiteSummary.path_slug)) {
+                $suiteSummary.editor_exit_code = $Script:PerSuiteExitBySlug[[string]$suiteSummary.path_slug]
+            }
+            else {
+                $suiteSummary.editor_exit_code = $batchExitCode
+            }
+            $suiteSummary.all_turns_reached_terminal = $suiteDone
+            $suiteSummary.run_jsonl_produced_count = $suiteProducedCount
+            $suiteSummary.run_jsonl_finished_count = $suiteFinishedCount
+            $suiteSummary.run_jsonl_started_only_count = $suiteStartedOnlyCount
+            $suiteSummary.tool_fail_event_count = $suiteToolFailEvents
+            $suiteSummary.blocker_hint_count = $suiteBlockerHints
+            $suiteSummary.finished_utc = (Get-Date).ToUniversalTime().ToString('o')
+            ($suiteSummary | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath (Join-Path $suiteSummary.run_root 'summary.json') -Encoding UTF8
+
+            if (-not $suiteDone) {
+                $failedSuiteCount++
+            }
+        }
+
+        Remove-Item Env:\UNREAL_AI_HARNESS_MAX_LLM_ROUNDS -ErrorAction SilentlyContinue
+        Remove-Item Env:\UNREAL_AI_HARNESS_MAX_TOKENS_PER_TURN -ErrorAction SilentlyContinue
+        $batchFailed = ($batchExitCode -ne 0) -or (-not $batchAllJsonlsFinished) -or ($failedSuiteCount -gt 0)
+        if (-not $batchAllJsonlsFinished) {
+            Write-Warning "Batch incomplete: not all expected run.jsonl files reached run_finished (sync timeout, crash, or stuck turn)."
+        }
+        if ($batchExitCode -ne 0) {
+            Write-Warning ("Batch editor exit code: {0}" -f $batchExitCode)
+        }
+
+        # End-of-batch high-level diagnostics for quick triage.
+        $totalExpected = 0
+        $totalProduced = 0
+        $totalFinished = 0
+        $totalStartedOnly = 0
+        $totalToolFails = 0
+        $totalBlockers = 0
+        foreach ($suiteSummary in $allStatuses) {
+            $totalExpected += [int](@($suiteSummary.expected_run_jsonls).Count)
+            $totalProduced += [int]$suiteSummary.run_jsonl_produced_count
+            $totalFinished += [int]$suiteSummary.run_jsonl_finished_count
+            $totalStartedOnly += [int]$suiteSummary.run_jsonl_started_only_count
+            $totalToolFails += [int]$suiteSummary.tool_fail_event_count
+            $totalBlockers += [int]$suiteSummary.blocker_hint_count
+        }
+        $elapsedSec = [Math]::Round(((Get-Date).ToUniversalTime() - $Script:RunStartUtc).TotalSeconds, 1)
+        Write-Host ("Batch stats: expected_turns={0} produced_run_jsonl={1} finished_turns={2} missing_finished={3}" -f $totalExpected, $totalProduced, $totalFinished, ($totalExpected - $totalFinished)) -ForegroundColor DarkCyan
+        Write-Host ("Batch signals: started_only_turns={0} tool_fail_events={1} blocker_hints={2} elapsed_sec={3}" -f $totalStartedOnly, $totalToolFails, $totalBlockers, $elapsedSec) -ForegroundColor DarkCyan
+        foreach ($suiteSummary in $allStatuses) {
+            $suiteExpected = [int](@($suiteSummary.expected_run_jsonls).Count)
+            $suiteFinished = [int]$suiteSummary.run_jsonl_finished_count
+            $suiteProduced = [int]$suiteSummary.run_jsonl_produced_count
+            Write-Host ("  Suite stats: {0} finished={1}/{2} produced={3} started_only={4} tool_fails={5} blockers={6}" -f $suiteSummary.path_slug, $suiteFinished, $suiteExpected, $suiteProduced, [int]$suiteSummary.run_jsonl_started_only_count, [int]$suiteSummary.tool_fail_event_count, [int]$suiteSummary.blocker_hint_count) -ForegroundColor DarkGray
+        }
+
+        $exitCode = if ($batchFailed) { 1 } else { 0 }
+        $dynamicDone = -not $batchFailed
+    }
 }
 finally {
     Stop-TrackedEditors
@@ -371,13 +751,35 @@ finally {
 
 $suiteSummary = [ordered]@{
     scenario_folder = $scenarioAbs
-    started_utc = (Get-Date).ToUniversalTime().ToString('o')
+    suite_file_name = $filter
+    suite_file_count = $suiteFiles.Count
+    batch_stamp = $batchStamp
+    batch_session_mode = $Script:BatchSessionMode
+    exec_cmds_length_chars = $Script:ExecCmdsLengthChars
+    max_exec_cmd_chars = $MaxExecCmdChars
+    recursive_suite_discovery = $true
+    started_utc = $(if ($Script:RunStartUtc) { $Script:RunStartUtc.ToString('o') } else { (Get-Date).ToUniversalTime().ToString('o') })
     files_processed = $allStatuses.Count
     runs = $allStatuses
 }
+if (-not $DryRun -and $allStatuses.Count -gt 0) {
+    $suiteSummary['editor_exit_code'] = $exitCode
+    $suiteSummary['all_turns_reached_terminal'] = $dynamicDone
+    $suiteSummary['batch_editor_exit_code'] = $batchExitCode
+    $suiteSummary['batch_all_expected_run_jsonls_finished'] = $batchAllJsonlsFinished
+    $suiteSummary['failed_suite_count'] = $failedSuiteCount
+    if ($Script:PerSuiteExitBySlug.Count -gt 0) {
+        $suiteSummary['per_suite_editor_exit_codes'] = $Script:PerSuiteExitBySlug
+    }
+}
 ($suiteSummary | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath (Join-Path $scenarioAbs 'last-suite-summary.json') -Encoding UTF8
 
-$failed = @($allStatuses | Where-Object { [int]$_.editor_exit_code -ne 0 }).Count
-Write-Host ("Completed files={0} failed_editor_exit={1}" -f $allStatuses.Count, $failed) -ForegroundColor Cyan
-if ($failed -gt 0) { exit 1 }
+if (-not $DryRun) {
+    $failed = if ($exitCode -ne 0) { 1 } else { 0 }
+    Write-Host ("Completed suites={0} editor_exit={1} all_finished={2} failed_suites={3}" -f $allStatuses.Count, $exitCode, $dynamicDone, $failedSuiteCount) -ForegroundColor Cyan
+    if ($failed -gt 0) { exit 1 }
+}
+else {
+    Write-Host ("DryRun: suites prepared={0}" -f $allStatuses.Count) -ForegroundColor Cyan
+}
 exit 0

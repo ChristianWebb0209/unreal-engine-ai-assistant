@@ -434,12 +434,27 @@ def main() -> int:
         time.sleep(max(0.0, args.sleep_ms / 1000.0))
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
+    no_tool_action_turn_count = 0
+    read_only_on_mutation_count = 0
+    all_tool_calls_invalid_count = 0
+    for row in transcript:
+        flags = [str(f) for f in row.get("turn_flags", [])]
+        if "NO_TOOL_ACTION_TURN" in flags:
+            no_tool_action_turn_count += 1
+        if "READ_ONLY_ON_MUTATION" in flags:
+            read_only_on_mutation_count += 1
+        if "ALL_TOOL_CALLS_INVALID" in flags:
+            all_tool_calls_invalid_count += 1
+
     meta = {
         "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "scenario_file": str(args.scenario),
         "api_model": model,
         "turns_requested": len(scenario),
         "turns_completed": len(transcript),
+        "no_tool_action_turn_count": no_tool_action_turn_count,
+        "read_only_on_mutation_count": read_only_on_mutation_count,
+        "all_tool_calls_invalid_count": all_tool_calls_invalid_count,
     }
     with args.out.open("w", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps({"meta": meta}, ensure_ascii=True) + "\n")

@@ -81,3 +81,6 @@ Thumbs.db
 # Python
 **/__pycache__/
 
+
+/tools/
+/tests/
