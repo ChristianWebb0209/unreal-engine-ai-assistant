@@ -47,7 +47,7 @@
           - workflow-input.json (copy of source)
           - thread_id.txt
           - editor_console_saved.log (or _chunkNN): Unreal project log after that suite's editor session(s)
-          - editor_console_stdout.txt / editor_console_stderr.txt when available (process streams)
+          - editor_console_stdout.txt / editor_console_stderr.txt when available (process streams; UE_LOG harness output is in Unreal's -log window + Saved/Logs, not stdout)
           - turn_messages\turn_XX.txt
           - turns\step_XX\run.jsonl (+ context dumps)
           - turns\step_XX\context_decision_logs\*.jsonl
@@ -60,6 +60,14 @@
   - UNREAL_AI_HARNESS_RUN_FINISHED_CONTEXT_DUMP=0 (default; set to 1 for full final context dump — can block on retrieval/vector index)
 
   -ReduceContextNoise: force UNREAL_AI_CONTEXT_DECISION_LOG=0 and UNREAL_AI_CONTEXT_VERBOSE=0 for quieter long batches (does not change UNREAL_AI_HARNESS_DUMP_CONTEXT unless you set it in the environment).
+
+  -MirrorEditorProcessStreamsToHost: echo the editor process stdout/stderr lines to this PowerShell console as well as editor_console_stdout/stderr .txt.
+    Default is off: Unreal on Windows rarely mirrors UE_LOG to process stdout; live harness progress uses the Unreal log window (-log) and LogTemp. Use this only to debug Chromium/launcher lines.
+
+  Per-turn harness sync (UNREAL_AI_HARNESS_SYNC_WAIT_MS)
+  - Default -SyncWaitMs is 150000 (150s), matching UnrealAiHarnessScenarioRunner when this script sets the env var.
+  - Plan-mode turns (suite type "plan") run multiple planner/agent substeps and often need >=120s wall time; if you see
+    "Harness run timed out waiting for completion" on plan steps, raise -SyncWaitMs (e.g. 180000) and re-run.
 #>
 [CmdletBinding()]
 param(
@@ -70,7 +78,7 @@ param(
     [string]$SuiteFileName = 'suite.json',
     [int]$MaxLlmRounds = 0,
     [int]$MaxTurnTokens = 0,
-    [int]$SyncWaitMs = 60000,
+    [int]$SyncWaitMs = 150000,
     [int]$HttpTimeoutSec = 20,
     [int]$EditorExitTimeoutSec = 0,
     [int]$MaxExecCmdChars = 7000,
@@ -79,7 +87,8 @@ param(
     [switch]$CloseAllUnrealEditorsOnExit,
     [switch]$DryRun,
     [switch]$SkipClassification,
-    [switch]$ReduceContextNoise
+    [switch]$ReduceContextNoise,
+    [switch]$MirrorEditorProcessStreamsToHost
 )
 
 $ErrorActionPreference = 'Stop'
@@ -393,21 +402,59 @@ function Save-UnrealEditorSessionLogs {
     }
 }
 
+function Stop-UnrealEditorConsoleTee {
+    param(
+        [System.Diagnostics.Process]$Process,
+        [System.IO.StreamWriter]$OutWriter,
+        [System.IO.StreamWriter]$ErrWriter,
+        [string]$SourceIdOut,
+        [string]$SourceIdErr
+    )
+    if ($null -ne $Process) {
+        try {
+            if (-not $Process.HasExited) { $null = $Process.WaitForExit(5000) }
+        }
+        catch { }
+        try { $Process.CancelOutputRead() } catch { }
+        try { $Process.CancelErrorRead() } catch { }
+    }
+    Start-Sleep -Milliseconds 250
+    Unregister-Event -SourceIdentifier $SourceIdOut -ErrorAction SilentlyContinue
+    Unregister-Event -SourceIdentifier $SourceIdErr -ErrorAction SilentlyContinue
+    try {
+        if ($null -ne $OutWriter) {
+            $OutWriter.Flush()
+            $OutWriter.Dispose()
+        }
+    }
+    catch { }
+    try {
+        if ($null -ne $ErrWriter) {
+            $ErrWriter.Flush()
+            $ErrWriter.Dispose()
+        }
+    }
+    catch { }
+}
+
 function Invoke-HeadedEditorDynamic {
     param(
         [string]$ExecCmds,
         [string[]]$ExpectedRunJsonls,
         [int]$TurnCount,
         [string]$SessionLogDir = '',
-        [string]$SessionLogFileSuffix = ''
+        [string]$SessionLogFileSuffix = '',
+        [bool]$MirrorProcessStreamsToHost = $false
     )
-    $args = @(
+    # Harness / module code uses UE_LOG(LogTemp, ...). There is no LogUnrealAiHarness category; without LogTemp Verbose,
+    # the separate log window from -log can look empty even while Saved/Logs/ has the full file.
+    $editorCliArgs = @(
         "`"$UProject`"",
         '-nop4',
         '-nosplash',
         '-log',
         '-unattended',
-        '-LogCmds=LogAutomationController Verbose, LogAutomationCommandLine Verbose, LogUnrealAiHarness Verbose',
+        '-LogCmds=LogTemp Verbose, LogAutomationController Verbose, LogAutomationCommandLine Verbose',
         "-ExecCmds=`"$ExecCmds`""
     )
 
@@ -425,21 +472,86 @@ function Invoke-HeadedEditorDynamic {
         $stdErrPath = Join-Path $SessionLogDir ("editor_console_stderr{0}.txt" -f $suffix)
     }
 
-    $spArgs = @{
-        FilePath               = $EditorExe
-        ArgumentList           = $args
-        PassThru               = $true
-        NoNewWindow            = $true
-    }
+    $teeOutWriter = $null
+    $teeErrWriter = $null
+    $teeSourceOut = $null
+    $teeSourceErr = $null
+    $launcher = $null
+
     if ($null -ne $stdOutPath -and $null -ne $stdErrPath) {
-        $spArgs['RedirectStandardOutput'] = $stdOutPath
-        $spArgs['RedirectStandardError'] = $stdErrPath
+        if ($MirrorProcessStreamsToHost) {
+            Write-Host 'Editor process stdout/stderr: mirroring to this console + editor_console_stdout/stderr .txt (UE_LOG still primarily in Unreal -log window).' -ForegroundColor DarkGray
+        }
+        else {
+            Write-Host 'Harness progress: watch the Unreal Editor log window (-log) or Saved/Logs; stdout/stderr tee -> editor_console_stdout/stderr .txt only.' -ForegroundColor DarkGray
+        }
+        $teeOutWriter = New-Object System.IO.StreamWriter($stdOutPath, $false, [System.Text.UTF8Encoding]::new($false))
+        $teeErrWriter = New-Object System.IO.StreamWriter($stdErrPath, $false, [System.Text.UTF8Encoding]::new($false))
+        $teeOutWriter.AutoFlush = $true
+        $teeErrWriter.AutoFlush = $true
+        $teeGuid = [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $teeSourceOut = "UnrealAiHarnessTeeOut_$teeGuid"
+        $teeSourceErr = "UnrealAiHarnessTeeErr_$teeGuid"
+
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $EditorExe
+        $psi.Arguments = [string]::Join(' ', $editorCliArgs)
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.RedirectStandardInput = $true
+        $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+        $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+        $psi.CreateNoWindow = $true
+
+        $launcher = New-Object System.Diagnostics.Process
+        $launcher.EnableRaisingEvents = $true
+        $launcher.StartInfo = $psi
+
+        $teeCtxOut = [ordered]@{ Writer = $teeOutWriter; MirrorToHost = $MirrorProcessStreamsToHost }
+        $teeCtxErr = [ordered]@{ Writer = $teeErrWriter; MirrorToHost = $MirrorProcessStreamsToHost }
+        $null = Register-ObjectEvent -InputObject $launcher -EventName OutputDataReceived -SourceIdentifier $teeSourceOut -MessageData $teeCtxOut -Action {
+            $e = $Event.SourceEventArgs
+            if ($null -eq $e.Data) { return }
+            $ctx = $Event.MessageData
+            $ctx.Writer.WriteLine($e.Data)
+            if ($ctx.MirrorToHost) {
+                Microsoft.PowerShell.Utility\Write-Host $e.Data
+            }
+        }
+        $null = Register-ObjectEvent -InputObject $launcher -EventName ErrorDataReceived -SourceIdentifier $teeSourceErr -MessageData $teeCtxErr -Action {
+            $e = $Event.SourceEventArgs
+            if ($null -eq $e.Data) { return }
+            $ctx = $Event.MessageData
+            $ctx.Writer.WriteLine($e.Data)
+            if ($ctx.MirrorToHost) {
+                Microsoft.PowerShell.Utility\Write-Host $e.Data -ForegroundColor DarkYellow
+            }
+        }
+
+        [void]$launcher.Start()
+        $launcher.BeginOutputReadLine()
+        $launcher.BeginErrorReadLine()
     }
-    $launcher = Start-Process @spArgs
+    else {
+        $spArgs = @{
+            FilePath    = $EditorExe
+            ArgumentList = $editorCliArgs
+            PassThru    = $true
+            NoNewWindow = $true
+        }
+        $launcher = Start-Process @spArgs
+    }
+
     Start-Sleep -Milliseconds 600
     try { $launcher.Refresh() } catch {}
 
     $p = $launcher
+    $teeCleanupDone = $false
+    if ($launcher.HasExited -and $null -ne $teeSourceOut) {
+        Stop-UnrealEditorConsoleTee -Process $launcher -OutWriter $teeOutWriter -ErrWriter $teeErrWriter -SourceIdOut $teeSourceOut -SourceIdErr $teeSourceErr
+        $teeCleanupDone = $true
+    }
     if ($launcher.HasExited) {
         # UE may hand off to another editor process and exit immediately.
         $currentEditors = @(Get-Process -Name 'UnrealEditor' -ErrorAction SilentlyContinue | Sort-Object StartTime -Descending)
@@ -447,10 +559,16 @@ function Invoke-HeadedEditorDynamic {
         if ($newCandidates.Count -gt 0) {
             $p = $newCandidates[0]
             Write-Host ("Launcher exited quickly; attached to new UnrealEditor pid={0}" -f $p.Id) -ForegroundColor DarkYellow
+            if ($teeCleanupDone) {
+                Write-Host 'Note: stdout/stderr tee was tied to the launcher; live console output may stop until the next run (Unreal log is still copied at end).' -ForegroundColor DarkGray
+            }
         } elseif ($currentEditors.Count -gt 0) {
             # Handoff may target an already-running process (single-instance behavior).
             $p = $currentEditors[0]
             Write-Host ("Launcher exited quickly; attached to existing UnrealEditor pid={0}" -f $p.Id) -ForegroundColor DarkYellow
+            if ($teeCleanupDone) {
+                Write-Host 'Note: stdout/stderr tee was tied to the launcher; live console output may stop until the next run (Unreal log is still copied at end).' -ForegroundColor DarkGray
+            }
         } else {
             $exitCodeText = if ($null -ne $launcher.ExitCode) { [string]$launcher.ExitCode } else { "<unknown>" }
             Write-Warning ("UnrealEditor launcher exited immediately with code {0}; no editor process found." -f $exitCodeText)
@@ -490,6 +608,11 @@ function Invoke-HeadedEditorDynamic {
     try { $p.Refresh() } catch {}
     if (-not $p.HasExited) {
         Stop-UnrealEditorProcessTree -Proc $p
+    }
+
+    if (-not $teeCleanupDone -and $null -ne $teeSourceOut) {
+        Stop-UnrealEditorConsoleTee -Process $launcher -OutWriter $teeOutWriter -ErrWriter $teeErrWriter -SourceIdOut $teeSourceOut -SourceIdErr $teeSourceErr
+        $teeCleanupDone = $true
     }
 
     if (-not [string]::IsNullOrWhiteSpace($SessionLogDir)) {
@@ -550,6 +673,7 @@ $batchStamp = [System.IO.Path]::GetFileName($batchRunsRoot)
 $batchStartedLocalIso = $batchStartedLocal.ToString('o')
 $batchStartedUtcIso = $batchStartedLocal.ToUniversalTime().ToString('o')
 Write-Host ("Batch output (local time): {0}" -f $batchRunsRoot) -ForegroundColor Cyan
+Write-Host ("Harness per-turn sync wait: UNREAL_AI_HARNESS_SYNC_WAIT_MS={0} ms (~{1} s); plan turns may need -SyncWaitMs 180000 if timeouts occur." -f $env:UNREAL_AI_HARNESS_SYNC_WAIT_MS, [int]([double]$env:UNREAL_AI_HARNESS_SYNC_WAIT_MS / 1000.0)) -ForegroundColor DarkGray
 
 $allStatuses = @()
 $previousThreadId = $null
@@ -757,7 +881,7 @@ try {
                     $suiteCmds = ($suiteExec -join ',')
                     Write-Host ("Running headed editor (per-suite) {0} chunk {1}/{2}" -f $suiteSummary.path_slug, $chunkIndex, $chunks.Count) -ForegroundColor Cyan
                     $chunkSuffix = if ($chunks.Count -gt 1) { ('_chunk{0:D2}' -f $chunkIndex) } else { '' }
-                    $runResult = Invoke-HeadedEditorDynamic -ExecCmds $suiteCmds -ExpectedRunJsonls $suiteExpected -TurnCount $suiteExpected.Count -SessionLogDir $suiteSummary.run_root -SessionLogFileSuffix $chunkSuffix
+                    $runResult = Invoke-HeadedEditorDynamic -ExecCmds $suiteCmds -ExpectedRunJsonls $suiteExpected -TurnCount $suiteExpected.Count -SessionLogDir $suiteSummary.run_root -SessionLogFileSuffix $chunkSuffix -MirrorProcessStreamsToHost:$MirrorEditorProcessStreamsToHost
                     $chunkExit = [int]$runResult.exit_code
                     if ($ex -eq 0 -and $chunkExit -ne 0) {
                         $ex = $chunkExit
@@ -775,7 +899,7 @@ try {
         }
         else {
             Write-Host ("ExecCmds length={0} (limit {1}) - single editor session" -f $execCmdLen, $MaxExecCmdChars) -ForegroundColor DarkGray
-            $runResult = Invoke-HeadedEditorDynamic -ExecCmds $execCmds -ExpectedRunJsonls @($allExpectedRunJsonls) -TurnCount $allExpectedRunJsonls.Count -SessionLogDir $batchRunsRoot
+            $runResult = Invoke-HeadedEditorDynamic -ExecCmds $execCmds -ExpectedRunJsonls @($allExpectedRunJsonls) -TurnCount $allExpectedRunJsonls.Count -SessionLogDir $batchRunsRoot -MirrorProcessStreamsToHost:$MirrorEditorProcessStreamsToHost
             $batchExitCode = [int]$runResult.exit_code
             $batchAllJsonlsFinished = [bool]$runResult.all_finished
             $Script:PerSuiteExitBySlug = @{}
