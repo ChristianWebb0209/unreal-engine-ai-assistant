@@ -3,6 +3,7 @@
 #include "Brushes/SlateBoxBrush.h"
 #include "Math/Color.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
+#include "Styling/AppStyle.h"
 #include "Styling/SlateStyleRegistry.h"
 #include "Brushes/SlateImageBrush.h"
 #if WITH_EDITOR
@@ -59,6 +60,11 @@ void FUnrealAiEditorStyle::Initialize()
 			new FSlateVectorImageBrush(
 				Style->RootToContentDir(TEXT("Starship/AssetIcons/AIController_16"), TEXT(".svg")),
 				AgentIconSize));
+	}
+
+	{
+		const FCheckBoxStyle& EngineCheckbox = FAppStyle::Get().GetWidgetStyle<FCheckBoxStyle>(TEXT("Checkbox"));
+		Style->Set(CheckboxStyleName(), EngineCheckbox);
 	}
 
 	FSlateStyleRegistry::RegisterSlateStyle(*StyleSet.Get());
@@ -131,6 +137,46 @@ FSlateColor FUnrealAiEditorStyle::ColorTextPrimary()
 	return FSlateColor(FLinearColor(0.902f, 0.902f, 0.902f, 1.f));
 }
 
+FSlateColor FUnrealAiEditorStyle::ColorTextMuted()
+{
+	return FSlateColor(FLinearColor(0.55f, 0.58f, 0.62f, 1.f));
+}
+
+FSlateColor FUnrealAiEditorStyle::ColorTextFooter()
+{
+	return FSlateColor(FLinearColor(0.5f, 0.52f, 0.55f, 1.f));
+}
+
+FSlateColor FUnrealAiEditorStyle::ColorComposerForegroundBright()
+{
+	return FSlateColor(FLinearColor(0.94f, 0.96f, 1.f, 1.f));
+}
+
+FSlateColor FUnrealAiEditorStyle::ColorTextMetaHint()
+{
+	return FSlateColor(FLinearColor(0.65f, 0.7f, 0.78f, 1.f));
+}
+
+FSlateColor FUnrealAiEditorStyle::ColorThinkingSubline()
+{
+	return FSlateColor(FLinearColor(0.5f, 0.52f, 0.56f, 0.72f));
+}
+
+FSlateColor FUnrealAiEditorStyle::ColorMarkdownHeading()
+{
+	return FSlateColor(FLinearColor(0.98f, 0.98f, 1.f, 1.f));
+}
+
+FSlateColor FUnrealAiEditorStyle::ColorMarkdownBody()
+{
+	return FSlateColor(FLinearColor(0.92f, 0.93f, 0.95f, 1.f));
+}
+
+FLinearColor FUnrealAiEditorStyle::LinearColorMarkdownTodoDoneCheck()
+{
+	return FLinearColor(0.4f, 0.82f, 0.52f, 1.f);
+}
+
 FSlateColor FUnrealAiEditorStyle::ColorAccent()
 {
 	return FSlateColor(FLinearColor(0.231f, 0.510f, 0.965f, 1.f));
@@ -138,10 +184,41 @@ FSlateColor FUnrealAiEditorStyle::ColorAccent()
 
 FSlateColor FUnrealAiEditorStyle::ColorDebugMuted()
 {
-	return FSlateColor(FLinearColor(0.55f, 0.58f, 0.62f, 1.f));
+	return ColorTextMuted();
 }
 
 FSlateColor FUnrealAiEditorStyle::ColorDebugNavFolder()
 {
 	return FSlateColor(FLinearColor(0.45f, 0.72f, 0.55f, 1.f));
+}
+
+FLinearColor FUnrealAiEditorStyle::LinearColorPanelMentionBg()
+{
+	return FLinearColor(0.16f, 0.16f, 0.18f, 0.95f);
+}
+
+FLinearColor FUnrealAiEditorStyle::LinearColorPanelSlashBg()
+{
+	return FLinearColor(0.14f, 0.18f, 0.16f, 0.95f);
+}
+
+FLinearColor FUnrealAiEditorStyle::LinearColorModeMenuPopoverBg()
+{
+	return FLinearColor(0.12f, 0.12f, 0.13f, 0.98f);
+}
+
+FLinearColor FUnrealAiEditorStyle::LinearColorChatHeaderStrip()
+{
+	return FLinearColor(0.12f, 0.12f, 0.12f, 1.f);
+}
+
+FName FUnrealAiEditorStyle::CheckboxStyleName()
+{
+	static const FName N(TEXT("UnrealAiEditor.Checkbox"));
+	return N;
+}
+
+const FCheckBoxStyle& FUnrealAiEditorStyle::GetCheckboxStyle()
+{
+	return Get().GetWidgetStyle<FCheckBoxStyle>(CheckboxStyleName());
 }
