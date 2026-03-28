@@ -121,6 +121,18 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRegistryQuery(const TSharedP
 		ClassName = FString::Printf(TEXT("/Script/Engine.%s"), *ClassName);
 	}
 
+	if (PathFilter.IsEmpty() && ClassName.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("path_filter"), TEXT("/Game/Blueprints"));
+		SuggestedArgs->SetNumberField(TEXT("max_results"), 50.0);
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("asset_registry_query: provide at least one of path_filter (aliases: filter, path, object_path) or class_name/class_paths so the query is bounded. "
+				 "Scanning the entire registry is not supported."),
+			TEXT("asset_registry_query"),
+			SuggestedArgs);
+	}
+
 	int32 MaxResults = 100;
 	double MR = 0.0;
 	if (Args->TryGetNumberField(TEXT("max_results"), MR))
@@ -388,10 +400,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ContentBrowserSyncAsset(const TSh
 	if (Path.IsEmpty())
 	{
 		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
-		SuggestedArgs->SetStringField(TEXT("path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
+		SuggestedArgs->SetStringField(TEXT("query"), TEXT("MyAsset"));
+		SuggestedArgs->SetStringField(TEXT("path_prefix"), TEXT("/Game"));
 		return UnrealAiToolJson::ErrorWithSuggestedCall(
-			TEXT("path is required (aliases: object_path, asset_path)."),
-			TEXT("content_browser_sync_asset"),
+			TEXT("content_browser_sync_asset: path/object_path/asset_path is required; empty arguments are invalid. "
+				 "Resolve a concrete asset object path (for example via asset_index_fuzzy_search or asset_registry_query, "
+				 "or from context/selection), then call again with that path."),
+			TEXT("asset_index_fuzzy_search"),
 			SuggestedArgs);
 	}
 
