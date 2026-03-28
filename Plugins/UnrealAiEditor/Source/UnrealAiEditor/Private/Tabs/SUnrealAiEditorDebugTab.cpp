@@ -15,7 +15,6 @@
 #include "Misc/MessageDialog.h"
 #include "Misc/FileHelper.h"
 #include "Serialization/Archive.h"
-#include "Styling/CoreStyle.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -110,8 +109,7 @@ void SUnrealAiEditorDebugTab::Construct(const FArguments& InArgs)
 						]
 						+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 12, 0)
 						[
-							SNew(SCheckBox)
-							.Style(FAppStyle::Get(), TEXT("ToggleButtonCheckbox"))
+							SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
 							.IsChecked(Self.Get(), &SUnrealAiEditorDebugTab::GetAutoRefreshCheckState)
 							.OnCheckStateChanged_Lambda([Self](ECheckBoxState S)
 							{
@@ -141,7 +139,7 @@ void SUnrealAiEditorDebugTab::Construct(const FArguments& InArgs)
 					[
 						SNew(STextBlock)
 						.Text_Lambda([Self]() { return Self->ProjectIdLabel; })
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Mono"), 9))
+						.Font(FUnrealAiEditorStyle::FontMono9())
 						.ColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted())
 					]
 				]
@@ -253,7 +251,7 @@ void SUnrealAiEditorDebugTab::Construct(const FArguments& InArgs)
 									SAssignNew(InspectorText, SMultiLineEditableText)
 									.IsReadOnly(true)
 									.AutoWrapText(true)
-									.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Mono"), 9))
+									.Font(FUnrealAiEditorStyle::FontMono9())
 								]
 							]
 						]
@@ -522,7 +520,7 @@ TSharedRef<ITableRow> SUnrealAiEditorDebugTab::OnGenerateRow(
 					SNew(STextBlock)
 					.Text(Item.IsValid() ? FText::FromString(Item->DisplayName) : FText::GetEmpty())
 					.ColorAndOpacity(Col)
-					.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Roboto"), 9))
+					.Font(FUnrealAiEditorStyle::FontBodySmall())
 				]
 			]
 		];

@@ -49,7 +49,7 @@ namespace UnrealAiChatListUi
 			[
 				SNew(STextBlock)
 				.Text(FText::FromString(Caption))
-				.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
+				.Font(FUnrealAiEditorStyle::FontBodySmall())
 				.ColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted())
 			]
 			+ SVerticalBox::Slot().AutoHeight()
@@ -106,7 +106,7 @@ void SAssistantReplyTimingFooter::Construct(const FArguments& InArgs)
 	ChildSlot
 		[
 			SAssignNew(Label, STextBlock)
-				.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
+				.Font(FUnrealAiEditorStyle::FontBodySmall())
 				.ColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted())
 		];
 	SyncLabel();
@@ -276,7 +276,7 @@ void SChatMessageList::Construct(const FArguments& InArgs)
 								.OnClicked(this, &SChatMessageList::OnJumpToBottomClicked)
 								[
 									SNew(STextBlock)
-										.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
+										.Font(FUnrealAiEditorStyle::FontBodySmall())
 										.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextPrimary())
 										.Text(LOCTEXT("JumpToBottom", "↓ New messages"))
 								]
@@ -408,7 +408,7 @@ void SChatMessageList::RebuildTranscript()
 									  .AutoWrapText(true)
 									  .WrapTextAt(800.f)
 									  .Text(FText::FromString(B.UserText))
-									  .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 11))
+									  .Font(FUnrealAiEditorStyle::FontBodyRegular11())
 									  .ColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted())
 							  ])
 					: StaticCastSharedRef<SWidget>(
@@ -423,7 +423,7 @@ void SChatMessageList::RebuildTranscript()
 											  .AutoWrapText(true)
 											  .WrapTextAt(800.f)
 											  .Text(FText::FromString(B.UserText))
-											  .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 11))
+											  .Font(FUnrealAiEditorStyle::FontBodyRegular11())
 											  .ColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 1.f)))
 									  ]
 							  ]);
@@ -529,7 +529,7 @@ void SChatMessageList::RebuildTranscript()
 								.Visibility(
 									MergedThinkingCaption.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
 								.Text(FText::FromString(MergedThinkingCaption))
-								.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
+								.Font(FUnrealAiEditorStyle::FontBodySmall())
 								.ColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted())
 							]
 							+ SVerticalBox::Slot().AutoHeight()

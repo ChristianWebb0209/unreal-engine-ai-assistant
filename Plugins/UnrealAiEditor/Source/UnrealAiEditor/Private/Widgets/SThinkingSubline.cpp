@@ -1,6 +1,6 @@
 #include "Widgets/SThinkingSubline.h"
 
-#include "Styling/CoreStyle.h"
+#include "Style/UnrealAiEditorStyle.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Text/STextBlock.h"
 
@@ -34,8 +34,8 @@ void SThinkingSubline::Construct(const FArguments& InArgs)
 				.Padding(FMargin(2.f, 4.f, 0.f, 0.f))
 				[
 					SAssignNew(LineText, STextBlock)
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Italic"), 9))
-						.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.56f, 0.72f)))
+						.Font(FUnrealAiEditorStyle::FontItalicCaption())
+						.ColorAndOpacity(FUnrealAiEditorStyle::ColorThinkingSubline())
 						.AutoWrapText(false)
 						.Text(FText::FromString(TEXT("Thinking...")))
 				]

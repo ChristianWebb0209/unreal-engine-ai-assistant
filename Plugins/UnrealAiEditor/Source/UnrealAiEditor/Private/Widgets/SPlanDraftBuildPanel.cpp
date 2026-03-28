@@ -37,8 +37,8 @@ void SPlanDraftBuildPanel::Construct(const FArguments& InArgs)
 					[
 						SNew(STextBlock)
 							.Text(LOCTEXT("PlanDraftHint", "Review or edit the plan JSON, then click Build to run nodes."))
-							.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10))
-							.ColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted())
+							.Font(FUnrealAiEditorStyle::FontRegular10())
+							.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 							.AutoWrapText(true)
 					]
 					+ SVerticalBox::Slot().FillHeight(1.f).Padding(0.f, 0.f, 0.f, 8.f)
@@ -48,7 +48,7 @@ void SPlanDraftBuildPanel::Construct(const FArguments& InArgs)
 							[
 								SAssignNew(DraftEdit, SMultiLineEditableTextBox)
 									.Text(FText::FromString(DraftText))
-									.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Mono"), 9))
+									.Font(FUnrealAiEditorStyle::FontMono9())
 									.OnTextChanged(this, &SPlanDraftBuildPanel::OnDraftTextChanged)
 							]
 					]
@@ -59,7 +59,7 @@ void SPlanDraftBuildPanel::Construct(const FArguments& InArgs)
 							.OnClicked(this, &SPlanDraftBuildPanel::OnBuildClicked)
 							[
 								SNew(STextBlock)
-									.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 11))
+									.Font(FUnrealAiEditorStyle::FontComposerBadge())
 									.Text(LOCTEXT("PlanDraftBuild", "Build"))
 							]
 					]

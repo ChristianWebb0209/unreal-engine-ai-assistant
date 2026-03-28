@@ -99,7 +99,7 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 					TEXT("%s: %s"),
 					bParsedDag ? TEXT("Plan DAG") : TEXT("Plan"),
 					*HeaderTitle)))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
+				.Font(FUnrealAiEditorStyle::FontComposerBadge())
 		];
 	if (bParsedDag)
 	{
@@ -137,7 +137,7 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 					SNew(SHorizontalBox)
 					+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 					[
-						SNew(SCheckBox)
+						SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
 							.IsChecked(bDone ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
 							.IsEnabled(false)
 					]

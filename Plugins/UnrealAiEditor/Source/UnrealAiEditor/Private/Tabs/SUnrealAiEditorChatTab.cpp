@@ -2,6 +2,7 @@
 
 #include "Async/Async.h"
 #include "UnrealAiEditorModule.h"
+#include "Style/UnrealAiEditorStyle.h"
 #include "UnrealAiEditorTabIds.h"
 #include "Context/UnrealAiContextDragDrop.h"
 #include "Context/UnrealAiProjectId.h"
@@ -101,8 +102,8 @@ void SUnrealAiEditorChatTab::Construct(const FArguments& InArgs)
 			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 3.f))
 			[
 				SNew(STextBlock)
-					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-					.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.58f, 1.f)))
+					.Font(FUnrealAiEditorStyle::FontCaption())
+					.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 					.Text_Lambda([this]()
 					{
 						if (!BackendRegistry.IsValid() || !BackendRegistry->GetRetrievalService())

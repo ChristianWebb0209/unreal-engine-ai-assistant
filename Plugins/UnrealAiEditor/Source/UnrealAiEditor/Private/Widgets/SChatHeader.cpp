@@ -1,6 +1,7 @@
 #include "Widgets/SChatHeader.h"
 
 #include "Backend/UnrealAiBackendRegistry.h"
+#include "Style/UnrealAiEditorStyle.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
@@ -22,7 +23,7 @@ void SChatHeader::Construct(const FArguments& InArgs)
 
 	ChildSlot
 		[SNew(SBorder)
-				.BorderBackgroundColor(FLinearColor(0.12f, 0.12f, 0.12f, 1.f))
+				.BorderBackgroundColor(FUnrealAiEditorStyle::LinearColorChatHeaderStrip())
 				.Padding(FMargin(8.f))
 				[
 					SNew(SHorizontalBox)
@@ -30,7 +31,7 @@ void SChatHeader::Construct(const FArguments& InArgs)
 					[
 						SNew(STextBlock)
 						.Text(this, &SChatHeader::GetChatTitleText)
-						.Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 11))
+						.Font(FUnrealAiEditorStyle::FontComposerBadge())
 					]
 					+ SHorizontalBox::Slot().FillWidth(1.f)
 					+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))

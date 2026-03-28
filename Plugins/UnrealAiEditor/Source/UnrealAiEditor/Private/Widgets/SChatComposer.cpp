@@ -29,6 +29,7 @@
 #include "PluginDescriptor.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -487,7 +488,7 @@ void SChatComposer::Construct(const FArguments& InArgs)
 			[
 				SAssignNew(MentionBorder, SBorder)
 					.Visibility(EVisibility::Collapsed)
-					.BorderBackgroundColor(FLinearColor(0.16f, 0.16f, 0.18f, 0.95f))
+					.BorderBackgroundColor(FUnrealAiEditorStyle::LinearColorPanelMentionBg())
 					.Padding(FMargin(6.f))
 					[
 						SNew(SVerticalBox)
@@ -495,8 +496,8 @@ void SChatComposer::Construct(const FArguments& InArgs)
 						[
 							SNew(STextBlock)
 								.Text(LOCTEXT("MentionPanelTitle", "Mentions — assets & scene"))
-								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
-								.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.62f, 1.f)))
+								.Font(FUnrealAiEditorStyle::FontPopoverTitle())
+								.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 						]
 						+ SVerticalBox::Slot().AutoHeight()
 						[
@@ -516,7 +517,7 @@ void SChatComposer::Construct(const FArguments& InArgs)
 			[
 				SAssignNew(SlashCommandBorder, SBorder)
 					.Visibility(EVisibility::Collapsed)
-					.BorderBackgroundColor(FLinearColor(0.14f, 0.18f, 0.16f, 0.95f))
+					.BorderBackgroundColor(FUnrealAiEditorStyle::LinearColorPanelSlashBg())
 					.Padding(FMargin(6.f))
 					[
 						SNew(SVerticalBox)
@@ -524,8 +525,8 @@ void SChatComposer::Construct(const FArguments& InArgs)
 						[
 							SNew(STextBlock)
 								.Text(LOCTEXT("SlashPanelTitle", "Commands"))
-								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
-								.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.62f, 1.f)))
+								.Font(FUnrealAiEditorStyle::FontPopoverTitle())
+								.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 						]
 						+ SVerticalBox::Slot().AutoHeight()
 						[
@@ -571,7 +572,7 @@ void SChatComposer::Construct(const FArguments& InArgs)
 								.ContentPadding(FMargin(12.f, 8.f))
 								.OnClicked(this, &SChatComposer::OnSendOrStopClicked)
 								.ToolTipText(this, &SChatComposer::GetSendStopTooltip)
-								.ForegroundColor(FSlateColor(FLinearColor(0.94f, 0.96f, 1.f, 1.f)))
+								.ForegroundColor(FUnrealAiEditorStyle::ColorComposerForegroundBright())
 								.IsEnabled_Lambda(
 									[this]()
 									{
@@ -587,18 +588,46 @@ void SChatComposer::Construct(const FArguments& InArgs)
 											[
 												SNew(SImage)
 													.Image_Lambda([this]() { return GetSendStopBrush(); })
-													.ColorAndOpacity(FSlateColor(FLinearColor(0.94f, 0.96f, 1.f, 1.f)))
+													.ColorAndOpacity(FUnrealAiEditorStyle::ColorComposerForegroundBright())
 											]
 									]
 									+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 									[
 										SNew(STextBlock)
 											.Text_Lambda([this]() { return GetSendStopLabel(); })
-											.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
-											.ColorAndOpacity(FSlateColor(FLinearColor(0.94f, 0.96f, 1.f, 1.f)))
+											.Font(FUnrealAiEditorStyle::FontComposerBadge())
+											.ColorAndOpacity(FUnrealAiEditorStyle::ColorComposerForegroundBright())
 									]
 								]
 						]
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(8.f, 2.f, 8.f, 2.f))
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+				[
+					SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
+						.IsChecked_Lambda([]()
+						{
+							return FUnrealAiEditorModule::IsEditorFocusEnabled()
+								? ECheckBoxState::Checked
+								: ECheckBoxState::Unchecked;
+						})
+						.OnCheckStateChanged_Lambda([](ECheckBoxState S)
+						{
+							FUnrealAiEditorModule::SetEditorFocusEnabled(S == ECheckBoxState::Checked);
+						})
+						.ToolTipText(LOCTEXT(
+							"EditorFocusComposerTip",
+							"When on, the agent may follow along in the editor (optional navigation). Tools that must open an editor still open. Stored in plugin settings."))
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+						.Font(FUnrealAiEditorStyle::FontCaption())
+						.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+						.Text(LOCTEXT("EditorFocusComposerLbl", "Editor focus"))
 				]
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(4.f)
@@ -653,7 +682,7 @@ void SChatComposer::Construct(const FArguments& InArgs)
 										  .VAlign(VAlign_Center)
 									[
 										SNew(STextBlock)
-											.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+											.Font(FUnrealAiEditorStyle::FontLabelBold())
 											.ColorAndOpacity(FSlateColor::UseForeground())
 											.Text(this, &SChatComposer::GetModeLabelShort)
 									]
@@ -705,8 +734,8 @@ void SChatComposer::Construct(const FArguments& InArgs)
 			+ SVerticalBox::Slot().AutoHeight().Padding(PadFooterSlot)
 			[
 				SNew(STextBlock)
-					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-					.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.55f, 1.f)))
+					.Font(FUnrealAiEditorStyle::FontCaption())
+					.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextFooter())
 					.Text(this, &SChatComposer::GetFooterText)
 			]
 		];
@@ -714,6 +743,17 @@ void SChatComposer::Construct(const FArguments& InArgs)
 	ContextAttachmentsChangedHandle = FUnrealAiEditorModule::OnContextAttachmentsChanged().AddSP(
 		this,
 		&SChatComposer::SyncAttachmentChipsUi);
+
+	{
+		const TWeakPtr<SChatComposer> WeakComposer = StaticCastSharedRef<SChatComposer>(AsShared()).ToWeakPtr();
+		EditorFocusPolicyHandle = FUnrealAiEditorModule::OnEditorFocusPolicyChanged().AddLambda([WeakComposer]()
+		{
+			if (const TSharedPtr<SChatComposer> C = WeakComposer.Pin())
+			{
+				C->Invalidate(EInvalidateWidgetReason::Layout);
+			}
+		});
+	}
 
 	RefreshAttachmentChips();
 
@@ -737,6 +777,11 @@ SChatComposer::~SChatComposer()
 	{
 		FUnrealAiEditorModule::OnContextAttachmentsChanged().Remove(ContextAttachmentsChangedHandle);
 		ContextAttachmentsChangedHandle.Reset();
+	}
+	if (EditorFocusPolicyHandle.IsValid())
+	{
+		FUnrealAiEditorModule::OnEditorFocusPolicyChanged().Remove(EditorFocusPolicyHandle);
+		EditorFocusPolicyHandle.Reset();
 	}
 	UnbindViewportScreenshotProcessed();
 	PendingViewportScreenshotPath.Empty();
@@ -1192,8 +1237,8 @@ void SChatComposer::RebuildMentionPanelUi()
 					[
 						SNew(STextBlock)
 							.Text(Msg)
-							.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
-							.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.62f, 1.f)))
+							.Font(FUnrealAiEditorStyle::FontBodySmall())
+							.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 					]
 			];
 	};
@@ -1277,7 +1322,7 @@ void SChatComposer::RebuildMentionPanelUi()
 												[
 													SNew(STextBlock)
 														.Text(FText::FromString(C.DisplayName))
-														.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+														.Font(FUnrealAiEditorStyle::FontListRowTitle())
 														.ColorAndOpacity(
 															bSel ? FSlateColor(FLinearColor(0.98f, 0.99f, 1.f, 1.f))
 																 : FSlateColor::UseForeground())
@@ -1286,8 +1331,8 @@ void SChatComposer::RebuildMentionPanelUi()
 												[
 													SNew(STextBlock)
 														.Text(FText::FromString(SecLine))
-														.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-														.ColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.70f, 0.78f, 1.f)))
+														.Font(FUnrealAiEditorStyle::FontCaption())
+														.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMetaHint())
 												]
 											]
 										]
@@ -1448,7 +1493,7 @@ void SChatComposer::RebuildSlashPanelUi()
 											[
 												SNew(STextBlock)
 													.Text(FText::FromString(C.Command))
-													.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+													.Font(FUnrealAiEditorStyle::FontListRowTitle())
 													.ColorAndOpacity(
 														bSel ? FSlateColor(FLinearColor(0.98f, 1.f, 0.96f, 1.f))
 															 : FSlateColor::UseForeground())
@@ -1458,7 +1503,7 @@ void SChatComposer::RebuildSlashPanelUi()
 												SNew(STextBlock)
 													.AutoWrapText(true)
 													.Text(C.Description)
-													.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+													.Font(FUnrealAiEditorStyle::FontCaption())
 													.ColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.72f, 0.68f, 1.f)))
 											]
 										]
@@ -1680,7 +1725,7 @@ void SChatComposer::RefreshAttachmentChips()
 								SNew(STextBlock)
 									.AutoWrapText(true)
 									.Text(FText::FromString(Label))
-									.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+									.Font(FUnrealAiEditorStyle::FontBodySmall())
 							]
 							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 							[
@@ -1720,8 +1765,8 @@ void SChatComposer::RefreshAttachmentChips()
 							SNew(STextBlock)
 								.AutoWrapText(true)
 								.Text(FText::FromString(Label))
-								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
-								.ColorAndOpacity(FSlateColor(FLinearColor(0.92f, 0.94f, 0.97f, 1.f)))
+								.Font(FUnrealAiEditorStyle::FontBodySmall())
+								.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextPrimary())
 						]
 						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 						[
@@ -2029,15 +2074,15 @@ TSharedRef<SWidget> SChatComposer::MakeModeMenuRow(EUnrealAiAgentMode Mode, FTex
 						+ SVerticalBox::Slot().AutoHeight()
 						[
 							SNew(STextBlock)
-								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+								.Font(FUnrealAiEditorStyle::FontLabelBold())
 								.ColorAndOpacity(FSlateColor(FLinearColor::White))
 								.Text(Title)
 						]
 						+ SVerticalBox::Slot().AutoHeight()
 						[
 							SNew(STextBlock)
-								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-								.ColorAndOpacity(FSlateColor(FLinearColor(0.62f, 0.64f, 0.68f, 1.f)))
+								.Font(FUnrealAiEditorStyle::FontCaption())
+								.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMetaHint())
 								.Text(Blurb)
 						]
 					]
@@ -2049,7 +2094,7 @@ TSharedRef<SWidget> SChatComposer::BuildModeMenuContent()
 {
 	return SNew(SBorder)
 		.Padding(4.f)
-		.BorderBackgroundColor(FLinearColor(0.12f, 0.12f, 0.13f, 0.98f))
+		.BorderBackgroundColor(FUnrealAiEditorStyle::LinearColorModeMenuPopoverBg())
 		[
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 2.f)

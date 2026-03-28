@@ -1,5 +1,6 @@
 #include "Tabs/SUnrealAiEditorHelpTab.h"
 
+#include "Style/UnrealAiEditorStyle.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/SBoxPanel.h"
@@ -23,7 +24,7 @@ void SUnrealAiEditorHelpTab::Construct(const FArguments& InArgs)
 					[
 						SNew(STextBlock)
 							.Text(LOCTEXT("HelpTitle", "Help"))
-							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
+							.Font(FUnrealAiEditorStyle::FontWindowTitle())
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(4.f)
 					[

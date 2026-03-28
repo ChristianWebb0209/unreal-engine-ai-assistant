@@ -1,6 +1,7 @@
 #include "Tabs/SUnrealAiEditorQuickStartTab.h"
 
 #include "UnrealAiEditorTabIds.h"
+#include "Style/UnrealAiEditorStyle.h"
 #include "Framework/Docking/TabManager.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
@@ -22,7 +23,7 @@ void SUnrealAiEditorQuickStartTab::Construct(const FArguments& InArgs)
 					[
 						SNew(STextBlock)
 							.Text(LOCTEXT("QsTitle", "Quick Start"))
-							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
+							.Font(FUnrealAiEditorStyle::FontWindowTitle())
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(4.f)
 					[

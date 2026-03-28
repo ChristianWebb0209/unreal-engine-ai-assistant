@@ -1,5 +1,6 @@
 #include "Widgets/SToolCallCard.h"
 
+#include "Style/UnrealAiEditorStyle.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
@@ -112,15 +113,15 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 							[
 								SNew(STextBlock)
 									.Text(FText::FromString(TEXT("\u2022")))
-									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+									.Font(FUnrealAiEditorStyle::FontLabelBold())
 									.ColorAndOpacity(FSlateColor(DotColor))
 							]
 							+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
 							[
 								SNew(STextBlock)
 									.Text(FText::FromString(ToolName))
-									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-									.ColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.95f, 0.95f, 1.f)))
+									.Font(FUnrealAiEditorStyle::FontListRowTitle())
+									.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextPrimary())
 							]
 							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(4.f, 0.f, 6.f, 0.f))
 							[
@@ -141,7 +142,7 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 										}
 										return bSuccess ? LOCTEXT("ToolOk", "Done") : LOCTEXT("ToolFail", "Failed");
 									})
-									.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+									.Font(FUnrealAiEditorStyle::FontCaption())
 									.ColorAndOpacity_Lambda([this]()
 									{
 										if (bRunning)
@@ -161,8 +162,8 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 							[
 								SNew(STextBlock)
 									.Text(LOCTEXT("ArgsHdr", "Arguments (JSON)"))
-									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
-									.ColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.7f, 0.78f, 1.f)))
+									.Font(FUnrealAiEditorStyle::FontPopoverTitle())
+									.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMetaHint())
 							]
 							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 0.f, 4.f, 4.f))
 							[
@@ -173,7 +174,7 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 										SNew(SMultiLineEditableText)
 											.IsReadOnly(true)
 											.AutoWrapText(true)
-											.Font(FCoreStyle::GetDefaultFontStyle("Mono", 8))
+											.Font(FUnrealAiEditorStyle::FontMono8())
 											.Text(FText::FromString(ArgsPreview.IsEmpty() ? TEXT("(empty)") : ArgsPreview))
 									]
 							]
@@ -181,8 +182,8 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 							[
 								SNew(STextBlock)
 									.Text(LOCTEXT("ResHdr", "Result"))
-									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
-									.ColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.7f, 0.78f, 1.f)))
+									.Font(FUnrealAiEditorStyle::FontPopoverTitle())
+									.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMetaHint())
 							]
 							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 0.f, 4.f, 2.f))
 							[
@@ -193,7 +194,7 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 										SNew(SMultiLineEditableText)
 											.IsReadOnly(true)
 											.AutoWrapText(true)
-											.Font(FCoreStyle::GetDefaultFontStyle("Mono", 8))
+											.Font(FUnrealAiEditorStyle::FontMono8())
 											.Text(FText::FromString(
 												ResultPreview.IsEmpty() && bRunning ? FString(TEXT("…")) : ResultPreview))
 									]

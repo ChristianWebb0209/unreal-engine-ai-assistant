@@ -1,10 +1,10 @@
 #include "Widgets/UnrealAiChatMarkdown.h"
 
 #include "Tools/Presentation/UnrealAiEditorNavigation.h"
+#include "Style/UnrealAiEditorStyle.h"
 
 #include "Misc/Char.h"
 #include "Styling/AppStyle.h"
-#include "Styling/CoreStyle.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SHyperlink.h"
 #include "Widgets/Layout/SBorder.h"
@@ -450,19 +450,19 @@ namespace UnrealAiChatMarkdown
 
 	static FSlateFontInfo BodyFont()
 	{
-		return FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 11);
+		return FUnrealAiEditorStyle::FontBodyRegular11();
 	}
 
 	static FSlateFontInfo HeadingFont(int32 Size)
 	{
-		return FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), Size);
+		return FUnrealAiEditorStyle::FontBold(Size);
 	}
 
 	static TSharedRef<SWidget> MakeTodoRow(bool bDone, const FString& ItemText)
 	{
 		const TCHAR* Box = bDone ? TEXT("\x2611") : TEXT("\x2610");
-		const FLinearColor Accent = bDone ? FLinearColor(0.4f, 0.82f, 0.52f, 1.f)
-										  : FLinearColor(0.65f, 0.7f, 0.78f, 1.f);
+		const FLinearColor Accent = bDone ? FUnrealAiEditorStyle::LinearColorMarkdownTodoDoneCheck()
+										  : FUnrealAiEditorStyle::ColorTextMetaHint().GetSpecifiedColor();
 		return SNew(SBorder)
 			.BorderBackgroundColor(FLinearColor(0.07f, 0.08f, 0.1f, 0.94f))
 			.Padding(FMargin(12.f, 7.f, 12.f, 7.f))
@@ -474,7 +474,7 @@ namespace UnrealAiChatMarkdown
 					  .Padding(0.f, 0.f, 10.f, 0.f)
 				[
 					SNew(STextBlock)
-						.Font(HeadingFont(12))
+						.Font(FUnrealAiEditorStyle::FontSectionHeading())
 						.ColorAndOpacity(FSlateColor(Accent))
 						.Text(FText::FromString(FString(Box)))
 				]
@@ -484,8 +484,8 @@ namespace UnrealAiChatMarkdown
 				[
 					UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 						ItemText,
-						FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 11),
-						FSlateColor(FLinearColor(0.94f, 0.95f, 0.97f, 1.f)))
+						FUnrealAiEditorStyle::FontBodyRegular11(),
+						FUnrealAiEditorStyle::ColorComposerForegroundBright())
 				]
 			];
 	}
@@ -500,7 +500,7 @@ namespace UnrealAiChatMarkdown
 			[
 				SNew(STextBlock)
 					.Font(BodyFont())
-					.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.65f, 1.f)))
+					.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 					.Text(FText::FromString(TEXT("\x2022")))
 			]
 			+ SHorizontalBox::Slot()
@@ -509,7 +509,7 @@ namespace UnrealAiChatMarkdown
 				UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 					ItemText,
 					BodyFont(),
-					FSlateColor(FLinearColor(0.92f, 0.93f, 0.95f, 1.f)))
+					FUnrealAiEditorStyle::ColorMarkdownBody())
 			];
 	}
 } // namespace UnrealAiChatMarkdown
@@ -581,7 +581,7 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownChatBody(const FString& Markdown)
 					UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 						Para,
 						BodyFont(),
-						FSlateColor(FLinearColor(0.92f, 0.93f, 0.95f, 1.f)))
+						FUnrealAiEditorStyle::ColorMarkdownBody())
 				];
 			continue;
 		}
@@ -594,7 +594,7 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownChatBody(const FString& Markdown)
 					UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 						L.Text,
 						HeadingFont(14),
-						FSlateColor(FLinearColor(0.98f, 0.98f, 1.f, 1.f)))
+						FUnrealAiEditorStyle::ColorMarkdownHeading())
 				];
 			break;
 		case ELineKind::H2:
@@ -603,7 +603,7 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownChatBody(const FString& Markdown)
 					UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 						L.Text,
 						HeadingFont(13),
-						FSlateColor(FLinearColor(0.98f, 0.98f, 1.f, 1.f)))
+						FUnrealAiEditorStyle::ColorMarkdownHeading())
 				];
 			break;
 		case ELineKind::H3:
@@ -612,7 +612,7 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownChatBody(const FString& Markdown)
 					UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 						L.Text,
 						HeadingFont(11),
-						FSlateColor(FLinearColor(0.98f, 0.98f, 1.f, 1.f)))
+						FUnrealAiEditorStyle::ColorMarkdownHeading())
 				];
 			break;
 		case ELineKind::Bullet:
@@ -630,7 +630,7 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownChatBody(const FString& Markdown)
 					UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 						L.Text,
 						BodyFont(),
-						FSlateColor(FLinearColor(0.92f, 0.93f, 0.95f, 1.f)))
+						FUnrealAiEditorStyle::ColorMarkdownBody())
 				];
 			break;
 		}
@@ -678,7 +678,7 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownToolNoteBody(const FString& Markdown)
 				Para += Lines[i].Text;
 				++i;
 			}
-			V->AddSlot().AutoHeight().Padding(0.f, 1.f)[MakeBody(Para, BodyFont(), FSlateColor(FLinearColor(0.92f, 0.93f, 0.95f, 1.f)))];
+			V->AddSlot().AutoHeight().Padding(0.f, 1.f)[MakeBody(Para, BodyFont(), FUnrealAiEditorStyle::ColorMarkdownBody())];
 			continue;
 		}
 
@@ -687,19 +687,19 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownToolNoteBody(const FString& Markdown)
 		case ELineKind::H1:
 			V->AddSlot().AutoHeight().Padding(0.f, 6.f, 0.f, 2.f)
 				[
-					MakeBody(L.Text, HeadingFont(14), FSlateColor(FLinearColor(0.98f, 0.98f, 1.f, 1.f)))
+					MakeBody(L.Text, HeadingFont(14), FUnrealAiEditorStyle::ColorMarkdownHeading())
 				];
 			break;
 		case ELineKind::H2:
 			V->AddSlot().AutoHeight().Padding(0.f, 8.f, 0.f, 4.f)
 				[
-					MakeBody(L.Text, HeadingFont(13), FSlateColor(FLinearColor(0.98f, 0.98f, 1.f, 1.f)))
+					MakeBody(L.Text, HeadingFont(13), FUnrealAiEditorStyle::ColorMarkdownHeading())
 				];
 			break;
 		case ELineKind::H3:
 			V->AddSlot().AutoHeight().Padding(0.f, 4.f, 0.f, 2.f)
 				[
-					MakeBody(L.Text, HeadingFont(11), FSlateColor(FLinearColor(0.98f, 0.98f, 1.f, 1.f)))
+					MakeBody(L.Text, HeadingFont(11), FUnrealAiEditorStyle::ColorMarkdownHeading())
 				];
 			break;
 		case ELineKind::Bullet:
@@ -726,7 +726,7 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownToolNoteBody(const FString& Markdown)
 			V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(true, L.Text)];
 			break;
 		default:
-			V->AddSlot().AutoHeight().Padding(0.f, 1.f)[MakeBody(L.Text, BodyFont(), FSlateColor(FLinearColor(0.92f, 0.93f, 0.95f, 1.f)))];
+			V->AddSlot().AutoHeight().Padding(0.f, 1.f)[MakeBody(L.Text, BodyFont(), FUnrealAiEditorStyle::ColorMarkdownBody())];
 			break;
 		}
 
