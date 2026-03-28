@@ -125,7 +125,35 @@ namespace UnrealAiContextCandidates
 		{
 			return Text.Contains(TEXT("/Game/"))
 				|| Text.Contains(TEXT("PersistentLevel."))
-				|| Text.Contains(TEXT("/Script/"));
+				|| Text.Contains(TEXT("/Script/"))
+				|| Text.Contains(TEXT("object_path"))
+				|| Text.Contains(TEXT("actor_path"))
+				|| Text.Contains(TEXT("blueprint_path"))
+				|| Text.Contains(TEXT("material_path"));
+		}
+
+		static bool IsLikelyMutatingToolName(const FString& ToolName)
+		{
+			const FString T = ToolName.ToLower();
+			return T.Contains(TEXT("_set_"))
+				|| T.Contains(TEXT("_apply"))
+				|| T.Contains(TEXT("_compile"))
+				|| T.Contains(TEXT("_save"))
+				|| T.Contains(TEXT("_create"))
+				|| T.Contains(TEXT("_rename"))
+				|| T.Contains(TEXT("_open_editor"))
+				|| T.Contains(TEXT("pie_start"))
+				|| T.Contains(TEXT("pie_stop"));
+		}
+
+		static FString ExtractToolNameFromSourceId(const FString& SourceId)
+		{
+			const int32 LastColon = SourceId.Find(TEXT(":"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+			if (LastColon == INDEX_NONE || LastColon + 1 >= SourceId.Len())
+			{
+				return FString();
+			}
+			return SourceId.Mid(LastColon + 1);
 		}
 	}
 
@@ -269,13 +297,17 @@ namespace UnrealAiContextCandidates
 			OutCandidates.Add(MoveTemp(E));
 		}
 
-		if (!State.ActiveOrchestrateDagJson.IsEmpty())
+		if (!State.ActivePlanDagJson.IsEmpty())
 		{
 			FContextCandidateEnvelope E;
-			E.Type = UnrealAiContextRankingPolicy::ECandidateType::OrchestrateState;
-			E.SourceId = TEXT("orch:dag");
-			E.Payload = TEXT("Active orchestrate DAG present.");
-			E.RenderedText = TEXT("Orchestrate state: Active DAG present.");
+			E.Type = UnrealAiContextRankingPolicy::ECandidateType::PlanState;
+			E.SourceId = TEXT("plan:dag");
+			E.Payload = UnrealAiFormatActivePlanDagSummary(State.ActivePlanDagJson, State.PlanNodeStatusById);
+			if (E.Payload.IsEmpty())
+			{
+				E.Payload = TEXT("Active plan DAG present.");
+			}
+			E.RenderedText = FString::Printf(TEXT("Plan DAG state: %s"), *E.Payload);
 			E.TokenCostEstimate = EstimateTokens(E.RenderedText);
 			OutCandidates.Add(MoveTemp(E));
 		}
@@ -550,10 +582,13 @@ namespace UnrealAiContextCandidates
 				TryPackIdx(ContentBrowserPath, TEXT("pack:budget"));
 			}
 		}
-		// - One actionable tool result anchor (best-effort): preserve a recently resolved concrete target path.
+		// - Up to two actionable tool result anchors (best-effort): preserve recently resolved concrete targets.
+		//   Prefer a mutating-tool target anchor first, then a discovery/read anchor, to reduce rediscovery loops.
 		{
-			int32 BestActionableTool = INDEX_NONE;
-			float BestScore = -FLT_MAX;
+			int32 BestMutatingActionableTool = INDEX_NONE;
+			float BestMutatingScore = -FLT_MAX;
+			int32 BestDiscoveryActionableTool = INDEX_NONE;
+			float BestDiscoveryScore = -FLT_MAX;
 			for (const int32 I : Idx)
 			{
 				const FContextCandidateEnvelope& C = Candidates[I];
@@ -565,15 +600,32 @@ namespace UnrealAiContextCandidates
 				{
 					continue;
 				}
-				if (C.Score.Total > BestScore)
+				const FString ToolName = ExtractToolNameFromSourceId(C.SourceId);
+				if (IsLikelyMutatingToolName(ToolName))
 				{
-					BestScore = C.Score.Total;
-					BestActionableTool = I;
+					if (C.Score.Total > BestMutatingScore)
+					{
+						BestMutatingScore = C.Score.Total;
+						BestMutatingActionableTool = I;
+					}
+				}
+				else
+				{
+					if (C.Score.Total > BestDiscoveryScore)
+					{
+						BestDiscoveryScore = C.Score.Total;
+						BestDiscoveryActionableTool = I;
+					}
 				}
 			}
-			if (BestActionableTool != INDEX_NONE)
+			if (BestMutatingActionableTool != INDEX_NONE)
 			{
-				TryPackIdx(BestActionableTool, TEXT("pack:budget"));
+				TryPackIdx(BestMutatingActionableTool, TEXT("pack:budget_anchor_actionable_target"));
+			}
+			if (BestDiscoveryActionableTool != INDEX_NONE
+				&& BestDiscoveryActionableTool != BestMutatingActionableTool)
+			{
+				TryPackIdx(BestDiscoveryActionableTool, TEXT("pack:budget_anchor_actionable_target"));
 			}
 		}
 		Idx.Sort([&Candidates](const int32 A, const int32 B)

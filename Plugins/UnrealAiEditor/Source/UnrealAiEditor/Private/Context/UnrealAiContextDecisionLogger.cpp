@@ -19,7 +19,7 @@ namespace UnrealAiContextDecisionLogger
 			{
 			case EUnrealAiAgentMode::Ask: return TEXT("ask");
 			case EUnrealAiAgentMode::Agent: return TEXT("agent");
-			case EUnrealAiAgentMode::Orchestrate: return TEXT("orchestrate");
+			case EUnrealAiAgentMode::Plan: return TEXT("plan");
 			default: return TEXT("unknown");
 			}
 		}

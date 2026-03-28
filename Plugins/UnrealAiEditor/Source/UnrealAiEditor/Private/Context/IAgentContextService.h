@@ -19,20 +19,22 @@ public:
 	/** Persist structured todo plan JSON (replaces prior plan + clears step checkboxes). */
 	virtual void SetActiveTodoPlan(const FString& PlanJson) = 0;
 	virtual void SetTodoStepDone(int32 StepIndex, bool bDone) = 0;
-	/** Persist orchestrate DAG JSON and reset node status maps. */
-	virtual void SetActiveOrchestrateDag(const FString& DagJson) = 0;
-	/** Update per-node orchestrate status and optional summary. */
-	virtual void SetOrchestrateNodeStatus(const FString& NodeId, const FString& Status, const FString& Summary = FString()) = 0;
+	/** Persist plan DAG JSON and reset node status maps. */
+	virtual void SetActivePlanDag(const FString& DagJson) = 0;
+	/** Update per-node plan status and optional summary. */
+	virtual void SetPlanNodeStatus(const FString& NodeId, const FString& Status, const FString& Summary = FString()) = 0;
 	/** Removes in-flight "running" markers so execution can resume after a crash or lost harness callback. */
-	virtual void ClearOrchestrateStaleRunningMarkers(const FString& ProjectId, const FString& ThreadId) = 0;
-	/** Clear active orchestrate DAG and any node execution status. */
-	virtual void ClearActiveOrchestrateDag() = 0;
+	virtual void ClearPlanStaleRunningMarkers(const FString& ProjectId, const FString& ThreadId) = 0;
+	/** Clear active plan DAG and any node execution status. */
+	virtual void ClearActivePlanDag() = 0;
 
 	virtual void SetEditorSnapshot(const FEditorContextSnapshot& Snapshot) = 0;
 	virtual void ClearEditorSnapshot() = 0;
 
 	/** Capture current editor selection / active asset (Phase C). */
 	virtual void RefreshEditorSnapshotFromEngine() = 0;
+	virtual void StartRetrievalPrefetch(const FString& TurnKey, const FString& UserMessageForComplexity) = 0;
+	virtual void CancelRetrievalPrefetchForThread(const FString& ProjectId, const FString& ThreadId) = 0;
 
 	virtual FAgentContextBuildResult BuildContextWindow(const FAgentContextBuildOptions& Options) = 0;
 

@@ -98,6 +98,10 @@ void FUnrealAiContextService::LoadOrCreate(const FString& ProjectId, const FStri
 
 void FUnrealAiContextService::ClearSession(const FString& ProjectId, const FString& ThreadId)
 {
+	if (RetrievalService)
+	{
+		RetrievalService->CancelPrefetchForThread(ProjectId, ThreadId);
+	}
 	Sessions.Remove(SessionKey(ProjectId, ThreadId));
 	if (ActiveProjectId == ProjectId && ActiveThreadId == ThreadId)
 	{
@@ -227,35 +231,35 @@ void FUnrealAiContextService::SetTodoStepDone(int32 StepIndex, bool bDone)
 	ScheduleSave(ActiveProjectId, ActiveThreadId);
 }
 
-void FUnrealAiContextService::SetActiveOrchestrateDag(const FString& DagJson)
+void FUnrealAiContextService::SetActivePlanDag(const FString& DagJson)
 {
 	if (ActiveProjectId.IsEmpty() || ActiveThreadId.IsEmpty())
 	{
 		return;
 	}
 	FAgentContextState* S = FindOrAddState(ActiveProjectId, ActiveThreadId);
-	S->ActiveOrchestrateDagJson = DagJson;
-	S->OrchestrateNodeStatusById.Reset();
-	S->OrchestrateNodeSummaryById.Reset();
+	S->ActivePlanDagJson = DagJson;
+	S->PlanNodeStatusById.Reset();
+	S->PlanNodeSummaryById.Reset();
 	ScheduleSave(ActiveProjectId, ActiveThreadId);
 }
 
-void FUnrealAiContextService::SetOrchestrateNodeStatus(const FString& NodeId, const FString& Status, const FString& Summary)
+void FUnrealAiContextService::SetPlanNodeStatus(const FString& NodeId, const FString& Status, const FString& Summary)
 {
 	if (ActiveProjectId.IsEmpty() || ActiveThreadId.IsEmpty() || NodeId.IsEmpty())
 	{
 		return;
 	}
 	FAgentContextState* S = FindOrAddState(ActiveProjectId, ActiveThreadId);
-	S->OrchestrateNodeStatusById.Add(NodeId, Status);
+	S->PlanNodeStatusById.Add(NodeId, Status);
 	if (!Summary.IsEmpty())
 	{
-		S->OrchestrateNodeSummaryById.Add(NodeId, Summary);
+		S->PlanNodeSummaryById.Add(NodeId, Summary);
 	}
 	ScheduleSave(ActiveProjectId, ActiveThreadId);
 }
 
-void FUnrealAiContextService::ClearOrchestrateStaleRunningMarkers(const FString& ProjectId, const FString& ThreadId)
+void FUnrealAiContextService::ClearPlanStaleRunningMarkers(const FString& ProjectId, const FString& ThreadId)
 {
 	if (ProjectId.IsEmpty() || ThreadId.IsEmpty())
 	{
@@ -263,7 +267,7 @@ void FUnrealAiContextService::ClearOrchestrateStaleRunningMarkers(const FString&
 	}
 	FAgentContextState* S = FindOrAddState(ProjectId, ThreadId);
 	TArray<FString> RemoveIds;
-	for (const TPair<FString, FString>& Pair : S->OrchestrateNodeStatusById)
+	for (const TPair<FString, FString>& Pair : S->PlanNodeStatusById)
 	{
 		if (Pair.Value.Equals(TEXT("running"), ESearchCase::IgnoreCase))
 		{
@@ -276,22 +280,22 @@ void FUnrealAiContextService::ClearOrchestrateStaleRunningMarkers(const FString&
 	}
 	for (const FString& Id : RemoveIds)
 	{
-		S->OrchestrateNodeStatusById.Remove(Id);
-		S->OrchestrateNodeSummaryById.Remove(Id);
+		S->PlanNodeStatusById.Remove(Id);
+		S->PlanNodeSummaryById.Remove(Id);
 	}
 	ScheduleSave(ProjectId, ThreadId);
 }
 
-void FUnrealAiContextService::ClearActiveOrchestrateDag()
+void FUnrealAiContextService::ClearActivePlanDag()
 {
 	if (ActiveProjectId.IsEmpty() || ActiveThreadId.IsEmpty())
 	{
 		return;
 	}
 	FAgentContextState* S = FindOrAddState(ActiveProjectId, ActiveThreadId);
-	S->ActiveOrchestrateDagJson.Empty();
-	S->OrchestrateNodeStatusById.Reset();
-	S->OrchestrateNodeSummaryById.Reset();
+	S->ActivePlanDagJson.Empty();
+	S->PlanNodeStatusById.Reset();
+	S->PlanNodeSummaryById.Reset();
 	ScheduleSave(ActiveProjectId, ActiveThreadId);
 }
 
@@ -371,6 +375,37 @@ void FUnrealAiContextService::RefreshEditorSnapshotFromEngine()
 #endif
 }
 
+void FUnrealAiContextService::StartRetrievalPrefetch(const FString& TurnKey, const FString& UserMessageForComplexity)
+{
+	if (TurnKey.IsEmpty() || UserMessageForComplexity.TrimStartAndEnd().IsEmpty())
+	{
+		return;
+	}
+	if (ActiveProjectId.IsEmpty() || ActiveThreadId.IsEmpty())
+	{
+		return;
+	}
+	if (!RetrievalService || !RetrievalService->IsEnabledForProject(ActiveProjectId))
+	{
+		return;
+	}
+
+	FUnrealAiRetrievalQuery RetrievalQuery;
+	RetrievalQuery.ProjectId = ActiveProjectId;
+	RetrievalQuery.ThreadId = ActiveThreadId;
+	RetrievalQuery.QueryText = UserMessageForComplexity;
+	RetrievalService->StartPrefetch(RetrievalQuery, TurnKey);
+}
+
+void FUnrealAiContextService::CancelRetrievalPrefetchForThread(const FString& ProjectId, const FString& ThreadId)
+{
+	if (!RetrievalService)
+	{
+		return;
+	}
+	RetrievalService->CancelPrefetchForThread(ProjectId, ThreadId);
+}
+
 FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgentContextBuildOptions& Options)
 {
 	FAgentContextBuildResult Result;
@@ -406,7 +441,7 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 			{
 			case EUnrealAiAgentMode::Ask: return TEXT("ask");
 			case EUnrealAiAgentMode::Agent: return TEXT("agent");
-			case EUnrealAiAgentMode::Orchestrate: return TEXT("orchestrate");
+			case EUnrealAiAgentMode::Plan: return TEXT("plan");
 			default: return TEXT("unknown");
 			}
 		}();
@@ -471,10 +506,44 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 		RetrievalQuery.ProjectId = ActiveProjectId;
 		RetrievalQuery.ThreadId = ActiveThreadId;
 		RetrievalQuery.QueryText = EffectiveOptions.UserMessageForComplexity;
-		UnrealAiRetrievalObservability::EmitQueryStart(RetrievalQuery);
-		const FUnrealAiRetrievalQueryResult RetrievalResult = RetrievalService->Query(RetrievalQuery);
+		FUnrealAiRetrievalQueryResult RetrievalResult;
+		bool bUsedAsyncPrefetch = false;
+		bool bPrefetchReady = false;
+		if (!EffectiveOptions.RetrievalTurnKey.IsEmpty())
+		{
+			const bool bHasPrefetchEntry = RetrievalService->TryConsumePrefetch(
+				EffectiveOptions.RetrievalTurnKey,
+				RetrievalResult,
+				bPrefetchReady);
+			if (bHasPrefetchEntry && bPrefetchReady)
+			{
+				bUsedAsyncPrefetch = true;
+				if (bVerbose)
+				{
+					AddTraceLine(FString::Printf(
+						TEXT("Retrieval prefetch consumed turn_key=%s snippets=%d"),
+						*EffectiveOptions.RetrievalTurnKey,
+						RetrievalResult.Snippets.Num()));
+				}
+			}
+			else if (bHasPrefetchEntry && !bPrefetchReady)
+			{
+				Result.Warnings.Add(TEXT("Retrieval prefetch not ready; continuing without retrieval snippets."));
+				if (bVerbose)
+				{
+					AddTraceLine(FString::Printf(
+						TEXT("Retrieval prefetch miss (not ready) turn_key=%s"),
+						*EffectiveOptions.RetrievalTurnKey));
+				}
+			}
+		}
+		if (!bUsedAsyncPrefetch && EffectiveOptions.RetrievalTurnKey.IsEmpty())
+		{
+			UnrealAiRetrievalObservability::EmitQueryStart(RetrievalQuery);
+			RetrievalResult = RetrievalService->Query(RetrievalQuery);
+			UnrealAiRetrievalObservability::EmitQueryEnd(RetrievalQuery, RetrievalResult);
+		}
 		RetrievalSnippets = RetrievalResult.Snippets;
-		UnrealAiRetrievalObservability::EmitQueryEnd(RetrievalQuery, RetrievalResult);
 		for (const FString& Warning : RetrievalResult.Warnings)
 		{
 			Result.Warnings.Add(Warning);
@@ -504,6 +573,15 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 			}
 		}
 		AddTraceLine(FString::Printf(TEXT("[Ranker] actionable_target_anchors_kept=%d"), ActionableTargetAnchors));
+		int32 ActionableTargetAnchorDrops = 0;
+		for (const UnrealAiContextCandidates::FContextCandidateEnvelope& Dropped : Unified.Dropped)
+		{
+			if (Dropped.DropReason == TEXT("pack:budget_anchor_actionable_target"))
+			{
+				++ActionableTargetAnchorDrops;
+			}
+		}
+		AddTraceLine(FString::Printf(TEXT("[Ranker] actionable_target_anchor_drops=%d"), ActionableTargetAnchorDrops));
 	}
 	Block = Unified.ContextBlock;
 	Result.bTruncated = Unified.bTruncated;

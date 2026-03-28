@@ -219,23 +219,23 @@ namespace UnrealAiAgentContextJson
 			DoneArr.Add(MakeShared<FJsonValueBoolean>(b));
 		}
 		Root->SetArrayField(TEXT("todoStepsDone"), DoneArr);
-		if (!State.ActiveOrchestrateDagJson.IsEmpty())
+		if (!State.ActivePlanDagJson.IsEmpty())
 		{
-			Root->SetStringField(TEXT("activeOrchestrateDag"), State.ActiveOrchestrateDagJson);
+			Root->SetStringField(TEXT("activePlanDag"), State.ActivePlanDagJson);
 		}
 		TArray<TSharedPtr<FJsonValue>> OrchStatusArr;
-		for (const TPair<FString, FString>& Pair : State.OrchestrateNodeStatusById)
+		for (const TPair<FString, FString>& Pair : State.PlanNodeStatusById)
 		{
 			TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 			O->SetStringField(TEXT("nodeId"), Pair.Key);
 			O->SetStringField(TEXT("status"), Pair.Value);
-			if (const FString* Summary = State.OrchestrateNodeSummaryById.Find(Pair.Key))
+			if (const FString* Summary = State.PlanNodeSummaryById.Find(Pair.Key))
 			{
 				O->SetStringField(TEXT("summary"), *Summary);
 			}
 			OrchStatusArr.Add(MakeShared<FJsonValueObject>(O.ToSharedRef()));
 		}
-		Root->SetArrayField(TEXT("orchestrateNodeStatus"), OrchStatusArr);
+		Root->SetArrayField(TEXT("planNodeStatus"), OrchStatusArr);
 		TArray<TSharedPtr<FJsonValue>> ThreadUiArr;
 		for (const FRecentUiEntry& R : State.ThreadRecentUiOverlay)
 		{
@@ -393,9 +393,9 @@ namespace UnrealAiAgentContextJson
 				}
 			}
 		}
-		Root->TryGetStringField(TEXT("activeOrchestrateDag"), OutState.ActiveOrchestrateDagJson);
+		Root->TryGetStringField(TEXT("activePlanDag"), OutState.ActivePlanDagJson);
 		const TArray<TSharedPtr<FJsonValue>>* OrchStatusArr = nullptr;
-		if (Root->TryGetArrayField(TEXT("orchestrateNodeStatus"), OrchStatusArr) && OrchStatusArr)
+		if (Root->TryGetArrayField(TEXT("planNodeStatus"), OrchStatusArr) && OrchStatusArr)
 		{
 			for (const TSharedPtr<FJsonValue>& V : *OrchStatusArr)
 			{
@@ -416,11 +416,11 @@ namespace UnrealAiAgentContextJson
 				{
 					continue;
 				}
-				OutState.OrchestrateNodeStatusById.Add(NodeId, Status);
+				OutState.PlanNodeStatusById.Add(NodeId, Status);
 				FString Summary;
 				if ((*ObjPtr)->TryGetStringField(TEXT("summary"), Summary) && !Summary.IsEmpty())
 				{
-					OutState.OrchestrateNodeSummaryById.Add(NodeId, Summary);
+					OutState.PlanNodeSummaryById.Add(NodeId, Summary);
 				}
 			}
 		}

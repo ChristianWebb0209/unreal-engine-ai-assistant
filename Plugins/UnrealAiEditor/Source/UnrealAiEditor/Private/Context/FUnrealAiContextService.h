@@ -26,14 +26,16 @@ public:
 
 	virtual void SetActiveTodoPlan(const FString& PlanJson) override;
 	virtual void SetTodoStepDone(int32 StepIndex, bool bDone) override;
-	virtual void SetActiveOrchestrateDag(const FString& DagJson) override;
-	virtual void SetOrchestrateNodeStatus(const FString& NodeId, const FString& Status, const FString& Summary = FString()) override;
-	virtual void ClearOrchestrateStaleRunningMarkers(const FString& ProjectId, const FString& ThreadId) override;
-	virtual void ClearActiveOrchestrateDag() override;
+	virtual void SetActivePlanDag(const FString& DagJson) override;
+	virtual void SetPlanNodeStatus(const FString& NodeId, const FString& Status, const FString& Summary = FString()) override;
+	virtual void ClearPlanStaleRunningMarkers(const FString& ProjectId, const FString& ThreadId) override;
+	virtual void ClearActivePlanDag() override;
 
 	virtual void SetEditorSnapshot(const FEditorContextSnapshot& Snapshot) override;
 	virtual void ClearEditorSnapshot() override;
 	virtual void RefreshEditorSnapshotFromEngine() override;
+	virtual void StartRetrievalPrefetch(const FString& TurnKey, const FString& UserMessageForComplexity) override;
+	virtual void CancelRetrievalPrefetchForThread(const FString& ProjectId, const FString& ThreadId) override;
 
 	virtual FAgentContextBuildResult BuildContextWindow(const FAgentContextBuildOptions& Options) override;
 

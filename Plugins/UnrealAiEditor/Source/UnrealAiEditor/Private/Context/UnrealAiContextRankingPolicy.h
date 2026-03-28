@@ -24,7 +24,7 @@ namespace UnrealAiContextRankingPolicy
 		MemorySnippet,
 		RetrievalSnippet,
 		TodoState,
-		OrchestrateState,
+		PlanState,
 	};
 
 	struct FScoreWeights
@@ -54,7 +54,7 @@ namespace UnrealAiContextRankingPolicy
 		// memory to avoid spending most of the token budget on historical snippets.
 		int32 MaxMemorySnippetShortPrompt = 2;
 		int32 MaxTodoState = 4;
-		int32 MaxOrchestrateState = 10;
+		int32 MaxPlanState = 10;
 	};
 
 	inline constexpr int32 DefaultHardMaxCandidates = 256;
@@ -114,7 +114,7 @@ namespace UnrealAiContextRankingPolicy
 		case ECandidateType::RetrievalSnippet:
 			// Retrieved local code/doc chunks can be high signal when query-matched.
 			return 66.f;
-		case ECandidateType::OrchestrateState:
+		case ECandidateType::PlanState:
 			// Important in orchestration mode; generally less critical in simple turns.
 			return 60.f;
 		default:
@@ -134,7 +134,7 @@ namespace UnrealAiContextRankingPolicy
 		case ECandidateType::MemorySnippet: return Caps.MaxMemorySnippet;
 		case ECandidateType::RetrievalSnippet: return Caps.MaxRetrievalSnippet;
 		case ECandidateType::TodoState: return Caps.MaxTodoState;
-		case ECandidateType::OrchestrateState: return Caps.MaxOrchestrateState;
+		case ECandidateType::PlanState: return Caps.MaxPlanState;
 		case ECandidateType::EngineHeader: return 1;
 		default: return 8;
 		}
@@ -152,7 +152,7 @@ namespace UnrealAiContextRankingPolicy
 		case ECandidateType::MemorySnippet: return TEXT("memory_snippet");
 		case ECandidateType::RetrievalSnippet: return TEXT("retrieval_snippet");
 		case ECandidateType::TodoState: return TEXT("todo_state");
-		case ECandidateType::OrchestrateState: return TEXT("orchestrate_state");
+		case ECandidateType::PlanState: return TEXT("plan_state");
 		default: return TEXT("unknown");
 		}
 	}

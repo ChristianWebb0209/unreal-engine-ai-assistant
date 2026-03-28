@@ -1,6 +1,7 @@
 #include "Context/UnrealAiActiveTodoSummary.h"
 
 #include "Dom/JsonObject.h"
+#include "Harness/UnrealAiPlanDag.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -34,4 +35,32 @@ FString UnrealAiFormatActiveTodoSummary(const FString& PlanJson, const TArray<bo
 	}
 	const FString T = Title.IsEmpty() ? TEXT("Plan") : Title;
 	return FString::Printf(TEXT("Active todo plan: \"%s\" — %d steps (%d marked done in UI)."), *T, N, Done);
+}
+
+FString UnrealAiFormatActivePlanDagSummary(const FString& DagJson, const TMap<FString, FString>& NodeStatusById)
+{
+	if (DagJson.IsEmpty())
+	{
+		return FString();
+	}
+	FUnrealAiPlanDag Dag;
+	FString Err;
+	if (!UnrealAiPlanDag::ParseDagJson(DagJson, Dag, Err))
+	{
+		return FString::Printf(TEXT("Active plan DAG present (%d chars); parse error: %s"), DagJson.Len(), *Err);
+	}
+	FString Title = Dag.Title.IsEmpty() ? TEXT("Plan DAG") : Dag.Title;
+	FString Lines = FString::Printf(TEXT("\"%s\" — %d nodes: "), *Title, Dag.Nodes.Num());
+	for (int32 i = 0; i < Dag.Nodes.Num(); ++i)
+	{
+		const FUnrealAiDagNode& N = Dag.Nodes[i];
+		const FString* St = NodeStatusById.Find(N.Id);
+		const FString Status = St && !St->IsEmpty() ? *St : TEXT("pending");
+		if (i > 0)
+		{
+			Lines += TEXT("; ");
+		}
+		Lines += FString::Printf(TEXT("%s (%s): %s"), *N.Id, *Status, N.Title.IsEmpty() ? *N.Id : *N.Title);
+	}
+	return Lines;
 }

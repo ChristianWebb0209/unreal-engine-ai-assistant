@@ -2,12 +2,12 @@
 
 #include "CoreMinimal.h"
 
-/** Ask / Agent / Orchestrate — controls what enters the built context block. */
+/** Ask / Agent / Plan — controls what enters the built context block. */
 enum class EUnrealAiAgentMode : uint8
 {
 	Ask,
 	Agent,
-	Orchestrate,
+	Plan,
 };
 
 enum class EContextAttachmentType : uint8
@@ -116,12 +116,12 @@ struct FAgentContextState
 	FString ActiveTodoPlanJson;
 	/** Parallel to `steps` in ActiveTodoPlanJson (best-effort). */
 	TArray<bool> TodoStepsDone;
-	/** Canonical orchestrate DAG JSON produced by planner pass (schema: unreal_ai.orchestrate_dag). */
-	FString ActiveOrchestrateDagJson;
+	/** Canonical plan DAG JSON produced by planner pass (schema: unreal_ai.plan_dag). */
+	FString ActivePlanDagJson;
 	/** Node-level execution status for the active DAG. */
-	TMap<FString, FString> OrchestrateNodeStatusById;
+	TMap<FString, FString> PlanNodeStatusById;
 	/** Optional one-line summary per completed/failed node for parent context carry-forward. */
-	TMap<FString, FString> OrchestrateNodeSummaryById;
+	TMap<FString, FString> PlanNodeSummaryById;
 	/** Thread-local recent UI overlay (bounded, persisted per thread). */
 	TArray<FRecentUiEntry> ThreadRecentUiOverlay;
 };
@@ -146,6 +146,8 @@ struct FAgentContextBuildOptions
 	FString UserMessageForComplexity;
 	/** Active thread id at build time, used for thread-preferred memory retrieval. */
 	FString ThreadIdForMemory;
+	/** Stable key for this LLM turn/round retrieval prefetch request. */
+	FString RetrievalTurnKey;
 	/** From model profile: if false, image-like attachments are stripped when building context. */
 	bool bModelSupportsImages = true;
 	/** Optional call-site label for decision log attribution (for example: request_build, harness_dump_run_started). */

@@ -37,7 +37,7 @@ namespace UnrealAiContextOverviewPriv
 		{
 		case EUnrealAiAgentMode::Ask: return TEXT("Ask");
 		case EUnrealAiAgentMode::Agent: return TEXT("Agent");
-		case EUnrealAiAgentMode::Orchestrate: return TEXT("Orchestrate");
+		case EUnrealAiAgentMode::Plan: return TEXT("Plan");
 		default: return TEXT("Ask");
 		}
 	}
