@@ -1,7 +1,15 @@
 # Tool calling
 
 - **Only** tools in the current request. IDs **snake_case** (e.g. `editor_get_selection`).
-- **Explicit tool id:** If the user names a specific tool (quoted id, `` `tool_id` ``, or “call tool **x**”), **call that exact tool** in this assistant turn. Use `{}` or the smallest valid argument object when arguments are unknown—**do not** swap in `scene_fuzzy_search`, `editor_get_selection`, or other discovery helpers unless the user only asked to search or inspect.
+- **Explicit tool id:** If the user names a specific tool (quoted id, `` `tool_id` ``, or “call tool **x**”), **call that exact tool** in this assistant turn. **Arguments must satisfy that tool’s JSON schema:** use the **smallest valid** argument object for **that** schema. **`{}` is only appropriate** when the schema has **no required fields** (examples: `pie_status`, `pie_stop`). If the schema lists **required** properties (`path`, `actor_paths`, `blueprint_path`, `object_path`, etc.), **never** invoke the tool with `{}` or omitted required keys—fill them from context, prior tool results, or a **read/discovery** tool first. **Do not** substitute a different discovery-only tool when the user explicitly named this tool unless they only asked to search or inspect.
+
+## Required arguments (schema-first)
+
+- **If `required` appears in the tool schema, `{}` is invalid** for that tool.
+- **Discovery before targeted calls:** if you do not yet know a path or id the tool needs, call `editor_get_selection`, `scene_fuzzy_search`, `asset_index_fuzzy_search`, `asset_registry_query`, or `editor_state_snapshot_read` first—**do not** “probe” write/UI tools with empty arguments.
+- **`asset_index_fuzzy_search`:** pass a **non-empty `query`** or, if the query is unknown, a **narrow `path_prefix`** (e.g. `/Game/Blueprints`)—calling with `{}` is invalid. **`asset_registry_query`** must include **`path_filter` or `class_name`** (bounded listing only).
+- **Retries:** an empty `{}` or the same missing-field shape counts as the **same invalid attempt**; change strategy or use `suggested_correct_call` instead of repeating it (see below).
+
 - **Selection vs scene:** `editor_get_selection` answers **what is selected in the editor right now** (may be empty). `scene_fuzzy_search` searches **all actors in the loaded level** by label/name/class/path/tags—use it when the user asks to *find* actors by topic, not only what is selected.
 - **Read first** when the user did **not** name a tool: `scene_fuzzy_search`, `asset_index_fuzzy_search`, `source_search_symbol`, `asset_registry_query`, `editor_state_snapshot_read`.
 - **Path-resolution gates:** if a target tool requires `object_path`/`blueprint_path`, resolve that path first via discovery tools, then call the target tool with concrete args in a single attempt.
@@ -13,7 +21,7 @@
 - **Generic asset authoring (most `UObject` / DataAsset / config-like assets under `/Game`):** prefer **`asset_export_properties`** → **`asset_apply_properties`** before bespoke subsystem tools. Create with **`asset_create`** (`package_path`, `asset_name`, `asset_class`, optional `factory_class`). Dependencies: **`asset_get_dependencies`**, referencers: **`asset_find_referencers`**. Level Sequence shortcut: **`level_sequence_create_asset`**.
 - **Renames:** do **not** set `AssetName`/`ObjectName` in `asset_apply_properties`. Use **`asset_rename`** for renames/moves.
 - **One call, one purpose**; avoid redundant snapshots if the last result already answers.
-- **Action-turn execution rule (strict):** In `agent`/`plan` mode, if the user asks you to *run/start/stop/compile/save/open/re-open/fix/apply/change/adjust/tune/create/delete*, your assistant turn must include at least one concrete tool call for that requested action (or the immediate prerequisite resolver call). Do **not** return narration-only text like "I will use tools..." for those turns.
+- **Action-turn execution (preferred):** In `agent`/`plan` mode, when the user asks you to *run/start/stop/compile/save/open/re-open/fix/apply/change/adjust/tune/create/delete*, prefer at least one concrete tool call for that action (or the immediate prerequisite resolver). The harness may allow text-only completion under relaxed policy; still avoid empty promises—either call tools or state a clear blocker.
 - **Mutation follow-through rule:** If the user asked for a change (for example "fix", "apply", "adjust", "reduce gloss", "compile warning"), do not stop after read-only inspection alone. After one discovery/read step, continue into the appropriate write/exec tool in the same ongoing run unless you are truly blocked.
 - **Blocker contract on action turns:** If you cannot safely continue with tools, explicitly state the blocker in one concise sentence (missing target path, permission gate, unavailable tool, editor modal block, etc.). Never end an action-intent turn with generic narration-only text.
 - **Known-target shortcut:** If a concrete editable target is already known from context (selected asset, attachment, explicit `/Game/...` path, or recent successful discovery), skip redundant re-discovery and move to the requested mutation/exec tool directly.
@@ -27,7 +35,7 @@
 - **Params:** follow the tool JSON schema **exactly**: use canonical key names first, fill required fields, and omit unknown optionals. Use aliases only when the schema explicitly documents them. Canonical examples: `asset_index_fuzzy_search.query`, `scene_fuzzy_search.query`, `asset_open_editor.object_path`, `asset_export_properties.object_path`, `asset_create.asset_class`, `project_file_read_text.relative_path`, `project_file_write_text.relative_path`.
 - **Minimal valid argument examples (canonical keys):**
   - `scene_fuzzy_search`: `{"query":"player start"}`
-  - `asset_index_fuzzy_search`: `{"query":"BP_Enemy","path_prefix":"/Game"}`
+  - `asset_index_fuzzy_search`: `{"query":"BP_Enemy","path_prefix":"/Game/Blueprints"}` (prefer a narrow `path_prefix`; if `query` is omitted, `path_prefix` is **required**)
   - `asset_open_editor`: `{"object_path":"/Game/Blueprints/BP_Player.BP_Player"}`
   - `actor_set_transform`: `{"actor_path":"PersistentLevel.BP_Player_C_0","location":[0,0,120]}`
   - `material_instance_set_scalar_parameter`: `{"material_path":"/Game/Materials/MI_Player.MI_Player","parameter_name":"GlowIntensity","value":0.6}`
@@ -36,8 +44,10 @@
   - `pie_status`: `{}`
   - `pie_stop`: `{}`
   - `asset_save_packages`: `{"all_dirty":true}`
+  - `content_browser_sync_asset`: `{"path":"/Game/Folder/MyAsset.MyAsset"}` (also `object_path` / `asset_path`; must be a **concrete asset** object path, not a folder-only string)
+  - `viewport_frame_actors`: `{"actor_paths":["/Game/MyLevel.PersistentLevel.MyActor"]}` (world actor paths; obtain via `editor_get_selection` or `scene_fuzzy_search` if unknown)
 - If a tool error includes `suggested_correct_call`, use that shape on the next retry instead of repeating the same args.
-- If a call fails validation, apply `suggested_correct_call` immediately; never retry the same invalid shape twice.
+- If a call fails validation, apply `suggested_correct_call` immediately; never retry the same invalid shape twice—including **empty `{}`** when required fields exist.
 - Search/retrieval loop cap: after 2 near-identical calls without new progress, change strategy/tool family or emit `agent_emit_todo_plan`.
 - Discovery loop policy examples:
   - If `scene_fuzzy_search` returns `count:0` twice for near-identical queries, switch approach (selection snapshot, broader query, or explicit blocker) instead of a third near-duplicate call.
