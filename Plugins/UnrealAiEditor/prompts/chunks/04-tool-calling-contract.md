@@ -71,7 +71,8 @@ For **gameplay Blueprint** work (movement, overlap, timers, health, spawners), r
 
 ## Editor focus (`focused`)
 
-- Optional boolean on supported tools: **`"focused": true`**. The execution host **strips** it before the handler runs; after a **successful** tool result it may **open or foreground** the related Blueprint graph, asset editor, Content Browser selection’s asset, or a **project source file** in the IDE (via Source Code Access). Omit or `false` for no navigation.
+- **Global switch (user setting):** `plugin_settings.json` → **`ui.editorFocus`** (default **false**). When **off**, the plugin skips **optional** follow/navigation: post-tool `focused` behavior, Content Browser sync/folder sync (validation still runs; responses may include **`ui_suppressed`: true**), and viewport **frame** camera moves that only call `FocusViewportOnBox`. Tools that **must** open an editor or tab to do their job (e.g. **`asset_open_editor`**, **`blueprint_open_graph_tab`**, **`global_tab_focus`**) still perform that UI.
+- Optional boolean on supported tools: **`"focused": true`**. The execution host **strips** it before the handler runs; after a **successful** tool result it may **open or foreground** the related Blueprint graph, asset editor, Content Browser selection’s asset, or a **project source file** in the IDE (via Source Code Access)—**only if** global **`ui.editorFocus`** is on. Omit or `false` for no navigation.
 - Supported tool IDs include blueprint family (`blueprint_*`, `animation_blueprint_get_graph_summary`), **`asset_open_editor`**, **`asset_create`**, **`asset_apply_properties`** (non–`dry_run`), **`content_browser_sync_asset`**, **`project_file_read_text`**, **`project_file_write_text`**. See catalog **`meta.invocation`** and per-tool `focused` property where listed.
 
 ## Tool result visualization (UI only)
