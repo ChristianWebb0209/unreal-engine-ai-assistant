@@ -7,7 +7,7 @@
 
 **This Markdown file** remains the **human-readable** narrative, Epic links, and engineering notes.
 
-**Related:** [`context-management.md`](context-management.md), [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md), repo [`README.md`](../README.md).
+**Related:** [`context-management.md`](context-management.md), [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md), [`tool-catalog-audit-guide.md`](tool-catalog-audit-guide.md) (iterative catalog review using harness results), repo [`README.md`](../README.md).
 
 ---
 
@@ -969,12 +969,12 @@ These are the first implementation wave. Each row is expanded in its domain sect
 
 | Field | Value |
 |-------|--------|
-| **summary** | Read a text file under project directory: `Source/`, `Config/`, `Content/`, `Plugins/`, `docs/`, `.github/`, `scripts/`, `tools/`, `build/`, root `README`/`LICENSE`-style files, or root `*.uproject` (path allow-list; no `..`). |
+| **summary** | Read a text file anywhere under the project directory (`relative_path` from project root; includes `Saved/`, `Intermediate/`, etc.). No `..` escape; resolved path must stay under `FPaths::ProjectDir()`. |
 | **parameters** | `relative_path`, `max_bytes`. |
 | **returns** | `content` or `truncated`. |
 | **side_effects** | none |
 | **permission** | `read` |
-| **ue_entry_points** | `FFileHelper::LoadFileToString` with **path allow-list** (no `..` escape). |
+| **ue_entry_points** | `FFileHelper::LoadFileToString` after project-relative resolution (no path escape). |
 | **threading** | Async file read OK. |
 | **failure_modes** | Path outside project; binary file. |
 | **doc_links** | [File I/O](https://dev.epicgames.com/documentation/en-us/unreal-engine/file-management-in-unreal-engine) |
@@ -984,12 +984,12 @@ These are the first implementation wave. Each row is expanded in its domain sect
 
 | Field | Value |
 |-------|--------|
-| **summary** | Write text file under project (e.g. config or notes) with confirmation. |
+| **summary** | Write a text file anywhere under the project directory (same path rules as `project_file_read_text`; confirmation unless headed auto-run). |
 | **parameters** | `relative_path`, `content`, optional `confirm` (auto-filled in headed runs when `UNREAL_AI_AUTO_RUN_DESTRUCTIVE=1`). |
 | **returns** | `success`. |
 | **side_effects** | disk |
 | **permission** | `destructive` |
-| **ue_entry_points** | `FFileHelper::SaveStringToFile` + allow-list. |
+| **ue_entry_points** | `FFileHelper::SaveStringToFile` after project-relative resolution (same rules as read). |
 | **threading** | Game or worker thread with flush. |
 | **failure_modes** | Read-only VCS. |
 | **status** | `future` |
