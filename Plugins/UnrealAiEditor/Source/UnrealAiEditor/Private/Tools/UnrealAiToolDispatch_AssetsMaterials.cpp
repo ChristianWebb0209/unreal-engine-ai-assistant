@@ -1,5 +1,6 @@
 #include "Tools/UnrealAiToolDispatch_AssetsMaterials.h"
 
+#include "Tools/UnrealAiToolDispatch_ArgRepair.h"
 #include "Tools/UnrealAiToolJson.h"
 
 #include "AssetRegistry/AssetIdentifier.h"
@@ -8,6 +9,7 @@
 #include "AssetToolsModule.h"
 #include "FileHelpers.h"
 #include "IAssetTools.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
@@ -21,6 +23,18 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetSavePackages(const TSharedPt
 	// Examples:
 	// - object_path/object_paths: `/Game/X/Asset.Asset`
 	// - package_paths: `/Game/X/Asset` or `/Game/X/Folder/` (folder is expanded via Asset Registry)
+	// - all_dirty: save every dirty package (matches catalog; no explicit paths required)
+
+	bool bAllDirty = false;
+	Args->TryGetBoolField(TEXT("all_dirty"), bAllDirty);
+	if (!bAllDirty)
+	{
+		Args->TryGetBoolField(TEXT("save_all_dirty"), bAllDirty);
+	}
+	if (!bAllDirty)
+	{
+		Args->TryGetBoolField(TEXT("dirty_all"), bAllDirty);
+	}
 
 	TArray<FString> InputTokens;
 
@@ -34,7 +48,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetSavePackages(const TSharedPt
 				FString P;
 				if (V.IsValid() && V->TryGetString(P) && !P.IsEmpty())
 				{
-					InputTokens.Add(P);
+					UnrealAiToolDispatchArgRepair::SanitizeUnrealPathString(P);
+					if (!P.IsEmpty())
+					{
+						InputTokens.Add(P);
+					}
 				}
 			}
 		}
@@ -44,11 +62,19 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetSavePackages(const TSharedPt
 			// object_path is canonical; `path` is ambiguous but tolerated as a fallback.
 			if (Args->TryGetStringField(TEXT("object_path"), ObjOne) && !ObjOne.IsEmpty())
 			{
-				InputTokens.Add(ObjOne);
+				UnrealAiToolDispatchArgRepair::SanitizeUnrealPathString(ObjOne);
+				if (!ObjOne.IsEmpty())
+				{
+					InputTokens.Add(ObjOne);
+				}
 			}
 				else if (Args->TryGetStringField(TEXT("path"), ObjOne) && !ObjOne.IsEmpty())
 			{
-				InputTokens.Add(ObjOne);
+				UnrealAiToolDispatchArgRepair::SanitizeUnrealPathString(ObjOne);
+				if (!ObjOne.IsEmpty())
+				{
+					InputTokens.Add(ObjOne);
+				}
 			}
 		}
 	}
@@ -63,7 +89,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetSavePackages(const TSharedPt
 				FString P;
 				if (V.IsValid() && V->TryGetString(P) && !P.IsEmpty())
 				{
-					InputTokens.Add(P);
+					UnrealAiToolDispatchArgRepair::SanitizeUnrealPathString(P);
+					if (!P.IsEmpty())
+					{
+						InputTokens.Add(P);
+					}
 				}
 			}
 		}
@@ -75,11 +105,19 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetSavePackages(const TSharedPt
 				FString P;
 				if (Args->TryGetStringField(TEXT("package_path"), P) && !P.IsEmpty())
 				{
-					InputTokens.Add(P);
+					UnrealAiToolDispatchArgRepair::SanitizeUnrealPathString(P);
+					if (!P.IsEmpty())
+					{
+						InputTokens.Add(P);
+					}
 				}
 				else if (Args->TryGetStringField(TEXT("path"), P) && !P.IsEmpty())
 				{
-					InputTokens.Add(P);
+					UnrealAiToolDispatchArgRepair::SanitizeUnrealPathString(P);
+					if (!P.IsEmpty())
+					{
+						InputTokens.Add(P);
+					}
 				}
 			}
 		}
@@ -96,6 +134,16 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetSavePackages(const TSharedPt
 
 	if (InputTokens.Num() == 0)
 	{
+		if (bAllDirty)
+		{
+			// Headless/editor automation: never prompt; save maps + content; fast save; no decline.
+			const bool bSaved = FEditorFileUtils::SaveDirtyPackages(false, true, true, true, false, false);
+			TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+			O->SetBoolField(TEXT("ok"), bSaved);
+			O->SetBoolField(TEXT("all_dirty"), true);
+			O->SetStringField(TEXT("mode"), TEXT("save_dirty_packages"));
+			return UnrealAiToolJson::Ok(O);
+		}
 		return UnrealAiToolJson::ErrorWithSuggestedCall(
 			TEXT("No package or object paths provided to asset_save_packages."),
 			TEXT("asset_save_packages"),
@@ -288,6 +336,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetGetMetadata(const TSharedPtr
 	{
 		return UnrealAiToolJson::Error(TEXT("object_path is required"));
 	}
+	UnrealAiToolDispatchArgRepair::NormalizeAssetLikeObjectPath(Path);
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 	const FAssetData AD = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(Path));
 	if (!AD.IsValid())
@@ -318,6 +367,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialGetUsageSummary(const TSh
 	{
 		return UnrealAiToolJson::Error(TEXT("material_path is required"));
 	}
+	UnrealAiToolDispatchArgRepair::NormalizeAssetLikeObjectPath(MaterialPath);
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 	IAssetRegistry& AR = ARM.Get();
 	const FSoftObjectPath SOP(MaterialPath);
@@ -361,11 +411,21 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetScalarParamete
 	{
 		return UnrealAiToolJson::Error(TEXT("material_path and parameter_name are required"));
 	}
+	UnrealAiToolDispatchArgRepair::NormalizeAssetLikeObjectPath(MaterialPath);
 	double Val = 0.0;
 	Args->TryGetNumberField(TEXT("value"), Val);
 	UMaterialInstanceConstant* MI = LoadObject<UMaterialInstanceConstant>(nullptr, *MaterialPath);
 	if (!MI)
 	{
+		if (LoadObject<UMaterial>(nullptr, *MaterialPath))
+		{
+			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+			SuggestedArgs->SetStringField(TEXT("object_path"), MaterialPath);
+			return UnrealAiToolJson::ErrorWithSuggestedCall(
+				TEXT("material_path resolves to a base Material, not a MaterialInstanceConstant. Scalar parameter edits require a Material Instance; duplicate the Material or create an MI, then pass the MI object path."),
+				TEXT("asset_open_editor"),
+				SuggestedArgs);
+		}
 		return UnrealAiToolJson::Error(TEXT("Could not load UMaterialInstanceConstant"));
 	}
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnMatScalar", "Unreal AI: MID scalar"));
@@ -397,6 +457,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetVectorParamete
 	{
 		return UnrealAiToolJson::Error(TEXT("material_path and parameter_name are required"));
 	}
+	UnrealAiToolDispatchArgRepair::NormalizeAssetLikeObjectPath(MaterialPath);
 	FLinearColor C(1.f, 1.f, 1.f, 1.f);
 	const TSharedPtr<FJsonObject>* Vo = nullptr;
 	if (Args->TryGetObjectField(TEXT("value"), Vo) && Vo->IsValid())
@@ -411,6 +472,15 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetVectorParamete
 	UMaterialInstanceConstant* MI = LoadObject<UMaterialInstanceConstant>(nullptr, *MaterialPath);
 	if (!MI)
 	{
+		if (LoadObject<UMaterial>(nullptr, *MaterialPath))
+		{
+			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+			SuggestedArgs->SetStringField(TEXT("object_path"), MaterialPath);
+			return UnrealAiToolJson::ErrorWithSuggestedCall(
+				TEXT("material_path resolves to a base Material, not a MaterialInstanceConstant. Vector parameter edits require a Material Instance; duplicate the Material or create an MI, then pass the MI object path."),
+				TEXT("asset_open_editor"),
+				SuggestedArgs);
+		}
 		return UnrealAiToolJson::Error(TEXT("Could not load UMaterialInstanceConstant"));
 	}
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnMatVec", "Unreal AI: MID vector"));

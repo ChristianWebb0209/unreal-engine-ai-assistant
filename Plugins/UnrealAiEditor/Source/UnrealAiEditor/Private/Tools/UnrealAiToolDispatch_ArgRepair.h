@@ -12,6 +12,17 @@
  */
 namespace UnrealAiToolDispatchArgRepair
 {
+	/** Strip SQL/JSON-style wrapping quotes and trim; safe to call on path-like strings. */
+	void SanitizeUnrealPathString(FString& S);
+
+	/**
+	 * Best-effort repair for common hallucinated asset object paths:
+	 * - outer quotes (`'/Game/...'`)
+	 * - file-style `.uasset` suffix
+	 * - `/Game/.../Leaf` without `.Leaf` object suffix (delegates to Blueprint normalizer).
+	 */
+	void NormalizeAssetLikeObjectPath(FString& Path);
+
 	static bool TryGetStringFieldCanonical(
 		const TSharedPtr<FJsonObject>& Args,
 		const TCHAR* CanonicalKey,

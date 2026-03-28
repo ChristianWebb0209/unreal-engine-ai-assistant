@@ -156,9 +156,9 @@ namespace UnrealAiHeadlessToolPromptTestsPriv
 			{
 				return EUnrealAiAgentMode::Ask;
 			}
-			if (InMode.Equals(TEXT("orchestrate"), ESearchCase::IgnoreCase))
+			if (InMode.Equals(TEXT("plan"), ESearchCase::IgnoreCase))
 			{
-				return EUnrealAiAgentMode::Orchestrate;
+				return EUnrealAiAgentMode::Plan;
 			}
 			return EUnrealAiAgentMode::Agent;
 		}
@@ -189,6 +189,7 @@ namespace UnrealAiHeadlessToolPromptTestsPriv
 				Req,
 				1,
 				16,
+				TEXT("headless_prompt_test_turn"),
 				Context.Get(),
 				Profiles.Get(),
 				&Catalog,

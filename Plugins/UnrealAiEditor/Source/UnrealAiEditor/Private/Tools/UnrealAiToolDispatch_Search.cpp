@@ -157,7 +157,8 @@ using namespace UnrealAiToolDispatchSearchInternal;
 FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr<FJsonObject>& Args)
 {
 	FString Query;
-	if (!Args->TryGetStringField(TEXT("query"), Query) || Query.IsEmpty())
+	const TArray<const TCHAR*> QueryAliases = {TEXT("search"), TEXT("q"), TEXT("text"), TEXT("needle"), TEXT("match")};
+	if (!UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(Args, TEXT("query"), QueryAliases, Query))
 	{
 		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
 		SuggestedArgs->SetStringField(TEXT("query"), TEXT("PlayerStart"));
@@ -166,6 +167,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 			TEXT("scene_fuzzy_search: non-empty query string is required."),
 			TEXT("scene_fuzzy_search"),
 			SuggestedArgs);
+	}
+	Query.TrimStartAndEndInline();
+	bool bQueryCoerced = false;
+	if (Query.IsEmpty())
+	{
+		Query = TEXT("PlayerStart");
+		bQueryCoerced = true;
+		Args->SetStringField(TEXT("query"), Query);
 	}
 	int32 MaxResults = 50;
 	double MR = 0.0;
@@ -274,6 +283,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("tool"), TEXT("scene_fuzzy_search"));
 	O->SetStringField(TEXT("query"), Query);
+	O->SetBoolField(TEXT("query_coerced"), bQueryCoerced);
 	O->SetArrayField(TEXT("matches"), Arr);
 	O->SetNumberField(TEXT("count"), static_cast<double>(Arr.Num()));
 	return UnrealAiToolJson::Ok(O);
@@ -282,24 +292,34 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TSharedPtr<FJsonObject>& Args)
 {
 	FString Query;
-	{
-		const TArray<const TCHAR*> Aliases = { TEXT("search_string"), TEXT("filter"), TEXT("name_prefix") };
-		UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
-			Args,
-			TEXT("query"),
-			Aliases,
-			Query);
-	}
-	if (Query.IsEmpty())
+	const TArray<const TCHAR*> QueryAliases = {
+		TEXT("search_string"),
+		TEXT("filter"),
+		TEXT("name_prefix"),
+		TEXT("search"),
+		TEXT("q"),
+		TEXT("text"),
+		TEXT("needle"),
+		TEXT("match")
+	};
+	if (!UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(Args, TEXT("query"), QueryAliases, Query))
 	{
 		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
-		SuggestedArgs->SetStringField(TEXT("query"), TEXT("coin"));
+		SuggestedArgs->SetStringField(TEXT("query"), TEXT("PlayerStart"));
 		SuggestedArgs->SetStringField(TEXT("path_prefix"), TEXT("/Game"));
 		SuggestedArgs->SetNumberField(TEXT("max_results"), 20.0);
 		return UnrealAiToolJson::ErrorWithSuggestedCall(
-			TEXT("asset_index_fuzzy_search: non-empty query string is required (preferred key: 'query'; accepted aliases: 'search_string', 'filter', 'name_prefix')."),
+			TEXT("asset_index_fuzzy_search: query string is required (preferred key: 'query'; accepted aliases: 'search_string', 'filter', 'name_prefix', 'search', 'q', 'text', 'needle', 'match')."),
 			TEXT("asset_index_fuzzy_search"),
 			SuggestedArgs);
+	}
+	Query.TrimStartAndEndInline();
+	bool bQueryCoerced = false;
+	if (Query.IsEmpty())
+	{
+		Query = TEXT("PlayerStart");
+		bQueryCoerced = true;
+		Args->SetStringField(TEXT("query"), Query);
 	}
 	FString PathPrefix(TEXT("/Game"));
 	Args->TryGetStringField(TEXT("path_prefix"), PathPrefix);
@@ -428,6 +448,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("tool"), TEXT("asset_index_fuzzy_search"));
 	O->SetStringField(TEXT("query"), Query);
+	O->SetBoolField(TEXT("query_coerced"), bQueryCoerced);
 	O->SetStringField(TEXT("path_prefix"), PathPrefix);
 	O->SetBoolField(TEXT("truncated"), bTruncated);
 	if (bLowConfidence)

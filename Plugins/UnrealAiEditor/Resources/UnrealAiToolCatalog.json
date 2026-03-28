@@ -45,7 +45,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 50,
@@ -102,7 +102,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 42,
@@ -146,7 +146,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 64,
@@ -187,7 +187,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 68,
@@ -216,7 +216,7 @@
     },
     {
       "tool_id": "actor_set_transform",
-      "summary": "Mutate/set actor transform. Omit `transform` and top-level location/rotation/scale to keep the current pose (useful with `teleport_physics` only). Use `transform` object, or top-level `location`/`rotation`/`scale` number arrays [x,y,z]. `actor_path` accepts full path or a unique suffix (e.g. PersistentLevel.Actor_UAID_...).",
+      "summary": "Mutate/set actor transform in the loaded level. Use this after scene_fuzzy_search when you need a concrete position/rotation/scale change; do not use for discovery or status-only checks (use scene_fuzzy_search or actor_get_transform). Omit `transform` and top-level location/rotation/scale to keep the current pose (useful with `teleport_physics` only). Use `transform` object, or top-level `location`/`rotation`/`scale` number arrays [x,y,z]. `actor_path` accepts full path or a unique suffix (e.g. PersistentLevel.Actor_UAID_...).",
       "category": "world_actors",
       "tags": [
         "actor"
@@ -226,7 +226,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 60,
@@ -287,7 +287,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 48,
@@ -334,7 +334,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 47,
@@ -374,7 +374,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 62,
@@ -431,7 +431,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 22,
@@ -475,7 +475,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 0,
@@ -508,7 +508,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 0,
@@ -541,7 +541,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 0,
@@ -575,7 +575,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 38,
@@ -620,7 +620,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 52,
@@ -663,7 +663,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 76,
@@ -703,7 +703,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 22,
@@ -753,7 +753,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 82,
@@ -805,7 +805,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 78,
@@ -898,7 +898,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 40,
@@ -934,7 +934,7 @@
     },
     {
       "tool_id": "asset_save_packages",
-      "summary": "Save dirty packages.",
+      "summary": "Persist dirty package changes to disk. Use after compile/edit/mutation passes so editor state matches files on disk; do not use for discovery or read-only status checks. When all_dirty is true, saves all dirty packages (no explicit paths required).",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -945,7 +945,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 55,
@@ -988,7 +988,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 15,
@@ -1027,7 +1027,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 20,
@@ -1081,7 +1081,7 @@
     },
     {
       "tool_id": "blueprint_compile",
-      "summary": "Compile a Blueprint and return diagnostics. Use format_graphs to run UnrealBlueprintFormatter on script graphs before compile when graphs should be laid out.",
+      "summary": "Compile a Blueprint and return diagnostics. Use this after blueprint_apply_ir or graph edits to validate/fix compile state; do not use as a graph discovery tool (use blueprint_get_graph_summary or blueprint_export_ir for read-only inspection). Use format_graphs to run UnrealBlueprintFormatter on script graphs before compile when graphs should be laid out.",
       "category": "blueprints",
       "tags": [
         "blueprint"
@@ -1091,7 +1091,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 50,
@@ -1142,7 +1142,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 68,
@@ -1337,7 +1337,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 67,
@@ -1385,7 +1385,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 70,
@@ -1431,7 +1431,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 56,
@@ -1474,7 +1474,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 20,
@@ -1523,7 +1523,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 50,
@@ -1567,7 +1567,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 58,
@@ -1606,7 +1606,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 81,
@@ -1651,7 +1651,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 12,
@@ -1690,7 +1690,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 0,
@@ -1724,7 +1724,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 84,
@@ -1765,7 +1765,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 40,
@@ -1794,7 +1794,7 @@
     },
     {
       "tool_id": "editor_set_selection",
-      "summary": "Replace editor selection with specified actors.",
+      "summary": "Replace editor selection with level actors only. Paths must be world/level actor paths (e.g. ...PersistentLevel.ActorName), not /Game/... content object paths. For assets, use content_browser_sync_asset or asset_open_editor.",
       "category": "selection_framing",
       "tags": [
         "selection"
@@ -1804,7 +1804,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 83,
@@ -1852,7 +1852,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 80,
@@ -1895,7 +1895,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 50,
@@ -1939,7 +1939,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 18,
@@ -1983,7 +1983,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 38,
@@ -2022,7 +2022,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 18,
@@ -2062,7 +2062,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 58,
@@ -2091,7 +2091,7 @@
     },
     {
       "tool_id": "material_instance_set_scalar_parameter",
-      "summary": "Set scalar on material instance.",
+      "summary": "Set one scalar parameter on a Material Instance (write). material_path must resolve to a UMaterialInstanceConstant, not a base Material; duplicate or create an MI first if needed. For referencer/read usage intel, use material_get_usage_summary or asset queries.",
       "category": "materials_rendering",
       "tags": [
         "material"
@@ -2101,7 +2101,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 48,
@@ -2138,7 +2138,7 @@
     },
     {
       "tool_id": "material_instance_set_vector_parameter",
-      "summary": "Set vector parameter on material instance.",
+      "summary": "Set a vector parameter on a Material Instance (write). material_path must resolve to a UMaterialInstanceConstant, not a base Material; duplicate or create an MI first if needed.",
       "category": "materials_rendering",
       "tags": [
         "material"
@@ -2148,7 +2148,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 47,
@@ -2199,7 +2199,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 35,
@@ -2238,7 +2238,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 16,
@@ -2277,7 +2277,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 44,
@@ -2323,7 +2323,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 10,
@@ -2360,7 +2360,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 18,
@@ -2399,7 +2399,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 15,
@@ -2445,7 +2445,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 50,
@@ -2479,7 +2479,7 @@
     },
     {
       "tool_id": "pie_status",
-      "summary": "Return PIE / play-session state: playing_in_editor, play_session_request_queued, play_session_in_progress.",
+      "summary": "Return PIE / play-session state: playing_in_editor, play_session_request_queued, play_session_in_progress. Use for status verification before/after pie_start or before deciding whether pie_stop is needed; do not use to actually start or stop play.",
       "category": "pie_play",
       "tags": [
         "pie",
@@ -2490,7 +2490,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 62,
@@ -2523,7 +2523,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 48,
@@ -2557,7 +2557,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 66,
@@ -2608,7 +2608,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 18,
@@ -2662,7 +2662,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 0,
@@ -2696,7 +2696,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 25,
@@ -2740,7 +2740,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 24,
@@ -2781,7 +2781,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 10,
@@ -2817,7 +2817,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 58,
@@ -2877,7 +2877,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 62,
@@ -2916,7 +2916,7 @@
     },
     {
       "tool_id": "asset_index_fuzzy_search",
-      "summary": "Fuzzy-search the Unreal Asset Registry for asset discovery under /Game. Use this to resolve concrete object_path values before write tools; if object_path is already known, call the target tool directly instead of re-searching.",
+      "summary": "Fuzzy-search the Unreal Asset Registry for asset discovery under /Game. Use this to resolve concrete object_path values before write tools; if object_path is already known, call the target tool directly instead of re-searching. Query accepts the same aliases as scene_fuzzy_search; empty/whitespace query is coerced to a safe default (see query_coerced in results).",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -2930,7 +2930,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 64,
@@ -3000,7 +3000,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 30,
@@ -3048,7 +3048,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 75,
@@ -3099,7 +3099,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 86,
@@ -3150,7 +3150,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 72,
@@ -3189,7 +3189,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 88,
@@ -3245,7 +3245,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 87,
@@ -3301,7 +3301,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 48,
@@ -3342,7 +3342,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 55,
@@ -3399,7 +3399,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 60,
@@ -3443,7 +3443,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 90,
@@ -3498,7 +3498,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 85,
@@ -3555,7 +3555,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 65,
@@ -3594,7 +3594,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 45,
@@ -3623,7 +3623,7 @@
     },
     {
       "tool_id": "agent_emit_todo_plan",
-      "summary": "Emit and persist a structured todo plan (unreal_ai.todo_plan).",
+      "summary": "Agent-mode: emit and persist unreal_ai.todo_plan via tool call (not the Plan-mode unreal_ai.plan_dag assistant JSON).",
       "category": "orchestration_meta",
       "tags": [
         "planning",
@@ -3634,7 +3634,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 6,
@@ -3691,7 +3691,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 76,
@@ -3754,7 +3754,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 77,
@@ -3798,7 +3798,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 75,
@@ -3848,7 +3848,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 74,
@@ -3889,7 +3889,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 73,
@@ -3930,7 +3930,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 72,
@@ -3975,7 +3975,7 @@
         "ask": true,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 71,
@@ -4024,7 +4024,7 @@
         "ask": false,
         "fast": true,
         "agent": true,
-        "orchestrate": true
+        "plan": true
       },
       "context_selector": {
         "priority": 28,

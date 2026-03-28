@@ -133,11 +133,11 @@ void FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode(
 					(*Modes)->TryGetBoolField(TEXT("fast"), bInclude);
 				}
 				break;
-			case EUnrealAiAgentMode::Orchestrate:
-				(*Modes)->TryGetBoolField(TEXT("orchestrate"), bInclude);
+			case EUnrealAiAgentMode::Plan:
+				(*Modes)->TryGetBoolField(TEXT("plan"), bInclude);
 				if (!bInclude)
 				{
-					// Default to agent tool surface unless orchestrate is explicitly split.
+					// Default to agent tool surface unless plan is explicitly split.
 					(*Modes)->TryGetBoolField(TEXT("agent"), bInclude);
 				}
 				break;
@@ -296,8 +296,8 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendix(
 					(*Modes)->TryGetBoolField(TEXT("fast"), bInclude);
 				}
 				break;
-			case EUnrealAiAgentMode::Orchestrate:
-				(*Modes)->TryGetBoolField(TEXT("orchestrate"), bInclude);
+			case EUnrealAiAgentMode::Plan:
+				(*Modes)->TryGetBoolField(TEXT("plan"), bInclude);
 				if (!bInclude)
 				{
 					(*Modes)->TryGetBoolField(TEXT("agent"), bInclude);

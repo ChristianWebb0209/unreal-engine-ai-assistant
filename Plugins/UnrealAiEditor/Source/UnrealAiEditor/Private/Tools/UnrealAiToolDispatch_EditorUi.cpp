@@ -1,6 +1,7 @@
 #include "Tools/UnrealAiToolDispatch_EditorUi.h"
 
 #include "Tools/UnrealAiToolActorLookup.h"
+#include "Tools/UnrealAiToolDispatch_ArgRepair.h"
 #include "Tools/UnrealAiToolJson.h"
 
 #include "Dom/JsonValue.h"
@@ -9,6 +10,53 @@
 #include "EditorModes.h"
 #include "Selection.h"
 #include "UnrealEdGlobals.h"
+
+namespace UnrealAiEditorSetSelectionInternal
+{
+	static bool IsLikelyLevelActorPath(const FString& Path)
+	{
+		return Path.Contains(TEXT("PersistentLevel")) || Path.Contains(TEXT(":PersistentLevel."));
+	}
+
+	/** Content object paths under /Game or /Engine (not level actor paths). */
+	static bool IsLikelyContentAssetPath(const FString& Path)
+	{
+		const bool bContentRoot = Path.StartsWith(TEXT("/Game/")) || Path.StartsWith(TEXT("/Engine/"));
+		if (!bContentRoot)
+		{
+			return false;
+		}
+		if (IsLikelyLevelActorPath(Path))
+		{
+			return false;
+		}
+		return Path.Contains(TEXT("."));
+	}
+
+	static FUnrealAiToolInvocationResult ErrorContentAssetVersusSelection(const FString& FirstContentPath)
+	{
+		const FString Msg = TEXT(
+			"editor_set_selection: path(s) look like content asset object paths (/Game/.../Name.Name), not level actor paths. "
+			"To work with assets, use content_browser_sync_asset or asset_open_editor; editor_set_selection only selects actors in the loaded level.");
+		FUnrealAiToolInvocationResult R;
+		R.bOk = false;
+		R.ErrorMessage = Msg;
+		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+		O->SetStringField(TEXT("error"), Msg);
+		O->SetBoolField(TEXT("ok"), false);
+		O->SetStringField(TEXT("id_kind"), TEXT("content_asset"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("path"), FirstContentPath);
+		TSharedPtr<FJsonObject> Suggested = MakeShared<FJsonObject>();
+		Suggested->SetStringField(TEXT("tool_id"), TEXT("content_browser_sync_asset"));
+		Suggested->SetObjectField(TEXT("arguments"), SuggestedArgs);
+		O->SetObjectField(TEXT("suggested_correct_call"), Suggested);
+		R.ContentForModel = UnrealAiToolJson::SerializeObject(O);
+		return R;
+	}
+}
+
+using namespace UnrealAiEditorSetSelectionInternal;
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_EditorGetSelection(const TSharedPtr<FJsonObject>& Args)
 {
@@ -88,6 +136,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_EditorSetSelection(const TSharedP
 		GEditor->SelectNone(false, false);
 	}
 	int32 Selected = 0;
+	int32 NonEmptyPaths = 0;
+	FString FirstContentStylePath;
 	for (const TSharedPtr<FJsonValue>& V : *Paths)
 	{
 		FString P;
@@ -95,11 +145,36 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_EditorSetSelection(const TSharedP
 		{
 			continue;
 		}
+		UnrealAiToolDispatchArgRepair::SanitizeUnrealPathString(P);
+		if (P.IsEmpty())
+		{
+			continue;
+		}
+		++NonEmptyPaths;
+		if (FirstContentStylePath.IsEmpty() && IsLikelyContentAssetPath(P))
+		{
+			FirstContentStylePath = P;
+		}
 		if (AActor* A = UnrealAiResolveActorInWorld(World, P))
 		{
 			GEditor->SelectActor(A, true, true);
 			++Selected;
 		}
+	}
+	if (NonEmptyPaths > 0 && Selected == 0)
+	{
+		if (!FirstContentStylePath.IsEmpty())
+		{
+			return ErrorContentAssetVersusSelection(FirstContentStylePath);
+		}
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("query"), TEXT("PlayerStart"));
+		SuggestedArgs->SetNumberField(TEXT("max_results"), 20.0);
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("editor_set_selection: could not resolve any actor from the given path(s) in the loaded level. "
+				 "Use world/level actor paths (e.g. ...PersistentLevel.ActorName). Try scene_fuzzy_search to discover actor paths."),
+			TEXT("scene_fuzzy_search"),
+			SuggestedArgs);
 	}
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);

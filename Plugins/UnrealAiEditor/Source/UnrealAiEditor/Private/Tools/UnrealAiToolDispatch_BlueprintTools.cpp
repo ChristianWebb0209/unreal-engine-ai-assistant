@@ -1,5 +1,6 @@
 #include "Tools/UnrealAiToolDispatch_BlueprintTools.h"
 
+#include "Tools/UnrealAiToolDispatch_ArgRepair.h"
 #include "Tools/UnrealAiBlueprintFormatterBridge.h"
 #include "Tools/UnrealAiBlueprintIrHallucinationNormalizer.h"
 #include "Tools/UnrealAiToolDispatch_MoreAssets.h"
@@ -783,10 +784,16 @@ namespace UnrealAiBlueprintToolsPriv
 	 */
 	void NormalizeBlueprintObjectPath(FString& Path)
 	{
+		UnrealAiToolDispatchArgRepair::SanitizeUnrealPathString(Path);
 		Path.TrimStartAndEndInline();
 		if (Path.IsEmpty() || Path.Contains(TEXT("..")))
 		{
 			return;
+		}
+		if (Path.EndsWith(TEXT(".uasset"), ESearchCase::IgnoreCase))
+		{
+			Path.LeftChopInline(7);
+			Path.TrimEndInline();
 		}
 		int32 LastSlash = INDEX_NONE;
 		if (!Path.FindLastChar(TEXT('/'), LastSlash))

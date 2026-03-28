@@ -32,6 +32,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRegistryQuery(const TSharedP
 	}
 	if (PathFilter.IsEmpty())
 	{
+		Args->TryGetStringField(TEXT("path"), PathFilter);
+	}
+	if (PathFilter.IsEmpty())
+	{
 		FString ObjectPath;
 		Args->TryGetStringField(TEXT("object_path"), ObjectPath);
 		if (!ObjectPath.IsEmpty())
@@ -67,10 +71,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRegistryQuery(const TSharedP
 		{
 			ClassName = FirstClass;
 		}
-	}
-	if (!ClassName.IsEmpty() && !ClassName.StartsWith(TEXT("/Script/"), ESearchCase::IgnoreCase))
-	{
-		ClassName = FString::Printf(TEXT("/Script/Engine.%s"), *ClassName);
 	}
 	const TArray<TSharedPtr<FJsonValue>>* Filters = nullptr;
 	if ((PathFilter.IsEmpty() || ClassName.IsEmpty()) && Args->TryGetArrayField(TEXT("filters"), Filters) && Filters)
@@ -113,6 +113,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRegistryQuery(const TSharedP
 			}
 		}
 	}
+	UnrealAiToolDispatchArgRepair::SanitizeUnrealPathString(PathFilter);
+	ClassName.TrimStartAndEndInline();
+	UnrealAiToolDispatchArgRepair::SanitizeUnrealPathString(ClassName);
+	if (!ClassName.IsEmpty() && !ClassName.StartsWith(TEXT("/Script/"), ESearchCase::IgnoreCase))
+	{
+		ClassName = FString::Printf(TEXT("/Script/Engine.%s"), *ClassName);
+	}
+
 	int32 MaxResults = 100;
 	double MR = 0.0;
 	if (Args->TryGetNumberField(TEXT("max_results"), MR))
