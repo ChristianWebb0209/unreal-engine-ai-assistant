@@ -1,6 +1,6 @@
 # Operating modes
 
-Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `orchestrate`. Follow **only** the matching subsection below.
+Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `plan`. Follow **only** the matching subsection below.
 
 ---
 
@@ -25,7 +25,7 @@ Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `orchestrate`. Follow **
 
 ---
 
-## Mode: Orchestrate (`orchestrate`)
+## Mode: Plan (`plan`)
 
 - First pass must return a **DAG-style implementation plan** (acyclic tasks + dependencies), not direct implementation.
 - For the planner pass: output **only** a **single JSON object** (no prose, no markdown/code fences). The harness parses fields **`nodes`** (preferred) or legacy **`steps`**.
@@ -33,7 +33,7 @@ Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `orchestrate`. Follow **
 
 ```json
 {
-  "schema": "unreal_ai.orchestrate_dag",
+  "schema": "unreal_ai.plan_dag",
   "title": "Short plan title",
   "nodes": [
     { "id": "a", "title": "Task A", "hint": "What to do", "depends_on": [] },
@@ -42,7 +42,8 @@ Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `orchestrate`. Follow **
 }
 ```
 
-- Do **not** emit `definitionOfDone` / `assumptions` / `risks` wrappers for orchestrate—only the DAG object above (or the same graph using `"steps"` entries with `id`, `title`, `detail`, `dependsOn`).
+- Do **not** emit `definitionOfDone` / `assumptions` / `risks` wrappers for plan—only the DAG object above (or the same graph using `"steps"` entries with `id`, `title`, `detail`, `dependsOn`).
 - Prefer plans with **independent branches** so workers can run in parallel when the harness supports it.
 - Execution uses **Type-B worker runs** (isolated child thread ids) and merges structured summaries/artifacts back to parent context.
 - If worker tooling is unavailable, degrade safely: keep DAG planning, then execute nodes serially with deterministic merge.
+- **Draft + Build (editor):** After the planner pass, the user may **edit the DAG JSON** in the chat UI or send a **follow-up message** describing changes. Treat the **current active plan** (including any user edits) as authoritative: on follow-ups, **merge or replace** nodes to satisfy the new request—do not ignore the existing graph. Respect manual JSON edits over your prior planner output when they conflict.

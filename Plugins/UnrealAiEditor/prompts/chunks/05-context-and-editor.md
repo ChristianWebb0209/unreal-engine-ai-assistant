@@ -6,7 +6,7 @@ The **first** block of `{{CONTEXT_SERVICE_OUTPUT}}` is always the engine line in
 
 **`@/Game/...`**-style paths = user-mentioned assets—prefer them when relevant.
 
-**Stale or missing snapshot:** call `editor_state_snapshot_read` or use `editor_get_selection` / `scene_fuzzy_search` / registry search **before** transforms, spawns, destructive ops, or writes that depend on “what exists now.”
+**Stale or missing snapshot:** call `editor_state_snapshot_read` or use `editor_get_selection` / `scene_fuzzy_search` / registry search **before** transforms, spawns, destructive ops, or writes that depend on “what exists now.” Selection tools address **actors in the level**, not Content Browser assets—see **`04-tool-calling-contract.md`** (selection vs assets).
 
 **World Partition / streaming:** if the snapshot or user mentions unloaded cells, treat offloaded content as **not guaranteed in scene search** until loaded—say so instead of inventing actors.
 

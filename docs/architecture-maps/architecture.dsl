@@ -79,12 +79,16 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
                 memoryJson = component "Memory JSON Persistence" "Reads/writes memory index/item files." "Memory serializers" "MemorySection"
             }
 
-            retrievalService = container "Retrieval Service (Optional)" "Local vector indexing/query and compatibility/migration handling." "C++" "RetrievalSection" {
-                indexManager = component "Index Lifecycle Manager" "Init/integrity/rebuild and manifest transitions." "FUnrealAiRetrievalService + VectorIndexStore" "RetrievalSection"
-                queryEngine = component "Retrieval Query Engine" "Embed query + top-K cosine + result shaping." "FUnrealAiRetrievalService" "RetrievalSection"
-                chunkPipeline = component "Chunking + Source Inventory" "File/docs/blueprint/memory chunk generation pipeline." "FUnrealAiRetrievalService" "RetrievalSection"
-                migrationGuard = component "Model Compatibility Guard" "Handles mismatch, pending_reembed, fail-closed behavior." "FUnrealAiRetrievalService" "Policy"
-                store = component "Vector Index Store Adapter" "SQLite storage and manifest I/O abstraction." "UnrealAiVectorIndexStore" "RetrievalSection"
+            retrievalService = container "Retrieval Service (Optional)" "Local vector index: embedding-first query (cosine Top-K in SQLite) with lexical fallback; index builds are whitelist- and cap-driven (BYOK embeddings)." "C++" "RetrievalSection" {
+                indexManager = component "Index lifecycle + orchestration" "BuildOrRebuildIndexNow: runs corpora, embeddings, incremental upsert, manifest/diagnostics." "FUnrealAiRetrievalService" "RetrievalSection"
+                indexPolicy = component "Index policy + filesystem crawl" "indexedExtensions whitelist, rootPreset (minimal/standard/extended), max files/chunks/embeds, chunk size/overlap, embedding batch throttle." "UnrealAiRetrievalIndexConfig" "RetrievalSection"
+                corpusFs = component "Filesystem text corpus" "Scans configured roots; only whitelisted extensions are opened as UTF-8 text (no raw binary asset reads)." "FUnrealAiRetrievalService" "RetrievalSection"
+                corpusAr = component "Asset Registry metadata corpus" "Deterministic synthetic shards under virtual://asset_registry/* from FAssetData (names/classes/paths); caps + optional /Engine." "GatherAssetRegistryShardTexts" "RetrievalSection"
+                corpusBp = component "Blueprint feature corpus" "Blueprint assets via registry-derived feature lines; extractor cap from settings." "UnrealAiBlueprintFeatureExtractor" "RetrievalSection"
+                corpusMem = component "Memory corpus (optional)" "Off by default (indexMemoryRecordsInVectorStore); tagged memory service remains the primary memory UX." "CollectMemoryChunks" "RetrievalSection"
+                queryEngine = component "Retrieval Query Engine" "Embed query text, cosine Top-K, empty-hit + circuit-breaker paths to lexical SQL fallback." "FUnrealAiRetrievalService" "RetrievalSection"
+                migrationGuard = component "Model Compatibility Guard" "Embedding model mismatch, pending_reembed, fail-closed to deterministic context." "FUnrealAiRetrievalService" "Policy"
+                store = component "Vector Index Store Adapter" "SQLite chunk rows + lexical index + manifest sidecar." "FUnrealAiVectorIndexStore" "RetrievalSection"
             }
 
             embeddingProvider = container "Embedding Provider (Optional)" "Embedding adapter interface + current OpenAI-compatible implementation." "C++" "RetrievalSection" {
@@ -157,6 +161,17 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
         plugin.contextService -> plugin.observability "Keep/drop decision logs"
 
         plugin.retrievalService -> plugin.embeddingProvider "Embed query/chunks"
+        plugin.retrievalService -> plugin.memoryService "Optional: read memory records when memory corpus enabled"
+        plugin.retrievalService -> unrealEditor "Asset Registry + Blueprint reads for index corpora"
+        plugin.retrievalService.indexManager -> plugin.retrievalService.indexPolicy "Resolves effective roots, whitelist, caps"
+        plugin.retrievalService.indexManager -> plugin.retrievalService.corpusFs "Chunks changed files"
+        plugin.retrievalService.indexManager -> plugin.retrievalService.corpusAr "Builds registry shards when enabled"
+        plugin.retrievalService.indexManager -> plugin.retrievalService.corpusBp "Blueprint feature rows"
+        plugin.retrievalService.indexManager -> plugin.retrievalService.corpusMem "Optional memory chunks"
+        plugin.retrievalService.corpusFs -> plugin.retrievalService.indexPolicy "Extension + root filters"
+        plugin.retrievalService.corpusAr -> unrealEditor "IAssetRegistry on game thread"
+        plugin.retrievalService.corpusBp -> unrealEditor "Blueprint FAssetData"
+        plugin.retrievalService.corpusMem -> plugin.memoryService "When gated on"
         plugin.retrievalService -> plugin.policy "Compatibility/fail-closed checks"
         plugin.retrievalService -> plugin.observability "Index diagnostics"
         plugin.embeddingProvider -> plugin.modelProfiles "Resolve API endpoint/key"
@@ -244,6 +259,40 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
             plugin.harness -> plugin.observability "11. Emit run artifacts + diagnostics"
             plugin.requestBuilder -> localData.conversationJson "12. Persist conversation updates"
             plugin.contextService -> localData.contextJson "13. Persist context updates"
+            autoLayout lr
+        }
+
+        container plugin "vector-db-end-to-end" "Optional local vector index: settings-driven whitelist + root presets + caps; corpora = filesystem text + Asset Registry metadata shards + Blueprint features + optional memory chunks; SQLite + manifest; BYOK embeddings; merged into context ranker. Does not index raw binary assets or full chat transcripts." {
+            include plugin.retrievalService
+            include plugin.embeddingProvider
+            include plugin.contextService
+            include plugin.harness
+            include plugin.memoryService
+            include localData.vectorDb
+            include localData.vectorManifest
+            include llmProvider
+            include unrealEditor
+            autoLayout tb
+        }
+
+        component plugin.retrievalService "vector-db-index-build" "Index rebuild (corpus rationale): Policy from plugin_settings retrieval JSON—whitelist extensions, root preset (minimal/standard/extended), and per-rebuild caps/throttle to bound API + CPU/disk. Filesystem corpus ingests UTF-8 text only for allow-listed paths (code/docs/config JSON sidecars, etc.); binary Content assets are not read as strings. Asset Registry corpus adds deterministic metadata shards (object path, class, package) for names/structure without .uasset bytes. Blueprint corpus adds registry-derived feature lines. Memory corpus is optional and default-off so tagged memory remains primary. Chat history is out of scope: conversation.json is already the bounded transcript input to the harness/context packer; duplicating it in the vector index would add cost and overlap the deterministic pipeline." {
+            include *
+            include plugin.embeddingProvider
+            include localData.settingsJson
+            include localData.vectorDb
+            include localData.vectorManifest
+            include unrealEditor
+            include plugin.memoryService
+            autoLayout tb
+        }
+
+        dynamic plugin "vector-db-query-sequence" "Per LLM round: harness may start retrieval prefetch; embed + SQLite query (or cache / lexical fallback); BuildContextWindow consumes snippets into ranked candidates." {
+            plugin.harness -> plugin.contextService "StartRetrievalPrefetch (turn key)"
+            plugin.requestBuilder -> plugin.contextService "BuildContextWindow"
+            plugin.contextService -> plugin.retrievalService "TryConsumePrefetch / Query"
+            plugin.retrievalService -> plugin.embeddingProvider "Embed query when not cached"
+            plugin.embeddingProvider -> llmProvider "HTTPS /v1/embeddings (BYOK)"
+            plugin.retrievalService -> localData.vectorDb "Cosine Top-K + lexical fallback SQL"
             autoLayout lr
         }
 

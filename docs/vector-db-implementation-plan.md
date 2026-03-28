@@ -24,6 +24,50 @@ This plan extends existing systems documented in:
 - `docs/agent-and-tool-requirements.md` (v1 no-vector constraint; this is post-v1 optional),
 - `README.md` (local-first plugin architecture summary).
 
+### 2.1 Visual architecture (Structurizr)
+
+Regenerated from `docs/architecture-maps/architecture.dsl` (run `scripts/export-architecture-maps.ps1` after edits):
+
+| View key | What it shows |
+|----------|----------------|
+| `vector-db-end-to-end` | Containers: retrieval service, embedding adapter, context + harness consumers, memory feed for index chunks, SQLite + manifest on disk, editor API boundary, LLM provider for `/embeddings`. |
+| `vector-db-query-sequence` | Dynamic sequence: prefetch → `BuildContextWindow` → consume/query → embed (if needed) → SQLite cosine + lexical fallback. |
+
+Existing `retrieval-components` view still lists internal retrieval components only; the two views above are the **system-level** vector story.
+
+### 2.2 What the vector index is for (and what it deliberately excludes)
+
+The local vector DB is a **project-scoped semantic index** over **textual corpora** we can chunk and embed cheaply. It is **not** a dump of the entire Unreal project or of the chat.
+
+| In scope (indexed into `index.db` when enabled) | Out of scope (not replaced by vectors; handled elsewhere) |
+|---------------------------------------------------|------------------------------------------------------------|
+| **Filesystem text** under configured **root presets** and **`indexedExtensions` whitelist** only (`UnrealAiRetrievalIndexConfig::CollectFilesystemIndexPaths`, `FUnrealAiRetrievalService::BuildOrRebuildIndexNow`). Default whitelist matches legacy behavior (`.h`, `.hpp`, `.cpp`, `.md`, `.txt`, `.ini`) when `indexedExtensions` is empty. | **`Content/` assets as binary blobs** (meshes, textures, most `.uasset` bytes)—never read as raw string for embedding. |
+| **Asset Registry** metadata lines (optional): synthetic shards under `virtual://asset_registry/part_*.txt` when `assetRegistryMaxAssets` > 0; no `.uasset` reads. | **Full chat transcript** (`conversation.json` stays in harness; not vector-indexed as the conversation). |
+| **Blueprint feature** text via `UnrealAiBlueprintFeatureExtractor` (not raw `.uasset` embedding). | **Live tool results** and **editor snapshot** (deterministic ranker inputs from `IAgentContextService`). |
+| **Memory** records as chunks **only if** `indexMemoryRecordsInVectorStore` is true (default **false**). Prefer the **tagged memory system** for primary memory UX; see `docs/memory-system.md`. | **Attachments**, **@mentions**, **plan DAG**—same as before (`context-management.md`). |
+| Embeddings stored per chunk in SQLite + **manifest** metadata. | |
+
+Normative intent from day one: **context assembly remains authoritative**; retrieval adds **`retrieval_snippet`** candidates into the **same ranker + budget** as tool results and memory snippets.
+
+### 2.3 Corpus expansion settings (whitelist, roots, caps)
+
+These fields live under `retrieval` in plugin settings JSON and in **AI Settings → Retrieval** in the editor.
+
+| Setting | Role |
+|---------|------|
+| `rootPreset` | `minimal` — `Source/`, `docs/`. `standard` — also `Config/`, `Plugins/*/Source/`. `extended` — also `Content/` (still **whitelist-only**). Project `.uproject` directory is included when present so `.uproject` / `.uplugin` can be indexed if listed in the whitelist. |
+| `indexedExtensions` | **Allow-list only**: extensions not listed are never opened for text indexing. Empty array ⇒ built-in legacy list above. |
+| `maxFilesPerRebuild` | Stop after N files (sorted paths); 0 = unlimited. Logged when truncation occurs. |
+| `maxTotalChunksPerRebuild` / `maxEmbeddingCallsPerRebuild` | Hard cap on chunks/embeddings per rebuild (combined with the stricter of the two). Changed sources beyond the cap are deferred to a later rebuild (sorted source order; tail deferred). |
+| `chunkChars`, `chunkOverlap` | Text chunking for files and asset-registry shards (clamped in code). |
+| `assetRegistryMaxAssets` | 0 = no registry snapshot. &gt; 0 caps rows included; shards are deterministic (`virtual://asset_registry/part_NNNN.txt`). |
+| `assetRegistryIncludeEngineAssets` | When true, includes `/Engine` in the registry filter (can be very large). |
+| `embeddingBatchSize`, `minDelayMsBetweenEmbeddingBatches` | Throttle HTTP/local work between embedding batches during index builds. |
+| `indexMemoryRecordsInVectorStore` | Default **false**; keeps **tagged memory** as the main memory story. |
+| `blueprintMaxFeatureRecords` | 0 = extractor default cap (~4000); otherwise caps Blueprint rows per rebuild. |
+
+**Cost tuning**: Reduce API load by lowering caps, shrinking the whitelist, using `minimal` preset, setting `assetRegistryMaxAssets` to 0, increasing batch delay, or disabling optional corpora (memory vector chunks off by default). **Query path** is unchanged: embedding-first cosine in SQLite, then lexical fallback on failure or empty hits (`FUnrealAiRetrievalService::Query`).
+
 Current context assembly remains the source of truth. Vector retrieval is a new candidate source, not a replacement for:
 - attachments,
 - editor snapshot,

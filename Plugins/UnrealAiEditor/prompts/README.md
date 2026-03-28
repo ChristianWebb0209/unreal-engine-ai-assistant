@@ -26,7 +26,7 @@ This folder holds **semantic fragments** the harness assembles into **system** a
 | [`chunks/06-execution-subturn.md`](chunks/06-execution-subturn.md) | when `activeTodoPlan` | same | same | Only when harness is in plan execution (summary + pointer). |
 | [`chunks/07-safety-banned.md`](chunks/07-safety-banned.md) | ✓ | ✓ | ✓ | Permissions, destructive confirms, banned tools. |
 | [`chunks/08-output-style.md`](chunks/08-output-style.md) | ✓ | ✓ | ✓ | Markdown, no fake chain-of-thought. |
-| [`chunks/09-orchestration-workers.md`](chunks/09-orchestration-workers.md) | — | optional | ✓ | Level B: `subagent_spawn`, merge (future). |
+| [`chunks/09-plan-dag.md`](chunks/09-plan-dag.md) | — | optional | ✓ | Plan mode: `unreal_ai.plan_dag` JSON, serial node execution (`FUnrealAiPlanExecutor`). |
 
 ## Runtime assembly (C++)
 

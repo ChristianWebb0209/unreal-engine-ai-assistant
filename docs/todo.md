@@ -18,10 +18,8 @@
 - Ensure tools catalog has high coverage of editor functionality:
 - - Data assets, animation basics, building components within components (building an actor then attatching a collision mesh, etc.)
 
-## Plan / Orchestrate Mode
+## Plan / Plan Mode
 
-- Probably rename orchestrate mode to plan mode
-- Maybe we should remove our existing complexity analysis, or at least do some tests to see if it is helping anything or just confusing the AI
 - DAG validation: does our DAG orchestration work with not allowing certain tasks to start until previous ones have been completed? Let's make some test cases for this.
 - Worker orchestration
 - - Ensure we establish reasonable budgets. Maybe this should be configurable by model as well?
@@ -31,6 +29,7 @@
 ## General Agent Tasks
 
 - Work more on and verify stall behavior. Right now stalling is a major issue, and it seems like there is something wrong with the model service layer itself.
+- Stream-first harness follow-up: evaluate optional parallel execution for clearly read-only tools while preserving sequential execution for mutating tools.
 
 # Future Features
 

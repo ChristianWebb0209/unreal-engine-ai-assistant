@@ -1,8 +1,8 @@
 # Context management (definitive)
 
-This document is the **single source of truth** for how the Unreal AI Editor plugin **assembles, budgets, persists, and injects** editor-side context into LLM requests. It also covers **planning artifacts** (complexity signal, todo plans, orchestrate DAG state) that live in the same persistence layer.
+This document is the **single source of truth** for how the Unreal AI Editor plugin **assembles, budgets, persists, and injects** editor-side context into LLM requests. It also covers **planning artifacts** (complexity signal, todo plans, plan DAG state) that live in the same persistence layer.
 
-**Related (not duplicated here):** harness iteration and scripts in [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md). For current testing/review workflow, see [`HEADLESS_TESTING_PLAYBOOK.md`](HEADLESS_TESTING_PLAYBOOK.md).
+**Related (not duplicated here):** harness iteration and scripts in [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md). For current testing/review workflow, see [`HEADLESS_TESTING_PLAYBOOK.md`](HEADLESS_TESTING_PLAYBOOK.md). Plan-mode DAG vs Agent todo-plan tools: [`planning.md`](planning.md).
 
 ---
 
@@ -10,7 +10,7 @@ This document is the **single source of truth** for how the Unreal AI Editor plu
 
 In-editor **context management** is a **logical service** in the plugin process—not a network backend. Context is now assembled by a **ranked candidate pipeline** that includes editor state, attachments, tool snippets, and memory snippets.
 
-Optional: when local retrieval is enabled, the candidate pipeline may also include **`retrieval_snippet`** candidates sourced from the per-project local vector index (see `docs/vector-db-implementation-plan.md`). Retrieval remains **disabled by default** and must degrade safely to deterministic-only behavior.
+Optional: when local retrieval is enabled, the candidate pipeline may also include **`retrieval_snippet`** candidates sourced from the per-project local vector index (see `docs/vector-db-implementation-plan.md`, including **§2.1–2.2** for Structurizr views and **what is / is not indexed**). Retrieval remains **disabled by default** and must degrade safely to deterministic-only behavior.
 
 | Responsibility | Owner |
 |----------------|--------|
@@ -22,7 +22,7 @@ Optional: when local retrieval is enabled, the candidate pipeline may also inclu
 
 | | **Context service** | **Agent harness** |
 |--|----------------------|-------------------|
-| **Owns** | `context.json`, attachments, bounded **tool-result snippets**, editor snapshot, **active todo plan**, **orchestrate DAG** state | `conversation.json` (roles for the API), turn loop, tool round-trips |
+| **Owns** | `context.json`, attachments, bounded **tool-result snippets**, editor snapshot, **active todo plan**, **plan DAG** state | `conversation.json` (roles for the API), turn loop, tool round-trips |
 | **Per LLM request** | `BuildContextWindow` → `FAgentContextBuildResult` (`SystemOrDeveloperBlock`, `ContextBlock`, complexity, user-visible messages) | Prepends **system** content from prompt builder + appends **user/assistant/tool** history; enforces continuation rails |
 
 Do not duplicate: context is the **editor-specific** layer; the harness owns **orchestration** and **API message list** shape.
@@ -122,7 +122,7 @@ flowchart TB
   What: Loads existing per-thread state from disk or creates a clean state object.  
   Why: Preserves continuity between turns/editor restarts while allowing fast new-thread initialization.
 - **FAgentContextState**  
-  What: Canonical in-memory state: attachments, tool-result snippets, editor snapshot, todo/orchestrate artifacts, budget overrides.  
+  What: Canonical in-memory state: attachments, tool-result snippets, editor snapshot, todo/plan artifacts, budget overrides.  
   Why: Single source of truth for prompt context assembly and persistence.
 - **RefreshEditorSnapshotFromEngine()**  
   What: Samples live editor signal (selected actors, Content Browser, open asset editors).  
@@ -149,7 +149,7 @@ flowchart TB
 **Harness**
 
 - **RunTurn**  
-  What: Orchestrates the assistant/tool sub-turn loop and stop conditions.  
+  What: Plans the assistant/tool sub-turn loop and stop conditions.  
   Why: Central coordination point for safe, bounded execution.
 - **Request builder**  
   What: Merges context-service outputs with conversation state into provider payloads.  
@@ -242,8 +242,8 @@ chats/<project_id>/threads/<thread_id>/context.json
 | `maxContextChars` | number | Per-thread override; `0` = use build defaults |
 | `activeTodoPlan` | string? | Canonical **`unreal_ai.todo_plan`** JSON from `agent_emit_todo_plan` |
 | `todoStepsDone` | bool[] | Parallel to `steps` in the plan JSON |
-| `activeOrchestrateDag` | string? | Canonical **`unreal_ai.orchestrate_dag`** JSON (Orchestrate mode) |
-| `orchestrateNodeStatus` | array | `{ nodeId, status, summary? }` for DAG execution |
+| `activePlanDag` | string? | Canonical **`unreal_ai.plan_dag`** JSON (Plan mode) |
+| `planNodeStatus` | array | `{ nodeId, status, summary? }` for DAG execution |
 
 ### 4.1 `editorSnapshot`
 
@@ -272,7 +272,7 @@ Maps to `EContextAttachmentType`: `asset`, `file`, `text`, `bp_node`, `actor`, `
 
 Context selection now supports a unified candidate pipeline:
 
-1. Collect candidate envelopes from all sources (`recent_tab`, `attachment`, `tool_result`, `editor_snapshot_field`, `todo_state`, `orchestrate_state`).
+1. Collect candidate envelopes from all sources (`recent_tab`, `attachment`, `tool_result`, `editor_snapshot_field`, `todo_state`, `plan_state`).
 2. Filter by hard policy (mode gates, model capability such as image support).
 3. Score with a shared feature model (mention hit, heuristic semantic relevance, recency, freshness, safety, active/thread bonuses).
 4. Pack under budget with per-type caps (greedy/knapsack-lite).
@@ -319,7 +319,7 @@ This section is the authoritative map of context ingestion sources and how they 
 | Editor snapshot scalar/list fields (selection, Content Browser path/assets, open editors) | `editor_snapshot_field` | Medium base importance with mention/semantic matching; useful situational glue when aligned to current request | 20 |
 | Recent UI focus entries (global + thread overlay ranking output) | `recent_tab` | High base importance plus explicit active/thread/frequency/recency bonuses; tuned to prioritize "what the user is touching now" | 12 |
 | Active todo summary | `todo_state` | Mid-high base importance to preserve execution continuity in multi-step work | 4 |
-| Active orchestrate DAG presence | `orchestrate_state` | Medium base importance, primarily useful in orchestrate-heavy turns | 10 |
+| Active plan DAG presence | `plan_state` | Medium base importance, primarily useful in plan-heavy turns | 10 |
 | Memory retrieval hits (title/description-first query) | `memory_snippet` | Mid-high base importance; semantic score comes from memory query + ranker heuristic; freshness/confidence/frequency contribute; low-score memories are blocked by min-score gate | 6 |
 
 Scoring formula components are additive: base type importance + mention + heuristic semantic + recency + freshness/reliability + active/thread/frequency bonuses + safety penalty.
@@ -332,7 +332,7 @@ All defaults above come from:
 
 Key fields ([`AgentContextTypes.h`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextTypes.h)):
 
-- **`Mode`**: `Ask` | `Agent` | `Orchestrate` — controls what enters the formatted block (e.g. Ask omits tool results).
+- **`Mode`**: `Ask` | `Agent` | `Plan` — controls what enters the formatted block (e.g. Ask omits tool results).
 - **`MaxContextChars`**: hard cap for packed candidate output (default 32k) enforced by score-ordered packing + per-type caps.
 - **`UserMessageForComplexity`**: feeds **`FUnrealAiComplexityAssessor`**.
 - **`bModelSupportsImages`**: from model profile; image-like attachments can be stripped with **`UserVisibleMessages`** explaining why.
@@ -347,7 +347,7 @@ Key fields ([`AgentContextTypes.h`](../Plugins/UnrealAiEditor/Source/UnrealAiEdi
 
 ### 5.3 Prompt builder coupling
 
-`UnrealAiTurnLlmRequestBuilder` sets **`bIncludeExecutionSubturnChunk`** when **`ActiveTodoPlanJson`** is non-empty so execution sub-turn prompts stay aligned with the persisted plan. **`bIncludeOrchestrationChunk`** is set when **`Mode == Orchestrate`**.
+`UnrealAiTurnLlmRequestBuilder` sets **`bIncludeExecutionSubturnChunk`** when **`ActiveTodoPlanJson`** is non-empty so execution sub-turn prompts stay aligned with the persisted plan. **`bIncludePlanDagChunk`** is set when **`Mode == Plan`** (see [`planning.md`](planning.md)).
 
 After assembly, message **character budget** can be enforced by dropping oldest **non-system** messages until under **`maxContextTokens * charPerTokenApprox`** (see builder).
 
@@ -361,13 +361,14 @@ After assembly, message **character budget** can be enforced by dropping oldest 
   - tool results,
   - editor snapshot fields,
   - recent tab entries,
-  - todo/orchestrate state,
+  - todo/plan state,
   - memory snippets from `IUnrealAiMemoryService::QueryRelevantMemories(...)`.
   - (optional) retrieval snippets from the local vector index when enabled.
 - Hard policy filters run first (mode gates, image-model compatibility, inclusion flags).
 - Scoring uses weighted features (`mention`, heuristic semantic overlap, recency, confidence/freshness, active/thread bonuses, safety penalties).
 - Packing enforces budget and per-type caps (including memory-specific caps and minimum memory score threshold).
 - Verbose traces and decision logs record keep/drop reasons for diagnostics.
+- Ranker keeps actionable target anchors under pressure (best-effort): active UI tab, key snapshot fields, plus up to two actionable tool-result anchors (prefer a mutating-tool target then a discovery/read target). Trace includes kept/dropped anchor counts.
 
 ### 5.5 Tuning artifacts and workflow reliability
 
@@ -437,9 +438,9 @@ When a checked-in JSON Schema exists for `unreal_ai.todo_plan`, link it here; un
 - Execution sub-turns prefer a **short summary** + **current step** + **pointer** (`cursorStepId`, `step_ids_done`, thread-local id).
 - The formatter **hydrates** full step text from disk when building the API request so the **canonical JSON** stays complete while the **prompt stays lean**.
 
-### 8.4 Orchestrate DAG
+### 8.4 Plan DAG
 
-**Orchestrate mode** persists a DAG JSON string and parallel **`orchestrateNodeStatus`** entries for node-level status and optional summaries — same “persist canonical artifact, inject summaries” idea as todo plans.
+**Plan mode** persists a DAG JSON string and parallel **`planNodeStatus`** entries for node-level status and optional summaries — same “persist canonical artifact, inject summaries” idea as todo plans.
 
 ### 8.5 Harness continuation (where this doc stops)
 

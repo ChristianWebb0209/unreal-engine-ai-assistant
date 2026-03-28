@@ -20,8 +20,7 @@ Index of all `docs/` files: [docs/README.md](./README.md)
 1. Prompts (when the model skips tools, wrong-order tools, or ignores merge/layout contracts)
 2. Catalog text + schema (when routing or parameter validation fails)
 3. Dispatch validation + threading (when behavior differs from the catalog)
-4. Matrix fixtures (when tools need non-empty args to be meaningful)
-5. Harness fixtures (multi-round `responses[]` stream correctness)
+4. Optional per-tool JSON args under `tests/fixtures/<tool_id>.json` for catalog matrix (dispatch checks; no LLM)
 
 ---
 ## Three harness tiers
@@ -30,25 +29,25 @@ Index of all `docs/` files: [docs/README.md](./README.md)
 
 `.\build-editor.ps1 -AutomationTests -Headless -SkipBlueprintFormatterSync`
 
-### 1b — Fixture harness (deterministic LLM)
-
-Set `UNREAL_AI_LLM_FIXTURE` **before** launching the editor so the plugin uses the deterministic fixture transport.
-
-- Schema: `tests/harness_llm_fixture.schema.json`
-- Example: `tests/harness_llm_fixture.example.json`
-- Each `StreamChatCompletion` call consumes the **next** object in `responses[]` (the number of `responses[]` entries should match the number of LLM rounds your scenario needs).
-
 ### 2 — Live headed qualitative (real API)
 
 Headed, qualitative runs using real API credentials from Unreal AI Editor settings.
 
-- Ensure `UNREAL_AI_LLM_FIXTURE` is **unset** (or pass `-AllowFixture` intentionally).
 - Run: `.\scripts\run-headed-live-scenarios.ps1 -MaxScenarios <N>`
 - Optional context dumps: `UNREAL_AI_HARNESS_DUMP_CONTEXT=1`
 
 Artifacts:
 - Harness output: `Saved/UnrealAiEditor/HarnessRuns/<timestamp>/run.jsonl`
 - Stable review copies: `tests/out/live_runs/<suite_id>/<scenario_id>/`
+
+Key enforcement telemetry now emitted in `run.jsonl`:
+- `enforcement_event` (action/mutation policy nudges/outcomes)
+- `enforcement_summary` (aggregate counts for action intent, tool-backed action, explicit blockers, and mutation read-only nudges)
+- Stream-first tool execution lifecycle event types:
+  - `stream_tool_ready`
+  - `stream_tool_exec_start`
+  - `stream_tool_exec_done`
+  - `stream_tool_call_incomplete_timeout`
 
 Bundle review (example):
 `python tests\bundle_live_harness_review.py tests\out\live_runs\tool_goals`
@@ -72,13 +71,13 @@ Snapshot without running the model:
 From Output Log:
 
 - `UnrealAi.RunCatalogMatrix [filter]` (dispatch only; no LLM)
-- `UnrealAi.RunAgentTurn <MessageFilePath> [ThreadGuid] [agent|ask|orchestrate] [OutputDir]`
+- `UnrealAi.RunAgentTurn <MessageFilePath> [ThreadGuid] [agent|ask|plan] [OutputDir]`
 - `UnrealAi.DumpContextWindow <ThreadGuid> [reason]`
 
 ---
 ## Fresh start (avoid stale harness state)
 
-1. Restart Unreal after changing `UNREAL_AI_LLM_FIXTURE` (the backend registry must rebuild transport).
+1. After changing API keys or provider settings, reload LLM configuration from the plugin settings UI (or restart the editor) so the HTTP transport picks up changes.
 2. Start a new conversation thread by omitting `ThreadGuid` (or reuse one intentionally to continue persisted context).
 3. If you drive via automation/ExecCmds, keep `-ExecCmds="..."` argument splitting compatible with `build-editor.ps1` (quote as a single argv token).
 
@@ -111,6 +110,8 @@ From Output Log:
 | Tool implementation | `Plugins/UnrealAiEditor/Source/.../Tools/UnrealAiToolDispatch*.cpp` |
 | Matrix fixtures | `tests/fixtures/<tool_id>.json` |
 | Headless prompt routing test | `tests/tool-call-prompts.generated.json` (prompt text must contain the tool id substring) |
-| Headed scenarios | `tests/harness_scenarios/` (`user_scenario_*.txt`, `responses[]` consumed per LLM round) |
+| Headed scenario prompts | `tests/harness_scenarios/` (`user_scenario_*.txt` message files for `UnrealAi.RunAgentTurn`) |
 | Context workflows | `tests/context_workflows/` |
+| Domain coverage matrix | `tests/domain_coverage_matrix.md` |
+| Qualitative turn template | `tests/qualitative_turn_review_template.md` |
 

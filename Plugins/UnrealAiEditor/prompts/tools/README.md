@@ -10,4 +10,6 @@
 
 | `tool_id` | Purpose |
 |-----------|---------|
-| `agent_emit_todo_plan` | Emit validated `unreal_ai.todo_plan` JSON (see [`context-management.md`](../../../../docs/context-management.md) §8). Catalog-backed and available to agent/orchestrate flows. |
+| `agent_emit_todo_plan` | **Agent-mode** structured todo plan (`unreal_ai.todo_plan` via tool call). Distinct from **Plan mode** chat/harness DAG (`unreal_ai.plan_dag` assistant JSON + `FUnrealAiPlanExecutor`). See [`planning.md`](../../../../docs/planning.md). |
+
+See [`context-management.md`](../../../../docs/context-management.md) for persistence and §8 where applicable.

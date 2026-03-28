@@ -5,17 +5,37 @@
 - **Selection vs scene:** `editor_get_selection` answers **what is selected in the editor right now** (may be empty). `scene_fuzzy_search` searches **all actors in the loaded level** by label/name/class/path/tags—use it when the user asks to *find* actors by topic, not only what is selected.
 - **Read first** when the user did **not** name a tool: `scene_fuzzy_search`, `asset_index_fuzzy_search`, `source_search_symbol`, `asset_registry_query`, `editor_state_snapshot_read`.
 - **Path-resolution gates:** if a target tool requires `object_path`/`blueprint_path`, resolve that path first via discovery tools, then call the target tool with concrete args in a single attempt.
+- **Unreal object paths:** use package-style paths like `/Game/Folder/Asset.Asset` (not bare `.uasset` file paths on disk).
+- **Selection vs assets:** `editor_set_selection` selects **level actors** only; for `/Game/...` assets use `content_browser_sync_asset` or `asset_open_editor`.
+- **Materials:** `material_instance_set_*` writes require a **Material Instance** path; base `UMaterial` assets need an MI (duplicate/create) first.
+- **Empty filters:** for search tools, omit optional query fields or pass a non-empty string—avoid `""` when the tool needs a real filter.
 - **Character/Pawn creation gate:** when creating a playable character asset, do **not** pass `/Script/Engine.Character` or `/Script/Engine.Pawn` to `asset_create.asset_class`; create a Blueprint asset and set Character/Pawn as `parent_class` in `blueprint_apply_ir` with `create_if_missing:true`.
 - **Generic asset authoring (most `UObject` / DataAsset / config-like assets under `/Game`):** prefer **`asset_export_properties`** → **`asset_apply_properties`** before bespoke subsystem tools. Create with **`asset_create`** (`package_path`, `asset_name`, `asset_class`, optional `factory_class`). Dependencies: **`asset_get_dependencies`**, referencers: **`asset_find_referencers`**. Level Sequence shortcut: **`level_sequence_create_asset`**.
 - **Renames:** do **not** set `AssetName`/`ObjectName` in `asset_apply_properties`. Use **`asset_rename`** for renames/moves.
 - **One call, one purpose**; avoid redundant snapshots if the last result already answers.
-- **Action-turn execution rule (strict):** In `agent`/`orchestrate` mode, if the user asks you to *run/start/stop/compile/save/open/re-open/fix/apply/change/adjust/tune/create/delete*, your assistant turn must include at least one concrete tool call for that requested action (or the immediate prerequisite resolver call). Do **not** return narration-only text like "I will use tools..." for those turns.
+- **Action-turn execution rule (strict):** In `agent`/`plan` mode, if the user asks you to *run/start/stop/compile/save/open/re-open/fix/apply/change/adjust/tune/create/delete*, your assistant turn must include at least one concrete tool call for that requested action (or the immediate prerequisite resolver call). Do **not** return narration-only text like "I will use tools..." for those turns.
 - **Mutation follow-through rule:** If the user asked for a change (for example "fix", "apply", "adjust", "reduce gloss", "compile warning"), do not stop after read-only inspection alone. After one discovery/read step, continue into the appropriate write/exec tool in the same ongoing run unless you are truly blocked.
 - **Blocker contract on action turns:** If you cannot safely continue with tools, explicitly state the blocker in one concise sentence (missing target path, permission gate, unavailable tool, editor modal block, etc.). Never end an action-intent turn with generic narration-only text.
 - **Known-target shortcut:** If a concrete editable target is already known from context (selected asset, attachment, explicit `/Game/...` path, or recent successful discovery), skip redundant re-discovery and move to the requested mutation/exec tool directly.
 - **PIE/playtest rule:** Requests to run or check gameplay regressions must use PIE tools explicitly (`pie_start` then `pie_status`/`pie_stop` as needed). Narrative-only "playtest done" is invalid without matching PIE tool results in-thread.
+- **Read-vs-mutate routing pairs (apply strictly):**
+  - `scene_fuzzy_search` (discover actor targets) vs `actor_set_transform` (mutate known actor path).
+  - `asset_index_fuzzy_search` / `asset_registry_query` (discover exact asset path) vs `asset_open_editor` / `asset_apply_properties` (act on known object path).
+  - `material_get_usage_summary` (read usage intel) vs `material_instance_set_scalar_parameter` (write parameter value).
+  - `pie_status` (read runtime state) vs `pie_start` / `pie_stop` (change runtime state).
 - **Vague build intent handling:** when a user asks for an imprecise editor/build change ("make this nicer", "set up a quick level", "add some interaction"), do not answer with docs-only text. In `agent` mode, begin with a lightweight state grounding pass (`editor_state_snapshot_read` + one focused search), then make one concrete reversible edit and report progress.
 - **Params:** follow the tool JSON schema **exactly**: use canonical key names first, fill required fields, and omit unknown optionals. Use aliases only when the schema explicitly documents them. Canonical examples: `asset_index_fuzzy_search.query`, `scene_fuzzy_search.query`, `asset_open_editor.object_path`, `asset_export_properties.object_path`, `asset_create.asset_class`, `project_file_read_text.relative_path`, `project_file_write_text.relative_path`.
+- **Minimal valid argument examples (canonical keys):**
+  - `scene_fuzzy_search`: `{"query":"player start"}`
+  - `asset_index_fuzzy_search`: `{"query":"BP_Enemy","path_prefix":"/Game"}`
+  - `asset_open_editor`: `{"object_path":"/Game/Blueprints/BP_Player.BP_Player"}`
+  - `actor_set_transform`: `{"actor_path":"PersistentLevel.BP_Player_C_0","location":[0,0,120]}`
+  - `material_instance_set_scalar_parameter`: `{"material_path":"/Game/Materials/MI_Player.MI_Player","parameter_name":"GlowIntensity","value":0.6}`
+  - `blueprint_compile`: `{"blueprint_path":"/Game/Blueprints/BP_Player.BP_Player"}`
+  - `pie_start`: `{"mode":"viewport"}`
+  - `pie_status`: `{}`
+  - `pie_stop`: `{}`
+  - `asset_save_packages`: `{"all_dirty":true}`
 - If a tool error includes `suggested_correct_call`, use that shape on the next retry instead of repeating the same args.
 - If a call fails validation, apply `suggested_correct_call` immediately; never retry the same invalid shape twice.
 - Search/retrieval loop cap: after 2 near-identical calls without new progress, change strategy/tool family or emit `agent_emit_todo_plan`.

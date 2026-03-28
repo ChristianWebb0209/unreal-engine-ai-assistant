@@ -5,7 +5,7 @@ These are **not** sent verbatim to the model. Document them in one place so prom
 | Token | Source | Purpose |
 |-------|--------|---------|
 | `{{CONTEXT_SERVICE_OUTPUT}}` | `IAgentContextService::BuildContextWindow` | Editor snapshot, attachments summary, tool-result memory, warnings. |
-| `{{AGENT_MODE}}` | settings / UI | `ask` \| `agent` \| `orchestrate` — drives tool allowlist and the **`02-operating-modes.md`** section injected at build time. |
+| `{{AGENT_MODE}}` | settings / UI | `ask` \| `agent` \| `plan` — drives tool allowlist and the **`02-operating-modes.md`** section injected at build time. |
 | `{{ACTIVE_TODO_SUMMARY}}` | `context.json` → `activeTodoPlan` | Short human summary when a plan exists. |
 | `{{PLAN_POINTER}}` | harness | `threadId=…; storage=context.json activeTodoPlan + todoStepsDone` (see `UnrealAiPromptBuilder.cpp`). |
 | `{{TOOL_PACK_NAME}}` | harness | Optional label for routed packs (core vs domain). |

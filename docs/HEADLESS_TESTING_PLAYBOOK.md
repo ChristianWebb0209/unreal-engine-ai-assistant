@@ -84,6 +84,17 @@ python tests/live_vague_workflow_runner.py --scenario tests/vague_action_heavy_w
 - `tool_calls`
 - `tool_call_validations`
 - `assistant_content`
+- `meta.no_tool_action_turn_count` / `meta.read_only_on_mutation_count` / `meta.all_tool_calls_invalid_count` (from `tests/live_vague_workflow_runner.py`)
+- `enforcement_event` / `enforcement_summary` rows in harness `run.jsonl` (from `IAgentRunSink` events)
+- stream-first lifecycle markers in `enforcement_event.event_type`:
+  - `stream_tool_ready`
+  - `stream_tool_exec_start`
+  - `stream_tool_exec_done`
+  - `stream_tool_call_incomplete_timeout`
+
+## Implementation-only update note
+
+The current repo state includes enforcement telemetry and coverage artifacts for phased improvements, but this update intentionally does **not** execute validation runs yet. Run-level proof should be collected in a later pass.
 
 ## Review process (required)
 
@@ -212,6 +223,10 @@ Exit criteria:
   - at least one vague complex scenario,
   - qualitative review notes,
   - pass/partial/fail status and remediation map.
+
+Tracking artifacts:
+- `tests/domain_coverage_matrix.md`
+- `tests/qualitative_turn_review_template.md`
 
 ## Guidance for future agents
 

@@ -79,7 +79,7 @@ Artifacts: [`tests/out/editor-last.log`](../tests/out/editor-last.log), [`tests/
 
 **Run in editor:** **Tools → Session Frontend** (or **Test Automation** in some UE versions) → search `UnrealAiEditor`.
 
-Catalog matrix tests catch **contract** breaks (empty responses, non-JSON, missing structured fields). They do **not** prove every tool succeeds with minimal args (`bOk` may be false by design). Add fixtures under `tests/fixtures/` for deeper per-tool checks; maps/assets/PIE still need targeted integration tests.
+Catalog matrix tests catch **contract** breaks (empty responses, non-JSON, missing structured fields). They do **not** prove every tool succeeds with minimal args (`bOk` may be false by design). Optional per-tool argument JSON under `tests/fixtures/<tool_id>.json` supplies non-empty args for matrix dispatch (no LLM). Maps/assets/PIE still need targeted integration tests.
 
 ## Out of scope (product)
 
