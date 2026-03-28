@@ -21,7 +21,7 @@ namespace
 	}
 }
 
-void FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(TArray<FUnrealAiBlueprintFeatureRecord>& OutRecords)
+void FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(TArray<FUnrealAiBlueprintFeatureRecord>& OutRecords, const int32 MaxRecords)
 {
 	OutRecords.Reset();
 #if WITH_EDITOR
@@ -32,7 +32,7 @@ void FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(TArray<FUnrealAiB
 	TArray<FAssetData> Assets;
 	RegistryModule.Get().GetAssets(Filter, Assets);
 
-	const int32 MaxFeatures = 4000;
+	const int32 MaxFeatures = (MaxRecords > 0) ? MaxRecords : 4000;
 	int32 Added = 0;
 	for (const FAssetData& Asset : Assets)
 	{

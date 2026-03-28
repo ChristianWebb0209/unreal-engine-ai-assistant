@@ -4,18 +4,26 @@
 #include "Async/Async.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Memory/IUnrealAiMemoryService.h"
 #include "Memory/UnrealAiMemoryTypes.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/Crc.h"
 #include "Misc/SecureHash.h"
 #include "Retrieval/FOpenAiCompatibleEmbeddingProvider.h"
 #include "Retrieval/UnrealAiBlueprintFeatureExtractor.h"
 #include "Retrieval/UnrealAiRetrievalDiagnostics.h"
+#include "Retrieval/UnrealAiRetrievalIndexConfig.h"
 #include "Retrieval/UnrealAiVectorIndexStore.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+
+#if WITH_EDITOR
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Modules/ModuleManager.h"
+#endif
 
 FUnrealAiRetrievalService::FUnrealAiRetrievalService(
 	IUnrealAiPersistence* InPersistence,
@@ -30,11 +38,65 @@ FUnrealAiRetrievalService::FUnrealAiRetrievalService(
 
 FUnrealAiRetrievalService::~FUnrealAiRetrievalService() = default;
 
+FUnrealAiVectorIndexStore* FUnrealAiRetrievalService::GetOrCreateStore(const FString& ProjectId, FString& OutError) const
+{
+	if (ProjectId.IsEmpty())
+	{
+		OutError = TEXT("Empty ProjectId for retrieval store.");
+		return nullptr;
+	}
+	FScopeLock Lock(&StoreCacheMutex);
+	TUniquePtr<FUnrealAiVectorIndexStore>& StorePtr = CachedStoresByProject.FindOrAdd(ProjectId);
+	if (!StorePtr.IsValid())
+	{
+		StorePtr = MakeUnique<FUnrealAiVectorIndexStore>(ProjectId);
+	}
+	if (!StorePtr->Initialize(OutError))
+	{
+		return nullptr;
+	}
+	return StorePtr.Get();
+}
+
 namespace
 {
+	static EUnrealAiRetrievalRootPreset ParseRootPresetString(const FString& S)
+	{
+		if (S.Equals(TEXT("standard"), ESearchCase::IgnoreCase))
+		{
+			return EUnrealAiRetrievalRootPreset::StandardRoots;
+		}
+		if (S.Equals(TEXT("extended"), ESearchCase::IgnoreCase))
+		{
+			return EUnrealAiRetrievalRootPreset::ExtendedRoots;
+		}
+		return EUnrealAiRetrievalRootPreset::Minimal;
+	}
+
+	static void ClampChunkParams(int32& ChunkChars, int32& ChunkOverlap)
+	{
+		ChunkChars = FMath::Clamp(ChunkChars, 128, 32000);
+		ChunkOverlap = FMath::Max(0, ChunkOverlap);
+		if (ChunkOverlap >= ChunkChars)
+		{
+			ChunkOverlap = FMath::Max(0, ChunkChars - 1);
+		}
+	}
+
 	static FString MakeChunkId(const FString& SourcePath, const int32 ChunkStart, const FString& ChunkText)
 	{
 		return SourcePath + TEXT(":") + FString::FromInt(ChunkStart) + TEXT(":") + FMD5::HashAnsiString(*ChunkText);
+	}
+
+	static uint32 MakePrefetchQueryHash(const FUnrealAiRetrievalQuery& Query)
+	{
+		const FString Canonical = FString::Printf(
+			TEXT("%s|%s|%d|%s"),
+			*Query.ProjectId,
+			*Query.ThreadId,
+			Query.MaxResults,
+			*Query.QueryText);
+		return FCrc::StrCrc32(*Canonical);
 	}
 }
 
@@ -83,6 +145,67 @@ FUnrealAiRetrievalSettings FUnrealAiRetrievalService::LoadSettings() const
 	}
 	(*RetrievalObj)->TryGetBoolField(TEXT("allowMixedModelCompatibility"), Settings.bAllowMixedModelCompatibility);
 
+	FString PresetStr;
+	if ((*RetrievalObj)->TryGetStringField(TEXT("rootPreset"), PresetStr))
+	{
+		Settings.RootPreset = ParseRootPresetString(PresetStr);
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* ExtArray = nullptr;
+	if ((*RetrievalObj)->TryGetArrayField(TEXT("indexedExtensions"), ExtArray) && ExtArray)
+	{
+		Settings.IndexedExtensions.Reset();
+		for (const TSharedPtr<FJsonValue>& V : *ExtArray)
+		{
+			if (V.IsValid() && V->Type == EJson::String)
+			{
+				Settings.IndexedExtensions.Add(V->AsString());
+			}
+		}
+		UnrealAiRetrievalIndexConfig::NormalizeIndexedExtensions(Settings.IndexedExtensions);
+	}
+
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("maxFilesPerRebuild"), NumberField))
+	{
+		Settings.MaxFilesPerRebuild = FMath::Max(0, static_cast<int32>(NumberField));
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("maxTotalChunksPerRebuild"), NumberField))
+	{
+		Settings.MaxTotalChunksPerRebuild = FMath::Max(0, static_cast<int32>(NumberField));
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("maxEmbeddingCallsPerRebuild"), NumberField))
+	{
+		Settings.MaxEmbeddingCallsPerRebuild = FMath::Max(0, static_cast<int32>(NumberField));
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("chunkChars"), NumberField))
+	{
+		Settings.ChunkChars = static_cast<int32>(NumberField);
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("chunkOverlap"), NumberField))
+	{
+		Settings.ChunkOverlap = static_cast<int32>(NumberField);
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("assetRegistryMaxAssets"), NumberField))
+	{
+		Settings.AssetRegistryMaxAssets = FMath::Max(0, static_cast<int32>(NumberField));
+	}
+	(*RetrievalObj)->TryGetBoolField(TEXT("assetRegistryIncludeEngineAssets"), Settings.bAssetRegistryIncludeEngineAssets);
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("embeddingBatchSize"), NumberField))
+	{
+		Settings.EmbeddingBatchSize = FMath::Max(1, static_cast<int32>(NumberField));
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("minDelayMsBetweenEmbeddingBatches"), NumberField))
+	{
+		Settings.MinDelayMsBetweenEmbeddingBatches = FMath::Max(0, static_cast<int32>(NumberField));
+	}
+	(*RetrievalObj)->TryGetBoolField(TEXT("indexMemoryRecordsInVectorStore"), Settings.bIndexMemoryRecordsInVectorStore);
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("blueprintMaxFeatureRecords"), NumberField))
+	{
+		Settings.BlueprintMaxFeatureRecords = FMath::Max(0, static_cast<int32>(NumberField));
+	}
+
+	ClampChunkParams(Settings.ChunkChars, Settings.ChunkOverlap);
+
 	return Settings;
 }
 
@@ -110,9 +233,15 @@ FUnrealAiRetrievalProjectStatus FUnrealAiRetrievalService::GetProjectStatus(cons
 		Status.StateText = TEXT("no_project");
 		return Status;
 	}
-	FUnrealAiVectorIndexStore Store(ProjectId);
+	FString StoreError;
+	FUnrealAiVectorIndexStore* Store = GetOrCreateStore(ProjectId, StoreError);
+	if (!Store)
+	{
+		Status.StateText = TEXT("error");
+		return Status;
+	}
 	FUnrealAiVectorManifest Manifest;
-	if (!Store.LoadManifest(Manifest))
+	if (!Store->LoadManifest(Manifest))
 	{
 		Status.StateText = TEXT("indexing");
 		return Status;
@@ -126,15 +255,15 @@ FUnrealAiRetrievalProjectStatus FUnrealAiRetrievalService::GetProjectStatus(cons
 		int32 DbFiles = 0;
 		int32 DbChunks = 0;
 		FString CountError;
-		if (Store.GetIndexCounts(DbFiles, DbChunks, CountError) && DbChunks > 0)
+		if (Store->GetIndexCounts(DbFiles, DbChunks, CountError) && DbChunks > 0)
 		{
 			Manifest.FilesIndexed = DbFiles;
 			Manifest.ChunksIndexed = DbChunks;
 			Manifest.Status = TEXT("ready");
-			Store.SaveManifest(Manifest);
+			Store->SaveManifest(Manifest);
 			TArray<TPair<FString, int32>> Top;
 			FString TopErr;
-			Store.GetTopSourcesByChunkCount(12, Top, TopErr);
+			Store->GetTopSourcesByChunkCount(12, Top, TopErr);
 			TArray<FUnrealAiRetrievalDiagnosticsRow> Rows;
 			for (const TPair<FString, int32>& P : Top)
 			{
@@ -153,7 +282,7 @@ FUnrealAiRetrievalProjectStatus FUnrealAiRetrievalService::GetProjectStatus(cons
 	{
 		TArray<TPair<FString, int32>> Top;
 		FString TopErr;
-		Store.GetTopSourcesByChunkCount(12, Top, TopErr);
+		Store->GetTopSourcesByChunkCount(12, Top, TopErr);
 		TArray<FUnrealAiRetrievalDiagnosticsRow> Rows;
 		for (const TPair<FString, int32>& P : Top)
 		{
@@ -165,6 +294,115 @@ FUnrealAiRetrievalProjectStatus FUnrealAiRetrievalService::GetProjectStatus(cons
 		UnrealAiRetrievalDiagnostics::WriteIndexDiagnostics(ProjectId, TEXT("ready"), Status.FilesIndexed, Status.ChunksIndexed, Rows);
 	}
 	return Status;
+}
+
+bool FUnrealAiRetrievalService::GetVectorDbOverview(
+	const FString& ProjectId,
+	FUnrealAiRetrievalVectorDbOverview& OutOverview,
+	FString& OutError) const
+{
+	OutOverview = FUnrealAiRetrievalVectorDbOverview();
+	OutError.Reset();
+
+	const FUnrealAiRetrievalSettings Settings = LoadSettings();
+	OutOverview.bRetrievalEnabledInSettings = Settings.bEnabled;
+	switch (Settings.RootPreset)
+	{
+	case EUnrealAiRetrievalRootPreset::StandardRoots:
+		OutOverview.RootPresetLabel = TEXT("standard");
+		break;
+	case EUnrealAiRetrievalRootPreset::ExtendedRoots:
+		OutOverview.RootPresetLabel = TEXT("extended");
+		break;
+	default:
+		OutOverview.RootPresetLabel = TEXT("minimal");
+		break;
+	}
+
+	TArray<FString> Exts;
+	UnrealAiRetrievalIndexConfig::GetEffectiveIndexedExtensions(Settings, Exts);
+	OutOverview.IndexedExtensionCount = Exts.Num();
+	for (int32 i = 0; i < Exts.Num() && i < 14; ++i)
+	{
+		if (i > 0)
+		{
+			OutOverview.IndexedExtensionsPreview += TEXT(", ");
+		}
+		OutOverview.IndexedExtensionsPreview += Exts[i];
+	}
+	if (Exts.Num() > 14)
+	{
+		OutOverview.IndexedExtensionsPreview += FString::Printf(TEXT(" … (+%d more)"), Exts.Num() - 14);
+	}
+
+	OutOverview.bAssetRegistryCorpusEnabled = Settings.AssetRegistryMaxAssets > 0;
+	OutOverview.bMemoryCorpusEnabled = Settings.bIndexMemoryRecordsInVectorStore;
+	OutOverview.BlueprintMaxFeatureRecords = Settings.BlueprintMaxFeatureRecords;
+	OutOverview.bBlueprintCapCustom = Settings.BlueprintMaxFeatureRecords > 0;
+
+	if (ProjectId.IsEmpty())
+	{
+		OutError = TEXT("No project id.");
+		return false;
+	}
+
+	const FUnrealAiRetrievalProjectStatus St = GetProjectStatus(ProjectId);
+	OutOverview.bIndexBusy = St.bBusy;
+	OutOverview.ManifestStatus = St.StateText;
+	OutOverview.FilesIndexed = St.FilesIndexed;
+	OutOverview.ChunksIndexed = St.ChunksIndexed;
+
+	FString StoreErr;
+	FUnrealAiVectorIndexStore* Store = GetOrCreateStore(ProjectId, StoreErr);
+	if (!Store)
+	{
+		OutOverview.bStoreAvailable = false;
+		OutOverview.StoreError = StoreErr;
+		return true;
+	}
+
+	OutOverview.bStoreAvailable = true;
+	OutOverview.IndexDbPath = Store->GetIndexDbPath();
+	OutOverview.ManifestPath = Store->GetManifestPath();
+
+	FUnrealAiVectorManifest Man;
+	if (Store->LoadManifest(Man))
+	{
+		if (!Man.EmbeddingModel.IsEmpty())
+		{
+			OutOverview.ManifestEmbeddingModel = Man.EmbeddingModel;
+		}
+		OutOverview.MigrationState = Man.MigrationState;
+		if (Man.LastFullScanUtc > FDateTime::MinValue())
+		{
+			OutOverview.LastFullScanUtc = Man.LastFullScanUtc;
+		}
+		if (!Man.Status.IsEmpty())
+		{
+			OutOverview.ManifestStatus = Man.Status;
+		}
+	}
+
+	FString CountErr;
+	int32 DbFiles = 0;
+	int32 DbChunks = 0;
+	if (Store->GetIndexCounts(DbFiles, DbChunks, CountErr))
+	{
+		OutOverview.FilesIndexed = DbFiles;
+		OutOverview.ChunksIndexed = DbChunks;
+	}
+
+	FString IntErr;
+	OutOverview.bIntegrityOk = Store->CheckIntegrity(IntErr);
+	if (!OutOverview.bIntegrityOk)
+	{
+		OutOverview.IntegrityError = IntErr;
+	}
+
+	FString TopErr;
+	Store->GetTopSourcesByChunkCount(8, OutOverview.TopSourcesByChunkCount, TopErr);
+
+	return true;
 }
 
 void FUnrealAiRetrievalService::RequestRebuild(const FString& ProjectId)
@@ -180,11 +418,13 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 {
 	FUnrealAiRetrievalQueryResult Result;
 	const FUnrealAiRetrievalSettings Settings = LoadSettings();
+	const double QueryStartSeconds = FPlatformTime::Seconds();
 	UE_LOG(
 		LogTemp,
 		Log,
-		TEXT("Retrieval query start project_id=%s enabled=%d query_chars=%d maxResults=%d cfgMax=%d"),
+		TEXT("Retrieval query start project_id=%s thread_id=%s enabled=%d query_chars=%d maxResults=%d cfgMax=%d"),
 		*Query.ProjectId,
+		*Query.ThreadId,
 		Settings.bEnabled ? 1 : 0,
 		Query.QueryText.Len(),
 		Query.MaxResults,
@@ -203,28 +443,28 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 		Result.Warnings.Add(TEXT("Retrieval query skipped: empty query text."));
 		return Result;
 	}
-	FUnrealAiVectorIndexStore Store(Query.ProjectId);
 	FString StoreError;
-	if (!Store.Initialize(StoreError))
+	FUnrealAiVectorIndexStore* Store = GetOrCreateStore(Query.ProjectId, StoreError);
+	if (!Store)
 	{
 		Result.Warnings.Add(FString::Printf(TEXT("Retrieval store unavailable: %s"), *StoreError));
 		return Result;
 	}
-	if (!Store.CheckIntegrity(StoreError))
+	if (!Store->CheckIntegrity(StoreError))
 	{
 		FUnrealAiVectorManifest CorruptManifest;
-		if (!Store.LoadManifest(CorruptManifest))
+		if (!Store->LoadManifest(CorruptManifest))
 		{
 			CorruptManifest.ProjectId = Query.ProjectId;
 		}
 		CorruptManifest.Status = TEXT("error");
-		Store.SaveManifest(CorruptManifest);
+		Store->SaveManifest(CorruptManifest);
 		Result.Warnings.Add(FString::Printf(TEXT("Retrieval integrity check failed; falling back to deterministic context: %s"), *StoreError));
 		EnsureBackgroundIndexBuild(Query.ProjectId, Settings);
 		return Result;
 	}
 	FUnrealAiVectorManifest Manifest;
-	const bool bHasManifest = Store.LoadManifest(Manifest);
+	const bool bHasManifest = Store->LoadManifest(Manifest);
 	bool bBusy = false;
 	{
 		FScopeLock Lock(&IndexStateMutex);
@@ -235,15 +475,15 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 		int32 DbFiles = 0;
 		int32 DbChunks = 0;
 		FString CountError;
-		if (Store.GetIndexCounts(DbFiles, DbChunks, CountError) && DbChunks > 0)
+		if (Store->GetIndexCounts(DbFiles, DbChunks, CountError) && DbChunks > 0)
 		{
 			Manifest.FilesIndexed = DbFiles;
 			Manifest.ChunksIndexed = DbChunks;
 			Manifest.Status = TEXT("ready");
-			Store.SaveManifest(Manifest);
+			Store->SaveManifest(Manifest);
 			TArray<TPair<FString, int32>> Top;
 			FString TopErr;
-			Store.GetTopSourcesByChunkCount(12, Top, TopErr);
+			Store->GetTopSourcesByChunkCount(12, Top, TopErr);
 			TArray<FUnrealAiRetrievalDiagnosticsRow> Rows;
 			for (const TPair<FString, int32>& P : Top)
 			{
@@ -261,14 +501,14 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 		int32 DbFiles = 0;
 		int32 DbChunks = 0;
 		FString CountError;
-		const bool bHasDbContent = Store.GetIndexCounts(DbFiles, DbChunks, CountError) && DbChunks > 0;
+		const bool bHasDbContent = Store->GetIndexCounts(DbFiles, DbChunks, CountError) && DbChunks > 0;
 		if (bHasDbContent)
 		{
 			Manifest.ProjectId = Query.ProjectId;
 			Manifest.FilesIndexed = DbFiles;
 			Manifest.ChunksIndexed = DbChunks;
 			Manifest.Status = TEXT("ready");
-			Store.SaveManifest(Manifest);
+			Store->SaveManifest(Manifest);
 			bCanQueryFromStore = true;
 		}
 	}
@@ -292,7 +532,7 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 	if (!Manifest.EmbeddingModel.IsEmpty() && Manifest.EmbeddingModel != Settings.EmbeddingModel)
 	{
 		Manifest.MigrationState = TEXT("pending_reembed");
-		Store.SaveManifest(Manifest);
+		Store->SaveManifest(Manifest);
 		EnsureBackgroundIndexBuild(Query.ProjectId, Settings);
 		if (!Settings.bAllowMixedModelCompatibility)
 		{
@@ -315,10 +555,103 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 	{
 		Result.Warnings.Add(TEXT("Retrieval max snippets <= 0; clamped to 1."));
 	}
+
+	// Short-lived cache avoids repeating identical retrieval work multiple times
+	// within the same harness turn/round churn.
+	const FString CacheKey = FString::Printf(
+		TEXT("%s|%s|%d|%s"),
+		*Query.ProjectId,
+		*Query.ThreadId,
+		TopK,
+		*Query.QueryText);
+	{
+		FScopeLock Lock(&QueryCacheMutex);
+		if (FRetrievalQueryCacheEntry* Existing = QueryCacheByKey.Find(CacheKey))
+		{
+			if (Existing->ExpiresAtSeconds > QueryStartSeconds)
+			{
+				UE_LOG(
+					LogTemp,
+					Display,
+					TEXT("Retrieval query cache hit project_id=%s thread_id=%s topk=%d hits=%d"),
+					*Query.ProjectId,
+					*Query.ThreadId,
+					TopK,
+					Existing->Result.Snippets.Num());
+				return Existing->Result;
+			}
+			QueryCacheByKey.Remove(CacheKey);
+		}
+	}
+
+	// Circuit breaker: if embeddings already timed out/faulted for this ThreadId,
+	// skip embedding generation and go straight to lexical retrieval to avoid
+	// repeatedly burning the HTTP timeout budget inside one harness step.
+	constexpr double EmbeddingCircuitBreakerSeconds = 300.0; // 5 minutes
+	double NowSeconds = FPlatformTime::Seconds();
+	if (!Query.ThreadId.IsEmpty())
+	{
+		bool bSkipEmbeddings = false;
+		{
+			FScopeLock Lock(&EmbeddingCircuitMutex);
+			if (const double* UntilSeconds = EmbeddingFailureUntilSecondsByThread.Find(Query.ThreadId))
+			{
+				if (*UntilSeconds > NowSeconds)
+				{
+					bSkipEmbeddings = true;
+				}
+				else
+				{
+					// Expired: allow embeddings attempts again.
+					EmbeddingFailureUntilSecondsByThread.Remove(Query.ThreadId);
+				}
+			}
+		}
+		if (bSkipEmbeddings)
+		{
+			FString CircuitLexicalStoreError;
+			if (!Store->QueryTopKByLexical(Query.QueryText, TopK, Result.Snippets, CircuitLexicalStoreError))
+			{
+				Result.Warnings.Add(FString::Printf(TEXT("Retrieval lexical fallback failed (circuit breaker active): %s"), *CircuitLexicalStoreError));
+			}
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("Retrieval embedding circuit breaker active; skipping embeddings and using lexical only project_id=%s thread_id=%s topk=%d hits=%d"),
+				*Query.ProjectId,
+				*Query.ThreadId,
+				TopK,
+				Result.Snippets.Num());
+			Result.Warnings.Add(TEXT("Retrieval embedding circuit breaker active; using lexical retrieval only."));
+			{
+				FScopeLock Lock(&QueryCacheMutex);
+				FRetrievalQueryCacheEntry& Cached = QueryCacheByKey.FindOrAdd(CacheKey);
+				Cached.Result = Result;
+				Cached.ExpiresAtSeconds = QueryStartSeconds + 15.0;
+			}
+			return Result;
+		}
+	}
+
 	if (!EmbeddingProvider->EmbedOne(Settings.EmbeddingModel, EmbeddingRequest, EmbeddingResponse))
 	{
 		Result.Warnings.Add(FString::Printf(TEXT("Retrieval query embedding failed; using lexical fallback: %s"), *EmbeddingResponse.Error));
-		if (!Store.QueryTopKByLexical(Query.QueryText, TopK, Result.Snippets, StoreError))
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("Retrieval fallback engaged (embedding failure) project_id=%s thread_id=%s err=%s"),
+			*Query.ProjectId,
+			*Query.ThreadId,
+			*EmbeddingResponse.Error);
+
+		// Enable circuit breaker for subsequent retrieval calls inside this harness step.
+		if (!Query.ThreadId.IsEmpty())
+		{
+			FScopeLock Lock(&EmbeddingCircuitMutex);
+			EmbeddingFailureUntilSecondsByThread.Add(Query.ThreadId, NowSeconds + EmbeddingCircuitBreakerSeconds);
+		}
+
+		if (!Store->QueryTopKByLexical(Query.QueryText, TopK, Result.Snippets, StoreError))
 		{
 			Result.Warnings.Add(FString::Printf(TEXT("Retrieval lexical fallback failed: %s"), *StoreError));
 		}
@@ -329,10 +662,16 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 			*Query.ProjectId,
 			TopK,
 			Result.Snippets.Num());
+		{
+			FScopeLock Lock(&QueryCacheMutex);
+			FRetrievalQueryCacheEntry& Cached = QueryCacheByKey.FindOrAdd(CacheKey);
+			Cached.Result = Result;
+			Cached.ExpiresAtSeconds = QueryStartSeconds + 15.0;
+		}
 		return Result;
 	}
 
-	if (!Store.QueryTopKByCosine(EmbeddingResponse.Vector, TopK, Result.Snippets, StoreError))
+	if (!Store->QueryTopKByCosine(EmbeddingResponse.Vector, TopK, Result.Snippets, StoreError))
 	{
 		Result.Warnings.Add(FString::Printf(TEXT("Retrieval query failed: %s"), *StoreError));
 	}
@@ -349,7 +688,12 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 	if (Result.Snippets.Num() == 0)
 	{
 		// Fallback keeps retrieval useful when embeddings return no close vectors.
-		if (Store.QueryTopKByLexical(Query.QueryText, TopK, Result.Snippets, StoreError))
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("Retrieval fallback engaged (empty vector hits) project_id=%s"),
+			*Query.ProjectId);
+		if (Store->QueryTopKByLexical(Query.QueryText, TopK, Result.Snippets, StoreError))
 		{
 			UE_LOG(
 				LogTemp,
@@ -364,7 +708,167 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 			Result.Warnings.Add(FString::Printf(TEXT("Retrieval lexical fallback failed: %s"), *StoreError));
 		}
 	}
+	{
+		FScopeLock Lock(&QueryCacheMutex);
+		FRetrievalQueryCacheEntry& Cached = QueryCacheByKey.FindOrAdd(CacheKey);
+		Cached.Result = Result;
+		Cached.ExpiresAtSeconds = QueryStartSeconds + 15.0;
+	}
 	return Result;
+}
+
+void FUnrealAiRetrievalService::StartPrefetch(const FUnrealAiRetrievalQuery& InQuery, const FString& TurnKey)
+{
+	if (TurnKey.IsEmpty() || InQuery.ProjectId.IsEmpty() || InQuery.QueryText.TrimStartAndEnd().IsEmpty())
+	{
+		return;
+	}
+
+	const double NowSeconds = FPlatformTime::Seconds();
+	const uint32 QueryHash = MakePrefetchQueryHash(InQuery);
+	{
+		FScopeLock Lock(&PrefetchMutex);
+		for (auto It = PrefetchByTurnKey.CreateIterator(); It; ++It)
+		{
+			if (It.Value().ExpiresAtSeconds <= NowSeconds)
+			{
+				It.RemoveCurrent();
+			}
+		}
+
+		if (FRetrievalPrefetchEntry* Existing = PrefetchByTurnKey.Find(TurnKey))
+		{
+			if (Existing->QueryHash == QueryHash && Existing->ExpiresAtSeconds > NowSeconds)
+			{
+				return;
+			}
+		}
+
+		FRetrievalPrefetchEntry& Entry = PrefetchByTurnKey.FindOrAdd(TurnKey);
+		Entry.ProjectId = InQuery.ProjectId;
+		Entry.ThreadId = InQuery.ThreadId;
+		Entry.QueryHash = QueryHash;
+		Entry.bInFlight = true;
+		Entry.bReady = false;
+		Entry.StartedAtSeconds = NowSeconds;
+		Entry.CompletedAtSeconds = 0.0;
+		Entry.ExpiresAtSeconds = NowSeconds + 30.0;
+		Entry.Result = FUnrealAiRetrievalQueryResult();
+	}
+
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("Retrieval prefetch started project_id=%s thread_id=%s turn_key=%s"),
+		*InQuery.ProjectId,
+		*InQuery.ThreadId,
+		*TurnKey);
+
+	Async(EAsyncExecution::ThreadPool, [this, InQuery, TurnKey, QueryHash]()
+	{
+		const double WorkStart = FPlatformTime::Seconds();
+		const FUnrealAiRetrievalQueryResult PrefetchResult = this->Query(InQuery);
+		const double WorkEnd = FPlatformTime::Seconds();
+
+		bool bHadWarnings = PrefetchResult.Warnings.Num() > 0;
+		{
+			FScopeLock Lock(&PrefetchMutex);
+			FRetrievalPrefetchEntry* Entry = PrefetchByTurnKey.Find(TurnKey);
+			if (!Entry || Entry->QueryHash != QueryHash)
+			{
+				return;
+			}
+			Entry->Result = PrefetchResult;
+			Entry->bInFlight = false;
+			Entry->bReady = true;
+			Entry->CompletedAtSeconds = WorkEnd;
+			Entry->ExpiresAtSeconds = WorkEnd + 20.0;
+		}
+
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("Retrieval prefetch ready project_id=%s thread_id=%s turn_key=%s ready_ms=%.0f snippets=%d warnings=%d"),
+			*InQuery.ProjectId,
+			*InQuery.ThreadId,
+			*TurnKey,
+			(WorkEnd - WorkStart) * 1000.0,
+			PrefetchResult.Snippets.Num(),
+			PrefetchResult.Warnings.Num());
+		if (bHadWarnings)
+		{
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("Retrieval prefetch completed with warnings project_id=%s thread_id=%s turn_key=%s"),
+				*InQuery.ProjectId,
+				*InQuery.ThreadId,
+				*TurnKey);
+		}
+	});
+}
+
+bool FUnrealAiRetrievalService::TryConsumePrefetch(
+	const FString& TurnKey,
+	FUnrealAiRetrievalQueryResult& OutResult,
+	bool& bOutReady)
+{
+	bOutReady = false;
+	OutResult = FUnrealAiRetrievalQueryResult();
+	if (TurnKey.IsEmpty())
+	{
+		return false;
+	}
+
+	const double NowSeconds = FPlatformTime::Seconds();
+	FScopeLock Lock(&PrefetchMutex);
+	for (auto It = PrefetchByTurnKey.CreateIterator(); It; ++It)
+	{
+		if (It.Value().ExpiresAtSeconds <= NowSeconds)
+		{
+			It.RemoveCurrent();
+		}
+	}
+
+	FRetrievalPrefetchEntry* Entry = PrefetchByTurnKey.Find(TurnKey);
+	if (!Entry)
+	{
+		return false;
+	}
+	if (!Entry->bReady)
+	{
+		bOutReady = false;
+		return true;
+	}
+
+	bOutReady = true;
+	OutResult = Entry->Result;
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("Retrieval prefetch consumed project_id=%s thread_id=%s turn_key=%s snippets=%d warnings=%d"),
+		*Entry->ProjectId,
+		*Entry->ThreadId,
+		*TurnKey,
+		OutResult.Snippets.Num(),
+		OutResult.Warnings.Num());
+	return true;
+}
+
+void FUnrealAiRetrievalService::CancelPrefetchForThread(const FString& ProjectId, const FString& ThreadId)
+{
+	if (ProjectId.IsEmpty() || ThreadId.IsEmpty())
+	{
+		return;
+	}
+	FScopeLock Lock(&PrefetchMutex);
+	for (auto It = PrefetchByTurnKey.CreateIterator(); It; ++It)
+	{
+		if (It.Value().ProjectId == ProjectId && It.Value().ThreadId == ThreadId)
+		{
+			It.RemoveCurrent();
+		}
+	}
 }
 
 void FUnrealAiRetrievalService::EnsureBackgroundIndexBuild(const FString& ProjectId, const FUnrealAiRetrievalSettings& Settings)
@@ -409,26 +913,14 @@ void FUnrealAiRetrievalService::EnsureBackgroundIndexBuild(const FString& Projec
 	});
 }
 
-void FUnrealAiRetrievalService::CollectIndexableFiles(const FString& ProjectDir, TArray<FString>& OutFiles) const
+void FUnrealAiRetrievalService::ChunkFileText(
+	const FString& RelativePath,
+	const FString& Text,
+	int32 ChunkChars,
+	int32 OverlapChars,
+	TArray<FUnrealAiVectorChunkRow>& OutChunks) const
 {
-	OutFiles.Reset();
-	TArray<FString> Candidates;
-	IFileManager::Get().FindFilesRecursive(Candidates, *FPaths::Combine(ProjectDir, TEXT("Source")), TEXT("*.*"), true, false);
-	IFileManager::Get().FindFilesRecursive(Candidates, *FPaths::Combine(ProjectDir, TEXT("docs")), TEXT("*.*"), true, false);
-	for (const FString& Path : Candidates)
-	{
-		const FString Ext = FPaths::GetExtension(Path, true).ToLower();
-		if (Ext == TEXT(".h") || Ext == TEXT(".hpp") || Ext == TEXT(".cpp") || Ext == TEXT(".md") || Ext == TEXT(".txt") || Ext == TEXT(".ini"))
-		{
-			OutFiles.Add(Path);
-		}
-	}
-}
-
-void FUnrealAiRetrievalService::ChunkFileText(const FString& RelativePath, const FString& Text, TArray<FUnrealAiVectorChunkRow>& OutChunks) const
-{
-	const int32 ChunkChars = 1200;
-	const int32 OverlapChars = 200;
+	ClampChunkParams(ChunkChars, OverlapChars);
 	if (Text.IsEmpty())
 	{
 		return;
@@ -452,19 +944,22 @@ void FUnrealAiRetrievalService::ChunkFileText(const FString& RelativePath, const
 	}
 }
 
-void FUnrealAiRetrievalService::CollectBlueprintFeatureChunks(TArray<FUnrealAiVectorChunkRow>& OutChunks) const
+void FUnrealAiRetrievalService::CollectBlueprintFeatureChunks(
+	const FUnrealAiRetrievalSettings& Settings,
+	TArray<FUnrealAiVectorChunkRow>& OutChunks) const
 {
 	TArray<FUnrealAiBlueprintFeatureRecord> Records;
+	const int32 BpCap = Settings.BlueprintMaxFeatureRecords;
 	if (IsInGameThread())
 	{
-		FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(Records);
+		FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(Records, BpCap);
 	}
 	else
 	{
 		FEvent* Done = FPlatformProcess::GetSynchEventFromPool(false);
-		AsyncTask(ENamedThreads::GameThread, [&Records, Done]()
+		AsyncTask(ENamedThreads::GameThread, [&Records, Done, BpCap]()
 		{
-			FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(Records);
+			FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(Records, BpCap);
 			if (Done)
 			{
 				Done->Trigger();
@@ -476,7 +971,10 @@ void FUnrealAiRetrievalService::CollectBlueprintFeatureChunks(TArray<FUnrealAiVe
 			FPlatformProcess::ReturnSynchEventToPool(Done);
 		}
 	}
-	const int32 MaxCharsPerRecord = 1200;
+	int32 ChunkChars = Settings.ChunkChars;
+	int32 ChunkOv = Settings.ChunkOverlap;
+	ClampChunkParams(ChunkChars, ChunkOv);
+	const int32 MaxCharsPerRecord = FMath::Max(256, ChunkChars);
 	for (const FUnrealAiBlueprintFeatureRecord& Record : Records)
 	{
 		FString Text = Record.Text;
@@ -493,9 +991,78 @@ void FUnrealAiRetrievalService::CollectBlueprintFeatureChunks(TArray<FUnrealAiVe
 	}
 }
 
-void FUnrealAiRetrievalService::CollectMemoryChunks(TArray<FUnrealAiVectorChunkRow>& OutChunks) const
+void FUnrealAiRetrievalService::GatherAssetRegistryShardTexts(
+	const FUnrealAiRetrievalSettings& Settings,
+	TArray<TPair<FString, FString>>& OutVirtualPathAndFullText) const
 {
-	if (!MemoryService)
+#if WITH_EDITOR
+	if (Settings.AssetRegistryMaxAssets <= 0)
+	{
+		return;
+	}
+
+	FEvent* Done = FPlatformProcess::GetSynchEventFromPool(false);
+	const FUnrealAiRetrievalSettings SettingsCopy = Settings;
+	AsyncTask(ENamedThreads::GameThread, [SettingsCopy, &OutVirtualPathAndFullText, Done]()
+	{
+		FAssetRegistryModule& RegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+		IAssetRegistry& AssetRegistry = RegistryModule.Get();
+		FARFilter Filter;
+		Filter.bRecursivePaths = true;
+		Filter.PackagePaths.Add(FName(TEXT("/Game")));
+		if (SettingsCopy.bAssetRegistryIncludeEngineAssets)
+		{
+			Filter.PackagePaths.Add(FName(TEXT("/Engine")));
+		}
+		TArray<FAssetData> Assets;
+		AssetRegistry.GetAssets(Filter, Assets);
+		Assets.Sort([](const FAssetData& A, const FAssetData& B)
+		{
+			return A.GetSoftObjectPath().ToString() < B.GetSoftObjectPath().ToString();
+		});
+
+		const int32 MaxAssets = SettingsCopy.AssetRegistryMaxAssets;
+		const int32 Count = FMath::Min(Assets.Num(), MaxAssets);
+		constexpr int32 AssetsPerShard = 500;
+		int32 ShardIdx = 0;
+		for (int32 Base = 0; Base < Count; Base += AssetsPerShard)
+		{
+			const int32 End = FMath::Min(Base + AssetsPerShard, Count);
+			FString ShardText;
+			for (int32 i = Base; i < End; ++i)
+			{
+				const FAssetData& Asset = Assets[i];
+				ShardText += FString::Printf(
+					TEXT("%s\t%s\t%s\n"),
+					*Asset.GetSoftObjectPath().ToString(),
+					*Asset.AssetClassPath.ToString(),
+					*Asset.PackageName.ToString());
+			}
+			const FString VPath = FString::Printf(TEXT("virtual://asset_registry/part_%04d.txt"), ShardIdx++);
+			OutVirtualPathAndFullText.Add(TPair<FString, FString>(VPath, ShardText));
+		}
+		if (Assets.Num() > MaxAssets)
+		{
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("Retrieval asset registry snapshot truncated: total_assets=%d cap=%d"),
+				Assets.Num(),
+				MaxAssets);
+		}
+		Done->Trigger();
+	});
+	if (Done)
+	{
+		Done->Wait();
+		FPlatformProcess::ReturnSynchEventToPool(Done);
+	}
+#endif
+}
+
+void FUnrealAiRetrievalService::CollectMemoryChunks(const FUnrealAiRetrievalSettings& Settings, TArray<FUnrealAiVectorChunkRow>& OutChunks) const
+{
+	if (!Settings.bIndexMemoryRecordsInVectorStore || !MemoryService)
 	{
 		return;
 	}
@@ -568,8 +1135,21 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 	Store.SaveManifest(Manifest);
 
 	const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+	int32 SkippedFilesDueToCap = 0;
 	TArray<FString> Files;
-	CollectIndexableFiles(ProjectDir, Files);
+	UnrealAiRetrievalIndexConfig::CollectFilesystemIndexPaths(ProjectDir, Settings, Files, SkippedFilesDueToCap);
+	if (SkippedFilesDueToCap > 0)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("Retrieval index: skipped %d filesystem files due to maxFilesPerRebuild cap."),
+			SkippedFilesDueToCap);
+	}
+
+	int32 ChunkChars = Settings.ChunkChars;
+	int32 ChunkOverlap = Settings.ChunkOverlap;
+	ClampChunkParams(ChunkChars, ChunkOverlap);
 
 	TMap<FString, FString> ExistingSourceHashes;
 	Store.LoadSourceHashes(ExistingSourceHashes, OutError);
@@ -577,7 +1157,6 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 	TMap<FString, TArray<FUnrealAiVectorChunkRow>> ChangedChunksBySource;
 	TArray<FString> RemovedSources;
 	ExistingSourceHashes.GetKeys(RemovedSources);
-	TArray<FUnrealAiVectorChunkRow> AllChunks;
 	int32 ChangedFiles = 0;
 	for (const FString& AbsolutePath : Files)
 	{
@@ -596,13 +1175,34 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 		{
 			++ChangedFiles;
 			TArray<FUnrealAiVectorChunkRow> ChunksForSource;
-			ChunkFileText(RelPath, Text, ChunksForSource);
+			ChunkFileText(RelPath, Text, ChunkChars, ChunkOverlap, ChunksForSource);
 			ChangedChunksBySource.Add(RelPath, MoveTemp(ChunksForSource));
 		}
 	}
 	{
+		TArray<TPair<FString, FString>> RegistryShards;
+		GatherAssetRegistryShardTexts(Settings, RegistryShards);
+		for (const TPair<FString, FString>& Pair : RegistryShards)
+		{
+			const FString& VPath = Pair.Key;
+			const FString& ShardText = Pair.Value;
+			const FString SourceHash = FMD5::HashAnsiString(*ShardText);
+			NewSourceHashes.Add(VPath, SourceHash);
+			RemovedSources.Remove(VPath);
+			const FString* ExistingHash = ExistingSourceHashes.Find(VPath);
+			const bool bChanged = !ExistingHash || *ExistingHash != SourceHash;
+			if (bChanged)
+			{
+				++ChangedFiles;
+				TArray<FUnrealAiVectorChunkRow> ChunksForSource;
+				ChunkFileText(VPath, ShardText, ChunkChars, ChunkOverlap, ChunksForSource);
+				ChangedChunksBySource.Add(VPath, MoveTemp(ChunksForSource));
+			}
+		}
+	}
+	{
 		TArray<FUnrealAiVectorChunkRow> BlueprintChunks;
-		CollectBlueprintFeatureChunks(BlueprintChunks);
+		CollectBlueprintFeatureChunks(Settings, BlueprintChunks);
 		for (FUnrealAiVectorChunkRow& Row : BlueprintChunks)
 		{
 			const FString SourceHash = Row.ContentHash;
@@ -620,7 +1220,7 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 	}
 	{
 		TArray<FUnrealAiVectorChunkRow> MemoryChunks;
-		CollectMemoryChunks(MemoryChunks);
+		CollectMemoryChunks(Settings, MemoryChunks);
 		for (FUnrealAiVectorChunkRow& Row : MemoryChunks)
 		{
 			const FString SourceHash = Row.ContentHash;
@@ -637,6 +1237,70 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 		}
 	}
 
+	int32 MaxChunksSetting = Settings.MaxTotalChunksPerRebuild;
+	int32 MaxEmbSetting = Settings.MaxEmbeddingCallsPerRebuild;
+	int32 EffectiveChunkCap = MAX_int32;
+	if (MaxChunksSetting > 0)
+	{
+		EffectiveChunkCap = FMath::Min(EffectiveChunkCap, MaxChunksSetting);
+	}
+	if (MaxEmbSetting > 0)
+	{
+		EffectiveChunkCap = FMath::Min(EffectiveChunkCap, MaxEmbSetting);
+	}
+	if (EffectiveChunkCap < MAX_int32 && ChangedChunksBySource.Num() > 0)
+	{
+		TArray<FString> SortedChangedKeys;
+		ChangedChunksBySource.GetKeys(SortedChangedKeys);
+		SortedChangedKeys.Sort();
+		int32 RunningChunks = 0;
+		int32 CutIndex = SortedChangedKeys.Num();
+		for (int32 i = 0; i < SortedChangedKeys.Num(); ++i)
+		{
+			const TArray<FUnrealAiVectorChunkRow>* Chunks = ChangedChunksBySource.Find(SortedChangedKeys[i]);
+			const int32 N = Chunks ? Chunks->Num() : 0;
+			if (RunningChunks + N > EffectiveChunkCap)
+			{
+				CutIndex = i;
+				break;
+			}
+			RunningChunks += N;
+		}
+		if (CutIndex < SortedChangedKeys.Num())
+		{
+			int32 DeferredChunks = 0;
+			for (int32 i = CutIndex; i < SortedChangedKeys.Num(); ++i)
+			{
+				const FString& K = SortedChangedKeys[i];
+				if (const TArray<FUnrealAiVectorChunkRow>* Ch = ChangedChunksBySource.Find(K))
+				{
+					DeferredChunks += Ch->Num();
+				}
+				ChangedChunksBySource.Remove(K);
+				if (const FString* OldH = ExistingSourceHashes.Find(K))
+				{
+					NewSourceHashes.Add(K, *OldH);
+				}
+				else
+				{
+					NewSourceHashes.Remove(K);
+				}
+			}
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("Retrieval index: deferred %d changed sources (%d chunks) due to max chunk/embed cap (effective_cap=%d)."),
+				SortedChangedKeys.Num() - CutIndex,
+				DeferredChunks,
+				EffectiveChunkCap);
+			ChangedFiles = FMath::Max(0, ChangedFiles - (SortedChangedKeys.Num() - CutIndex));
+		}
+	}
+
+	int32 InBatch = 0;
+	const int32 EmbedBatchSize = FMath::Max(1, Settings.EmbeddingBatchSize);
+	const int32 DelayMs = Settings.MinDelayMsBetweenEmbeddingBatches;
+
 	for (TPair<FString, TArray<FUnrealAiVectorChunkRow>>& Pair : ChangedChunksBySource)
 	{
 		for (FUnrealAiVectorChunkRow& Chunk : Pair.Value)
@@ -652,7 +1316,15 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 				return false;
 			}
 			Chunk.Embedding = MoveTemp(Resp.Vector);
-			AllChunks.Add(Chunk);
+			++InBatch;
+			if (InBatch >= EmbedBatchSize)
+			{
+				if (DelayMs > 0)
+				{
+					FPlatformProcess::Sleep(static_cast<float>(DelayMs) / 1000.f);
+				}
+				InBatch = 0;
+			}
 		}
 	}
 

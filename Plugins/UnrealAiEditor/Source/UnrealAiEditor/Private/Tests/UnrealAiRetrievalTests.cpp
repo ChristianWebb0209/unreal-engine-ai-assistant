@@ -1,10 +1,12 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Misc/Paths.h"
 
 #include "Backend/FUnrealAiPersistenceStub.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Retrieval/FUnrealAiRetrievalService.h"
+#include "Retrieval/UnrealAiRetrievalIndexConfig.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FUnrealAiRetrievalDisabledFallbackTest,
@@ -26,6 +28,80 @@ bool FUnrealAiRetrievalDisabledFallbackTest::RunTest(const FString& Parameters)
 
 	const FUnrealAiRetrievalQueryResult R = Retrieval.Query(Query);
 	TestEqual(TEXT("Disabled retrieval should return zero snippets"), R.Snippets.Num(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiRetrievalIndexConfigWhitelistTest,
+	"UnrealAiEditor.Retrieval.IndexConfigWhitelist",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiRetrievalIndexConfigWhitelistTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	const TArray<FString> Legacy = UnrealAiRetrievalIndexConfig::GetLegacyDefaultIndexedExtensions();
+	TestEqual(TEXT("legacy default extension count"), Legacy.Num(), 6);
+	TestTrue(TEXT("legacy includes .h"), Legacy.Contains(TEXT(".h")));
+
+	FUnrealAiRetrievalSettings Settings;
+	TArray<FString> Effective;
+	UnrealAiRetrievalIndexConfig::GetEffectiveIndexedExtensions(Settings, Effective);
+	TestEqual(TEXT("empty indexedExtensions uses legacy list"), Effective.Num(), Legacy.Num());
+
+	Settings.IndexedExtensions = {TEXT("CS"), TEXT(".JSON")};
+	UnrealAiRetrievalIndexConfig::GetEffectiveIndexedExtensions(Settings, Effective);
+	TestEqual(TEXT("custom whitelist size"), Effective.Num(), 2);
+	TestTrue(TEXT("normalized .cs"), Effective.Contains(TEXT(".cs")));
+	TestTrue(TEXT("normalized .json"), Effective.Contains(TEXT(".json")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiRetrievalSettingsDefaultsTest,
+	"UnrealAiEditor.Retrieval.SettingsDefaults",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiRetrievalSettingsDefaultsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	const FUnrealAiRetrievalSettings S;
+	TestFalse(TEXT("memory vector index off by default"), S.bIndexMemoryRecordsInVectorStore);
+	TestEqual(TEXT("asset registry off by default"), S.AssetRegistryMaxAssets, 0);
+	TestEqual(TEXT("minimal preset"), S.RootPreset, EUnrealAiRetrievalRootPreset::Minimal);
+	TestEqual(TEXT("chunk chars default"), S.ChunkChars, 1200);
+	TestEqual(TEXT("chunk overlap default"), S.ChunkOverlap, 200);
+	TestEqual(TEXT("max files default unlimited"), S.MaxFilesPerRebuild, 0);
+	TestTrue(TEXT("indexedExtensions default empty"), S.IndexedExtensions.Num() == 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiRetrievalMaxFilesCapTest,
+	"UnrealAiEditor.Retrieval.MaxFilesCap",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiRetrievalMaxFilesCapTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	// Uses the project directory; only asserts that a strict cap is enforced and skipped count is reported.
+	FUnrealAiRetrievalSettings Settings;
+	Settings.RootPreset = EUnrealAiRetrievalRootPreset::Minimal;
+	Settings.MaxFilesPerRebuild = 0;
+	const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+	TArray<FString> PathsAll;
+	int32 SkippedAll = 0;
+	UnrealAiRetrievalIndexConfig::CollectFilesystemIndexPaths(ProjectDir, Settings, PathsAll, SkippedAll);
+	TestEqual(TEXT("no cap means no skip"), SkippedAll, 0);
+
+	Settings.MaxFilesPerRebuild = 1;
+	TArray<FString> PathsCapped;
+	int32 Skipped = 0;
+	UnrealAiRetrievalIndexConfig::CollectFilesystemIndexPaths(ProjectDir, Settings, PathsCapped, Skipped);
+	TestEqual(TEXT("capped list at most 1"), PathsCapped.Num() <= 1, true);
+	if (PathsAll.Num() > 1)
+	{
+		TestTrue(TEXT("skipped reported when cap applies"), Skipped > 0);
+	}
 	return true;
 }
 

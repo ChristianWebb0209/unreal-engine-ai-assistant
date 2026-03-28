@@ -11,5 +11,6 @@ struct FUnrealAiBlueprintFeatureRecord
 class FUnrealAiBlueprintFeatureExtractor
 {
 public:
-	static void ExtractFeatureRecords(TArray<FUnrealAiBlueprintFeatureRecord>& OutRecords);
+	/** When MaxRecords <= 0, uses an internal default cap (4000). */
+	static void ExtractFeatureRecords(TArray<FUnrealAiBlueprintFeatureRecord>& OutRecords, int32 MaxRecords = 0);
 };
