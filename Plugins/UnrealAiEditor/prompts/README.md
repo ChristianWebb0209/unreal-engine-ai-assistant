@@ -4,7 +4,7 @@
 
 **Location:** `Plugins/UnrealAiEditor/prompts/` (this plugin).
 
-This folder holds **semantic fragments** the harness assembles into **system** and **developer** messages. The canonical machine-readable tool definitions live in [`Resources/UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json); narrative specs in the repo docs: [`tool-registry.md`](../../../docs/tooling/tool-registry.md), context: [`context-management.md`](../../../docs/context/context-management.md), **two plan mechanisms (DAG vs todo tool):** [`planning.md`](../../../docs/planning.md). Plan DAG types and executor live under `Source/UnrealAiEditor/Private/Planning/`.
+This folder holds **semantic fragments** the harness assembles into **system** and **developer** messages. The canonical machine-readable tool definitions live in [`Resources/UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json); narrative specs in the repo docs: [`tool-registry.md`](../../../docs/tooling/tool-registry.md), context: [`context-management.md`](../../../docs/context/context-management.md). **Plan mode (DAG)** behavior is defined in chunks (**`09-plan-dag.md`**, **`11-plan-node-execution.md`**) and C++ under `Source/UnrealAiEditor/Private/Planning/`. The `agent_emit_todo_plan` tool is **deprecated** (not exposed to the model); legacy `activeTodoPlan` may still appear in context.
 
 ## Design rules
 
@@ -20,12 +20,12 @@ This folder holds **semantic fragments** the harness assembles into **system** a
 | [`chunks/00-template-tokens.md`](chunks/00-template-tokens.md) | âœ“ | âœ“ | âœ“ | Document placeholders only (no model text). |
 | [`chunks/01-identity.md`](chunks/01-identity.md) | âœ“ | âœ“ | âœ“ | Base role + scope; identity + **Examples contract**. |
 | [`chunks/02-operating-modes.md`](chunks/02-operating-modes.md) | inject **Ask** only | inject **Agent** only | inject **Plan** only | Shared preamble + one `## Mode:` block (`UnrealAiPromptBuilder::ExtractOperatingModeSection`). |
-| [`chunks/03-complexity-and-todo-plan.md`](chunks/03-complexity-and-todo-plan.md) | âœ“ (plan allowed; no mutating tools) | âœ“ | âœ“ | Dynamic trigger-based planning policy (`act_now` / implicit / explicit todo plan). |
+| [`chunks/03-complexity-and-todo-plan.md`](chunks/03-complexity-and-todo-plan.md) | âœ“ (plan allowed; no mutating tools) | âœ“ | âœ“ | Complexity, scope, graceful handoff when blocked; Plan mode for structured DAGs. |
 | [`chunks/04-tool-calling-contract.md`](chunks/04-tool-calling-contract.md) | âœ“ (read tools only) | âœ“ | âœ“ | General tool discipline; Blueprint IR + **UnrealBlueprintFormatter** (`merge_policy`, `layout_scope`, `blueprint_format_graph`, `format_graphs`). |
 | [`chunks/05-context-and-editor.md`](chunks/05-context-and-editor.md) | âœ“ | âœ“ | âœ“ | Attachments, snapshot, `@` mentions. |
 | [`chunks/10-mvp-gameplay-and-tooling.md`](chunks/10-mvp-gameplay-and-tooling.md) | âœ“ | âœ“ | âœ“ | MVP gameplay flows, PIE, matrix `ok:false` semantics (`UnrealAiPromptBuilder` after `05`). |
 | [`chunks/11-plan-node-execution.md`](chunks/11-plan-node-execution.md) | â€” | when thread `*_plan_*` | â€” | Serial plan DAG node turns only (`UnrealAiTurnLlmRequestBuilder`). |
-| [`chunks/06-execution-subturn.md`](chunks/06-execution-subturn.md) | when `activeTodoPlan` | same | same | Only when harness is in plan execution (summary + pointer). |
+| [`chunks/06-execution-subturn.md`](chunks/06-execution-subturn.md) | when `activeTodoPlan` | same | same | Legacy persisted todo plan only (`summary + pointer`). |
 | [`chunks/07-safety-banned.md`](chunks/07-safety-banned.md) | âœ“ | âœ“ | âœ“ | Permissions, destructive confirms, banned tools. |
 | [`chunks/08-output-style.md`](chunks/08-output-style.md) | âœ“ | âœ“ | âœ“ | Markdown, no fake chain-of-thought. |
 | [`chunks/09-plan-dag.md`](chunks/09-plan-dag.md) | â€” | optional | âœ“ | Plan mode: `unreal_ai.plan_dag` JSON, serial node execution (`Private/Planning/FUnrealAiPlanExecutor`). |
@@ -35,7 +35,7 @@ This folder holds **semantic fragments** the harness assembles into **system** a
 The editor builds the system/developer string at LLM time:
 
 1. [`FUnrealAiContextService::BuildContextWindow`](../Source/UnrealAiEditor/Private/Context/FUnrealAiContextService.cpp) â€” formats `{{CONTEXT_SERVICE_OUTPUT}}` and `ActiveTodoSummaryText` for `{{ACTIVE_TODO_SUMMARY}}`.
-2. [`UnrealAiPromptBuilder::BuildSystemDeveloperContent`](../Source/UnrealAiEditor/Private/Prompt/UnrealAiPromptBuilder.cpp) â€” loads `prompts/chunks/*.md`, injects the mode slice from `02-operating-modes.md`, substitutes template tokens.
+2. [`UnrealAiPromptBuilder::BuildSystemDeveloperContent`](../Source/UnrealAiEditor/Private/Prompt/UnrealAiPromptBuilder.cpp) â€” [`UnrealAiPromptAssemblyStrategy`](../Source/UnrealAiEditor/Private/Prompt/UnrealAiPromptAssemblyStrategy.cpp) loads `prompts/chunks/*.md` linearly and injects the mode slice from `02-operating-modes.md` via `ExtractOperatingModeSection`. Template tokens: `ApplyTemplateTokens`.
 3. [`UnrealAiTurnLlmRequestBuilder::Build`](../Source/UnrealAiEditor/Private/Harness/UnrealAiTurnLlmRequestBuilder.cpp) â€” merges conversation history, tools JSON, model id, streaming flag, API URL/key from the selected model profile (`FUnrealAiAgentTurnRequest::ModelProfileId` from UI session).
 4. [`FUnrealAiLlmInvocationService`](../Source/UnrealAiEditor/Private/Harness/UnrealAiLlmInvocationService.h) + [`ILlmTransport`](../Source/UnrealAiEditor/Private/Harness/ILlmTransport.h) â€” submit the request; the bundled HTTP transport is [`FOpenAiCompatibleHttpTransport`](../Source/UnrealAiEditor/Private/Transport/FOpenAiCompatibleHttpTransport.cpp) (shared chat-completions JSON shape, not one vendor only).
 
@@ -45,7 +45,7 @@ The editor builds the system/developer string at LLM time:
 
 1. `01-identity`
 2. Mode slice from `02-operating-modes`
-3. `03` trigger-based planning policy
+3. `03` complexity / scope / handoff policy
 4. `04`, `05`, `10`
 5. If executing a stored plan: `06`
 6. `07`, `08`
@@ -57,4 +57,4 @@ The editor builds the system/developer string at LLM time:
 ## Maintenance
 
 - When **`UnrealAiToolCatalog.json`** changes, refresh [`tools/by-category.md`](tools/by-category.md) and [`tools/catalog-snapshot.tsv`](tools/catalog-snapshot.tsv) (TSV is optional; can be regenerated from JSON).
-- When **`agent_emit_todo_plan`** (or equivalent) lands in the catalog, add its schema pointer to `03-complexity-and-todo-plan.md` and the tool list.
+- **`agent_emit_todo_plan`** is deprecated in the catalog (not in the model tool list); legacy threads may still have `activeTodoPlan` on disk.

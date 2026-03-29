@@ -79,6 +79,7 @@ namespace UnrealAiTurnLlmRequestBuilderPriv
 			ApiMsgs.RemoveAt(1);
 		}
 	}
+
 }
 
 bool UnrealAiTurnLlmRequestBuilder::Build(
@@ -113,12 +114,15 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 
 	FAgentContextBuildOptions Opt;
 	Opt.Mode = Request.Mode;
-	Opt.UserMessageForComplexity = Request.UserText;
+	Opt.UserMessageForComplexity = Request.ContextComplexityUserText.IsEmpty() ? Request.UserText : Request.ContextComplexityUserText;
 	Opt.RetrievalTurnKey = RetrievalTurnKey;
 	Opt.bModelSupportsImages = Caps.bSupportsImages;
 	Opt.ContextBuildInvocationReason = TEXT("request_build");
-	const FAgentContextBuildResult Built = ContextService->BuildContextWindow(Opt);
+	FAgentContextBuildResult Built = ContextService->BuildContextWindow(Opt);
 	OutContextUserMessages = Built.UserVisibleMessages;
+
+	const FString EffectiveUser =
+		Request.ContextComplexityUserText.IsEmpty() ? Request.UserText : Request.ContextComplexityUserText;
 
 	FUnrealAiPromptAssembleParams P;
 	P.Built = &Built;

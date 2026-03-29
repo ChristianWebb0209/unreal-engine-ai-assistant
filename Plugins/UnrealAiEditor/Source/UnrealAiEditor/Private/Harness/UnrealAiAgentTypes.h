@@ -126,6 +126,11 @@ struct FUnrealAiAgentTurnRequest
 	FString ThreadId;
 	EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Agent;
 	FString UserText;
+	/**
+	 * When non-empty, used for retrieval, complexity heuristics, tool-index shaping, and prefetch instead of UserText.
+	 * Plan-node turns leave this empty and rely on UserText (full original request + node block from FUnrealAiPlanExecutor).
+	 */
+	FString ContextComplexityUserText;
 	/** Logical profile id (e.g. settings key); resolved to FUnrealAiModelCapabilities. */
 	FString ModelProfileId;
 	/** If true, record assistant output as tool result for context demos (compat with stub). */
