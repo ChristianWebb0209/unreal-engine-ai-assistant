@@ -1,26 +1,32 @@
 # Subagents, parallel plan nodes, and architecture
 
-This document describes **today’s** plan-DAG execution model in the Unreal AI Editor plugin, the **product and safety thinking** behind future **subagents / parallel node execution**, and a **concrete implementation plan** (files, boundaries, settings). It is the single place to align prompts, harness behavior, and UI.
+This is the authoritative description of shipped plan-mode behavior and the currently guarded subagent/parallel path in this repo.
 
 **Related:** Ask / Agent / Plan modes are selected in chat and carried on `FUnrealAiAgentTurnRequest::Mode`. Plan DAG execution is serial today (this doc); todo-plan JSON is a separate legacy path.
 
 ---
 
-## 1. What we have today (current architecture)
+## 1. Current behavior
 
 ### 1.1 Plan mode: planner JSON, then serial execution
 
 - **Planner pass (`EUnrealAiAgentMode::Plan`):** The model emits a single JSON object, schema `unreal_ai.plan_dag`, with a `nodes[]` array (`id`, `title`, `hint`, `dependsOn` / `depends_on`). No tools in this pass.
 - **Validation:** `UnrealAiPlanDag::ParseDagJson` and `UnrealAiPlanDag::ValidateDag` run before any node executes (duplicate ids, unknown deps, cycles, max node count). Invalid graphs do not run children; the executor may perform a **one-shot planner repair** (`FUnrealAiPlanExecutor`).
-- **Execution:** `FUnrealAiPlanExecutor` (`Plugins/UnrealAiEditor/.../Private/Planning/FUnrealAiPlanExecutor.cpp`) walks **ready** nodes in dependency order and runs them **strictly serially**: **one** ready node at a time, each as a normal **Agent** harness turn.
-- **Thread isolation (per node):** Child runs use thread ids of the form `<parentThreadId>_plan_<nodeId>` so context and logs stay separable; there is **no** concurrent harness turn for multiple plan nodes today.
+- **Execution:** `FUnrealAiPlanExecutor` (`Plugins/UnrealAiEditor/.../Private/Planning/FUnrealAiPlanExecutor.cpp`) computes a deterministic ready **wave** (policy width `1` when `bUseSubagents=false`, `2` when true) and currently dispatches one child turn at a time in wave order.
+- **Thread isolation (per node):** Child runs use thread ids of the form `<parentThreadId>_plan_<nodeId>` so context/logs stay separable, while plan-scoped state mutations always target the **parent** thread via explicit context APIs.
 - **Harness:** `FUnrealAiAgentHarness` runs one turn at a time; plan pipeline lifetime is tracked (`IsPlanPipelineActive`, idle-abort tuning for headed runs).
 - **Prompts:** Chunk `09-plan-dag.md` (planner); chunk `11-plan-node-execution.md` for Agent turns whose thread id contains `_plan_` (anti–tool-loop / checklist discipline).
 - **Legacy:** `agent_emit_todo_plan` / `unreal_ai.todo_plan` persistence is **separate** from the plan DAG executor and is **deprecated** (not exposed to the model).
 
-### 1.2 What we do not have yet
+### 1.2 Guardrails and fail-mode routing
 
-- **No parallel scheduling** of multiple ready DAG nodes.
+- Node failures are classified deterministically (validation, tool budget, stream incomplete, transient transport, empty assistant, fallback runtime) before executor action.
+- Replan decision matrix is deterministic: recoverable transport/stream/empty-assistant categories may auto-replan (bounded attempts), validation/tool-budget categories skip dependents without replan.
+- Resume-from-DAG preserves statuses for unchanged node ids and clears only fresh/replaced ids.
+
+### 1.3 Not shipped yet
+
+- **No true concurrent execution** of multiple ready DAG nodes in one plan run.
 - **No subagent process** (no second OS process dedicated to a worker).
 - **No catalog tools** for spawn/merge (prior orchestration tools were removed from the catalog).
 
@@ -28,7 +34,26 @@ In documentation we use **“subagent”** to mean **a delegated harness run** (
 
 ---
 
-## 2. Goals and constraints (product thinking)
+## 2. Execution flow
+
+```mermaid
+flowchart TD
+  A[Planner turn emits unreal_ai.plan_dag] --> B[Parse + validate DAG]
+  B --> C[Select ready wave from context statuses]
+  C --> D[Run node child turn]
+  D --> E{Node result}
+  E -->|success| F[Mark node success on parent thread]
+  E -->|failure| G[Classify fail mode]
+  G -->|recoverable| H[Auto-replan if budget remains]
+  G -->|non-recoverable| I[Mark failed + skip dependents]
+  H --> C
+  F --> C
+  I --> C
+  C --> J[No ready nodes left]
+  J --> K[Finish + persist context]
+```
+
+## 3. Constraints and policy
 
 ### 2.1 Parallelism is optional; serial is always valid
 

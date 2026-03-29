@@ -57,6 +57,17 @@ public:
 	bool bUseSubagents = true;
 
 	/**
+	 * When true, plan mode may run an extra Plan-mode LLM pass after a node failure or headed scenario wall stall
+	 * (between sub-turns) to merge a revised DAG for remaining work. See docs/todo.md (automatic replan).
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Plan: auto-replan on failure or wall stall"))
+	bool bPlanAutoReplan = true;
+
+	/** Maximum supplemental planner (replan) HTTP turns per plan executor run; 0 disables replanning. */
+	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (ClampMin = "0", ClampMax = "8"))
+	int32 PlanAutoReplanMaxAttemptsPerRun = 2;
+
+	/**
 	 * Headed harness only: append each outbound LLM payload (messages + tools + model) to llm_requests.jsonl beside run.jsonl.
 	 * Overridden when environment variable UNREAL_AI_LOG_LLM_REQUESTS is set to 1/true or 0/false.
 	 */

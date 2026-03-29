@@ -11,6 +11,8 @@ UUnrealAiEditorSettings::UUnrealAiEditorSettings(const FObjectInitializer& Objec
 	, AssistantTypewriterCps(88.f)
 	, bAutoContinuePlanSteps(true)
 	, bUseSubagents(true)
+	, bPlanAutoReplan(true)
+	, PlanAutoReplanMaxAttemptsPerRun(2)
 	, bLogLlmRequestsToHarnessRunFile(true)
 {
 }

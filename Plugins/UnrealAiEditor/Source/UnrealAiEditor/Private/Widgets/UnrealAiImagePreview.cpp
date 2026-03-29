@@ -16,6 +16,48 @@ namespace UnrealAiImagePreviewPrivate
 	static TMap<FString, TStrongObjectPtr<UTexture2D>> GTextureByPath;
 	static TMap<FString, TSharedPtr<FSlateDynamicImageBrush>> GThumbBrushByPath;
 
+	static bool IsLikelyMagentaPlaceholder(UTexture2D* Tex)
+	{
+		if (!Tex || !Tex->GetPlatformData() || Tex->GetPlatformData()->Mips.Num() == 0)
+		{
+			return false;
+		}
+		const FTexture2DMipMap& Mip0 = Tex->GetPlatformData()->Mips[0];
+		const int32 W = Mip0.SizeX;
+		const int32 H = Mip0.SizeY;
+		if (W <= 0 || H <= 0 || Tex->GetPixelFormat() != PF_B8G8R8A8)
+		{
+			return false;
+		}
+		const int64 PixelCount = static_cast<int64>(W) * static_cast<int64>(H);
+		if (PixelCount <= 0 || PixelCount > 8'000'000)
+		{
+			return false;
+		}
+		const void* Raw = Mip0.BulkData.LockReadOnly();
+		if (!Raw)
+		{
+			Mip0.BulkData.Unlock();
+			return false;
+		}
+		const uint8* Bytes = static_cast<const uint8*>(Raw);
+		int64 MagentaishCount = 0;
+		for (int64 I = 0; I < PixelCount; ++I)
+		{
+			const uint8 B = Bytes[(I * 4) + 0];
+			const uint8 G = Bytes[(I * 4) + 1];
+			const uint8 R = Bytes[(I * 4) + 2];
+			// Engine placeholders are often very magenta-heavy.
+			if (R >= 220 && B >= 220 && G <= 80)
+			{
+				++MagentaishCount;
+			}
+		}
+		Mip0.BulkData.Unlock();
+		const double Ratio = static_cast<double>(MagentaishCount) / static_cast<double>(PixelCount);
+		return Ratio >= 0.70;
+	}
+
 	static UTexture2D* LoadTexture(const FString& Path)
 	{
 		if (TStrongObjectPtr<UTexture2D>* Found = GTextureByPath.Find(Path))
@@ -28,6 +70,11 @@ namespace UnrealAiImagePreviewPrivate
 		UTexture2D* Tex = FImageUtils::ImportFileAsTexture2D(Path);
 		if (!Tex)
 		{
+			return nullptr;
+		}
+		if (IsLikelyMagentaPlaceholder(Tex))
+		{
+			// Suppress known bad placeholder images in chat cards.
 			return nullptr;
 		}
 		GTextureByPath.Add(Path, TStrongObjectPtr<UTexture2D>(Tex));

@@ -89,7 +89,7 @@ The plugin’s **structured** planning path is **Plan-mode DAG** (`FUnrealAiPlan
 | **Plan-mode DAG** | Plan chat: assistant emits **`unreal_ai.plan_dag`** JSON (no tools in planner pass). | `Private/Planning/UnrealAiPlanDag`, `Private/Planning/FUnrealAiPlanExecutor` |
 | **Legacy todo plan** | **`agent_emit_todo_plan`** deprecated (not in model tool list); **`activeTodoPlan`** may load from old saves. | Context service + harness; summaries via `Private/Planning/UnrealAiStructuredPlanSummary` |
 
-Serial execution of DAG nodes uses distinct thread ids per node; there is **no** separate merge orchestrator.
+Plan DAG execution now uses deterministic ready-wave selection with guarded width policy (`bUseSubagents`), but child dispatch is currently single-turn serial. Plan-scoped status writes target the parent thread explicitly, and node failures are categorized for deterministic replan-vs-skip handling.
 
 ---
 
@@ -113,9 +113,9 @@ Prefer **structured tool definitions + validation**. Fine-tune only if metrics s
 
 ---
 
-## 5. Multi-agent handoff (not shipped here)
+## 5. Multi-agent handoff (status)
 
-Earlier drafts described parent/worker schemas for hypothetical parallel agents. **This plugin build** does not expose `subagent_spawn`, `worker_merge_results`, or a merge orchestrator. Tool results and plan state flow through the **single** harness + context service. If multi-worker patterns are revisited, prefer explicit design docs before reintroducing catalog entries.
+This plugin build does not expose `subagent_spawn`, `worker_merge_results`, or a merge orchestrator. Tool results and plan state flow through the single harness + context service. `bUseSubagents` currently gates wave-selection policy and diagnostics, not true concurrent child worker execution.
 
 ---
 

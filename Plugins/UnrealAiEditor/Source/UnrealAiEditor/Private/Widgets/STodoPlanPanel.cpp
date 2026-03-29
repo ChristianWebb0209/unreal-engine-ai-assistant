@@ -5,6 +5,8 @@
 #include "Context/IAgentContextService.h"
 #include "Planning/UnrealAiPlanDag.h"
 #include "Context/UnrealAiProjectId.h"
+#include "Style/UnrealAiEditorStyle.h"
+#include "Widgets/Plan/SPlanDagWaveList.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/SBoxPanel.h"
@@ -15,7 +17,6 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Styling/CoreStyle.h"
-#include "Style/UnrealAiEditorStyle.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
@@ -58,6 +59,9 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 	FUnrealAiPlanDag Dag;
 	FString DagErr;
 	const bool bParsedDag = UnrealAiPlanDag::ParseDagJson(PlanJson, Dag, DagErr) && Dag.Nodes.Num() > 0;
+	FString ValidateErr;
+	const bool bDagValid =
+		bParsedDag && UnrealAiPlanDag::ValidateDag(Dag, 64, ValidateErr);
 
 	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
 	const FString ThreadId = Session.IsValid()
@@ -101,20 +105,28 @@ void STodoPlanPanel::Construct(const FArguments& InArgs)
 					*HeaderTitle)))
 				.Font(FUnrealAiEditorStyle::FontComposerBadge())
 		];
-	if (bParsedDag)
+
+	if (bParsedDag && bDagValid)
 	{
-		for (const FUnrealAiDagNode& N : Dag.Nodes)
-		{
-			const FString* St = DagNodeStatus.Find(N.Id);
-			const FString StatusLine = St && !St->IsEmpty() ? *St : TEXT("pending");
-			const FString Line = FString::Printf(TEXT("[%s] %s — %s"), *N.Id, *StatusLine, N.Title.IsEmpty() ? *N.Id : *N.Title);
-			Box->AddSlot().AutoHeight().Padding(FMargin(8.f, 2.f))
-				[
-					SNew(STextBlock)
-						.AutoWrapText(true)
-						.Text(FText::FromString(Line))
-				];
-		}
+		Box->AddSlot().AutoHeight().Padding(FMargin(4.f, 6.f, 4.f, 0.f))
+			[
+				SNew(SPlanDagWaveList)
+					.Dag(Dag)
+					.NodeStatusById(DagNodeStatus)
+					.bShowWaveHeaders(true)
+					.bNodesInitiallyCollapsed(true)
+			];
+	}
+	else if (bParsedDag && !bDagValid)
+	{
+		Box->AddSlot().AutoHeight().Padding(FMargin(4.f, 6.f, 4.f, 0.f))
+			[
+				SNew(STextBlock)
+					.AutoWrapText(true)
+					.Font(FUnrealAiEditorStyle::FontRegular10())
+					.ColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.55f, 0.45f, 1.f)))
+					.Text(FText::FromString(FString::Printf(TEXT("DAG layout invalid: %s"), *ValidateErr)))
+			];
 	}
 	else if (Steps.Num() == 0)
 	{
