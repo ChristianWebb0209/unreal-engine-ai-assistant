@@ -40,7 +40,7 @@
   - Output layout (each script invocation gets one new folder under the central runs directory; older batches are kept):
       tests\long-running-tests\runs\run-<index>-<localMachineTimestamp>\
         Index is a monotonic integer across all scenarios. Timestamp uses local machine time with ms resolution.
-        - last-suite-summary.json  (copy also written to tests\long-running-tests\last-suite-summary.json as latest pointer)
+        - last-suite-summary.json  (batch metadata; only under this run folder)
         - editor_console_saved.log  (single-session mode: full Unreal Saved/Logs copy for the whole batch)
         <path-slug>\
           - summary.json
@@ -62,6 +62,7 @@
     output is shown in the Unreal -log console window and appended to Saved/Logs/<project>.log (not streamed into PowerShell).
 
   -LiveProjectLog: also tail Saved/Logs/<project>.log into this PowerShell window while the editor runs (useful in Cursor).
+    Long batches also print periodic [harness] lines (turns M/N, elapsed wall time, ETA after the first turn completes).
 
   -NoLiveProjectLog: force-disable host tail (default is already off; use if you pass -LiveProjectLog elsewhere and want off).
 
@@ -100,7 +101,6 @@ param(
 $ErrorActionPreference = 'Stop'
 $batchRunsRoot = $null
 $batchRunIndexUsed = 0
-$lastSummaryPointer = Join-Path $PSScriptRoot 'last-suite-summary.json'
 # Default: Unreal -log + Saved/Logs only; use -LiveProjectLog to stream project log into this PowerShell (old Cursor-centric default).
 $Script:StreamProjectLogToHost = $false
 if ($LiveProjectLog) { $Script:StreamProjectLogToHost = $true }
@@ -630,8 +630,12 @@ function Invoke-HeadedEditorDynamic {
         $prevConsoleWindowTitle = $null
         try { $prevConsoleWindowTitle = $Host.UI.RawUI.WindowTitle } catch { }
         $lastHarnessTimerUiUtc = [DateTime]::MinValue
+        $lastHarnessProgressLineUtc = $harnessProgressStartedAt
         $harnessTimerStatusLine = $false
         $allFinished = $false
+        $totalExpectedTurns = $ExpectedRunJsonls.Count
+        # Long suites / noisy modes: occasional full lines so ETA is visible even when -LiveProjectLog fills the console.
+        $harnessProgressFullLineSec = if ($LiveProjectLogToHost -or $MirrorProcessStreamsToHost) { 25 } elseif ($totalExpectedTurns -ge 12) { 55 } else { 0 }
         while ($true) {
             if ($null -ne $tailJob) {
                 $chunk = Receive-Job -Job $tailJob -ErrorAction SilentlyContinue
@@ -644,34 +648,59 @@ function Invoke-HeadedEditorDynamic {
                 }
             }
             $tickNow = Get-Date
-            if (($tickNow - $lastHarnessTimerUiUtc).TotalMilliseconds -ge 500) {
-                $lastHarnessTimerUiUtc = $tickNow
-                $elapsed = $tickNow - $harnessProgressStartedAt
-                $h = [int][math]::Floor($elapsed.TotalHours)
-                $elapsedStr = '{0:00}:{1:00}:{2:00}' -f $h, $elapsed.Minutes, $elapsed.Seconds
-                try {
-                    $Host.UI.RawUI.WindowTitle = "Unreal AI harness | elapsed $elapsedStr"
-                }
-                catch { }
-                $showInlineTimer = (-not $LiveProjectLogToHost) -and (-not $MirrorProcessStreamsToHost)
-                if ($showInlineTimer) {
-                    Write-Host "`rHarness elapsed $elapsedStr  " -NoNewline -ForegroundColor DarkGray
-                    $harnessTimerStatusLine = $true
-                }
-            }
-            try { $p.Refresh() } catch {}
-            if ($p.HasExited) { break }
-            $now = (Get-Date).ToUniversalTime()
+            $elapsed = $tickNow - $harnessProgressStartedAt
             $done = 0
             foreach ($j in $ExpectedRunJsonls) {
                 if (Test-RunJsonlFinished -RunJsonlPath $j) { $done++ }
             }
-            if ($ExpectedRunJsonls.Count -gt 0 -and $done -ge $ExpectedRunJsonls.Count) {
+            $etaSuffix = ''
+            if ($totalExpectedTurns -gt 0 -and $done -gt 0 -and $done -lt $totalExpectedTurns) {
+                $avgSec = $elapsed.TotalSeconds / [double]$done
+                $remSec = $avgSec * ($totalExpectedTurns - $done)
+                if ($remSec -lt 0) { $remSec = 0 }
+                $rem = [TimeSpan]::FromSeconds($remSec)
+                $etaH = [int][math]::Floor($rem.TotalHours)
+                $etaSuffix = ' | ETA ~{0:00}:{1:00}:{2:00}' -f $etaH, $rem.Minutes, $rem.Seconds
+            }
+            elseif ($totalExpectedTurns -gt 0 -and $done -eq 0) {
+                $etaSuffix = ' | ETA: after 1st turn'
+            }
+            if (($tickNow - $lastHarnessTimerUiUtc).TotalMilliseconds -ge 500) {
+                $lastHarnessTimerUiUtc = $tickNow
+                $h = [int][math]::Floor($elapsed.TotalHours)
+                $elapsedStr = '{0:00}:{1:00}:{2:00}' -f $h, $elapsed.Minutes, $elapsed.Seconds
+                $titleExtra = if ($totalExpectedTurns -gt 0) { "$done/$totalExpectedTurns | $elapsedStr$etaSuffix" } else { "elapsed $elapsedStr" }
+                try {
+                    $Host.UI.RawUI.WindowTitle = "Unreal AI harness | $titleExtra"
+                }
+                catch { }
+                $showInlineTimer = (-not $LiveProjectLogToHost) -and (-not $MirrorProcessStreamsToHost)
+                if ($showInlineTimer) {
+                    if ($totalExpectedTurns -gt 0) {
+                        Write-Host "`rHarness turns $done/$totalExpectedTurns | $elapsedStr$etaSuffix  " -NoNewline -ForegroundColor DarkGray
+                    }
+                    else {
+                        Write-Host "`rHarness elapsed $elapsedStr  " -NoNewline -ForegroundColor DarkGray
+                    }
+                    $harnessTimerStatusLine = $true
+                }
+            }
+            if ($harnessProgressFullLineSec -gt 0 -and ($tickNow - $lastHarnessProgressLineUtc).TotalSeconds -ge $harnessProgressFullLineSec) {
+                $lastHarnessProgressLineUtc = $tickNow
+                $h = [int][math]::Floor($elapsed.TotalHours)
+                $elapsedStr = '{0:00}:{1:00}:{2:00}' -f $h, $elapsed.Minutes, $elapsed.Seconds
+                Write-Host ''
+                Write-Host ("[harness] turns {0}/{1} | wall {2}{3}" -f $done, $totalExpectedTurns, $elapsedStr, $etaSuffix) -ForegroundColor Cyan
+            }
+            try { $p.Refresh() } catch {}
+            if ($p.HasExited) { break }
+            $now = (Get-Date).ToUniversalTime()
+            if ($totalExpectedTurns -gt 0 -and $done -ge $totalExpectedTurns) {
                 $allFinished = $true
                 break
             }
             if ($useWatchdog -and $now -ge $watchdogDeadlineUtc) {
-                Write-Warning ("Watchdog timeout waiting for run completion ({0}/{1} turns finished). Forcing shutdown." -f $done, $ExpectedRunJsonls.Count)
+                Write-Warning ("Watchdog timeout waiting for run completion ({0}/{1} turns finished). Forcing shutdown." -f $done, $totalExpectedTurns)
                 break
             }
             Start-Sleep -Milliseconds 200
@@ -926,6 +955,12 @@ try {
         Write-Host ("Batch: suites={0} total_turns={1} stamp={2}" -f $allStatuses.Count, $totalTurns, $batchStamp) -ForegroundColor Green
         foreach ($suiteSummary in $allStatuses) {
             Write-Host ("  Suite: {0} | turns={1} | thread={2}" -f $suiteSummary.path_slug, $suiteSummary.turn_count, $suiteSummary.thread_id) -ForegroundColor Green
+        }
+        if ($totalTurns -ge 8) {
+            $hintLo = [math]::Max(3, [int][math]::Floor($totalTurns * 0.35))
+            $hintHi = [math]::Max($hintLo + 1, [int][math]::Ceiling($totalTurns * 0.55))
+            Write-Host ("  Wall time varies (LLM + tools); ~{0}-{1} min is a common band for {2} turns on a responsive API." -f $hintLo, $hintHi, $totalTurns) -ForegroundColor DarkGray
+            Write-Host '  While the editor runs: PowerShell shows turns M/N + ETA (after turn 1); window title updates; [harness] lines every ~25-55s on long runs / live log.' -ForegroundColor DarkGray
         }
 
         $allExecParts = [System.Collections.Generic.List[string]]::new()
@@ -1190,7 +1225,6 @@ if (-not $DryRun -and $allStatuses.Count -gt 0) {
 $summaryJson = ($suiteSummary | ConvertTo-Json -Depth 8) + "`n"
 if ($null -ne $batchRunsRoot) {
     $summaryJson | Set-Content -LiteralPath (Join-Path $batchRunsRoot 'last-suite-summary.json') -Encoding UTF8
-    $summaryJson | Set-Content -LiteralPath $lastSummaryPointer -Encoding UTF8
 }
 
 if ($null -ne $batchRunsRoot -and -not $DryRun -and $allStatuses.Count -gt 0 -and -not $SkipClassification) {
@@ -1241,15 +1275,6 @@ if ($batchRunsRoot -and (Test-Path -LiteralPath $batchRunsRoot)) {
     Write-Host ''
     Write-Host ("Batch output folder: {0}" -f $absRunDir) -ForegroundColor Green
     Write-Host ("last-suite-summary.json (full detail): {0}" -f $absSummaryFile) -ForegroundColor DarkGray
-    if (Test-Path -LiteralPath $lastSummaryPointer) {
-        try {
-            $ptrAbs = (Resolve-Path -LiteralPath $lastSummaryPointer).Path
-        }
-        catch {
-            $ptrAbs = $lastSummaryPointer
-        }
-        Write-Host ("Latest pointer: {0}" -f $ptrAbs) -ForegroundColor DarkGray
-    }
 }
 
 if ($exitHarness -ne 0) { exit $exitHarness }

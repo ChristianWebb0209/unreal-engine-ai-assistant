@@ -8,8 +8,8 @@ Buckets:
   run_finished_ok — run_finished with success:true
 
 Usage:
-  python tests/classify_harness_run_jsonl.py --batch-root tests/long-running-tests/runs/run_20260328-120000_123
-  python tests/classify_harness_run_jsonl.py --from-summary tests/long-running-tests/last-suite-summary.json
+  python tests/classify_harness_run_jsonl.py --batch-root tests/long-running-tests/runs/run_<index>-<timestamp>
+  python tests/classify_harness_run_jsonl.py --from-summary tests/long-running-tests/runs/run_<index>-<timestamp>/last-suite-summary.json
 """
 from __future__ import annotations
 
