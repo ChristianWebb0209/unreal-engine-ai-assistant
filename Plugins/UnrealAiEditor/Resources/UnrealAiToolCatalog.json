@@ -1112,7 +1112,7 @@
     },
     {
       "tool_id": "blueprint_apply_ir",
-      "summary": "Apply compact Blueprint IR and materialize/wire EventGraph nodes. Primary tool for gameplay logic (overlap, timers, variables, calls). Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Minimal valid shape: blueprint_path + nodes[] + links[] where each node has node_id/op and each link has from/to pin refs. Not for UMG Designer layout.",
+      "summary": "Apply compact Blueprint IR and materialize/wire EventGraph nodes. Primary tool for gameplay logic (overlap, timers, variables, calls). blueprint_path must be an object_path from asset_index_fuzzy_search or asset_registry_query results—never a guessed name when multiple assets matched. Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Minimal valid shape: blueprint_path + nodes[] + links[] where each node has node_id/op and each link has from/to pin refs. Not for UMG Designer layout.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -3586,7 +3586,7 @@
     },
     {
       "tool_id": "agent_emit_todo_plan",
-      "summary": "Agent-mode: emit and persist unreal_ai.todo_plan via tool call (not the Plan-mode unreal_ai.plan_dag assistant JSON).",
+      "summary": "Deprecated: not exposed to the model. Persist unreal_ai.todo_plan via tool call (legacy). Use Plan chat mode for unreal_ai.plan_dag + executor instead.",
       "category": "exec",
       "tags": [
         "planning",
@@ -3595,8 +3595,8 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "agent": true,
-        "plan": true
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 6,
@@ -3638,7 +3638,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "asset_create",
@@ -3795,7 +3795,7 @@
     },
     {
       "tool_id": "asset_find_referencers",
-      "summary": "List Asset Registry referencers for an asset identifier.",
+      "summary": "List Asset Registry referencers for an asset identifier. Pass object_path copied from a prior discovery tool (asset_index_fuzzy_search, asset_registry_query, etc.)—do not invent /Game paths.",
       "category": "assets_content",
       "tags": [
         "asset",
