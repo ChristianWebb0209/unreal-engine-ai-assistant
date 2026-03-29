@@ -1,5 +1,6 @@
 # Tool calling
 
+- **Plan mode — planner pass:** The model profile uses **no callable tools** for the DAG-only planner turn. Output **`unreal_ai.plan_dag` JSON only**; do not emit `tool_calls` (see `09-plan-dag.md`). Node execution uses normal Agent tool calling in separate turns.
 - **Only** tools in the current request. IDs **snake_case** (e.g. `editor_get_selection`).
 - **Explicit tool id:** If the user names a specific tool (quoted id, `` `tool_id` ``, or “call tool **x**”), **call that exact tool** in this assistant turn. **Arguments must satisfy that tool’s JSON schema:** use the **smallest valid** argument object for **that** schema. **`{}` is only appropriate** when the schema has **no required fields** (examples: `pie_status`, `pie_stop`). If the schema lists **required** properties (`path`, `actor_paths`, `blueprint_path`, `object_path`, etc.), **never** invoke the tool with `{}` or omitted required keys—fill them from context, prior tool results, or a **read/discovery** tool first. **Do not** substitute a different discovery-only tool when the user explicitly named this tool unless they only asked to search or inspect.
 
@@ -14,6 +15,12 @@
 - **Read first** when the user did **not** name a tool: `scene_fuzzy_search`, `asset_index_fuzzy_search`, `source_search_symbol`, `asset_registry_query`, `editor_state_snapshot_read`.
 - **Path-resolution gates:** if a target tool requires `object_path`/`blueprint_path`, resolve that path first via discovery tools, then call the target tool with concrete args in a single attempt.
 - **Unreal object paths:** use package-style paths like `/Game/Folder/Asset.Asset` (not bare `.uasset` file paths on disk).
+
+- **Path *parameter names* (schema keys—not interchangeable):**
+  - **`object_path`:** Asset Registry **asset id** string (same form as above). Used by **`asset_open_editor`**, **`asset_find_referencers`**, **`asset_get_dependencies`**, **`asset_export_properties`**, and many other `/Game/...` asset tools. **Do not** pass this as **`path`** unless the tool schema explicitly lists `path` (e.g. **`content_browser_sync_asset`** accepts `path` / `object_path` / `asset_path`).
+  - **`path` / `path_prefix`:** Folder or filter scopes—**`asset_index_fuzzy_search.path_prefix`**, content browser sync’s **`path`**, not the same as a full asset **`object_path`**.
+  - **`actor_path` / `actor_paths`:** **Level actor** identifiers (world paths, often including `:PersistentLevel.`…)—for transforms, framing, selection—not interchangeable with **`object_path`** for UAssets.
+  - **`relative_path`:** Project files on disk for **`project_file_read_text`** / **`project_file_write_text`**—not Unreal object paths.
 - **Selection vs assets:** `editor_set_selection` selects **level actors** only; for `/Game/...` assets use `content_browser_sync_asset` or `asset_open_editor`.
 - **Materials:** `material_instance_set_*` writes require a **Material Instance** path; base `UMaterial` assets need an MI (duplicate/create) first.
 - **Empty filters:** for search tools, omit optional query fields or pass a non-empty string—avoid `""` when the tool needs a real filter.
@@ -37,6 +44,7 @@
   - `scene_fuzzy_search`: `{"query":"player start"}`
   - `asset_index_fuzzy_search`: `{"query":"BP_Enemy","path_prefix":"/Game/Blueprints"}` (prefer a narrow `path_prefix`; if `query` is omitted, `path_prefix` is **required**)
   - `asset_open_editor`: `{"object_path":"/Game/Blueprints/BP_Player.BP_Player"}`
+  - `asset_find_referencers` / `asset_get_dependencies`: `{"object_path":"/Game/Blueprints/BP_Player.BP_Player"}` (**use `object_path`**, not `path`)
   - `actor_set_transform`: `{"actor_path":"PersistentLevel.BP_Player_C_0","location":[0,0,120]}`
   - `material_instance_set_scalar_parameter`: `{"material_path":"/Game/Materials/MI_Player.MI_Player","parameter_name":"GlowIntensity","value":0.6}`
   - `blueprint_compile`: `{"blueprint_path":"/Game/Blueprints/BP_Player.BP_Player"}`
