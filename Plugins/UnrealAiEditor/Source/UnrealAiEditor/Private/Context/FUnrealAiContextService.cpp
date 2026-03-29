@@ -26,6 +26,24 @@
 #include "Serialization/JsonSerializer.h"
 #include "Misc/UnrealAiRecentUiTracker.h"
 
+namespace UnrealAiCtxPlanChildPriv
+{
+	static const TCHAR* GPlanThreadMarker = TEXT("_plan_");
+
+	/** Split `<parent>_plan_<nodeId>` from the rightmost `_plan_` so parent thread ids may contain the substring. */
+	static bool TrySplitPlanChildThreadId(const FString& ThreadId, FString& OutParentThreadId, FString& OutNodeIdSuffix)
+	{
+		const int32 LastIdx = ThreadId.Find(GPlanThreadMarker, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+		if (LastIdx == INDEX_NONE)
+		{
+			return false;
+		}
+		OutParentThreadId = ThreadId.Left(LastIdx);
+		OutNodeIdSuffix = ThreadId.Mid(LastIdx + FCString::Strlen(GPlanThreadMarker));
+		return !OutParentThreadId.IsEmpty() && !OutNodeIdSuffix.IsEmpty();
+	}
+}
+
 namespace UnrealAiCtxTodoPriv
 {
 	static int32 CountTodoStepsInJson(const FString& PlanJson)
@@ -431,6 +449,22 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 	}
 
 	FAgentContextState Working = *Found;
+	{
+		FString ParentTid;
+		FString NodeSuffix;
+		if (UnrealAiCtxPlanChildPriv::TrySplitPlanChildThreadId(ActiveThreadId, ParentTid, NodeSuffix))
+		{
+			if (const FAgentContextState* ParentState = FindState(ActiveProjectId, ParentTid))
+			{
+				if (!ParentState->ActivePlanDagJson.IsEmpty())
+				{
+					Working.ActivePlanDagJson = ParentState->ActivePlanDagJson;
+				}
+				Working.PlanNodeStatusById = ParentState->PlanNodeStatusById;
+				Working.PlanNodeSummaryById = ParentState->PlanNodeSummaryById;
+			}
+		}
+	}
 	const int32 PreModeToolResultsCount = Working.ToolResults.Num();
 	UnrealAiAgentContextFormat::ApplyModeToStateForBuild(Working, Options);
 	if (bVerbose)

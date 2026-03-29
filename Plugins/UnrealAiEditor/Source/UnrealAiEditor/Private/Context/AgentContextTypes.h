@@ -112,7 +112,7 @@ struct FAgentContextState
 	TOptional<FEditorContextSnapshot> EditorSnapshot;
 	/** Max chars for the assembled ContextBlock (post-format); 0 = default from options. */
 	int32 MaxContextChars = 0;
-	/** Canonical `unreal_ai.todo_plan` JSON from agent_emit_todo_plan (persisted). */
+	/** Legacy `unreal_ai.todo_plan` JSON (deprecated tool; may persist from old sessions). */
 	FString ActiveTodoPlanJson;
 	/** Parallel to `steps` in ActiveTodoPlanJson (best-effort). */
 	TArray<bool> TodoStepsDone;
