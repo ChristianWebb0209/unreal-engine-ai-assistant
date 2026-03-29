@@ -628,9 +628,15 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetApplyProperties(const TShare
 FUnrealAiToolInvocationResult UnrealAiDispatch_AssetFindReferencers(const TSharedPtr<FJsonObject>& Args)
 {
 	FString Path;
-	if (!Args->TryGetStringField(TEXT("object_path"), Path) || Path.IsEmpty())
+	Args->TryGetStringField(TEXT("object_path"), Path);
+	if (Path.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("object_path is required"));
+		// Common model mistake: uses `path` (as with content_browser_sync_asset) instead of `object_path`.
+		Args->TryGetStringField(TEXT("path"), Path);
+	}
+	if (Path.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("object_path is required (asset object path, e.g. /Game/Folder/Asset.Asset)"));
 	}
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 	IAssetRegistry& AR = ARM.Get();
@@ -658,9 +664,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetFindReferencers(const TShare
 FUnrealAiToolInvocationResult UnrealAiDispatch_AssetGetDependencies(const TSharedPtr<FJsonObject>& Args)
 {
 	FString Path;
-	if (!Args->TryGetStringField(TEXT("object_path"), Path) || Path.IsEmpty())
+	Args->TryGetStringField(TEXT("object_path"), Path);
+	if (Path.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("object_path is required"));
+		Args->TryGetStringField(TEXT("path"), Path);
+	}
+	if (Path.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("object_path is required (asset object path, e.g. /Game/Folder/Asset.Asset)"));
 	}
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 	IAssetRegistry& AR = ARM.Get();

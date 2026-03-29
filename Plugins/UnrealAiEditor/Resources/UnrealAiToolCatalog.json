@@ -3867,7 +3867,8 @@
         "additionalProperties": false,
         "properties": {
           "object_path": {
-            "type": "string"
+            "type": "string",
+            "description": "Full asset object path (e.g. /Game/Folder/MyAsset.MyAsset). Same key as asset_open_editor—not the `path` key used by content_browser_sync_asset."
           }
         },
         "required": [
@@ -3907,7 +3908,8 @@
         "additionalProperties": false,
         "properties": {
           "object_path": {
-            "type": "string"
+            "type": "string",
+            "description": "Full asset object path (e.g. /Game/Folder/MyAsset.MyAsset). Same key as asset_open_editor—not the `path` key used by content_browser_sync_asset."
           }
         },
         "required": [
