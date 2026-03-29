@@ -70,11 +70,12 @@ Thumbs.db
 /BuildOut/
 /tests-failed.txt
 
-# Tests: track only .py and .ps1 (ignore run outputs, logs, large generated JSON under tests/out, etc.)
+# Tests: track .py, .ps1, and .md (e.g. long-running harness docs, Tool Iteration Log); ignore run outputs, etc.
 /tests/**
 !/tests/**/
 !/tests/**/*.py
 !/tests/**/*.ps1
+!/tests/**/*.md
 # Re-ignore paths that became visible because parent dirs were un-ignored for traversal
 /tests/out/
 /tests/long-running-tests/runs/
