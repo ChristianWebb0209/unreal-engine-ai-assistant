@@ -45,9 +45,11 @@
 - **Minimal valid argument examples (canonical keys):**
   - `scene_fuzzy_search`: `{"query":"player start"}`
   - `asset_index_fuzzy_search`: `{"query":"enemy","path_prefix":"/Game/Blueprints"}` (`query` is a search string, not a fabricated asset name; prefer a narrow `path_prefix`; if `query` is omitted, `path_prefix` is **required**)
+  - `asset_registry_query`: `{"path_filter":"/Game/Blueprints"}` or `{"class_name":"/Script/Engine.Blueprint","path_filter":"/Game"}` (bounded query required; `{}` is invalid)
   - `asset_open_editor`: `{"object_path":"/Game/Blueprints/<DiscoveredBp>.<DiscoveredBp>"}` (replace from discovery results)
   - `asset_find_referencers` / `asset_get_dependencies`: `{"object_path":"/Game/Blueprints/<DiscoveredBp>.<DiscoveredBp>"}` (**use `object_path`**, not `path`)
   - `actor_set_transform`: `{"actor_path":"/Game/Maps/<MapAsset>.<MapAsset>:PersistentLevel.<DiscoveredActor>","location":[0,0,120]}` (actor path from `scene_fuzzy_search` / selection)
+  - `actor_spawn_from_class`: `{"class_path":"/Script/Engine.StaticMeshActor","location":[0,0,100],"rotation":[0,0,0]}` (if exact transform unknown, use explicit safe defaults instead of omitting fields)
   - `material_instance_set_scalar_parameter`: `{"material_path":"/Game/Materials/<DiscoveredMI>.<DiscoveredMI>","parameter_name":"GlowIntensity","value":0.6}`
   - `blueprint_compile`: `{"blueprint_path":"/Game/Blueprints/<DiscoveredBp>.<DiscoveredBp>"}`
   - `pie_start`: `{"mode":"viewport"}`
@@ -57,6 +59,8 @@
   - `content_browser_sync_asset`: `{"path":"/Game/Folder/<DiscoveredAsset>.<DiscoveredAsset>"}` (also `object_path` / `asset_path`; must be a **concrete asset** object path, not a folder-only string)
   - `project_file_read_text`: `{"relative_path":"<actual_basename>.uproject","max_bytes":16384}` — `<actual_basename>.uproject` is the real manifest filename at the project root (see factual **Project workspace** in system context when available); project-relative, not `/Game/...`. **Never** paste a placeholder basename from docs.
   - `viewport_frame_actors`: `{"actor_paths":["/Game/<MapPath>:PersistentLevel.<DiscoveredActor>"]}` (full world actor paths; never `["PersistentLevel"]` alone—obtain paths via `editor_get_selection` or `scene_fuzzy_search`)
+  - `asset_create`: `{"package_path":"/Game/Blueprints","asset_name":"DoorBP","asset_class":"/Script/Engine.Blueprint"}` (`{}` is invalid; all three keys required, `class_path` is alias for `asset_class`)
+  - `asset_apply_properties`: `{"object_path":"/Game/Blueprints/DoorBP.DoorBP","properties":{"bHiddenInGame":false}}` (`{}` is invalid)
 - If a tool error includes `suggested_correct_call`, use that shape on the next retry instead of repeating the same args.
 - If a call fails validation, apply `suggested_correct_call` immediately; never retry the same invalid shape twice—including **empty `{}`** when required fields exist.
 - Search/retrieval loop cap: after 2 near-identical calls without new progress, change strategy/tool family or **stop with a concise handoff** (remaining work, blockers); suggest **Plan mode** for large structured follow-up if appropriate (**03**).

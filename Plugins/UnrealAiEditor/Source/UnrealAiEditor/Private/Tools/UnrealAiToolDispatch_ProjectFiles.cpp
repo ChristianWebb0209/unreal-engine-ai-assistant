@@ -11,9 +11,8 @@
 namespace UnrealAiProjectFileDispatchPriv
 {
 	/** Prefer the real `.uproject` path (project-relative); fallback to a config file if unavailable. */
-	static void FillSuggestedArgsForReadText(TSharedPtr<FJsonObject>& OutSuggestedArgs)
+	static FString DefaultRelativePathForReadText()
 	{
-		OutSuggestedArgs->SetNumberField(TEXT("max_bytes"), 1024.0);
 		const FString ProjectFileAbs = FPaths::GetProjectFilePath();
 		if (!ProjectFileAbs.IsEmpty())
 		{
@@ -21,17 +20,23 @@ namespace UnrealAiProjectFileDispatchPriv
 			if (FPaths::MakePathRelativeTo(RelToProject, *FPaths::ProjectDir()))
 			{
 				RelToProject.ReplaceInline(TEXT("\\"), TEXT("/"));
-				OutSuggestedArgs->SetStringField(TEXT("relative_path"), RelToProject);
-				return;
+				return RelToProject;
 			}
 		}
-		OutSuggestedArgs->SetStringField(TEXT("relative_path"), TEXT("Config/DefaultEngine.ini"));
+		return TEXT("Config/DefaultEngine.ini");
+	}
+
+	static void FillSuggestedArgsForReadText(TSharedPtr<FJsonObject>& OutSuggestedArgs)
+	{
+		OutSuggestedArgs->SetNumberField(TEXT("max_bytes"), 1024.0);
+		OutSuggestedArgs->SetStringField(TEXT("relative_path"), DefaultRelativePathForReadText());
 	}
 }
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileReadText(const TSharedPtr<FJsonObject>& Args)
 {
 	FString Rel;
+	bool bRelativePathDefaulted = false;
 	{
 		const TArray<const TCHAR*> Aliases = { TEXT("file_path") };
 		if (!UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
@@ -41,12 +46,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileReadText(const TShared
 			Rel)
 			|| Rel.IsEmpty())
 		{
-			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
-			UnrealAiProjectFileDispatchPriv::FillSuggestedArgsForReadText(SuggestedArgs);
-			return UnrealAiToolJson::ErrorWithSuggestedCall(
-				TEXT("relative_path is required (alias: file_path). For engine/plugin association, read the `.uproject` file at the project root (see suggested_correct_call); Config/DefaultEngine.ini is another common text file."),
-				TEXT("project_file_read_text"),
-				SuggestedArgs);
+			Rel = UnrealAiProjectFileDispatchPriv::DefaultRelativePathForReadText();
+			bRelativePathDefaulted = true;
 		}
 	}
 	int32 MaxBytes = 512 * 1024;
@@ -78,6 +79,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileReadText(const TShared
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("relative_path"), Rel);
+	if (bRelativePathDefaulted)
+	{
+		O->SetBoolField(TEXT("relative_path_defaulted"), true);
+	}
 	O->SetStringField(TEXT("content"), Content);
 	O->SetBoolField(TEXT("truncated"), bTruncated);
 	return UnrealAiToolJson::Ok(O);

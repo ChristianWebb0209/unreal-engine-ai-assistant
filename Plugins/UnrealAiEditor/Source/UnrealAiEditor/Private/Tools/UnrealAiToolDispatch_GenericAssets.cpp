@@ -17,9 +17,59 @@
 #include "UObject/UnrealType.h"
 #include "UObject/Class.h"
 #include "LevelSequence.h"
+#include "Materials/MaterialInterface.h"
 
 namespace UnrealAiGenericAssets
 {
+	static bool IsCommonTextOrWidgetPropertyMistakeOnMaterial(const FString& Key)
+	{
+		// Models often try to set Text/UMG fields on UMaterial — these are not material properties.
+		if (Key.Equals(TEXT("Text"), ESearchCase::IgnoreCase)
+			|| Key.Equals(TEXT("HorizontalAlignment"), ESearchCase::IgnoreCase)
+			|| Key.Equals(TEXT("VerticalAlignment"), ESearchCase::IgnoreCase)
+			|| Key.Equals(TEXT("Font"), ESearchCase::IgnoreCase)
+			|| Key.Equals(TEXT("FontSize"), ESearchCase::IgnoreCase)
+			|| Key.Equals(TEXT("WorldSize"), ESearchCase::IgnoreCase)
+			|| Key.Equals(TEXT("TextWorldSize"), ESearchCase::IgnoreCase)
+			|| Key.Equals(TEXT("ColorAndOpacity"), ESearchCase::IgnoreCase)
+			|| Key.Equals(TEXT("Justification"), ESearchCase::IgnoreCase)
+			|| Key.Equals(TEXT("LineBreakStrategy"), ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		return false;
+	}
+
+	static FUnrealAiToolInvocationResult BuildMaterialTextPropertyConfusionError(UObject* Obj, const TArray<FString>& BadKeys)
+	{
+		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+		O->SetBoolField(TEXT("ok"), false);
+		O->SetStringField(TEXT("status"), TEXT("material_text_property_confusion"));
+		O->SetStringField(
+			TEXT("message"),
+			TEXT("asset_apply_properties: property name(s) look like Text/UMG widget fields, not Material/MaterialInstance properties. ")
+			TEXT("Use a TextRenderActor (or UMG) in the level for visible text; use asset_apply_properties only for material parameters (e.g. BaseColor, Roughness, scalar/vector params)."));
+		TArray<TSharedPtr<FJsonValue>> Arr;
+		for (const FString& K : BadKeys)
+		{
+			Arr.Add(MakeShareable(new FJsonValueString(K)));
+		}
+		O->SetArrayField(TEXT("invalid_keys_for_material"), Arr);
+		O->SetStringField(TEXT("object_path"), Obj->GetPathName());
+		O->SetStringField(TEXT("object_class"), Obj->GetClass()->GetName());
+		TSharedPtr<FJsonObject> SuggestedCall = MakeShared<FJsonObject>();
+		SuggestedCall->SetStringField(TEXT("tool"), TEXT("actor_spawn_from_class"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.TextRenderActor"));
+		SuggestedCall->SetObjectField(TEXT("args"), SuggestedArgs);
+		O->SetObjectField(TEXT("suggested_correct_call"), SuggestedCall);
+		FUnrealAiToolInvocationResult R;
+		R.bOk = false;
+		R.ErrorMessage = UnrealAiToolJson::SerializeObject(O);
+		R.ContentForModel = R.ErrorMessage;
+		return R;
+	}
+
 	static bool IsUnderGameContentPackage(const FString& InPackageOrObjectPath)
 	{
 		FString Pkg = InPackageOrObjectPath;
@@ -44,6 +94,27 @@ namespace UnrealAiGenericAssets
 	{
 		// Example: PackagePath=/Game/Foo, AssetName=Bar -> /Game/Foo/Bar.Bar
 		return PackagePath + TEXT("/") + AssetName + TEXT(".") + AssetName;
+	}
+
+	static bool IsBlueprintAssetMissingGeneratedClass(const FAssetData& AD)
+	{
+		if (!AD.IsValid())
+		{
+			return false;
+		}
+		const auto BlueprintClassPath = UBlueprint::StaticClass()->GetClassPathName();
+		if (AD.AssetClassPath != BlueprintClassPath)
+		{
+			return false;
+		}
+		FString GeneratedClassTag;
+		if (!AD.GetTagValue(FName(TEXT("GeneratedClass")), GeneratedClassTag))
+		{
+			return true;
+		}
+		GeneratedClassTag.TrimStartAndEndInline();
+		return GeneratedClassTag.IsEmpty() || GeneratedClassTag.Equals(TEXT("None"), ESearchCase::IgnoreCase)
+			|| GeneratedClassTag.Equals(TEXT("null"), ESearchCase::IgnoreCase);
 	}
 
 	static UObject* LoadObjectInGame(const FString& ObjectPath, FString& OutErr)
@@ -311,14 +382,28 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetCreate(const TSharedPtr<FJso
 	FString AssetName;
 	FString ClassPath;
 	FString FactoryClassPath;
-	if (!Args->TryGetStringField(TEXT("package_path"), PackagePath) || PackagePath.IsEmpty()
-		|| !Args->TryGetStringField(TEXT("asset_name"), AssetName) || AssetName.IsEmpty()
-		|| !Args->TryGetStringField(TEXT("asset_class"), ClassPath) || ClassPath.IsEmpty())
+	const TArray<const TCHAR*> PackageAliases = { TEXT("path") };
+	const TArray<const TCHAR*> NameAliases = { TEXT("name"), TEXT("object_name") };
+	const TArray<const TCHAR*> ClassAliases = { TEXT("class_path") };
+	const bool bHasPackagePath = UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
+		Args,
+		TEXT("package_path"),
+		PackageAliases,
+		PackagePath);
+	const bool bHasAssetName = UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
+		Args,
+		TEXT("asset_name"),
+		NameAliases,
+		AssetName);
+	const bool bHasAssetClass = UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
+		Args,
+		TEXT("asset_class"),
+		ClassAliases,
+		ClassPath);
+	if (!bHasPackagePath || PackagePath.IsEmpty()
+		|| !bHasAssetName || AssetName.IsEmpty()
+		|| !bHasAssetClass || ClassPath.IsEmpty())
 	{
-		if (ClassPath.IsEmpty())
-		{
-			Args->TryGetStringField(TEXT("class_path"), ClassPath);
-		}
 		if (PackagePath.IsEmpty() || AssetName.IsEmpty() || ClassPath.IsEmpty())
 		{
 			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
@@ -373,6 +458,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetCreate(const TSharedPtr<FJso
 		const FAssetData AD = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(ExpectedObjPath));
 		if (AD.IsValid())
 		{
+			if (IsBlueprintAssetMissingGeneratedClass(AD))
+			{
+				return UnrealAiToolJson::Error(FString::Printf(
+					TEXT("asset_create: existing blueprint asset is invalid (GeneratedClass missing): %s"),
+					*ExpectedObjPath));
+			}
 			UObject* ExistingObj = LoadObject<UObject>(nullptr, *ExpectedObjPath);
 			if (ExistingObj && ExistingObj->IsA(AssetClass))
 			{
@@ -431,6 +522,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetCreate(const TSharedPtr<FJso
 			const FAssetData AD = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(ExpectedObjPath));
 			if (AD.IsValid())
 			{
+				if (IsBlueprintAssetMissingGeneratedClass(AD))
+				{
+					return UnrealAiToolJson::Error(FString::Printf(
+						TEXT("asset_create: existing blueprint asset is invalid (GeneratedClass missing): %s"),
+						*ExpectedObjPath));
+				}
 				UObject* ExistingObj = LoadObject<UObject>(nullptr, *ExpectedObjPath);
 				if (ExistingObj && ExistingObj->IsA(AssetClass))
 				{
@@ -507,7 +604,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetApplyProperties(const TShare
 {
 	using namespace UnrealAiGenericAssets;
 	FString Path;
-	if (!Args->TryGetStringField(TEXT("object_path"), Path) || Path.IsEmpty())
+	const TArray<const TCHAR*> PathAliases = { TEXT("path"), TEXT("asset_path"), TEXT("object") };
+	if (!UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(Args, TEXT("object_path"), PathAliases, Path) || Path.IsEmpty())
 	{
 		return UnrealAiToolJson::Error(TEXT("object_path is required"));
 	}
@@ -524,6 +622,22 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetApplyProperties(const TShare
 	if (!Obj)
 	{
 		return UnrealAiToolJson::Error(Err);
+	}
+
+	if (Cast<UMaterialInterface>(Obj))
+	{
+		TArray<FString> BadKeys;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*Delta)->Values)
+		{
+			if (IsCommonTextOrWidgetPropertyMistakeOnMaterial(Pair.Key))
+			{
+				BadKeys.Add(Pair.Key);
+			}
+		}
+		if (BadKeys.Num() > 0)
+		{
+			return BuildMaterialTextPropertyConfusionError(Obj, BadKeys);
+		}
 	}
 
 	TArray<FString> ApplyErrors;

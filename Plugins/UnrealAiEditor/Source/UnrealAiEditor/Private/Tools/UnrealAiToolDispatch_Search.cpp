@@ -1,5 +1,6 @@
 #include "Tools/UnrealAiToolDispatch_Search.h"
 
+#include "Tools/UnrealAiActorEditorPolicy.h"
 #include "Tools/UnrealAiFuzzySearch.h"
 #include "Tools/UnrealAiToolJson.h"
 #include "Tools/UnrealAiToolDispatch_ArgRepair.h"
@@ -198,6 +199,27 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 	}
 	bool bIncludeHidden = false;
 	Args->TryGetBoolField(TEXT("include_hidden"), bIncludeHidden);
+	bool bIncludeEngineInternals = false;
+	Args->TryGetBoolField(TEXT("include_engine_internals"), bIncludeEngineInternals);
+	TArray<FString> ExtraExcludeClassSubstrings;
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+		if (Args.IsValid() && Args->TryGetArrayField(TEXT("exclude_class_substrings"), Arr) && Arr)
+		{
+			for (const TSharedPtr<FJsonValue>& V : *Arr)
+			{
+				if (V.IsValid() && V->Type == EJson::String)
+				{
+					FString S = V->AsString();
+					S.TrimStartAndEndInline();
+					if (!S.IsEmpty())
+					{
+						ExtraExcludeClassSubstrings.Add(MoveTemp(S));
+					}
+				}
+			}
+		}
+	}
 
 	const int32 MaxWallMs = ParseMaxWallMs(Args, SearchWallMsDefault);
 	const double StartSec = FPlatformTime::Seconds();
@@ -232,6 +254,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 	TArray<FHit> Hits;
 	Hits.Reserve(256);
 	int32 ActorsVisited = 0;
+	int32 ActorsExcludedByPolicy = 0;
 	bool bTimedOut = false;
 	bool bActorsTruncated = false;
 	for (TActorIterator<AActor> It(World); It; ++It)
@@ -253,6 +276,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 		AActor* A = *It;
 		if (!A)
 		{
+			continue;
+		}
+		if (UnrealAiActorEditorPolicy::ShouldExcludeFromSceneFuzzySearch(A, bIncludeEngineInternals, ExtraExcludeClassSubstrings))
+		{
+			++ActorsExcludedByPolicy;
 			continue;
 		}
 		if (!bIncludeHidden && A->IsHiddenEd())
@@ -331,6 +359,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 	O->SetBoolField(TEXT("timed_out"), bTimedOut);
 	O->SetBoolField(TEXT("actors_truncated"), bActorsTruncated);
 	O->SetNumberField(TEXT("actors_visited"), static_cast<double>(ActorsVisited));
+	O->SetNumberField(TEXT("actors_excluded_by_policy"), static_cast<double>(ActorsExcludedByPolicy));
+	O->SetBoolField(TEXT("engine_internals_included"), bIncludeEngineInternals);
 	O->SetNumberField(TEXT("max_actors_to_visit"), static_cast<double>(MaxActorsToVisit));
 	if (bTimedOut)
 	{
@@ -430,24 +460,21 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 		PathPrefix = TEXT("/") + PathPrefix;
 	}
 
-	if (bQueryCoerced && !bExplicitPathPrefix)
-	{
-		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
-		SuggestedArgs->SetStringField(TEXT("query"), TEXT("MyBlueprint"));
-		SuggestedArgs->SetStringField(TEXT("path_prefix"), TEXT("/Game/Blueprints"));
-		return UnrealAiToolJson::ErrorWithSuggestedCall(
-			TEXT("asset_index_fuzzy_search: missing or empty `query` requires a narrow `path_prefix` (e.g. /Game/Blueprints) so the registry is not fully scanned. "
-				 "Pass both `query` and `path_prefix`, or use asset_registry_query with path_filter for directory listing."),
-			TEXT("asset_index_fuzzy_search"),
-			SuggestedArgs);
-	}
-
 	if (bQueryCoerced)
 	{
-		Query = TEXT("PlayerStart");
+		// Deterministic one-shot recovery for empty query: use a bounded default instead of failing.
+		Query = TEXT("Blueprint");
+		if (!bExplicitPathPrefix)
+		{
+			PathPrefix = TEXT("/Game/Blueprints");
+		}
 		if (Args.IsValid())
 		{
 			Args->SetStringField(TEXT("query"), Query);
+			if (!bExplicitPathPrefix)
+			{
+				Args->SetStringField(TEXT("path_prefix"), PathPrefix);
+			}
 		}
 	}
 

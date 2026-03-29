@@ -1,5 +1,6 @@
 #include "Tools/UnrealAiToolDispatch_Actors.h"
 
+#include "Tools/UnrealAiActorEditorPolicy.h"
 #include "Tools/UnrealAiToolActorLookup.h"
 #include "Tools/UnrealAiToolJson.h"
 
@@ -306,6 +307,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorDestroy(const TSharedPtr<FJs
 	{
 		return UnrealAiToolJson::Error(TEXT("Actor not found"));
 	}
+	if (UnrealAiActorEditorPolicy::IsProtectedFromAiDestruction(A))
+	{
+		return UnrealAiToolJson::Error(FString::Printf(
+			TEXT("actor_destroy refused: actor appears to be engine streaming/HLOD/partition infrastructure (%s). Do not destroy it; adjust user-authored meshes/props instead."),
+			*A->GetClass()->GetName()));
+	}
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnActorDestroy", "Unreal AI: destroy actor"));
 	if (World)
 	{
@@ -575,9 +582,30 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorSpawnFromClass(const TShared
 	FString ClassPath;
 	const TArray<TSharedPtr<FJsonValue>>* LocArr = nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* RotArr = nullptr;
-	if (!Args->TryGetStringField(TEXT("class_path"), ClassPath) || ClassPath.IsEmpty()
-		|| !Args->TryGetArrayField(TEXT("location"), LocArr) || !LocArr
-		|| !Args->TryGetArrayField(TEXT("rotation"), RotArr) || !RotArr)
+	if (!Args->TryGetStringField(TEXT("class_path"), ClassPath) || ClassPath.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("class_path, location[], rotation[] are required"));
+	}
+	if (!Args->TryGetArrayField(TEXT("location"), LocArr) || !LocArr)
+	{
+		// Deterministic fallback transform for missing spawn coordinates.
+		TArray<TSharedPtr<FJsonValue>> DefaultLoc;
+		DefaultLoc.Add(MakeShared<FJsonValueNumber>(0.0));
+		DefaultLoc.Add(MakeShared<FJsonValueNumber>(0.0));
+		DefaultLoc.Add(MakeShared<FJsonValueNumber>(100.0));
+		Args->SetArrayField(TEXT("location"), DefaultLoc);
+		Args->TryGetArrayField(TEXT("location"), LocArr);
+	}
+	if (!Args->TryGetArrayField(TEXT("rotation"), RotArr) || !RotArr)
+	{
+		TArray<TSharedPtr<FJsonValue>> DefaultRot;
+		DefaultRot.Add(MakeShared<FJsonValueNumber>(0.0));
+		DefaultRot.Add(MakeShared<FJsonValueNumber>(0.0));
+		DefaultRot.Add(MakeShared<FJsonValueNumber>(0.0));
+		Args->SetArrayField(TEXT("rotation"), DefaultRot);
+		Args->TryGetArrayField(TEXT("rotation"), RotArr);
+	}
+	if (!LocArr || !RotArr)
 	{
 		return UnrealAiToolJson::Error(TEXT("class_path, location[], rotation[] are required"));
 	}

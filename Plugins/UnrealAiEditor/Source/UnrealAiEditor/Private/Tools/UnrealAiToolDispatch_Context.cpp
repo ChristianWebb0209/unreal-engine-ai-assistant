@@ -123,14 +123,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRegistryQuery(const TSharedP
 
 	if (PathFilter.IsEmpty() && ClassName.IsEmpty())
 	{
-		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
-		SuggestedArgs->SetStringField(TEXT("path_filter"), TEXT("/Game/Blueprints"));
-		SuggestedArgs->SetNumberField(TEXT("max_results"), 50.0);
-		return UnrealAiToolJson::ErrorWithSuggestedCall(
-			TEXT("asset_registry_query: provide at least one of path_filter (aliases: filter, path, object_path) or class_name/class_paths so the query is bounded. "
-				 "Scanning the entire registry is not supported."),
-			TEXT("asset_registry_query"),
-			SuggestedArgs);
+		// Deterministic one-shot recovery: keep the query bounded without forcing a tool failure.
+		PathFilter = TEXT("/Game");
+		if (Args.IsValid())
+		{
+			Args->SetStringField(TEXT("path_filter"), PathFilter);
+		}
 	}
 
 	int32 MaxResults = 100;

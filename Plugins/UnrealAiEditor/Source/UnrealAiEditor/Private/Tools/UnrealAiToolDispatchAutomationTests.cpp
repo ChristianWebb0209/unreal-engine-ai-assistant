@@ -422,7 +422,7 @@ bool FUnrealAiGenericAssetToolsContractTest::RunTest(const FString& Parameters)
 	(void)Parameters;
 	TestTrue(TEXT("Runs on game thread"), IsInGameThread());
 
-	// Missing required string fields should include suggested_correct_call for deterministic repair.
+	// Missing relative_path: default to project manifest or DefaultEngine.ini (no tool_finish failure).
 	{
 		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
 			TEXT("project_file_read_text"),
@@ -431,27 +431,31 @@ bool FUnrealAiGenericAssetToolsContractTest::RunTest(const FString& Parameters)
 			nullptr,
 			FString(),
 			FString());
-		TestFalse(TEXT("project_file_read_text missing relative_path: bOk"), R.bOk);
+		TestTrue(TEXT("project_file_read_text missing relative_path: bOk"), R.bOk);
 
 		TSharedPtr<FJsonObject> O;
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
 		TestTrue(TEXT("project_file_read_text missing relative_path: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-		TestTrue(TEXT("project_file_read_text missing relative_path: has suggested_correct_call"), O->HasField(TEXT("suggested_correct_call")));
-		const TSharedPtr<FJsonObject>* Suggested = nullptr;
-		TestTrue(TEXT("project_file_read_text: suggested_correct_call object"), O->TryGetObjectField(TEXT("suggested_correct_call"), Suggested) && Suggested && Suggested->IsValid());
-		const TSharedPtr<FJsonObject>* InnerArgs = nullptr;
-		TestTrue(TEXT("project_file_read_text: suggested arguments"), (*Suggested)->TryGetObjectField(TEXT("arguments"), InnerArgs) && InnerArgs && InnerArgs->IsValid());
+		bool bOk = false;
+		TestTrue(TEXT("project_file_read_text missing relative_path: ok"), O->TryGetBoolField(TEXT("ok"), bOk) && bOk);
 		FString RelPath;
-		TestTrue(TEXT("project_file_read_text: suggested relative_path"), (*InnerArgs)->TryGetStringField(TEXT("relative_path"), RelPath));
-		const FString ExpectedUProj = FPaths::GetCleanFilename(FPaths::GetProjectFilePath());
-		if (!ExpectedUProj.IsEmpty())
-		{
-			TestEqual(TEXT("project_file_read_text: suggested path matches project .uproject"), RelPath, ExpectedUProj);
-		}
-		else
-		{
-			TestTrue(TEXT("project_file_read_text: suggested path non-empty fallback"), !RelPath.IsEmpty());
-		}
+		TestTrue(TEXT("project_file_read_text: effective relative_path"), O->TryGetStringField(TEXT("relative_path"), RelPath) && !RelPath.IsEmpty());
+		bool bDefaulted = false;
+		TestTrue(TEXT("project_file_read_text: relative_path_defaulted"), O->TryGetBoolField(TEXT("relative_path_defaulted"), bDefaulted) && bDefaulted);
+		const FString ExpectedRel = [&]() {
+			const FString ProjectFileAbs = FPaths::GetProjectFilePath();
+			if (!ProjectFileAbs.IsEmpty())
+			{
+				FString RelToProject = ProjectFileAbs;
+				if (FPaths::MakePathRelativeTo(RelToProject, *FPaths::ProjectDir()))
+				{
+					RelToProject.ReplaceInline(TEXT("\\"), TEXT("/"));
+					return RelToProject;
+				}
+			}
+			return FString(TEXT("Config/DefaultEngine.ini"));
+		}();
+		TestEqual(TEXT("project_file_read_text: path matches default resolver"), RelPath, ExpectedRel);
 	}
 
 	{

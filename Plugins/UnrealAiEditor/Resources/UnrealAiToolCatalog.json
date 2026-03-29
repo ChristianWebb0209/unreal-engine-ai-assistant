@@ -93,7 +93,7 @@
     },
     {
       "tool_id": "actor_destroy",
-      "summary": "Destroy an actor in the editor world.",
+      "summary": "Destroy an actor in the editor world. Refused for engine streaming/HLOD/WorldPartition infrastructure actors (class/path heuristics)—only delete user-authored props/meshes you can justify.",
       "category": "world_actors",
       "tags": [
         "actor",
@@ -130,7 +130,9 @@
       "permission": "destructive",
       "ue_entry_points": "UWorld::DestroyActor",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "ok:false when actor_path matches built-in protected types (HLOD / WorldPartition helpers): choose a different actor or fix the user's mesh instead."
+      ],
       "doc_links": [],
       "status": "research"
     },
@@ -359,7 +361,7 @@
     },
     {
       "tool_id": "actor_spawn_from_class",
-      "summary": "Spawn an actor in the editor world.",
+      "summary": "Spawn an actor in the editor world. Requires class_path + location[3] + rotation[3]. If exact transform is unknown, use explicit safe defaults (e.g. location [0,0,100], rotation [0,0,0]) instead of omitting fields.",
       "category": "world_actors",
       "tags": [
         "actor",
@@ -410,7 +412,9 @@
       "permission": "write",
       "ue_entry_points": "UWorld::SpawnActor; FScopedTransaction",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "Missing required args: class_path, location, and rotation are mandatory; `{}` is invalid."
+      ],
       "doc_links": [],
       "status": "research"
     },
@@ -780,7 +784,7 @@
     },
     {
       "tool_id": "asset_registry_query",
-      "summary": "Query Asset Registry for deterministic listing by exact path/class filters. You must pass at least path_filter (or class_name)—unbounded full-registry scans are rejected. Use asset_index_fuzzy_search for fuzzy name discovery under a path_prefix.",
+      "summary": "Query Asset Registry for deterministic listing by exact path/class filters. You must pass at least path_filter (or class_name)—unbounded full-registry scans are rejected. `{}` is invalid. Use asset_index_fuzzy_search for fuzzy name discovery under a path_prefix.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -860,7 +864,19 @@
             "type": "integer"
           }
         },
-        "required": []
+        "required": [],
+        "anyOf": [
+          {
+            "required": [
+              "path_filter"
+            ]
+          },
+          {
+            "required": [
+              "class_name"
+            ]
+          }
+        ]
       },
       "side_effects": "none",
       "permission": "read",
@@ -1112,7 +1128,7 @@
     },
     {
       "tool_id": "blueprint_apply_ir",
-      "summary": "Apply compact Blueprint IR and materialize/wire EventGraph nodes. Primary tool for gameplay logic (overlap, timers, variables, calls). blueprint_path must be an object_path from asset_index_fuzzy_search or asset_registry_query results—never a guessed name when multiple assets matched. Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Minimal valid shape: blueprint_path + nodes[] + links[] where each node has node_id/op and each link has from/to pin refs. Not for UMG Designer layout.",
+      "summary": "Apply compact Blueprint IR and materialize/wire EventGraph nodes. Primary tool for gameplay logic (overlap, timers, variables, calls). blueprint_path must be an object_path from asset_index_fuzzy_search or asset_registry_query results—never a guessed name when multiple assets matched. Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Minimal valid shape: blueprint_path + nodes[] + links[] where each node has node_id/op and each link has from/to pin refs. blueprint_path must be a Blueprint asset path (/Game/...Asset.Asset), never a level actor/world path. Not for UMG Designer layout.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -2850,7 +2866,7 @@
     },
     {
       "tool_id": "scene_fuzzy_search",
-      "summary": "Fuzzy-search actors across the loaded editor world/level (not Content Browser assets). For /Game assets use asset_index_fuzzy_search. Stops after max_wall_ms (default 12s) or max_actors_to_visit with timed_out/actors_truncated partial results. If query is missing or blank, the handler applies a safe default (query_coerced:true)—still pass an explicit non-empty query when possible.",
+      "summary": "Fuzzy-search actors across the loaded editor world/level (not Content Browser assets). For /Game assets use asset_index_fuzzy_search. By default excludes engine streaming/HLOD/WorldPartition helper actors from results (see actors_excluded_by_policy); use include_engine_internals:true only for diagnostics. Stops after max_wall_ms (default 12s) or max_actors_to_visit with timed_out/actors_truncated partial results. If query is missing or blank, the handler applies a safe default (query_coerced:true)—still pass an explicit non-empty query when possible.",
       "category": "world_actors",
       "tags": [
         "actor",
@@ -2898,6 +2914,17 @@
           "max_actors_to_visit": {
             "type": "integer",
             "description": "Max actor iterator steps (default 500000, clamped 5000–2000000); stops with actors_truncated."
+          },
+          "include_engine_internals": {
+            "type": "boolean",
+            "description": "If true, do not apply built-in excludes for HLOD/streaming helpers (still applies exclude_class_substrings). Default false."
+          },
+          "exclude_class_substrings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional extra class-name substrings to exclude from matches (case-insensitive)."
           }
         },
         "required": [
@@ -2911,14 +2938,15 @@
       "failure_modes": [
         "Missing or empty query is coerced to a default search; prefer explicit query strings to avoid irrelevant matches.",
         "timed_out true: partial matches; narrow query, raise max_wall_ms, or raise max_actors_to_visit.",
-        "actors_truncated true: iterator cap hit; raise max_actors_to_visit or narrow search."
+        "actors_truncated true: iterator cap hit; raise max_actors_to_visit or narrow search.",
+        "High actors_excluded_by_policy: many engine-internal actors skipped; use include_engine_internals only if you truly need them."
       ],
       "doc_links": [],
       "status": "implemented"
     },
     {
       "tool_id": "asset_index_fuzzy_search",
-      "summary": "Fuzzy-search the Asset Registry under path_prefix (default /Game). On vague but domain-scoped user asks (e.g. something in project assets, blueprint-ish, material-like), prefer one bounded call with a topical query plus narrow path_prefix over asking the user for a keyword first; ask only if results are empty and the user text has no usable token. If query is missing or empty, you must pass a narrow path_prefix (e.g. /Game/Blueprints)—otherwise the tool errors instead of scanning the whole project. Enumeration stops after max_assets_to_scan or max_wall_ms (default 12s, max 120s)—see truncated, timed_out, assets_visited. Prefer explicit query + path_prefix for performance. When multiple matches return, downstream tools must use object_path values from this result (or a follow-up narrowed search)—do not invent paths.",
+      "summary": "Fuzzy-search the Asset Registry under path_prefix (default /Game). On vague but domain-scoped user asks (e.g. something in project assets, blueprint-ish, material-like), prefer one bounded call with a topical query plus narrow path_prefix over asking the user for a keyword first; ask only if results are empty and the user text has no usable token. If query is missing or empty, you must pass a narrow path_prefix (e.g. /Game/Blueprints). Invalid shape examples: `{}` or empty query with no path_prefix. Enumeration stops after max_assets_to_scan or max_wall_ms (default 12s, max 120s)—see truncated, timed_out, assets_visited. Prefer explicit query + path_prefix for performance. When multiple matches return, downstream tools must use object_path values from this result (or a follow-up narrowed search)—do not invent paths.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -2932,6 +2960,18 @@
         "ask": true,
         "agent": true,
         "plan": true
+        "anyOf": [
+          {
+            "required": [
+              "query"
+            ]
+          },
+          {
+            "required": [
+              "path_prefix"
+            ]
+          }
+        ]
       },
       "context_selector": {
         "priority": 64,
@@ -3642,7 +3682,7 @@
     },
     {
       "tool_id": "asset_create",
-      "summary": "Create a new asset under /Game via IAssetTools (asset_class path + optional factory_class). Use for Blueprint assets/materials/sounds/etc. For Character/Pawn gameplay, create a Blueprint asset (/Script/Engine.Blueprint) then set parent_class via blueprint_apply_ir create_if_missing flow.",
+      "summary": "Create a new asset under /Game via IAssetTools (asset_class path + optional factory_class). Use for Blueprint assets/materials/sounds/etc. `{}` is invalid: package_path, asset_name, and asset_class are required. For Character/Pawn gameplay, create a Blueprint asset (/Script/Engine.Blueprint) then set parent_class via blueprint_apply_ir create_if_missing flow.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -3698,7 +3738,9 @@
       "permission": "write",
       "ue_entry_points": "IAssetTools::CreateAsset",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "missing_required_fields: package_path, asset_name, and asset_class are required (`class_path` is alias for asset_class)."
+      ],
       "doc_links": [],
       "status": "implemented"
     },
@@ -3747,7 +3789,7 @@
     },
     {
       "tool_id": "asset_apply_properties",
-      "summary": "Write/apply JSON property deltas to an asset under /Game (reflection / ImportText). Mutation tool: use after a concrete object_path is known and prefer dry_run before irreversible edits.",
+      "summary": "Write/apply JSON property deltas to an asset under /Game (reflection / ImportText). Mutation tool: use after a concrete object_path is known and prefer dry_run before irreversible edits. `{}` is invalid: object_path + properties are required. Materials do not have Text/UMG fields—if you see status material_text_property_confusion, use in-world text (TextRenderActor/UMG) instead of inventing Text on Material assets.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -3789,7 +3831,10 @@
       "permission": "write",
       "ue_entry_points": "FProperty::ImportText",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "status material_text_property_confusion: property keys look like Text/widget fields on a Material/MaterialInstance; follow suggested_correct_call or use level text actors.",
+        "status apply_errors: unknown or non-editable property names—use asset_export_properties first to list valid keys."
+      ],
       "doc_links": [],
       "status": "implemented"
     },
