@@ -23,6 +23,11 @@
   Budget (harness): primary stop = 4 consecutive identical tool failures OR per-turn token cap (model profile / default 500k);
     round cap is a 512 backstop. -MaxLlmRounds / -MaxTurnTokens are recorded in summary.json only; tune limits in the model profile JSON (env overrides removed).
 
+  Editor process exit vs harness success
+  - last-suite-summary.json includes batch_editor_exit_code from UnrealEditor-Cmd; value 1 often appears after Quit even when every run.jsonl reached run_finished.
+  - Judge batch quality on run_jsonl_finished_count / all_turns_reached_terminal and failed_suite_count, not only editor_exit_code.
+  - Optional env: UNREAL_AI_HEADED_BATCH_IGNORE_EDITOR_NONZERO_EXIT=1 treats "all jsonls finished + no failed suite" as batch pass even if the editor process exited nonzero.
+
   JSON schema (suite files):
   {
     "suite_id": "optional_suite_name",
@@ -1134,6 +1139,13 @@ try {
             if (-not $suiteDone) {
                 $failedSuiteCount++
             }
+        }
+
+        # UnrealEditor-Cmd commonly returns a nonzero process exit on Quit even when every turn reached run_finished.
+        # Set UNREAL_AI_HEADED_BATCH_IGNORE_EDITOR_NONZERO_EXIT=1 to treat "all jsonls finished + no failed suite" as batch pass regardless.
+        if (($env:UNREAL_AI_HEADED_BATCH_IGNORE_EDITOR_NONZERO_EXIT -eq '1') -and $batchAllJsonlsFinished -and ($failedSuiteCount -eq 0) -and ($batchExitCode -ne 0)) {
+            Write-Warning ("Ignoring editor process exit code {0}: all expected run.jsonl finished and failed_suite_count=0 (UNREAL_AI_HEADED_BATCH_IGNORE_EDITOR_NONZERO_EXIT=1)." -f $batchExitCode)
+            $batchExitCode = 0
         }
 
         $batchFailed = ($batchExitCode -ne 0) -or (-not $batchAllJsonlsFinished) -or ($failedSuiteCount -gt 0)
