@@ -18,9 +18,9 @@ namespace UnrealAiWaitTime
 	/**
 	 * Headed harness: if the turn is still non-terminal but HTTP is complete and stream telemetry is idle
 	 * for this long (no active tool work), cancel early instead of waiting the full HarnessSyncWaitMs.
-	 * 0 = disabled. Kept short so stuck planner/agent turns fail fast after tokens stop (see fine-tuning log).
+	 * 0 = disabled. Run-29 step_03: post-tool assistant replies need more than 3s on slow models; 12s reduces false idle-abort before run_finished.
 	 */
-	inline constexpr uint32 HarnessSyncIdleAbortMs = 3000;
+	inline constexpr uint32 HarnessSyncIdleAbortMs = 12000;
 
 	/**
 	 * Headed scenario sync: when a plan pipeline is active (planner + serial node turns), post-tool / post-token
@@ -41,11 +41,17 @@ namespace UnrealAiWaitTime
 	// --- Plan executor: 0 = no total wall-clock cap between segments ---
 	inline constexpr uint32 HarnessPlanMaxWallMs = 0;
 
+	/**
+	 * Max nodes in a DAG emitted by the planner model (FUnrealAiPlanExecutor::OnPlannerFinished).
+	 * User-edited / Build / Resume-from-JSON paths keep a separate higher cap (64) so manual large graphs still validate.
+	 */
+	inline constexpr int32 PlannerEmittedMaxDagNodes = 8;
+
 	/** Max LLM rounds for EUnrealAiAgentMode::Plan (planner DAG only); agent plan nodes keep profile limits. */
 	inline constexpr int32 PlannerMaxLlmRounds = 16;
 
 	/** Upper bound on LLM rounds for Agent turns whose thread id is a plan node (`*_plan_*`); applied in harness DispatchLlm. */
-	inline constexpr int32 PlanNodeMaxLlmRounds = 12;
+	inline constexpr int32 PlanNodeMaxLlmRounds = 8;
 
 	// --- Streamed tool-call incomplete guard (SSE can split tool JSON across chunks) ---
 	/** Run-20 step_01: `stream_tool_call_incomplete_timeout` at age_events=64 (age_ms=4) — provider fragmented many tiny SSE chunks before tool JSON closed. */

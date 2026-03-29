@@ -36,7 +36,7 @@ FString FUnrealAiComplexityAssessment::FormatBlock() const
 		Sig += Signals[i];
 	}
 	return FString::Printf(
-		TEXT("[Complexity]\nscore: %.2f (%s)\nsignals: %s\npolicy: if high OR clearly multi-goal, prefer emitting unreal_ai.todo_plan (via agent_emit_todo_plan) before destructive tools\nrecommendPlanGate: %s"),
+		TEXT("[Complexity]\nscore: %.2f (%s)\nsignals: %s\npolicy: if high OR clearly multi-goal, prefer Plan chat mode (unreal_ai.plan_dag) or stop with a concise handoff before destructive tools\nrecommendPlanGate: %s"),
 		ScoreNormalized,
 		*Label,
 		Sig.IsEmpty() ? TEXT("(none)") : *Sig,

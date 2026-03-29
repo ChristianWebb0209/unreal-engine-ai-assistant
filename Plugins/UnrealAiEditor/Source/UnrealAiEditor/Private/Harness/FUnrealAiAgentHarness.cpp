@@ -793,7 +793,8 @@ namespace UnrealAiAgentHarnessPriv
 			*Request.ThreadId,
 			*RunId.ToString(EGuidFormats::DigitsWithHyphens),
 			LlmRound);
-		ContextService->StartRetrievalPrefetch(RetrievalTurnKey, Request.UserText);
+		const FString& ComplexityQuery = Request.ContextComplexityUserText.IsEmpty() ? Request.UserText : Request.ContextComplexityUserText;
+		ContextService->StartRetrievalPrefetch(RetrievalTurnKey, ComplexityQuery);
 		FUnrealAiToolSurfaceTelemetry ToolSurfaceTel;
 		if (!UnrealAiTurnLlmRequestBuilder::Build(
 				Request,
@@ -816,7 +817,7 @@ namespace UnrealAiAgentHarnessPriv
 		UsageQueryHash = ToolSurfaceTel.QueryHash;
 		if (UsageQueryHash.IsEmpty())
 		{
-			UsageQueryHash = UnrealAiAgentHarnessPriv::HashUtf8Query(Request.UserText);
+			UsageQueryHash = UnrealAiAgentHarnessPriv::HashUtf8Query(ComplexityQuery);
 		}
 		if (Sink.IsValid() && !ToolSurfaceTel.ToolSurfaceMode.Equals(TEXT("off")))
 		{
@@ -874,6 +875,11 @@ namespace UnrealAiAgentHarnessPriv
 		}
 
 		UnrealAiHarnessTpmThrottle::MaybeWaitBeforeChatRequest(LlmReq, CharPerTokenApprox);
+
+		if (Sink.IsValid())
+		{
+			Sink->OnLlmRequestPreparedForHttp(Request, RunId, LlmRound, EffectiveMaxLlmRounds, LlmReq);
+		}
 
 		const TSharedPtr<FAgentTurnRunner> Self = AsShared();
 		UnrealAiHarnessProgressTelemetry::NotifyLlmSubmit();
@@ -1528,7 +1534,7 @@ namespace UnrealAiAgentHarnessPriv
 			AccumulateRoundUsage();
 			EmitEnforcementEvent(TEXT("repeated_identical_ok_abort"), LastConsecutiveIdenticalOkSignature.Left(240));
 			Fail(FString::Printf(
-				TEXT("Stopped after %d consecutive identical successful tool calls with no progress (%s). Use a different tool, change arguments based on new information, emit `agent_emit_todo_plan`, or state a concise blocker."),
+				TEXT("Stopped after %d consecutive identical successful tool calls with no progress (%s). Use a different tool, change arguments based on new information, state a concise blocker, end with remaining work, or use Plan chat mode for structured multi-step follow-up."),
 				GHarnessRepeatedFailureStopCount,
 				LastConsecutiveIdenticalOkSignature.IsEmpty() ? TEXT("unknown signature") : *LastConsecutiveIdenticalOkSignature));
 			return;
@@ -1554,7 +1560,7 @@ namespace UnrealAiAgentHarnessPriv
 			FUnrealAiConversationMessage LoopNudge;
 			LoopNudge.Role = TEXT("user");
 			LoopNudge.Content = TEXT(
-				"[Harness][reason=repeated_tool_loop] Repeated tool loop detected. Replan-or-stop now: either emit one concise `agent_emit_todo_plan` for remaining work and continue from step 1, or provide a concise blocked summary with the exact blocker.");
+				"[Harness][reason=repeated_tool_loop] Repeated tool loop detected. Stop or change strategy: provide a concise blocked summary with the exact blocker, or summarize what is done vs remaining; use Plan chat mode for dependency-style multi-step work.");
 			Conv->GetMessagesMutable().Add(LoopNudge);
 		}
 		// The next round still runs (DispatchLlm below), but models often reply with text-only and end
@@ -1564,7 +1570,7 @@ namespace UnrealAiAgentHarnessPriv
 			FUnrealAiConversationMessage Nudge;
 			Nudge.Role = TEXT("user");
 			Nudge.Content = TEXT(
-				"[Harness][reason=todo_plan_only] Plan recorded. When ready, continue with the first pending plan step using Unreal tools if appropriate.");
+				"[Harness][reason=todo_plan_only] Legacy todo plan recorded. When ready, continue with the first pending plan step using Unreal tools if appropriate.");
 			Conv->GetMessagesMutable().Add(Nudge);
 		}
 		else if (Request.Mode == EUnrealAiAgentMode::Agent && bDeferredQueue)

@@ -30,4 +30,10 @@ namespace UnrealAiPlanDag
 	/** Status helpers used by executor/context state. */
 	bool IsTerminalStatus(const FString& Status);
 	bool IsSuccessfulStatus(const FString& Status);
+
+	/**
+	 * All node ids that transitively depend on FailedNodeId (forward along edges dep->dependent).
+	 * Does not include FailedNodeId. Order is BFS order (not semantically significant).
+	 */
+	void CollectTransitiveDependents(const FUnrealAiPlanDag& Dag, const FString& FailedNodeId, TArray<FString>& OutDependents);
 }

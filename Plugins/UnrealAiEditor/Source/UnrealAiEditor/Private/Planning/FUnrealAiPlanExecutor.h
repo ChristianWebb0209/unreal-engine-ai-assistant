@@ -51,8 +51,16 @@ private:
 	void OnNodeFinished(const FString& NodeId, bool bSuccess, const FString& ErrorText, const FString& AssistantText);
 	void Finish(bool bSuccess, const FString& ErrorText);
 
+	/** After a node fails, mark transitive dependents skipped so the DAG cannot deadlock on failed deps. */
+	void CascadeSkipDependentsAfterFailure(const FString& FailedNodeId, const FString& ErrorText);
+	/** When no ready nodes remain, derive success from context (any failed node => Finish false). */
+	void FinishWhenDagFullyResolved();
+
 	/** If UnrealAiWaitTime::HarnessPlanMaxWallMs > 0, wall clock from PlanWallStartSec must stay within budget between planner/node segments. */
 	bool CheckPlanWallBudgetOrFinish();
+
+	bool ComputePlanOverallSuccess();
+	FString BuildPlanFailureRollupMessage();
 
 	IUnrealAiAgentHarness* Harness = nullptr;
 	IAgentContextService* ContextService = nullptr;
@@ -80,4 +88,7 @@ private:
 	FString PendingPlannerUserTextOverride;
 	/** After one failed parse/validate, a second planner pass may run with augmented user text; only one repair. */
 	bool bPlannerDagRepairConsumed = false;
+
+	/** True if any plan node harness turn ended with bSuccess==false (covers missing context service). */
+	bool bAnyPlanNodeFailedThisRun = false;
 };

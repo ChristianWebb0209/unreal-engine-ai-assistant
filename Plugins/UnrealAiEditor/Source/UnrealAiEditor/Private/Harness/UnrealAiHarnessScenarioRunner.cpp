@@ -332,17 +332,70 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		bool bSignaled = false;
 		bool bIdleAbort = false;
 		int32 PlanSubTurnCompletionsBeforeTimeout = 0;
+		auto AppendSyncDiag = [&Sink](const TSharedPtr<FJsonObject>& Obj)
+		{
+			if (Sink.IsValid())
+			{
+				Sink->AppendHarnessDiagnosticJson(Obj);
+			}
+		};
+		auto SegmentResultString = [](const EPlanHarnessSyncSegment Seg) -> FString
+		{
+			switch (Seg)
+			{
+			case EPlanHarnessSyncSegment::Done:
+				return TEXT("done");
+			case EPlanHarnessSyncSegment::SubTurn:
+				return TEXT("sub_turn");
+			case EPlanHarnessSyncSegment::IdleAbort:
+				return TEXT("idle_abort");
+			case EPlanHarnessSyncSegment::Timeout:
+				return TEXT("timeout");
+			default:
+				return TEXT("unknown");
+			}
+		};
 		// Plan: fresh HarnessSyncWaitMs per segment; PlanSubTurnEvent resets when FUnrealAiPlanExecutor calls OnPlanHarnessSubTurnComplete (after planner parse and each node).
 		if (Mode == EUnrealAiAgentMode::Plan && PlanSubTurnEvent)
 		{
+			{
+				const uint32 IdleMs = UnrealAiHarnessScenarioRunnerPriv::GetEffectiveHarnessSyncIdleAbortMs(Harness, true);
+				TSharedPtr<FJsonObject> Cfg = MakeShared<FJsonObject>();
+				Cfg->SetStringField(TEXT("type"), TEXT("harness_sync_config"));
+				Cfg->SetNumberField(TEXT("sync_wait_ms"), static_cast<double>(WaitMs));
+				Cfg->SetNumberField(TEXT("idle_abort_ms_effective"), static_cast<double>(IdleMs));
+				Cfg->SetNumberField(TEXT("idle_abort_ms_base"), static_cast<double>(UnrealAiWaitTime::HarnessSyncIdleAbortMs));
+				Cfg->SetNumberField(TEXT("plan_pipeline_idle_abort_ms"), static_cast<double>(UnrealAiWaitTime::HarnessPlanPipelineSyncIdleAbortMs));
+				Cfg->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
+				AppendSyncDiag(Cfg);
+			}
+			int32 SyncSegmentIndex = 0;
 			for (;;)
 			{
+				{
+					TSharedPtr<FJsonObject> W = MakeShared<FJsonObject>();
+					W->SetStringField(TEXT("type"), TEXT("harness_sync_segment_wait_start"));
+					W->SetNumberField(TEXT("segment_index"), static_cast<double>(SyncSegmentIndex));
+					W->SetNumberField(TEXT("wait_ms"), static_cast<double>(WaitMs));
+					W->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
+					AppendSyncDiag(W);
+				}
 				const EPlanHarnessSyncSegment Seg = WaitForDoneOrPlanSubTurnWhilePumpingGameThread(
 					DoneEvent,
 					PlanSubTurnEvent,
 					WaitMs,
 					Harness,
 					&bIdleAbort);
+				{
+					TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
+					R->SetStringField(TEXT("type"), TEXT("harness_sync_segment_result"));
+					R->SetNumberField(TEXT("segment_index"), static_cast<double>(SyncSegmentIndex));
+					R->SetStringField(TEXT("result"), SegmentResultString(Seg));
+					R->SetBoolField(TEXT("idle_abort"), bIdleAbort);
+					R->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
+					AppendSyncDiag(R);
+				}
+				++SyncSegmentIndex;
 				if (Seg == EPlanHarnessSyncSegment::Done)
 				{
 					bSignaled = true;
@@ -363,7 +416,25 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		}
 		else
 		{
+			{
+				const uint32 IdleMs = UnrealAiHarnessScenarioRunnerPriv::GetEffectiveHarnessSyncIdleAbortMs(Harness, true);
+				TSharedPtr<FJsonObject> W = MakeShared<FJsonObject>();
+				W->SetStringField(TEXT("type"), TEXT("harness_sync_wait_start"));
+				W->SetStringField(TEXT("mode"), TEXT("single_turn"));
+				W->SetNumberField(TEXT("wait_ms"), static_cast<double>(WaitMs));
+				W->SetNumberField(TEXT("idle_abort_ms_effective"), static_cast<double>(IdleMs));
+				W->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
+				AppendSyncDiag(W);
+			}
 			bSignaled = WaitForHarnessEventWhilePumpingGameThread(DoneEvent, WaitMs, Harness, &bIdleAbort);
+			{
+				TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
+				R->SetStringField(TEXT("type"), TEXT("harness_sync_wait_finished"));
+				R->SetBoolField(TEXT("signaled"), bSignaled);
+				R->SetBoolField(TEXT("idle_abort"), bIdleAbort);
+				R->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
+				AppendSyncDiag(R);
+			}
 		}
 
 		if (!bSignaled)

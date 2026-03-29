@@ -291,4 +291,42 @@ namespace UnrealAiPlanDag
 			}
 		}
 	}
+
+	void CollectTransitiveDependents(const FUnrealAiPlanDag& Dag, const FString& FailedNodeId, TArray<FString>& OutDependents)
+	{
+		OutDependents.Reset();
+		if (FailedNodeId.IsEmpty())
+		{
+			return;
+		}
+		TMap<FString, TArray<FString>> DependentsOf;
+		for (const FUnrealAiDagNode& N : Dag.Nodes)
+		{
+			for (const FString& Dep : N.DependsOn)
+			{
+				DependentsOf.FindOrAdd(Dep).Add(N.Id);
+			}
+		}
+		TSet<FString> Visited;
+		Visited.Add(FailedNodeId);
+		TArray<FString> Queue;
+		Queue.Add(FailedNodeId);
+		while (Queue.Num() > 0)
+		{
+			const FString U = Queue[0];
+			Queue.RemoveAt(0);
+			if (const TArray<FString>* Next = DependentsOf.Find(U))
+			{
+				for (const FString& V : *Next)
+				{
+					if (!Visited.Contains(V))
+					{
+						Visited.Add(V);
+						OutDependents.Add(V);
+						Queue.Add(V);
+					}
+				}
+			}
+		}
+	}
 }

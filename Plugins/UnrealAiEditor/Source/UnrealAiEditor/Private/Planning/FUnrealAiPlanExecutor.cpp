@@ -1,7 +1,9 @@
 #include "Planning/FUnrealAiPlanExecutor.h"
 
+#include "Context/AgentContextTypes.h"
 #include "Context/IAgentContextService.h"
 #include "HAL/PlatformTime.h"
+#include "Harness/ILlmTransport.h"
 #include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Harness/IAgentRunSink.h"
 #include "Harness/IUnrealAiAgentHarness.h"
@@ -15,10 +17,12 @@ namespace UnrealAiPlanExecutorPriv
 			+ TEXT("\n\n---\n[Plan harness] Previous planner output did not parse or validate as unreal_ai.plan_dag.\n")
 			+ TEXT("Error: ")
 			+ Err
-			+ TEXT(
-				"\nReturn a single corrected JSON object only: schema unreal_ai.plan_dag, top-level nodes[] with id, title, hint, "
-				"and dependsOn or depends_on (string ids). Each dependency must reference an existing node id; the graph must be "
-				"acyclic (no self-edges). No markdown fences or prose outside the JSON.\n---");
+			+ FString::Printf(
+				TEXT(
+					"\nReturn a single corrected JSON object only: schema unreal_ai.plan_dag, top-level nodes[] with id, title, hint, "
+					"and dependsOn or depends_on (string ids). Each dependency must reference an existing node id; the graph must be "
+					"acyclic (no self-edges). Keep the planner DAG to at most %d nodes. No markdown fences or prose outside the JSON.\n---"),
+				UnrealAiWaitTime::PlannerEmittedMaxDagNodes);
 	}
 
 	class FCollectingSink final : public IAgentRunSink
@@ -104,6 +108,16 @@ namespace UnrealAiPlanExecutorPriv
 		virtual void OnPlanDraftReady(const FString& DagJsonText) override
 		{
 			ForwardIfPossible([&](IAgentRunSink& P) { P.OnPlanDraftReady(DagJsonText); });
+		}
+		virtual void OnLlmRequestPreparedForHttp(
+			const FUnrealAiAgentTurnRequest& TurnRequest,
+			const FGuid& RunId,
+			int32 LlmRound,
+			int32 EffectiveMaxLlmRounds,
+			const FUnrealAiLlmRequest& LlmRequest) override
+		{
+			ForwardIfPossible([&](IAgentRunSink& P)
+			{ P.OnLlmRequestPreparedForHttp(TurnRequest, RunId, LlmRound, EffectiveMaxLlmRounds, LlmRequest); });
 		}
 		virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) override
 		{
@@ -367,7 +381,7 @@ void FUnrealAiPlanExecutor::OnPlannerFinished(bool bSuccess, const FString& Erro
 				*ParseError));
 		return;
 	}
-	if (!UnrealAiPlanDag::ValidateDag(Dag, 64, ParseError))
+	if (!UnrealAiPlanDag::ValidateDag(Dag, UnrealAiWaitTime::PlannerEmittedMaxDagNodes, ParseError))
 	{
 		if (!bPlannerDagRepairConsumed)
 		{
@@ -460,7 +474,7 @@ void FUnrealAiPlanExecutor::BeginNextReadyNode()
 	UnrealAiPlanDag::GetReadyNodeIds(Dag, Statuses, ReadyNodeIds);
 	if (ReadyNodeIds.Num() == 0)
 	{
-		Finish(true, FString());
+		FinishWhenDagFullyResolved();
 		return;
 	}
 	const FString NodeId = ReadyNodeIds[0];
@@ -486,11 +500,22 @@ void FUnrealAiPlanExecutor::BeginNextReadyNode()
 	ChildReq.Mode = EUnrealAiAgentMode::Agent;
 	ChildReq.LlmRoundBudgetFloor = FMath::Min(64, FMath::Max(1, UnrealAiWaitTime::PlanNodeMaxLlmRounds));
 	ChildReq.ThreadId = FString::Printf(TEXT("%s_plan_%s"), *ParentRequest.ThreadId, *NodeId);
-	ChildReq.UserText = FString::Printf(
-		TEXT("Execute plan node '%s'.\nTitle: %s\nHint: %s"),
-		*Node->Id,
-		Node->Title.IsEmpty() ? *Node->Id : *Node->Title,
-		*Node->Hint);
+	{
+		static constexpr int32 GPlanNodeParentUserTextMaxChars = 4000;
+		FString ParentGoal = OriginalPlannerUserText.IsEmpty() ? ParentRequest.UserText : OriginalPlannerUserText;
+		ParentGoal.TrimStartAndEndInline();
+		if (ParentGoal.Len() > GPlanNodeParentUserTextMaxChars)
+		{
+			ParentGoal = ParentGoal.Left(GPlanNodeParentUserTextMaxChars) + TEXT("\n[...truncated]");
+		}
+		const FString NodeTitle = Node->Title.IsEmpty() ? Node->Id : Node->Title;
+		ChildReq.UserText = FString::Printf(
+			TEXT("## Original request (from user)\n%s\n\n---\n\n## Current plan node\nExecute plan node '%s'.\nTitle: %s\nHint: %s\n\nComplete **this node only**, aligned with the original request above. Do not expand scope beyond the hint unless the user asked for it."),
+			*ParentGoal,
+			*Node->Id,
+			*NodeTitle,
+			*Node->Hint);
+	}
 
 	const TSharedRef<UnrealAiPlanExecutorPriv::FCollectingSink> Sink = MakeShared<UnrealAiPlanExecutorPriv::FCollectingSink>();
 	const TWeakPtr<FUnrealAiPlanExecutor> WeakExec = AsShared();
@@ -515,9 +540,17 @@ void FUnrealAiPlanExecutor::OnNodeFinished(const FString& NodeId, bool bSuccess,
 		ParentSink->OnPlanHarnessSubTurnComplete();
 	}
 	const FString Summary = AssistantText.Left(300);
+	if (!bSuccess)
+	{
+		bAnyPlanNodeFailedThisRun = true;
+	}
 	if (ContextService)
 	{
 		ContextService->SetPlanNodeStatus(NodeId, bSuccess ? TEXT("success") : TEXT("failed"), Summary);
+		if (!bSuccess)
+		{
+			CascadeSkipDependentsAfterFailure(NodeId, ErrorText);
+		}
 	}
 	if (ParentSink.IsValid() && !bSuccess)
 	{
@@ -527,6 +560,114 @@ void FUnrealAiPlanExecutor::OnNodeFinished(const FString& NodeId, bool bSuccess,
 			*ErrorText));
 	}
 	BeginNextReadyNode();
+}
+
+void FUnrealAiPlanExecutor::CascadeSkipDependentsAfterFailure(const FString& FailedNodeId, const FString& ErrorText)
+{
+	if (!ContextService || FailedNodeId.IsEmpty())
+	{
+		return;
+	}
+	ContextService->LoadOrCreate(ParentRequest.ProjectId, ParentRequest.ThreadId);
+	TArray<FString> Dependents;
+	UnrealAiPlanDag::CollectTransitiveDependents(Dag, FailedNodeId, Dependents);
+	FString ErrOneLine = ErrorText;
+	ErrOneLine.ReplaceInline(TEXT("\r"), TEXT(""));
+	ErrOneLine.ReplaceInline(TEXT("\n"), TEXT(" "));
+	ErrOneLine.TrimStartAndEndInline();
+	if (ErrOneLine.Len() > 180)
+	{
+		ErrOneLine = ErrOneLine.Left(180) + TEXT("...");
+	}
+	for (const FString& SkippedId : Dependents)
+	{
+		ContextService->LoadOrCreate(ParentRequest.ProjectId, ParentRequest.ThreadId);
+		const FAgentContextState* St = ContextService->GetState(ParentRequest.ProjectId, ParentRequest.ThreadId);
+		const FString* Prev = St ? St->PlanNodeStatusById.Find(SkippedId) : nullptr;
+		if (Prev
+			&& (Prev->Equals(TEXT("success"), ESearchCase::IgnoreCase) || Prev->Equals(TEXT("failed"), ESearchCase::IgnoreCase)
+				|| Prev->Equals(TEXT("skipped"), ESearchCase::IgnoreCase)))
+		{
+			continue;
+		}
+		const FString SkipSummary = ErrOneLine.IsEmpty()
+			? FString::Printf(TEXT("skipped: upstream node '%s' failed"), *FailedNodeId)
+			: FString::Printf(TEXT("skipped: upstream node '%s' failed (%s)"), *FailedNodeId, *ErrOneLine);
+		ContextService->SetPlanNodeStatus(SkippedId, TEXT("skipped"), SkipSummary);
+	}
+}
+
+void FUnrealAiPlanExecutor::FinishWhenDagFullyResolved()
+{
+	if (ComputePlanOverallSuccess())
+	{
+		Finish(true, FString());
+	}
+	else
+	{
+		Finish(false, BuildPlanFailureRollupMessage());
+	}
+}
+
+bool FUnrealAiPlanExecutor::ComputePlanOverallSuccess()
+{
+	if (bAnyPlanNodeFailedThisRun)
+	{
+		return false;
+	}
+	if (!ContextService)
+	{
+		return true;
+	}
+	ContextService->LoadOrCreate(ParentRequest.ProjectId, ParentRequest.ThreadId);
+	if (const FAgentContextState* St = ContextService->GetState(ParentRequest.ProjectId, ParentRequest.ThreadId))
+	{
+		for (const TPair<FString, FString>& Pair : St->PlanNodeStatusById)
+		{
+			if (Pair.Value.Equals(TEXT("failed"), ESearchCase::IgnoreCase))
+			{
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+FString FUnrealAiPlanExecutor::BuildPlanFailureRollupMessage()
+{
+	if (!ContextService)
+	{
+		return TEXT("Plan completed with one or more failed nodes.");
+	}
+	ContextService->LoadOrCreate(ParentRequest.ProjectId, ParentRequest.ThreadId);
+	const FAgentContextState* St = ContextService->GetState(ParentRequest.ProjectId, ParentRequest.ThreadId);
+	if (!St)
+	{
+		return TEXT("Plan completed with one or more failed nodes.");
+	}
+	TArray<FString> Parts;
+	for (const TPair<FString, FString>& Pair : St->PlanNodeStatusById)
+	{
+		if (!Pair.Value.Equals(TEXT("failed"), ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+		FString Line = Pair.Key;
+		if (const FString* Sum = St->PlanNodeSummaryById.Find(Pair.Key))
+		{
+			if (!Sum->IsEmpty())
+			{
+				Line += TEXT(": ");
+				Line += Sum->Left(200);
+			}
+		}
+		Parts.Add(Line);
+	}
+	if (Parts.Num() == 0)
+	{
+		return TEXT("Plan completed with one or more failed nodes.");
+	}
+	return FString::Printf(TEXT("Plan completed with failures: %s"), *FString::Join(Parts, TEXT("; ")));
 }
 
 void FUnrealAiPlanExecutor::Finish(bool bSuccess, const FString& ErrorText)

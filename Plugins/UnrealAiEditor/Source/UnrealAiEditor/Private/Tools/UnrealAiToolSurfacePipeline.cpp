@@ -67,11 +67,12 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 	}
 
 	const double T0 = FPlatformTime::Seconds();
+	const FString& QueryForTools = Request.ContextComplexityUserText.IsEmpty() ? Request.UserText : Request.ContextComplexityUserText;
 	FString Shaped;
 	EUnrealAiToolQueryShape ShapeUsed = EUnrealAiToolQueryShape::Raw;
-	UnrealAiToolQueryShaper::ShapeForRetrieval(Request.UserText, Shaped, ShapeUsed);
+	UnrealAiToolQueryShaper::ShapeForRetrieval(QueryForTools, Shaped, ShapeUsed);
 	FString Hybrid;
-	UnrealAiToolQueryShaper::BuildHybridQuery(Request.UserText, Shaped, Hybrid);
+	UnrealAiToolQueryShaper::BuildHybridQuery(QueryForTools, Shaped, Hybrid);
 	OutTelemetry.QueryShape = (ShapeUsed == EUnrealAiToolQueryShape::Heuristic) ? TEXT("hybrid") : TEXT("raw");
 	OutTelemetry.QueryHash = UnrealAiToolSurfacePipelinePriv::HashUtf8(Hybrid);
 
