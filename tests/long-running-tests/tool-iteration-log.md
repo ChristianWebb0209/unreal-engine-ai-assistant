@@ -4,6 +4,23 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 ---
 
+## Entry 35 — Plan DAG stuck on first node: write node status on parent thread
+
+- **Symptom:** After a valid planner DAG (e.g. 4 nodes `a`–`d`), `BeginNextReadyNode` kept dispatching **`node_id=a`** for dozens of LLM rounds until **`harness_scenario_wall_exceeded`** (~5 min) or huge `run.jsonl`. `harness_progress.log` showed repeated **`…_plan_a`** HTTP outbounds only; **`GetReadyNodeIds`** never saw **`success`** for `a` on the **parent** session.
+- **Cause:** **`IAgentContextService::SetPlanNodeStatus`** updates **`Sessions[(ActiveProjectId, ActiveThreadId)]`**. A plan-node **`RunTurn`** uses **`ThreadId = "<parent>_plan_<node>"`** and the service’s **active** session follows that child thread. **`OnNodeFinished`** called **`SetPlanNodeStatus(..., success)`** while active was still the **child**, so completion lived on the **wrong** session. **`BeginNextReadyNode`** reads **`GetState(parent)`** for **`PlanNodeStatusById`**. **`ClearPlanStaleRunningMarkers(parent)`** (when the harness is idle) removes **`running`** from the parent map **without** a matching **`success`** there → **`a`** stays eligible forever.
+- **Fix (`FUnrealAiPlanExecutor::OnNodeFinished`):** Call **`ContextService->LoadOrCreate(ParentRequest.ProjectId, ParentRequest.ThreadId)`** immediately **before** **`SetPlanNodeStatus`** so **success/failed** (and summaries) are stored on the **same thread** the DAG scheduler uses. **`CascadeSkipDependentsAfterFailure`** already did **`LoadOrCreate(parent)`** before skipped nodes; the main success path was missing it.
+- **Verification:** Headed **`plan-mode-smoke`** — expect **`a` → `b` → `c` → `d`** in **`harness_progress.log` / `llm_requests.jsonl`**, **`run_finished.success`** true, ~tens of seconds instead of wall timeout. **`git`:** `fc1f00d` (same commit may include related **`OnHarnessProgressLog`** wiring in the plan executor for diagnostics).
+
+---
+
+## Entry 34 — Plan node empty assistant: skip harness nudge loop; `11-plan-node-execution` prompt
+
+- **`FUnrealAiAgentHarness::FAgentTurnRunner::CompleteAssistantOnly`:** For **Agent** turns whose **`ThreadId` contains `_plan_`**, the **empty-assistant** path no longer injects **`[Harness][reason=empty_assistant]`** and **`DispatchLlm()`** in a loop (that behavior remains for normal interactive Agent chat). Plan DAG nodes run **serially**; repeated LLM rounds on empty streaming blocked the plan executor. Instead the harness emits **`plan_node_empty_assistant_finish`** (enforcement) and **completes the run** so **`OnRunFinished`** / the plan runner can advance.
+- **`prompts/chunks/11-plan-node-execution.md`:** Clarifies that plan-node turns differ from interactive Agent mode; **empty assistant replies stall the pipeline**; model should always emit at least one short sentence when it would otherwise finish empty.
+- **Build:** `./build-editor.ps1 -Headless` (or `-Restart` if LNK1104) after pulling this change.
+
+---
+
 ## Entry 33 — `FAgentRunFileSink`: `bFinished` release when `run_finished` append fails (verify headed smoke)
 
 - **`FAgentRunFileSink::OnRunFinished`:** After **`compare_exchange`** claims the terminal slot, if **`AppendRunFinishedLineWithRetry`** returns false, **`bFinished`** is **cleared** so **`~FAgentRunFileSink`** can call **`OnRunFinished`** again and retry the line (avoids a state where the disk never gets `run_finished` but `bFinished` blocks the destructor path). **`DoneEvent` / completion pointers** still run so the headed runner does not deadlock. Warning log: `run_finished append failed; released finish slot for destructor retry`.
