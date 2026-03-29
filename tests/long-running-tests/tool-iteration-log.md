@@ -1,0 +1,234 @@
+# Tool Iteration Log
+
+Chronicle of changes aimed at headed harness quality and API reliability. Entries are **numbered** (`Entry N`) with a short title; body is freeform bullets or paragraphs. **Newest changes appear first** (highest entry number at the top). When adding a note, prepend **`## Entry M — …`** where **M** is one greater than the current highest number (do not renumber existing entries).
+
+---
+
+## Entry 23 — Plan DAG hardening: repair loop, idle abort, plan-node prompts (audit completion)
+
+- **`FUnrealAiPlanExecutor`:** One-shot **planner repair** after invalid JSON or failed `ValidateDag` (augmented user text via `MakePlannerDagRepairUserText`); `OriginalPlannerUserText` captured in `Start()`. Clearer `Finish` strings for `ResumeExecutionFromDag` parse/validate. Plan child `LlmRoundBudgetFloor` aligned with `PlanNodeMaxLlmRounds`.
+- **`FUnrealAiAgentHarness::DispatchLlm`:** Caps `EffectiveMaxLlmRounds` at `PlanNodeMaxLlmRounds` for Agent turns whose `threadId` contains `_plan_`.
+- **`UnrealAiWaitTimePolicy.h`:** `HarnessPlanPipelineSyncIdleAbortMs` (45s default), `PlanNodeMaxLlmRounds` (12).
+- **`UnrealAiHarnessScenarioRunner`:** `GetEffectiveHarnessSyncIdleAbortMs` when `IsPlanPipelineActive`; idle-abort diagnostics use the **effective** ms (not always 3s).
+- **Prompts:** `02-operating-modes.md` (Plan checklist scope), `09-plan-dag.md` (v1 cost), new `11-plan-node-execution.md`; `UnrealAiPromptBuilder` / `UnrealAiTurnLlmRequestBuilder` inject chunk 11 for `*_plan_*` Agent threads.
+- **`docs/planning.md`:** Documents repair, plan-node rounds, plan-pipeline idle abort.
+- **Build:** `.\build-editor.ps1 -Restart -Headless` after changes; use **`-Restart`** if `LNK1104` on the plugin DLL.
+- **Headed verification:** User runs `plan-mode-smoke` locally (not automated here).
+
+---
+
+## Entry 22 — Basket suite hardening: multi-match prompts + expanded realistic-user-agent turns
+
+- **Problem (run-25):** `asset_index_fuzzy_search` returned multiple Blueprints; model called **`blueprint_export_ir`** with a path not in the result set (`SimpleBlueprint`), then recovered—**`tool_finish_false`** still counted 1 on [`tests/long-running-tests/runs/run-25-20260328-210131_814`](tests/long-running-tests/runs/run-25-20260328-210131_814) / [`harness-classification.json`](tests/long-running-tests/runs/run-25-20260328-210131_814/harness-classification.json) (`tool_finish_false`: 1, `run_finished_true`: 1 for the single `step_01` `run.jsonl`).
+- **`10-mvp-gameplay-and-tooling.md`:** New bullet **Multiple fuzzy/registry matches**—only use **`object_path`** values from the discovery result; pick from the list or narrow the query; no invented `/Game/...`; no **`blueprint_export_ir` / `blueprint_get_graph_summary` / `blueprint_compile`** on guessed names.
+- **`04-tool-calling-contract.md`:** New bullet **Multiple asset hits** under discovery.
+- **`UnrealAiToolCatalog.json`:** **`asset_index_fuzzy_search`** and **`blueprint_export_ir`** summaries extended with the same constraint (downstream paths must come from results).
+- **`tests/long-running-tests/realistic-user-agent-basket-rerun/suite.json`:** Expanded from one turn to **five**: (1) scratch-float “that blueprint” regression; (2) gameplay BP disambiguation + scratch bool; (3) referencer count after discovery; (4) Material Instance roughness tweak with honest skip if no MI; (5) **plan** turn—small orientation checklist DAG aligned with **`02-operating-modes.md`**. Did **not** restore old run-22 steps 2–7 (Entry 20 easy passes). `coverage_notes` updated for what to measure (`tool_finish_false`, discovery order, plan node count).
+- **Validation:** `run-long-running-headed.ps1 -ScenarioFolder tests\long-running-tests\realistic-user-agent-basket-rerun -DryRun` succeeds (**5** turns). Re-run **headed** (no `-DryRun`) locally to produce `runs/run-*` with per-step `run.jsonl`, then `python tests/classify_harness_run_jsonl.py --batch-root <that folder>` and compare per-step **`tool_finish_false`** to the run-25 baseline above.
+- **Build:** JSON + markdown only for this entry; no C++ changes in this change set.
+
+---
+
+## Entry 21 — Log format: numbered entries (replace date headings)
+
+- Replaced **`## YYYY-MM-DD — …`** section titles with **`## Entry N — …`** (`Entry 1` = oldest, `Entry 21` = this change; file order remains newest first).
+- **`docs/README.md`**, **`context.md`**, **`docs/tooling/tool-catalog-audit-guide.md`:** Point to [`tests/long-running-tests/tool-iteration-log.md`](tool-iteration-log.md) and describe numbering + prepend rule.
+
+---
+
+## Entry 20 — Run-22 follow-up: suite minimal trim, “that blueprint” prompt, editor exit policy
+
+- **`tests/long-running-tests/realistic-user-agent-basket-rerun/suite.json`:** Single turn only—scratch-float Blueprint request (run-22 step_01 with tool_fail events). Dropped steps 2–7 (run-22 had zero `tool_finish_false` there). `coverage_notes` updated for run-22–minimal.
+- **`10-mvp-gameplay-and-tooling.md`:** Bullet **“That blueprint” with no path:** use **`editor_get_selection`** / **`asset_index_fuzzy_search`** and returned **`object_path`** before **`blueprint_get_graph_summary`** / **`blueprint_apply_ir`** / **`blueprint_compile`**—no assumed tutorial names.
+- **`run-long-running-headed.ps1`:** Documented that **`batch_editor_exit_code`** from Unreal often ≠ harness failure when all `run_finished` succeeded. Optional **`UNREAL_AI_HEADED_BATCH_IGNORE_EDITOR_NONZERO_EXIT=1`** sets batch pass if all expected `run.jsonl` finished and **`failed_suite_count`** is 0, even when editor process exits nonzero.
+- **Build:** Prompt/suite/PS1 only—no plugin compile required for this change set.
+
+---
+
+## Entry 19 — Prompt policy: slim duplicate cross-refs (after audit)
+
+- **Keep:** **`01-identity.md`** **Examples contract** (one place); **`04-tool-calling-contract.md`** **Discovery before targeted calls** + placeholder-style minimal JSON; **`06`**/**`09`** short chunk-specific lines (plan hint ≠ path); **`10`** known-target wording; **`README`** canonical-behavior bullet.
+- **Remove:** Repeated “see 01+04” boilerplate from **`02`**, **`05`**, **`07`**, **`08`**, and duplicate opening bullet from **`10`**.
+- **`00-template-tokens.md`:** Author note only—no copy-pastable `/Game/...` tutorial names in chunk examples.
+- **Rationale:** One strong rule + scrub literals beats repeating prose in many chunks ([`prompts/README.md`](Plugins/UnrealAiEditor/prompts/README.md) **Canonical behavior**).
+
+---
+
+## Entry 18 — Prompt chunk audit: discovery + identifiers (cross-chunk consistency)
+
+- **Invariant:** **`01-identity.md`** + **`04-tool-calling-contract.md`** (**Discovery before targeted calls**) are canonical; other chunks cross-reference instead of conflicting rules.
+- **`00-template-tokens.md`:** Note that behavioral rules live in numbered chunks, not the token table.
+- **`01-identity.md`:** Linked “no invented identifiers” to **04** **Discovery before targeted calls** by name.
+- **`02-operating-modes.md` (Ask):** Read-only tools bullet points to **01** + **04**.
+- **`03-complexity-and-todo-plan.md`:** “Unresolved path” trigger forbids inventing paths in plan/todo prose; **01**/**04** pointers.
+- **`04-tool-calling-contract.md`:** Path-resolution / known-target text; minimal JSON examples use `<DiscoveredBp>` / `<DiscoveredMI>` / search query `enemy` instead of `BP_Player`/`BP_Enemy`/`MI_Player` literals.
+- **`05-context-and-editor.md`:** New **Identifiers** line tying attachments to **01**/**04**.
+- **`06-execution-subturn.md`:** Plan `hint` text is not a substitute for real tool paths.
+- **`07-safety-banned.md`:** Ground truth extended to asset existence claims.
+- **`08-output-style.md`:** User-visible `/Game` paths must reflect tools/context.
+- **`09-plan-dag.md`:** Node hints are not validated paths for execution turns.
+- **`10-mvp-gameplay-and-tooling.md`:** Opening principle + tightened known-target shortcuts.
+- **`prompts/README.md`:** Design-rules **Invariant** bullet for discovery/identifiers.
+
+---
+
+## Entry 17 — run-20 follow-up: suite trim, anti-example-leak, TTFT idle skip, SSE tool event cap
+
+- **`tests/long-running-tests/realistic-user-agent-basket-rerun/suite.json`:** Dropped run-20 easy-pass turns (duplicate under `/Game`, typo asset resolution); `coverage_notes` now describe the run-20–focused subset (7 turns).
+- **`04-tool-calling-contract.md` / `UnrealAiToolCatalog.json`:** Minimal JSON examples framed as **shape-only**; `project_file_read_text` line uses `<actual_basename>.uproject` + rule text (no literal `MyProject.uproject` / `MyGame.uproject` in catalog summary).
+- **`UnrealAiTurnLlmRequestBuilder.cpp`:** System prompt gains factual **Project workspace** line: manifest **basename** from `FPaths::GetCleanFilename(GetProjectFilePath())` so the model can ground `relative_path` without copying doc placeholders.
+- **`UnrealAiHarnessScenarioRunner.cpp` — `TryHarnessIdleAbort`:** Headed scenario skips idle abort while **`HasActiveLlmTransportRequest()`** and **no assistant delta yet** (`awaiting_first_assistant_delta`); avoids false abort when time-to-first-token exceeds **`HarnessSyncIdleAbortMs`** (3s).
+- **`UnrealAiWaitTimePolicy.h`:** **`StreamToolIncompleteMaxEvents`** 64 → **128** — run-20 step_01 hit cap at **`age_events=64`** (`age_ms=4`, fragmented SSE) before tool JSON closed.
+
+---
+
+## Entry 16 — run-13 class: `project_file_read_text` suggestion + harness `suggested_correct_call` nudge
+
+- **`UnrealAiToolDispatch_ProjectFiles.cpp`:** Missing `relative_path` for **`project_file_read_text`** now builds **`suggested_correct_call`** from **`FPaths::GetProjectFilePath()`** (project-relative via **`FPaths::MakePathRelativeTo`**), not a hardcoded **`Config/DefaultEngine.ini`** only; clearer error text mentions `.uproject` manifest vs config.
+- **`UnrealAiToolCatalog.json` / `04-tool-calling-contract.md`:** Catalog summary + one minimal **`project_file_read_text`** example with **`MyProject.uproject`**.
+- **`FUnrealAiAgentHarness.cpp`:** When **`RepeatedToolFailureCount >= 3`**, the existing **`[Harness][reason=repeated_validation_failure]`** line may append the last resolver **`suggested_correct_call`** JSON (capped); enforcement event **`suggested_call_validation_nudge`**. **`LastSuggestedCorrectCallSerialized`** resets each LLM round and on tool success.
+- **`UnrealAiToolDispatchAutomationTests.cpp`:** Asserts suggested **`relative_path`** matches **`FPaths::GetCleanFilename(GetProjectFilePath())`** when the project file is known.
+- **Truncated `run.jsonl` (e.g. run-13 step_06 / step_17):** No code change; if needed, correlate with **`editor_console_saved.log`** / batch exit for that run.
+
+---
+
+## Entry 15 — plan-mode stall fix (merged plan): harness, idle, HTTP, prompts, harness-only
+
+- **`FUnrealAiAgentHarness.cpp`:** Plan-mode stream **`Finish`** always **`CompleteAssistantOnly`** (no **`CompleteToolPath`**); enforcement event `plan_finish_ignore_streamed_tool_calls` when streamed tool deltas/`tool_calls` finish reason appeared.
+- **`IUnrealAiAgentHarness` / `FUnrealAiAgentHarness`:** **`NotifyPlanExecutorStarted` / `NotifyPlanExecutorEnded` / `IsPlanPipelineActive`** so headed idle abort is not skipped with **`turn_not_in_progress`** between planner and node segments while the plan executor is still **`IsRunning()`**.
+- **`FUnrealAiPlanExecutor`:** **`FUnrealAiPlanExecutorStartOptions::bHarnessPlannerOnlyNoExecute`** — after valid DAG parse, **`Finish(true)`** without **`BeginNextReadyNode`**. **`UnrealAiHarnessScenarioRunner`:** env **`UNREAL_AI_HEADED_PLAN_HARNESS_PLANNER_ONLY=1`** sets the option.
+- **`UnrealAiWaitTimePolicy.h` / `FUnrealAiLlmRequest` / `FOpenAiCompatibleHttpTransport`:** **`PlannerHttpRequestTimeoutSec`** (90s default) overrides generic HTTP timeout for Plan planner requests only.
+- **`UnrealAiTurnLlmRequestBuilder.cpp`:** Sets **`HttpTimeoutOverrideSec`** for **`EUnrealAiAgentMode::Plan`**.
+- **Prompts:** **`09-plan-dag.md`**, **`04-tool-calling-contract.md`** — planner pass must be JSON-only; no **`tool_calls`**.
+- **Build:** Sources compile; full link can fail with **LNK1104** if the editor holds **`UnrealEditor-UnrealAiEditor.dll`** (close editor or **`build-editor.ps1 -Restart`**).
+
+---
+
+## Entry 14 — fine-tuning log + plan doc hygiene
+
+- **Plan (`plan_mode_stall_fix_3c8da223.plan.md`):** Verification assumes no harness reruns while another headed batch may run; ship notes go into this file as short factual bullets. Added final step: clean up this log (done in same pass).
+- **This file:** Removed the old fixed “how to add an entry” schema and the bottom **long-running harness vs catalog** gap-audit appendix. Historical entries below were shortened; substance preserved.
+
+---
+
+## Entry 13 — plan-mode stall: idle abort, planner Finish, telemetry
+
+- **`UnrealAiWaitTimePolicy.h`:** `HarnessSyncIdleAbortMs` 45000 → 3000 (headed sync exits soon after quiet telemetry).
+- **`FUnrealAiAgentHarness.cpp`:** Plan mode — on `Finish` with `finish_reason != tool_calls`, `PendingToolCalls.Reset()` so stray `tool_calls` deltas don’t force `CompleteToolPath` / extra `DispatchLlm` without `Succeed`. `ShouldSuppressIdleAbort()` false for Plan unless `CompletedToolCallQueue` non-empty.
+- **`UnrealAiHarnessScenarioRunner.cpp` — `TryHarnessIdleAbort`:** `idle_abort_skip_*` via `SetIdleAbortSkipReason`; if HTTP idle unset (`-1`), require assistant-only idle instead of blocking abort.
+- **`UnrealAiHarnessProgressTelemetry`:** `NotifyHttpStreamParseComplete()` after parse; `BuildHarnessSyncTimeoutDiagnosticJson` includes `idle_abort_skip_reason`.
+- **`FOpenAiCompatibleHttpTransport.cpp`:** Calls `NotifyHttpStreamParseComplete` after body parse.
+
+**Run-11 note:** Mixed-salad plan step hit 300s sync with `plan_sub_turn_completions_before_timeout: 0` — planner JSON finished streaming but harness didn’t terminal-success; attributed to non-empty `PendingToolCalls` with `ToolsJson []` plus idle abort blocked when HTTP idle was `-1`.
+
+---
+
+## Entry 12 — HTTP 400 orphan `tool` rows
+
+- **`UnrealAiConversationJson.cpp`:** `RemoveOrphanToolMessages` after stripping leading tool-after-system — drops `role=tool` when preceding assistant has no matching serializable `tool_call_id` (fixes OpenAI 400).
+- **`UnrealAiTurnLlmRequestBuilder.cpp` — `TrimApiMessagesForContextBudget`:** If oldest post-system is assistant without serializable tool_calls followed only by tools, remove that assistant + trailing tools together.
+
+---
+
+## Entry 11 — asset referencers/deps: `path` alias
+
+- **`UnrealAiToolDispatch_GenericAssets.cpp`:** `asset_find_referencers` / `asset_get_dependencies` accept `path` when `object_path` empty; clearer error if both missing.
+- **`UnrealAiToolCatalog.json`:** Descriptions clarify `object_path` vs `content_browser_sync_asset`’s `path`.
+- **`04-tool-calling-contract.md`:** Short subsection on path parameter names + minimal referencers example.
+
+---
+
+## Entry 10 — idle abort + plan sub-turn sync
+
+- **`FUnrealAiPlanExecutor.cpp`:** Removed premature `OnPlanHarnessSubTurnComplete()` right after `RunTurn` (was schedule-time, not planner done).
+- **`UnrealAiWaitTimePolicy.h`:** `HarnessSyncIdleAbortMs` (default 45s, 0 = off).
+- **`ILlmTransport` / `FOpenAiCompatibleHttpTransport`:** `HasActiveRequest()` so idle abort doesn’t fire during HTTP.
+- **`FUnrealAiAgentHarness`:** `ShouldSuppressIdleAbort()` during tool execution / queued tool work / incomplete stream slots.
+- **`UnrealAiHarnessScenarioRunner.cpp`:** Idle predicate in sync waits; `harness_sync_idle_abort_diagnostic` JSONL.
+- **`UnrealAiHarnessProgressTelemetry`:** `GetStreamIdleSeconds`, idle-abort helpers.
+
+---
+
+## Entry 9 — liberal HTTP + harness sync defaults
+
+- **`UnrealAiRuntimeDefaults.h`:** `HttpRequestTimeoutSec` 1200s; `HarnessSyncWaitMs` ~25 min/segment; `StreamToolIncompleteMaxMs` 180000 (source-only, not `.env`).
+- **`FOpenAiCompatibleHttpTransport.cpp`:** Chat timeout from `HttpRequestTimeoutSec` only.
+- **`UnrealAiHarnessScenarioRunner.cpp`:** Sync uses `HarnessSyncWaitMs` only.
+- **`run-long-running-headed.ps1`:** No timeout env; editor focus off by default (`-BringEditorToForeground` opt-in).
+
+---
+
+## Entry 8 — streamed tool_calls: placeholders + caps
+
+- **`FUnrealAiAgentHarness.cpp`:** `MergeToolCallDeltas` pads placeholder slots; placeholders (empty id/name/args) ignored for incomplete timeout. First-seen maps keyed by pending index only.
+- **`UnrealAiRuntimeDefaults.h`:** `StreamToolIncompleteMaxEvents` 12→96, `StreamToolIncompleteMaxMs` 2500→90000.
+
+---
+
+## Entry 7 — streamed tool timeout key + script label
+
+- **`FUnrealAiAgentHarness.cpp`:** `Slot.StreamMergeIndex` set in merge; timeout maps use same key as first-seen (fixes `age_ms` stuck at 0).
+- **`run-long-running-headed.ps1`:** Batch banner label `tool_finish_events` (was misleading `tool_calls`).
+
+---
+
+## Entry 6 — viewport framing errors
+
+- **`UnrealAiToolDispatch_Viewport.cpp`:** `viewport_frame_actors` rejects bad `actor_paths` (`PersistentLevel` / `WorldSettings` alone, empty); suggests `scene_fuzzy_search`. `viewport_frame_selection` errors point to discovery + camera tools.
+- **`UnrealAiToolCatalog.json`:** Summaries/failure_modes aligned.
+- **`04-tool-calling-contract.md`:** Example path + “never PersistentLevel alone”.
+
+---
+
+## Entry 5 — Plan mode: per-segment sync; catalog `fast` removed
+
+- **`UnrealAiHarnessScenarioRunner.cpp`:** Plan waits per segment (`PlanSubTurnEvent` + `WaitForDoneOrPlanSubTurnWhilePumpingGameThread`), fresh `HarnessSyncWaitMs` each segment.
+- **`IAgentRunSink.h` / `FAgentRunFileSink`:** `OnPlanHarnessSubTurnComplete()`; executor emits after planner continuation and on node boundaries (not when pause-for-build).
+- **`FUnrealAiPlanExecutor.cpp`:** Wiring above.
+- **`UnrealAiToolCatalog.json` / `UnrealAiToolCatalog.cpp`:** Removed redundant `modes.fast`; Agent mode no longer falls back to `fast`.
+
+---
+
+## Entry 4 — catalog nudges (localized)
+
+- **`UnrealAiToolCatalog.json`:** `asset_index_fuzzy_search` — prefer one bounded fuzzy call over asking user first; `material_get_usage_summary` — retry fuzzy search before “not found”.
+
+---
+
+## Entry 3 — empty `{}`, schema-first prompts, catalog truth
+
+**Goal:** Fewer invalid tool calls (empty `{}`, missing required fields) and fewer retry loops.
+
+**Testing:** Headed long-running harness under `tests/long-running-tests/runs/`; `harness-classification.json` is coarse; `run.jsonl` is precise for arguments.
+
+- **`UnrealAiToolCatalog.json`:** `content_browser_sync_asset` — resolvable object path, not “folder string”; viewport frame tools — `actor_paths` required vs selection variant.
+- **`UnrealAiToolDispatch_Context.cpp` — `content_browser_sync_asset`:** Empty args → `suggested_correct_call` → `asset_index_fuzzy_search`.
+- **`UnrealAiToolDispatch_Viewport.cpp` — `viewport_frame_actors`:** Missing paths → `ErrorWithSuggestedCall` toward selection / search.
+- **`04-tool-calling-contract.md`:** Don’t use `{}` when schema has required fields; “Required arguments (schema-first)”; examples for sync + frame actors.
+- **`05-context-and-editor.md`:** Selection/framing/sync need concrete paths from context or discovery.
+
+---
+
+## Entry 2 — asset fuzzy search perf + registry guard + HTTP 400 logging
+
+**Core fixes:** `asset_index_fuzzy_search` uses `EnumerateAssets` with `max_assets_to_scan` visit cap (default 12000) — no full `/Game` `GetAssets` array. Empty `query` without explicit `path_prefix` rejected with suggestion. `asset_registry_query` rejects totally empty filter. Blueprint/material “path required” tools use `ErrorWithSuggestedCall`. HTTP 400 logs outbound JSON parse_ok + head/tail for malformed-body diagnosis.
+
+*Earlier prompt/catalog/resolver-only passes helped but didn’t cap CPU; enumeration + gates address stalls.*
+
+- **`UnrealAiToolDispatch_Search.cpp`:** Enumeration + cap; narrow-search rule for empty query.
+- **`UnrealAiToolDispatch_Context.cpp`:** Registry query guard.
+- **Blueprint/material dispatch:** `ErrorWithSuggestedCall` when path missing.
+- **`04-tool-calling-contract.md`:** Notes aligned with handlers.
+- **`FOpenAiCompatibleHttpTransport.cpp`:** 400 diagnostic logging.
+
+---
+
+## Entry 1 — harness lax policy, runner logs, HTTP 429
+
+- **`FUnrealAiAgentHarness.cpp`:** Lax policy — no hard fail on text-only after tools; telemetry events instead of synthetic nudges; mutation read-only notes telemetry-only.
+- **`run-long-running-headed.ps1`:** `editor_console_saved.log` / batch log copies; `-MaxSuites`.
+- **`FOpenAiCompatibleHttpTransport.cpp`:** 429 retries honor `Retry-After` / HTTP-date / JSON hints without arbitrary 120s cap when hint present.
+
+---
+
+<!-- Next change: prepend `## Entry 23 — …` above Entry 22 (do not renumber existing entries). -->

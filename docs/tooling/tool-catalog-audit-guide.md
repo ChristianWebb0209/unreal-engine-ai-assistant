@@ -2,7 +2,7 @@
 
 **Audience:** Humans or coding agents reviewing [`Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) for **redundancy**, **unused / underused** entries, and **inaccurate** (misleading or broken) tools.
 
-**Related:** [`tool-registry.md`](tool-registry.md), [`fine-tuning-log.md`](fine-tuning-log.md) (coverage audit), [`.cursor/rules/testing-long-running-harness.mdc`](../../.cursor/rules/testing-long-running-harness.mdc).
+**Related:** [`tool-registry.md`](tool-registry.md), [`tests/long-running-tests/tool-iteration-log.md`](../../tests/long-running-tests/tool-iteration-log.md) (numbered changelog; optional coverage audit notes), [`.cursor/rules/testing-long-running-harness.mdc`](../../.cursor/rules/testing-long-running-harness.mdc).
 
 ---
 
@@ -27,7 +27,7 @@ Always prefer the **latest** long-running batch unless the task names a specific
 2. **Classification rollup:** `harness-classification.json` inside that batch folder (from [`tests/classify_harness_run_jsonl.py`](../../tests/classify_harness_run_jsonl.py) if present).
 3. **Per-turn artifacts:** under the batch folder, each suite’s `turns/**/run.jsonl` — lines with `"type":"tool_finish"` (and deltas if you need tool names from stream events, depending on logger format).
 4. **Catalog:** `UnrealAiToolCatalog.json` — `meta.categories`, per-tool `summary`, `parameters`, `permission`, `side_effects`, `status`, `modes`.
-5. **Optional:** static coverage table in [`fine-tuning-log.md`](fine-tuning-log.md) — which tools are **high/low/gap/policy** for current vague suites.
+5. **Optional:** static coverage table in [`tests/long-running-tests/tool-iteration-log.md`](../../tests/long-running-tests/tool-iteration-log.md) — which tools are **high/low/gap/policy** for current vague suites.
 
 **Minimum extraction for an agent script or manual pass:**
 
@@ -72,7 +72,7 @@ Always prefer the **latest** long-running batch unless the task names a specific
 **How to use test results:**
 
 1. Build **invocation frequency** from `run.jsonl` across the batch.
-2. Cross-check **static gap list** in `fine-tuning-log.md`: a tool marked **gap** there is **expected** for current suites.
+2. Cross-check **static gap list** in `tests/long-running-tests/tool-iteration-log.md`: a tool marked **gap** there is **expected** for current suites.
 3. Flag **suspicious** unused only when: **(a)** `summary` claims a common editor action, **and** **(b)** scenarios in that batch should have exercised it, **and** **(c)** the model chose a weaker workaround repeatedly.
 
 **Outcomes:**

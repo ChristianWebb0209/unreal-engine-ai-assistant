@@ -40,12 +40,12 @@
 | Turn build + context trim | `UnrealAiTurnLlmRequestBuilder.cpp` |
 | Harness / stream tools | `FUnrealAiAgentHarness.cpp` |
 | Scenario sync wait | `UnrealAiHarnessScenarioRunner.cpp` |
-| Plan DAG | `FUnrealAiPlanExecutor.cpp` |
+| Plan DAG | `Plugins/UnrealAiEditor/.../Private/Planning/FUnrealAiPlanExecutor.cpp` |
 | Tool dispatch / viewport | `UnrealAiToolDispatch_Viewport.cpp` |
 | Catalog | `Resources/UnrealAiToolCatalog.json` |
 
 ## Operational changelog
-- **`docs/fine-tuning-log.md`** (repo root under `docs/`) — dated entries for harness/tool/prompt changes (add new blocks there when landing behavior changes).
+- **`tests/long-running-tests/tool-iteration-log.md`** — numbered entries (`Entry 1` … `Entry N`, newest first) for harness/tool/prompt changes; prepend **`## Entry M — …`** when logging (see file header).
 - **`docs/api/timeout-handling.md`** — inventory of HTTP / harness / tool timeouts and sync behavior.
 
 ## Before a new harness batch
@@ -55,4 +55,4 @@
 
 ## Intentional constraints (from user)
 - Prefer **minimal, focused** diffs; match existing style.  
-- Don’t expand markdown/docs unless asked (exception: operational logs like `fine-tuning-log.md` when recording changes).
+- Don’t expand markdown/docs unless asked (exception: operational logs like `tests/long-running-tests/tool-iteration-log.md` when recording changes).
