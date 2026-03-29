@@ -1,6 +1,6 @@
 # Agent & Tool Requirements
 
-This document consolidates architectural decisions, operating modes, subagent design (Level B), tool/context strategy, and game-engine-specific considerations for larger-scale agentic workflows. It is intended as a single reference for implementation and prioritization.
+This document consolidates architectural decisions, operating modes, tool/context strategy, and game-engine-specific considerations for larger-scale agentic workflows in the **Unreal AI Editor** plugin. It is intended as a single reference for implementation and prioritization.
 
 ---
 
@@ -8,17 +8,17 @@ This document consolidates architectural decisions, operating modes, subagent de
 
 ### 1.1 Goals
 
-- Support **larger-scale agentic tasks** (multi-step, long-running, possibly parallel work units).
+- Support **larger-scale agentic tasks** (multi-step, long-running work).
 - Accept **nonâ€“real-time latency** (e.g. minutes per major step); optimize for **correctness, cost, and clarity** over instant responses.
 - Use **normal instruction-tuned models** where possible; **fine-tuning** is optional and mainly for format consistency or domain lock-inâ€”not a prerequisite for tool use when using structured APIs or tight prompts + validation.
 
 ### 1.2 Latency assumption
 
-When end-to-end work already takes **1â€“10+ minutes** (engine operations, cooks, heavy generation), **additional orchestration round-trips** (routing, subagent spawn, merge) are usually **negligible** relative to total time. Prioritize:
+When end-to-end work already takes **1â€“10+ minutes** (engine operations, cooks, heavy generation), extra **LLM round-trips** for planning or repair are usually **small** relative to total time. Prioritize:
 
 - Fewer failed / retried mega-runs
 - Narrower tool sets and clearer contracts
-- Observable runs (IDs, logs, merge rationale)
+- Observable runs (IDs, logs, harness enforcement events)
 
 ### 1.3 v1 indexing and retrieval (historical v1 scope)
 
@@ -30,7 +30,7 @@ When end-to-end work already takes **1â€“10+ minutes** (engine operations, 
 - Context in v1 comes from **non-semantic sources** only, for example: user messages, **tool-mediated reads** (files, assets, editor state), **Unreal Asset Registry** and other **deterministic** engine APIs where applicable, simple **keyword/path** search if we add it, and **conversation history** within limits.
 - **Future versions** may add optional **local vector stores** (e.g. Chroma or similar on disk per user), **hybrid retrieval** (e.g. BM25 + embeddings), or **semantic tool-description selection**; that work is **out of scope for v1** and should be a separate milestone with its own cost, privacy, and invalidation story.
 
-**Rationale:** Ship a reliable agent harness, tool surface, and orchestration first; defer embedding pipelines, chunking strategy, index invalidation, and storage until there is a proven need.
+**Rationale:** Ship a reliable agent harness and tool surface first; defer embedding pipelines, chunking strategy, index invalidation, and storage until there is a proven need.
 
 ### 1.4 MVP deployment (plugin-only â€” no server, no product backend)
 
@@ -38,7 +38,7 @@ Aligned with the MVP architecture, local-first mandate, and persistence model.
 
 | Rule | Detail |
 |------|--------|
-| **Shipping unit** | **Unreal editor plugin only.** Chat UI, tool execution, persistence, and agent orchestration (including **Level B** parallel workers) run **inside the editor process** (with optional **child processes** spawned locally if neededâ€”still **not** a separate *product* server). |
+| **Shipping unit** | **Unreal editor plugin only.** Chat UI, tool execution, persistence, and the agent harness run **inside the editor process** (optional local helpers are fine; **not** a separate *product* server). |
 | **No product backend** | **No** hosted REST API, account service, chat relay, job queue, RAG host, or telemetry backend **for MVP**. Anything labeled â€œserverâ€ in integration docs means **localhost inside the plugin** (e.g. MCP) or **third-party** APIs. |
 | **Outbound network** | **Only** what the user configures: **HTTPS** (or provider SDKs) to **third-party** LLM vendors (OpenRouter, Anthropic, OpenAI, etc.). No requirement to call **our** infrastructure. |
 | **Inbound** | Optional **localhost** endpoints for MCP / external CLI toolsâ€”served by the **editor**, not the public internet. |
@@ -49,7 +49,7 @@ Aligned with the MVP architecture, local-first mandate, and persistence model.
 
 - **Competitive aim:** v1 should be **stronger than typical editor copilots on large, ambiguous, multi-step tasks**â€”a category where many products still **one-shot** or lightly tool-loop and appear â€œfinishedâ€ before dependencies and acceptance criteria are handled.
 - **Product bet:** Ship a **planning loop** in the plugin: **deterministic complexity assessor** â†’ **validated `unreal_ai.todo_plan`** (tool-emitted, schema-checked) â†’ **harness-driven execution sub-turns** with **hard rails** (max sub-turns, cancel, optional auto-continue toggle). **Execution prompts use summary + pointer** against the canonical plan on disk (no full-plan re-paste every roundtrip)â€”see [`docs/complexity-assessor-todos-and-chat-phases.md`](docs/complexity-assessor-todos-and-chat-phases.md).
-- **Not a substitute for RAG later** (Â§1.3): this is **orchestration discipline first**; retrieval remains a separate milestone.
+- **Not a substitute for RAG later** (Â§1.3): structured planning + harness rails come first; retrieval remains a separate milestone.
 
 ---
 
@@ -72,62 +72,24 @@ Ask and Agent modes give predictable behavior, cost, and risk profiles.
 
 | Aspect | Specification |
 |--------|----------------|
-| **Tools** | **Enabled** + **meta-tool(s)** to spawn **subagents** (Level B â€” see Â§3). |
-| **Use case** | Large tasks decomposed into **parallel** or **isolated** work units with a **merge** phase. |
-| **Implementation** | Standard agent harness **plus** orchestration: enqueue workers, collect structured results, merge, optionally continue. |
+| **Tools** | **Enabled** via the normal harness tool loop (`unreal_ai_dispatch` / native tools). |
+| **Use case** | Multi-step editing, asset/scene work, Blueprint IR, diagnosticsâ€”with optional **todo plans** via **`agent_emit_todo_plan`** (`unreal_ai.todo_plan`). |
+| **Implementation** | Single **agent harness** in-process; **no** subagent spawn or worker-merge tools in this product build. |
 
-**Rationale:** Scales to broader tasks without one context window holding everything.
+**Rationale:** One conversation + tool surface keeps behavior predictable inside the editor.
 
 ---
 
-## 3. Subagents: Level B (parallel workers)
+## 3. Planning surfaces (implemented)
 
-### 3.1 Definition
+The plugin implements **two** planning paths (see [`planning.md`](../planning.md)):
 
-**Level B** means:
+| Mechanism | Entry | Code |
+|-----------|--------|------|
+| **Plan-mode DAG** | Plan chat: assistant emits **`unreal_ai.plan_dag`** JSON (no tools in planner pass). | `Private/Planning/UnrealAiPlanDag`, `Private/Planning/FUnrealAiPlanExecutor` |
+| **Agent todo plan** | Agent mode: tool **`agent_emit_todo_plan`** persists **`unreal_ai.todo_plan`**. | Context service + harness; summaries via `Private/Planning/UnrealAiStructuredPlanSummary` |
 
-- A **single orchestrator** (parent run) decides **what** to parallelize and **how** to merge.
-- Each **worker** is still an LLM (+ tools) but with:
-  - **Isolated context** (fresh system + task brief, not full parent history unless explicitly summarized/injected).
-  - Optionally a **role prompt** (â€œyou specialize in Xâ€).
-  - Its own **tool allowlist** (tool pack) and **budget** (steps, tokens, time).
-- **N concurrent** LLM calls may run; results are **merged** by deterministic logic and/or a **merge** model step.
-
-This is **not** required to be separate OS processes initially; **logical isolation** (session ID, message list, tool pack) is enough.
-
-### 3.2 What Level B is not (initially)
-
-- **Not** infinite recursive subagent trees (thatâ€™s a later â€œLevel Dâ€â€“style complexity).
-- **Not** mandatory separate fine-tuned models per workerâ€”same model with different prompts/packs is fine.
-
-### 3.3 Orchestrator responsibilities
-
-1. **Decompose** the user goal into **independent** or **sequential** chunks where possible.
-2. Assign each chunk: **objective**, **constraints**, **tool pack**, **budget**, **output schema**.
-3. **Launch** workers (parallel up to `max_parallelism`).
-4. **Collect** structured outputs (see Â§5).
-5. **Merge**:
-   - **Deterministic**: concatenate, union of file lists, take highest-priority conflict policy.
-   - **Model-assisted**: single merge pass with **only** worker summaries + artifacts (not full transcripts).
-6. **Resolve conflicts** if two workers touched the same resources (policy: serial lock, last-writer-wins, or reject and re-run).
-
-### 3.4 Difficulty assessment
-
-| Area | Notes |
-|------|--------|
-| Core harness (spawn + schema + collect) | **Medium** â€” mostly engineering, not ML. |
-| Parallelism | **Medium** â€” concurrency, backpressure, cancellation. |
-| Merge & conflict policy | **Mediumâ€“High** â€” product decisions + edge cases. |
-| Observability | **Medium** â€” parent/child run IDs, structured logs. |
-
-### 3.5 Risks & mitigations
-
-| Risk | Mitigation |
-|------|------------|
-| Duplicate or conflicting edits | Resource scopes per worker; **serial** execution for conflicting files; or explicit locks. |
-| Cost spikes | Per-worker **token/step budgets**; cap `max_parallelism`. |
-| Parent context explosion | Hand off **summaries + artifacts**, not full child traces (unless debug mode). |
-| Hard debugging | **Run graph**: `run_id`, `parent_run_id`, `worker_id`, tool calls, merge version. |
+Serial execution of DAG nodes uses distinct thread ids per node; there is **no** separate merge orchestrator.
 
 ---
 
@@ -151,33 +113,9 @@ Prefer **structured tool definitions + validation**. Fine-tune only if metrics s
 
 ---
 
-## 5. Contracts: parent â†” worker handoff
+## 5. Multi-agent handoff (not shipped here)
 
-### 5.1 Recommended structured child result
-
-Workers should return a **fixed schema**, for example:
-
-- `status`: `success` | `partial` | `failed`
-- `summary`: short natural language
-- `artifacts`: paths, URIs, or IDs of produced/changed objects
-- `errors`: machine-readable codes + messages
-- `follow_up_questions`: optional blockers for the parent
-
-Parents should **not** rely on free-form-only replies for downstream automation.
-
-### 5.2 Spawn parameters (meta-tool input)
-
-- `goal` (string)
-- `constraints` (e.g. paths, forbidden operations)
-- `tool_pack_id` or explicit `allowed_tools[]`
-- `max_steps` / `max_tokens` / wall-clock budget
-- `output_schema` version
-- `parallel_group_id` (for batching)
-
-### 5.3 Depth & parallelism caps (v1)
-
-- **`max_subagent_depth`**: start at **1** (parent â†’ workers only).
-- **`max_parallel_workers`**: start low (e.g. **2â€“4**); tune with cost and engine load.
+Earlier drafts described parent/worker schemas for hypothetical parallel agents. **This plugin build** does not expose `subagent_spawn`, `worker_merge_results`, or a merge orchestrator. Tool results and plan state flow through the **single** harness + context service. If multi-worker patterns are revisited, prefer explicit design docs before reintroducing catalog entries.
 
 ---
 
@@ -213,7 +151,7 @@ When engine/editor work dominates wall clock, prioritize:
 
 - **Narrow tools** â†’ fewer wrong actions â†’ fewer multi-minute retries.
 - **Dry-run / preview** tools where expensive operations exist.
-- **Multi-round orchestration** is acceptable if it reduces failed runs.
+- **Multi-round** agent or planner passes are acceptable if they reduce failed runs.
 
 ---
 
@@ -251,17 +189,16 @@ Many Unreal-oriented integrations use **standard models** + **structured tools**
 
 ## 8. Observability & product requirements
 
-### 8.1 Required for Agent mode + Level B
+### 8.1 Required for Agent / Plan modes
 
-- **Run ID** per user session step; **parent_run_id** / **worker_id** for tree edges.
-- **Structured log** of tool calls (name, args hash, duration, outcome).
-- **Merge log**: which worker outputs were combined and how conflicts were resolved.
-- **Budget usage**: tokens/steps per worker and aggregate.
+- **Run / thread identifiers** suitable for correlating logs and harness artifacts.
+- **Structured log** of tool calls (name, args hash, duration, outcome) where enabled.
+- **Budget usage**: tokens/steps per turn (see settings and usage tracker).
 
 ### 8.2 User-facing
 
 - Clear indication of **mode** (Ask / Agent / Plan).
-- When **workers** run: progress (queued / running / merging), and **failure** with retry policy.
+- Plan mode: progress through planner vs node execution (`FUnrealAiPlanExecutor` continuation phases).
 
 ---
 
@@ -270,10 +207,10 @@ Many Unreal-oriented integrations use **standard models** + **structured tools**
 | Phase | Scope |
 |-------|--------|
 | **P0** | Ask + Agent; single-agent loop; core tool pack; validation + retries; **no vector search** (Â§1.3). |
-| **P1** | Agent mode: **one-level** Level B subagents; structured handoff schema; merge v1 (deterministic + optional single merge model); caps on parallelism and depth. |
+| **P1** | Stronger planning rails (todo + Plan DAG), tool surface tiering, long-run harness quality. |
 | **P2** | Tool routing (two-phase heuristics or tags; **optional postâ€“v1:** semantic tool RAG); tool packs by domain; compaction of long traces. |
-| **P3** | Conflict detection, file-level locking or serial fallback; richer merge policies. |
-| **P4** | Deeper trees or higher parallelism only if metrics justify complexity. |
+| **P3** | Conflict detection, file-level locking or serial fallback where edits collide. |
+| **P4** | Optional parallel plan-node execution or external workers **only** if metrics justify complexity. |
 | **Future (postâ€“v1)** | Optional **local vector DB** (e.g. per-user disk), codebase embeddings, hybrid retrieval â€” only after v1 is stable (Â§1.3). |
 
 ---
@@ -281,8 +218,7 @@ Many Unreal-oriented integrations use **standard models** + **structured tools**
 ## 10. Open decisions (to fill in during implementation)
 
 - [ ] Exact **tool pack** list and which modes may invoke which packs.
-- [ ] **Merge** strategy: deterministic-only vs model-assisted vs hybrid.
-- [ ] **Parallelism** default and max for Unreal/editor safety (single editor thread constraints may force **logical** parallelism with **serialized** mutating tool callsâ€”validate against your bridge).
+- [ ] **Parallelism** default and max for Unreal/editor safety (mutating tools remain **serialized** on the game thread).
 - [ ] Whether **Ask** mode uses only explicit reads / deterministic search (**v1** â€” no vector index per Â§1.3).
 - [ ] Telemetry: **MVP default = none** or strictly local logs unless an opt-in policy is added later; no product telemetry backend per Â§1.4.
 
@@ -297,4 +233,4 @@ Many Unreal-oriented integrations use **standard models** + **structured tools**
 
 ---
 
-*Document version: 1.2 â€” adds **MVP plugin-only / no product backend** (Â§1.4). v1.1: no vector search (Â§1.3).*
+*Document version: 1.3 â€” removes subagent/worker-merge product scope; aligns with `Private/Planning/` plan DAG + todo summaries. v1.2: MVP plugin-only / no product backend (Â§1.4). v1.1: no vector search (Â§1.3).*

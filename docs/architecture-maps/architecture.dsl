@@ -1,4 +1,4 @@
-﻿// C4 workspace for architecture maps (exported to SVG via scripts/export-architecture-maps.ps1).
+// C4 workspace for architecture maps (exported to SVG via scripts/export-architecture-maps.ps1).
 // Diagram readability: very long single-line descriptions render as one stretched horizontal line in SVGs
 // (no automatic wrap). Prefer splitting description strings with \n at clause boundaries or ~60-80 characters.
 // Keep relationship labels short; put narrative detail in the readme prose block (see file tail) or docs/.
@@ -434,7 +434,7 @@ BEGIN_README_MAP context-components
 Context owns **`context.json`** and planning artifacts that live beside it; it does **not** own the chat API message list (that is the **harness** + `conversation.json`). Optional local **vector retrieval** adds `retrieval_snippet` candidates into the **same** ranker when enabledâ€”see [`docs/context/context-management.md`](docs/context/context-management.md) and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 2.2.
 END_README_MAP
 BEGIN_README_MAP harness-components
-**Agent harness** decomposition: **turn orchestration**, **tool loop** (streaming tool calls, execution host, telemetry such as `tool_surface_metrics`, session **usage prior** updates, optional **repair** nudge after bad `unreal_ai_dispatch` unwrap), **continuation rails**, **worker/subagent** coordination, and **run artifact** sinks (`FAgentRunFileSink`) for harness diagnostics.
+**Agent harness** decomposition: **turn loop**, **tool loop** (streaming tool calls, execution host, telemetry such as `tool_surface_metrics`, session **usage prior** updates, optional **repair** nudge after bad `unreal_ai_dispatch` unwrap), **continuation rails**, **Plan-mode DAG execution** (`Private/Planning/FUnrealAiPlanExecutor` driving serial node turns), and **run artifact** sinks (`FAgentRunFileSink`) for harness diagnostics.
 
 This is where **`conversation.json`** is read/written, LLM rounds are bounded, and tool rounds connect to dispatch. For iteration, artifacts, and what â€œgoodâ€ looks like in tests, see [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](docs/tooling/AGENT_HARNESS_HANDOFF.md).
 END_README_MAP

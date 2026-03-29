@@ -81,9 +81,8 @@ Every tool below follows this schema (suitable for export to JSON for OpenAI/Ant
 17. [Diagnostics, logs & audit](#diagnostics-logs--audit)  
 18. [Project files & search](#project-files--search)  
 19. [Console & gated execution](#console--gated-execution)  
-20. [Orchestration & meta-tools](#orchestration--meta-tools)  
-21. [Banned or out-of-scope for v1](#banned-or-out-of-scope-for-v1)  
-22. [Appendix: subsystems & modules to study](#appendix-subsystems--modules-to-study)  
+20. [Banned or out-of-scope for v1](#banned-or-out-of-scope-for-v1)  
+21. [Appendix: subsystems & modules to study](#appendix-subsystems--modules-to-study)  
 
 ---
 
@@ -1042,35 +1041,6 @@ These are the first implementation wave. Each row is expanded in its domain sect
 
 ---
 
-## Orchestration & meta-tools
-
-### `subagent_spawn`
-
-| Field | Value |
-|-------|--------|
-| **summary** | Spawn a child agent run with isolated tool pack (Agent mode / Level B). |
-| **parameters** | Per [`agent-and-tool-requirements.md`](agent-and-tool-requirements.md) §5.2: `goal`, `allowed_tools[]`, `budgets`, `output_schema`. |
-| **returns** | `worker_run_id`. |
-| **side_effects** | orchestration |
-| **permission** | `exec` |
-| **ue_entry_points** | Plugin harness — not UE engine API; uses local session registry. |
-| **threading** | Async orchestration. |
-| **status** | `future` |
-
-### `worker_merge_results`
-
-| Field | Value |
-|-------|--------|
-| **summary** | Deterministic merge of worker structured outputs (§5.1 schema). |
-| **parameters** | `parent_run_id`, `worker_results[]`. |
-| **returns** | `merged` object. |
-| **side_effects** | none |
-| **permission** | `write` |
-| **ue_entry_points** | Pure code in plugin. |
-| **status** | `future` |
-
----
-
 ## Banned or out-of-scope for v1
 
 | `tool_id` | Reason |
@@ -1109,7 +1079,7 @@ Use this as a reading checklist against your **installed** `Engine/Source` tree.
 
 ## Consolidated tool index (alphabetical)
 
-`actor_attach_to` · `actor_destroy` · `actor_find_by_label` · `actor_get_transform` · `actor_set_transform` · `actor_set_visibility` · `actor_spawn_from_class` · `animation_blueprint_get_graph_summary` · `asset_delete` · `asset_duplicate` · `asset_get_metadata` · `asset_import` · `asset_registry_query` · `asset_rename` · `asset_save_packages` · `blueprint_add_variable` · `blueprint_compile` · `blueprint_get_graph_summary` · `blueprint_open_graph_tab` · `console_command` · `content_browser_navigate_folder` · `content_browser_sync_asset` · `editor_get_selection` · `editor_set_mode` · `editor_set_selection` · `editor_state_snapshot_read` · `engine_message_log_read` · `foliage_paint_instances` · `global_tab_focus` · `landscape_import_heightmap` · `material_get_usage_summary` · `material_instance_set_scalar_parameter` · `material_instance_set_vector_parameter` · `menu_command_invoke` · `metasound_open_editor` · `outliner_folder_move` · `pcg_generate` · `pie_start` · `pie_status` · `pie_stop` · `project_file_read_text` · `project_file_write_text` · `render_target_readback_editor` · `sequencer_open` · `source_search_symbol` · `subagent_spawn` · `tool_audit_append` · `viewport_camera_dolly` · `viewport_camera_get_transform` · `viewport_camera_orbit` · `viewport_camera_pan` · `viewport_camera_pilot` · `viewport_camera_set_transform` · `viewport_capture_delayed` · `viewport_capture_png` · `viewport_frame_actors` · `viewport_frame_selection` · `viewport_set_view_mode` · `worker_merge_results`
+`actor_attach_to` · `actor_destroy` · `actor_find_by_label` · `actor_get_transform` · `actor_set_transform` · `actor_set_visibility` · `actor_spawn_from_class` · `animation_blueprint_get_graph_summary` · `asset_delete` · `asset_duplicate` · `asset_get_metadata` · `asset_import` · `asset_registry_query` · `asset_rename` · `asset_save_packages` · `blueprint_add_variable` · `blueprint_compile` · `blueprint_get_graph_summary` · `blueprint_open_graph_tab` · `console_command` · `content_browser_navigate_folder` · `content_browser_sync_asset` · `editor_get_selection` · `editor_set_mode` · `editor_set_selection` · `editor_state_snapshot_read` · `engine_message_log_read` · `foliage_paint_instances` · `global_tab_focus` · `landscape_import_heightmap` · `material_get_usage_summary` · `material_instance_set_scalar_parameter` · `material_instance_set_vector_parameter` · `menu_command_invoke` · `metasound_open_editor` · `outliner_folder_move` · `pcg_generate` · `pie_start` · `pie_status` · `pie_stop` · `project_file_read_text` · `project_file_write_text` · `render_target_readback_editor` · `sequencer_open` · `source_search_symbol` · `tool_audit_append` · `viewport_camera_dolly` · `viewport_camera_get_transform` · `viewport_camera_orbit` · `viewport_camera_pan` · `viewport_camera_pilot` · `viewport_camera_set_transform` · `viewport_capture_delayed` · `viewport_capture_png` · `viewport_frame_actors` · `viewport_frame_selection` · `viewport_set_view_mode`
 
 ---
 

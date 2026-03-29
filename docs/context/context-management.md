@@ -2,7 +2,7 @@
 
 This document is the **single source of truth** for how the Unreal AI Editor plugin **assembles, budgets, persists, and injects** editor-side context into LLM requests. It also covers **planning artifacts** (complexity signal, todo plans, plan DAG state) that live in the same persistence layer.
 
-**Related (not duplicated here):** harness iteration and scripts in [`AGENT_HARNESS_HANDOFF.md`](../tooling/AGENT_HARNESS_HANDOFF.md). For current testing/review workflow, see [`HEADLESS_TESTING_PLAYBOOK.md`](HEADLESS_TESTING_PLAYBOOK.md). Plan-mode DAG vs Agent todo-plan tools: [`planning.md`](planning.md).
+**Related (not duplicated here):** harness iteration and scripts in [`AGENT_HARNESS_HANDOFF.md`](../tooling/AGENT_HARNESS_HANDOFF.md). For current testing/review workflow, see [`HEADLESS_TESTING_PLAYBOOK.md`](HEADLESS_TESTING_PLAYBOOK.md). Plan-mode DAG vs Agent todo-plan tools: [`planning.md`](../planning.md) (implementations under `Private/Planning/`).
 
 ---
 
@@ -27,7 +27,7 @@ Optional: when local retrieval is enabled, the candidate pipeline may also inclu
 | **Owns** | `context.json`, attachments, bounded **tool-result snippets**, editor snapshot, **active todo plan**, **plan DAG** state | `conversation.json` (roles for the API), turn loop, tool round-trips |
 | **Per LLM request** | `BuildContextWindow` â†’ `FAgentContextBuildResult` (`SystemOrDeveloperBlock`, `ContextBlock`, complexity, user-visible messages) | Prepends **system** content from prompt builder + appends **user/assistant/tool** history; enforces continuation rails |
 
-Do not duplicate: context is the **editor-specific** layer; the harness owns **orchestration** and **API message list** shape.
+Do not duplicate: context is the **editor-specific** layer; the harness owns the **turn loop** and **API message list** shape (planner vs agent vs tool rounds).
 
 ---
 
@@ -244,7 +244,7 @@ chats/<project_id>/threads/<thread_id>/context.json
 | `maxContextChars` | number | Per-thread override; `0` = use build defaults |
 | `activeTodoPlan` | string? | Canonical **`unreal_ai.todo_plan`** JSON from `agent_emit_todo_plan` |
 | `todoStepsDone` | bool[] | Parallel to `steps` in the plan JSON |
-| `activePlanDag` | string? | Canonical **`unreal_ai.plan_dag`** JSON (Plan mode) |
+| `activePlanDag` | string? | Canonical **`unreal_ai.plan_dag`** JSON (Plan mode); parse/validate helpers in `Private/Planning/UnrealAiPlanDag` |
 | `planNodeStatus` | array | `{ nodeId, status, summary? }` for DAG execution |
 
 ### 4.1 `editorSnapshot`

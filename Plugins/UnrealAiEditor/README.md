@@ -65,7 +65,7 @@ When `WITH_DEV_AUTOMATION_TESTS` is enabled (default for **Development** Editor 
 | `UnrealAiEditor.Tools.DispatchEditorSmoke` | Router returns structured `not_implemented` for unknown IDs; `editor_get_selection` reaches `GEditor` and returns `actor_paths` / `labels` / `count`. |
 | `UnrealAiEditor.Tools.CatalogMatrix` | Every catalog tool ID: dispatch with `{}`; asserts non-empty, parseable JSON with `ok` / `status` / `error`; writes `Saved/UnrealAiEditor/Automation/tool_matrix_last.json`. |
 | `UnrealAiEditor.Tools.BlueprintApplyIrContract` | `blueprint_apply_ir` invalid IR and invalid `merge_policy`; `blueprint_format_graph` missing path. |
-| `UnrealAiEditor.Harness.*` | Orchestrator merge, DAG parse/validation (see `UnrealAiAgentHarnessAutomationTests.cpp`). |
+| `UnrealAiEditor.Harness.*` | Plan DAG parse/validation / ready-set (see `UnrealAiAgentHarnessAutomationTests.cpp`). |
 
 **Run from repo root (headless automation + matrix):**
 
