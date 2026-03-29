@@ -112,7 +112,7 @@ Derived from `UnrealAiToolCatalog.json`. Table cells list **ask** and **agent**;
 
 | tool_id | Summary | permission | status | modes |
 |---------|---------|------------|--------|-------|
-| `agent_emit_todo_plan` | Emit and persist `unreal_ai.todo_plan` (Agent mode; not Plan-mode DAG JSON). | write | implemented | ask=False agent=True |
+| `agent_emit_todo_plan` | Deprecated: not exposed to the model. Legacy persist path for `unreal_ai.todo_plan`. | write | deprecated | ask=False agent=False |
 
 ## `physics_collision`
 

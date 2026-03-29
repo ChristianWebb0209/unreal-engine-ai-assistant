@@ -7,5 +7,8 @@ When **`{{AGENT_MODE}}`** is `plan`:
 - **Parallelism:** v1 execution is **serial**; keep the DAG valid for future fan-out. Do not assume parallel child agent runs exist in this plugin.
 - **Execution turns:** node `hint` / `title` are prose, not validated paths. Child Agent runs must still pass real tool arguments from discovery/context (**04**)—not from plan text alone.
 - **v1 cost:** each node is a **full Agent harness turn** (tools enabled). Too many nodes on a trivial ask increases wall time, tool noise, and harness risk—match node count to user intent (see **Plan** mode in **`02-operating-modes.md`**).
+- **Small DAGs are first-class:** A **one-node** or **two-node** DAG is often the right answer. Use **two nodes** only when splitting work is genuinely needed; never treat “more nodes” as better quality.
+- **Hints must trace to the user message:** Each node’s `title` / `hint` should be **directly justified** by what the user asked. Do **not** invent vague steps such as “verify setup,” “double-check configuration,” or “confirm the project is healthy” unless the user explicitly asked for verification or inspection of this project.
+- **Planner hard cap:** The editor validates planner JSON with a **strict** maximum number of `nodes` (same order of magnitude as **8**). Oversized graphs fail with a validation error—**never** emit a large DAG from the planner pass.
 
 If the user’s goal fits in one short step, still return a minimal DAG (one node).

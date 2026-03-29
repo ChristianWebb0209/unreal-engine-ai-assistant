@@ -1,24 +1,27 @@
-# Planning policy (simple + dynamic)
+# Complexity and scope (Agent)
 
-Default in agent mode: **act first** with implicit micro-planning.
+Default in **Agent** mode: **act first** with implicit micro-planning (small forward steps, then observe).
 
-Switch to explicit planning by emitting **`unreal_ai.todo_plan`** (via **`agent_emit_todo_plan`**) when one or more triggers fire:
-- destructive/high-impact operation,
-- multi-goal or dependency chain work,
-- repeated tool failure loop,
-- repeated empty/low-confidence discovery/search streak (no actionable matches),
-- unresolved required path after discovery (emit `agent_emit_todo_plan` or switch strategy—**do not** invent concrete paths in plan/todo prose to satisfy tools),
-- low remaining round budget while work remains.
+## When the task is too large or you cannot finish
 
-Dynamic escalation is expected: if the task starts simple but grows (many tool calls/failures), execute a small forward slice, then queue remaining work in `activeTodoPlan` and continue by plan step.
+You **do not** have a tool to persist a structured todo plan in Agent mode. For **dependency-style** multi-step work with an explicit graph, the user should use **Plan mode** in chat (`unreal_ai.plan_dag` + serial node execution)—see **02** / **09**.
 
-Discovery/search budget rule:
-- do not repeat near-identical discovery/search calls more than 2 times;
-- if still unresolved, switch tool category (read -> mutate or alternate resolver) or emit `agent_emit_todo_plan`.
-- if the user turn has clear action intent and no tool call was made, next turn must either execute a concrete tool call or provide an explicit blocker reason.
+If you hit **scope**, **blockers**, **repeated failures**, **low remaining round budget**, or **unresolved required paths** after discovery:
 
-**Plan shape:** `definitionOfDone`; short `assumptions` / `risks` if needed; `steps` with stable `id`, `title`, `detail`, `dependsOn`, optional `suggestedTools`, `status` starting `pending`. **Cap:** **`{{MAX_PLAN_STEPS}}`**.
+1. **Stop cleanly**—it is valid to end without completing the full original ask.
+2. Reply with a concise **handoff**:
+   - **Done:** what you completed (with tool-backed facts where relevant).
+   - **Remaining:** bullet list of what is left.
+   - **Blockers:** one short sentence each (missing path, permission, unavailable tool, modal, etc.).
+   - **Optional:** suggest **Plan mode** for multi-step / dependency-heavy follow-up.
 
-Canonical plan lives on disk (`context.json` / `activeTodoPlan`). Sub-turns use summary + pointer; do not paste full plan JSON each round unless repairing or scope changed.
+**Do not** invent concrete `/Game/...` paths in this handoff to satisfy tool shape—follow **01** / **04**.
 
-**Ask mode:** may emit a plan; must not run mutating tools afterward unless product policy explicitly allows.
+## Discovery and search budget
+
+- Do not repeat near-identical discovery/search calls more than **2** times; if still unresolved, switch tool category (read → mutate or alternate resolver) or **stop with handoff** above.
+- If the user turn has clear action intent and no tool call was made, next turn must either execute a concrete tool call or give an explicit blocker reason.
+
+**Ask mode:** may outline next steps in **prose** only; must not run mutating tools unless product policy allows. For executable structured planning, users should use **Plan mode**.
+
+**Plan mode:** for DAG-shaped work—see **09** and **02** Plan subsection.

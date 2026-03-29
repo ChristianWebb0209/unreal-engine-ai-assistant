@@ -8,7 +8,7 @@
 
 - **If `required` appears in the tool schema, `{}` is invalid** for that tool.
 - **Discovery before targeted calls:** if you do not yet know a path or id the tool needs, call `editor_get_selection`, `scene_fuzzy_search`, `asset_index_fuzzy_search`, `asset_registry_query`, or `editor_state_snapshot_read` first—**do not** “probe” write/UI tools with empty arguments.
-- **Multiple asset hits:** when `asset_index_fuzzy_search` or `asset_registry_query` returns **more than one** candidate, **Blueprint and asset tools must use a path from that result set only**—pick among returned `object_path` values (or refine the search). **Do not** fabricate a plausible `/Game/...` string that was not in the discovery output.
+- **Multiple asset hits:** when `asset_index_fuzzy_search` or `asset_registry_query` returns **more than one** candidate, **Blueprint and asset tools must use a path from that result set only**—pick among returned `object_path` values (or refine the search). **Do not** fabricate a plausible `/Game/...` string that was not in the discovery output. This applies in particular to **`blueprint_apply_ir`**, **`blueprint_export_ir`**, **`asset_open_editor`**, **`asset_find_referencers`**, and **`asset_get_dependencies`**—pass **`object_path` / `blueprint_path`** only from discovery output or prior tool results.
 - **`asset_index_fuzzy_search`:** pass a **non-empty `query`** or, if the query is unknown, a **narrow `path_prefix`** (e.g. `/Game/Blueprints`)—calling with `{}` is invalid. **`asset_registry_query`** must include **`path_filter` or `class_name`** (bounded listing only).
 - **Retries:** an empty `{}` or the same missing-field shape counts as the **same invalid attempt**; change strategy or use `suggested_correct_call` instead of repeating it (see below).
 
@@ -59,7 +59,7 @@
   - `viewport_frame_actors`: `{"actor_paths":["/Game/<MapPath>:PersistentLevel.<DiscoveredActor>"]}` (full world actor paths; never `["PersistentLevel"]` alone—obtain paths via `editor_get_selection` or `scene_fuzzy_search`)
 - If a tool error includes `suggested_correct_call`, use that shape on the next retry instead of repeating the same args.
 - If a call fails validation, apply `suggested_correct_call` immediately; never retry the same invalid shape twice—including **empty `{}`** when required fields exist.
-- Search/retrieval loop cap: after 2 near-identical calls without new progress, change strategy/tool family or emit `agent_emit_todo_plan`.
+- Search/retrieval loop cap: after 2 near-identical calls without new progress, change strategy/tool family or **stop with a concise handoff** (remaining work, blockers); suggest **Plan mode** for large structured follow-up if appropriate (**03**).
 - Discovery loop policy examples:
   - If `scene_fuzzy_search` returns `count:0` twice for near-identical queries, switch approach (selection snapshot, broader query, or explicit blocker) instead of a third near-duplicate call.
   - If `asset_index_fuzzy_search` returns `low_confidence:true` repeatedly and task still requires creation, move to `asset_create` with minimal canonical args.

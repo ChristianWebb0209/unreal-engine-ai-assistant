@@ -6,10 +6,8 @@
 - **Grouped for prompts:** [`by-category.md`](by-category.md) â€” same data organized by `category` for â€œtool packâ€ and routing prose. Keep **`blueprints`** rows aligned with formatter-related tools: **`blueprint_apply_ir`**, **`blueprint_export_ir`**, **`blueprint_format_graph`**, **`blueprint_compile`** (`format_graphs`), matching **`04-tool-calling-contract.md`**.
 - **Core pack defaults:** [`core-pack.md`](core-pack.md) â€” tools flagged `always_include_in_core_pack` in JSON.
 
-## Planning tool
+## Structured planning (product)
 
-| `tool_id` | Purpose |
-|-----------|---------|
-| `agent_emit_todo_plan` | **Agent-mode** structured todo plan (`unreal_ai.todo_plan` via tool call). Distinct from **Plan mode** chat DAG (`unreal_ai.plan_dag` assistant JSON + `Private/Planning/FUnrealAiPlanExecutor`). See [`planning.md`](../../../../docs/planning.md). |
+Use **Plan mode** in chat for `unreal_ai.plan_dag` (planner JSON + executor). See chunks **`09-plan-dag.md`**, **`11-plan-node-execution.md`**, and `Private/Planning/` in source.
 
-See [`context-management.md`](../../../../docs/context/context-management.md) for persistence and Â§8 where applicable.
+The catalog entry **`agent_emit_todo_plan`** is **deprecated** (not exposed to the model). Legacy persisted `activeTodoPlan` JSON may still exist on disk—see [`context-management.md`](../../../../docs/context/context-management.md).
