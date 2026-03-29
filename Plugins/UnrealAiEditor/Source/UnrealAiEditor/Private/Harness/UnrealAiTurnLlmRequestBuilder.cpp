@@ -6,6 +6,7 @@
 #include "Harness/ILlmTransport.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Misc/UnrealAiRuntimeDefaults.h"
+#include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Prompt/UnrealAiPromptBuilder.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Tools/UnrealAiToolSurfacePipeline.h"
@@ -58,6 +59,21 @@ namespace UnrealAiTurnLlmRequestBuilderPriv
 				}
 				ApiMsgs.RemoveAt(1, RemoveCount);
 				continue;
+			}
+			// Assistant with no serializable tool_calls but followed by tool rows: drop those tools too
+			// (otherwise HTTP 400: tool without preceding assistant tool_calls in the trimmed payload).
+			if (ApiMsgs[1].Role == TEXT("assistant") && !AssistantHasSerializableToolCalls(ApiMsgs[1]))
+			{
+				int32 RemoveCount = 1;
+				while (1 + RemoveCount < ApiMsgs.Num() && ApiMsgs[1 + RemoveCount].Role == TEXT("tool"))
+				{
+					++RemoveCount;
+				}
+				if (RemoveCount > 1)
+				{
+					ApiMsgs.RemoveAt(1, RemoveCount);
+					continue;
+				}
 			}
 			ApiMsgs.RemoveAt(1);
 		}
@@ -207,6 +223,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	{
 		// Planner pass must be DAG-only in v1; executor child turns run in Agent mode.
 		ToolsJson = TEXT("[]");
+		OutRequest.HttpTimeoutOverrideSec = UnrealAiWaitTime::PlannerHttpRequestTimeoutSec;
 	}
 	else
 	{
@@ -233,6 +250,10 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	OutRequest.ToolsJsonArray = MoveTemp(ToolsJson);
 	OutRequest.bStream = GetDefault<UUnrealAiEditorSettings>()->bStreamLlmChat;
 	OutRequest.MaxOutputTokens = FMath::Clamp(Caps.MaxOutputTokens, 1, 128000);
+	if (Request.Mode == EUnrealAiAgentMode::Plan)
+	{
+		OutRequest.HttpTimeoutOverrideSec = UnrealAiWaitTime::PlannerHttpRequestTimeoutSec;
+	}
 
 	if (Profiles->HasAnyConfiguredApiKey())
 	{

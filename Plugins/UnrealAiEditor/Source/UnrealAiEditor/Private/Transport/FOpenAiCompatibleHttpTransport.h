@@ -15,6 +15,7 @@ public:
 
 	virtual void StreamChatCompletion(const FUnrealAiLlmRequest& Request, FUnrealAiLlmStreamCallback OnEvent) override;
 	virtual void CancelActiveRequest() override;
+	virtual bool HasActiveRequest() const override;
 
 private:
 	TSharedPtr<IHttpRequest> ActiveRequest;

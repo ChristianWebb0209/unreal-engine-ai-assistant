@@ -15,6 +15,13 @@ namespace UnrealAiWaitTime
 	 */
 	inline constexpr uint32 HarnessSyncWaitMs = 300000; // 5 min / segment
 
+	/**
+	 * Headed harness: if the turn is still non-terminal but HTTP is complete and stream telemetry is idle
+	 * for this long (no active tool work), cancel early instead of waiting the full HarnessSyncWaitMs.
+	 * 0 = disabled. Kept short so stuck planner/agent turns fail fast after tokens stop (see fine-tuning log).
+	 */
+	inline constexpr uint32 HarnessSyncIdleAbortMs = 3000;
+
 	/** After CancelTurn(), drain window so sink/game-thread work can flush before forced terminal. */
 	inline constexpr uint32 HarnessCancelDrainWaitMs = 5000;
 
@@ -34,6 +41,8 @@ namespace UnrealAiWaitTime
 	// --- OpenAI-compatible chat/completions HTTP ---
 	/** Single request until response completes (streaming is one connection). Keep below HarnessSyncWaitMs to leave room for tool work in the same segment. */
 	inline constexpr float HttpRequestTimeoutSec = 240.0f; // 4 min
+	/** Plan-mode planner pass only (FUnrealAiLlmRequest override). Shorter than HttpRequestTimeoutSec so stuck planner HTTP fails faster than generic agent turns. */
+	inline constexpr float PlannerHttpRequestTimeoutSec = 90.0f;
 	inline constexpr int32 Http429MaxAttempts = 6;
 
 	// --- Embeddings HTTP (retrieval path) ---

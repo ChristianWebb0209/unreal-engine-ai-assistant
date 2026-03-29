@@ -286,7 +286,8 @@ namespace OpenAiTransportUtil
 			}
 		}
 
-		// Some proxies omit the final data: [DONE] line; still complete the harness turn.
+		// Some proxies omit the final data: [DONE] line; EmitFinalFinish still runs once after the line loop
+		// so the harness always receives a Finish event (defensive vs missing [DONE]).
 		EmitFinalFinish();
 	}
 
@@ -442,6 +443,11 @@ void FOpenAiCompatibleHttpTransport::CancelActiveRequest()
 	}
 }
 
+bool FOpenAiCompatibleHttpTransport::HasActiveRequest() const
+{
+	return ActiveRequest.IsValid();
+}
+
 void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequest& Request, FUnrealAiLlmStreamCallback OnEvent)
 {
 	CancelActiveRequest();
@@ -508,7 +514,9 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 	HttpRequest->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *Key));
 	HttpRequest->SetContentAsString(BodyStr);
-	const float TimeoutSec = UnrealAiWaitTime::HttpRequestTimeoutSec;
+	const float TimeoutSec = Request.HttpTimeoutOverrideSec > 0.f
+		? Request.HttpTimeoutOverrideSec
+		: UnrealAiWaitTime::HttpRequestTimeoutSec;
 	HttpRequest->SetTimeout(TimeoutSec);
 
 	UE_LOG(LogTemp, Display,
@@ -603,10 +611,12 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 				if (bStream)
 				{
 					OpenAiTransportUtil::ParseSseBody(RespBody, OnEvent);
+					UnrealAiHarnessProgressTelemetry::NotifyHttpStreamParseComplete();
 				}
 				else
 				{
 					OpenAiTransportUtil::ParseNonStreamBody(RespBody, OnEvent);
+					UnrealAiHarnessProgressTelemetry::NotifyHttpStreamParseComplete();
 				}
 			});
 

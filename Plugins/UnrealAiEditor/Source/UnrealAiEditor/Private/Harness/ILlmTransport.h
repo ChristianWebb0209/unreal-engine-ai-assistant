@@ -17,6 +17,8 @@ struct FUnrealAiLlmRequest
 	/** Resolved from model profile + providers (required for HTTP transport). */
 	FString ApiBaseUrl;
 	FString ApiKey;
+	/** If > 0, overrides UnrealAiWaitTime::HttpRequestTimeoutSec for this request (e.g. Plan planner). */
+	float HttpTimeoutOverrideSec = 0.f;
 };
 
 class ILlmTransport
@@ -29,4 +31,7 @@ public:
 		FUnrealAiLlmStreamCallback OnEvent) = 0;
 
 	virtual void CancelActiveRequest() {}
+
+	/** True while an HTTP chat/completions request is in flight (streaming or waiting on response). */
+	virtual bool HasActiveRequest() const { return false; }
 };
