@@ -32,9 +32,9 @@ These diagrams are generated from [docs/architecture-maps/architecture.dsl](docs
 
 **C4 system context (Level 1).** This is the outermost trust-boundary picture: who uses the assistant, what stays inside the editor process, and what leaves the machine.
 
-- **Unreal Developer** drives the **UnrealAiEditor** plugin inside **Unreal Editor**; there is **no** required product backend—only user-configured **HTTPS** to **third-party LLM APIs (BYOK)** and optional **localhost** bridges (MCP, CLI helpers) you opt into.
+- **Unreal Developer** drives the **UnrealAiEditor** plugin inside **Unreal Editor**; there is **no** required product backendâ€”only user-configured **HTTPS** to **third-party LLM APIs (BYOK)** and optional **localhost** bridges (MCP, CLI helpers) you opt into.
 - **Unreal Editor Runtime** is the engine surface the tools actually call: selection, Asset Registry, Content Browser, PIE, tabs, and world state.
-- **Local Data Store** holds settings, per-thread `conversation.json` and `context.json`, memories, optional SQLite vector files, diagnostics, and tool-usage JSONL—everything stays under the plugin data root (see repo [`README.md`](README.md) and [`docs/tooling/agent-and-tool-requirements.md`](docs/tooling/agent-and-tool-requirements.md) section 1.4 (MVP deployment)).
+- **Local Data Store** holds settings, per-thread `conversation.json` and `context.json`, memories, optional SQLite vector files, diagnostics, and tool-usage JSONLâ€”everything stays under the plugin data root (see repo [`README.md`](README.md) and [`docs/tooling/agent-and-tool-requirements.md`](docs/tooling/agent-and-tool-requirements.md) section 1.4 (MVP deployment)).
 
 [Open full-size SVG](docs/architecture-maps/system-context.svg)
 
@@ -66,7 +66,7 @@ For how **context** vs **harness** split work, see [`docs/context/context-manage
 
 **Context subsystem** decomposition: thread-scoped state, **editor snapshot** queries, **@mention** resolution, **candidate** collection from attachments/tool snippets/memory/optional retrieval, **weighted ranking**, **budgeted packing**, **complexity assessor** output, and formatted blocks that become `BuildContextWindow` / `{{CONTEXT_SERVICE_OUTPUT}}` in the prompt.
 
-Context owns **`context.json`** and planning artifacts that live beside it; it does **not** own the chat API message list (that is the **harness** + `conversation.json`). Optional local **vector retrieval** adds `retrieval_snippet` candidates into the **same** ranker when enabled—see [`docs/context/context-management.md`](docs/context/context-management.md) and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 2.2.
+Context owns **`context.json`** and planning artifacts that live beside it; it does **not** own the chat API message list (that is the **harness** + `conversation.json`). Optional local **vector retrieval** adds `retrieval_snippet` candidates into the **same** ranker when enabledâ€”see [`docs/context/context-management.md`](docs/context/context-management.md) and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 2.2.
 
 [Open full-size SVG](docs/architecture-maps/context-components.svg)
 
@@ -81,7 +81,7 @@ Context owns **`context.json`** and planning artifacts that live beside it; it d
 
 **Agent harness** decomposition: **turn orchestration**, **tool loop** (streaming tool calls, execution host, telemetry such as `tool_surface_metrics`, session **usage prior** updates, optional **repair** nudge after bad `unreal_ai_dispatch` unwrap), **continuation rails**, **worker/subagent** coordination, and **run artifact** sinks (`FAgentRunFileSink`) for harness diagnostics.
 
-This is where **`conversation.json`** is read/written, LLM rounds are bounded, and tool rounds connect to dispatch. For iteration, artifacts, and what “good” looks like in tests, see [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](docs/tooling/AGENT_HARNESS_HANDOFF.md).
+This is where **`conversation.json`** is read/written, LLM rounds are bounded, and tool rounds connect to dispatch. For iteration, artifacts, and what â€œgoodâ€ looks like in tests, see [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](docs/tooling/AGENT_HARNESS_HANDOFF.md).
 
 [Open full-size SVG](docs/architecture-maps/harness-components.svg)
 
@@ -96,7 +96,7 @@ This is where **`conversation.json`** is read/written, LLM rounds are bounded, a
 
 **Tool catalog, execution host, and dispatch** split by concern: **catalog loader** (`UnrealAiToolCatalog.json`), **tool surface pipeline** entry (for eligibility when enabled), **execution host** (permissions + invocation), and **dispatch** modules (actors/world, assets, Blueprint, editor UI, search, PIE, etc.).
 
-Narrowing **which tools appear** and **tiered markdown** for `unreal_ai_dispatch` is a separate pipeline from **docs vector retrieval**—see [`docs/tooling/tools-expansion.md`](docs/tooling/tools-expansion.md) and the companion view **Tool surface graph**. Narrative catalog: [`docs/tooling/tool-registry.md`](docs/tooling/tool-registry.md).
+Narrowing **which tools appear** and **tiered markdown** for `unreal_ai_dispatch` is a separate pipeline from **docs vector retrieval**â€”see [`docs/tooling/tools-expansion.md`](docs/tooling/tools-expansion.md) and the companion view **Tool surface graph**. Narrative catalog: [`docs/tooling/tool-registry.md`](docs/tooling/tool-registry.md).
 
 [Open full-size SVG](docs/architecture-maps/tooling-components.svg)
 
@@ -124,7 +124,7 @@ Telemetry (`tool_surface_metrics`) and optional **`tool_usage_events.jsonl`** su
 <details>
 <summary><strong>Tool surface sequence</strong></summary>
 
-**Simplified dynamic sequence** for round 1: message budgeter / tiered surface → compact **`tools[]` + markdown index** → **chat completion** stream → **tool loop** (operational_ok, usage prior, `tool_surface_metrics`) → append **JSONL** usage line.
+**Simplified dynamic sequence** for round 1: message budgeter / tiered surface â†’ compact **`tools[]` + markdown index** â†’ **chat completion** stream â†’ **tool loop** (operational_ok, usage prior, `tool_surface_metrics`) â†’ append **JSONL** usage line.
 
 **Dynamic** diagram views cannot attach to arbitrary components at software-system scope, so the **full** internal wiring appears in **Tool surface graph**; this diagram is the **stage-to-stage** story aligned with the view description on `tool-surface-sequence` in `architecture.dsl`.
 
@@ -154,7 +154,7 @@ Retrieval is **off by default**; when disabled, behavior must match pre-retrieva
 <details>
 <summary><strong>Memory components</strong></summary>
 
-**Memory service** decomposition: **staged query** (title → description → body), **compaction** heuristics, **retention** and **tombstones** to avoid regeneration loops, and JSON persistence under **`memories/`**.
+**Memory service** decomposition: **staged query** (title â†’ description â†’ body), **compaction** heuristics, **retention** and **tombstones** to avoid regeneration loops, and JSON persistence under **`memories/`**.
 
 Memory is **isolated** from raw chat transcript storage; integration into prompts is via **explicit** context candidates. Definitive reference: [`docs/context/memory-system.md`](docs/context/memory-system.md).
 
@@ -171,7 +171,7 @@ Memory is **isolated** from raw chat transcript storage; integration into prompt
 
 **Slate UI** decomposition: **chat tab shell**, **composer** (send pipeline, modes), **settings** surfaces (providers, models, retrieval, memory), **transcript** widgets (markdown, tool cards, warnings), and **Quick Start / Debug** tabs.
 
-This maps to **Window → Unreal AI** and related entry points described in the repo [`README.md`](README.md) and [`Plugins/UnrealAiEditor/README.md`](Plugins/UnrealAiEditor/README.md).
+This maps to **Window â†’ Unreal AI** and related entry points described in the repo [`README.md`](README.md) and [`Plugins/UnrealAiEditor/README.md`](Plugins/UnrealAiEditor/README.md).
 
 [Open full-size SVG](docs/architecture-maps/ui-components.svg)
 
@@ -184,7 +184,7 @@ This maps to **Window → Unreal AI** and related entry points described in the 
 <details>
 <summary><strong>Request lifecycle</strong></summary>
 
-**Numbered turn lifecycle**: load thread and snapshot → **RunTurn** → assemble prompts and **BuildContextWindow** → resolve **model profile** → **send** request → **stream** response → **execute tools** → record snippets → **observability** → persist **`conversation.json`** and **`context.json`**.
+**Numbered turn lifecycle**: load thread and snapshot â†’ **RunTurn** â†’ assemble prompts and **BuildContextWindow** â†’ resolve **model profile** â†’ **send** request â†’ **stream** response â†’ **execute tools** â†’ record snippets â†’ **observability** â†’ persist **`conversation.json`** and **`context.json`**.
 
 Use this view with [`docs/context/context-management.md`](docs/context/context-management.md) (context assembly) and [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](docs/tooling/AGENT_HARNESS_HANDOFF.md) (harness behavior and logs).
 
@@ -201,7 +201,7 @@ Use this view with [`docs/context/context-management.md`](docs/context/context-m
 
 **Container-level end-to-end** optional vector story: **Retrieval Service** + **Embedding Provider** + **Context Service** + **Harness** + **Memory** (optional corpus feed) + on-disk **SQLite** + **manifest** + **LLM provider** for `/embeddings` + **Unreal Editor** for Asset Registry and Blueprint-derived corpora.
 
-Aligns with [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 2.1 (visual architecture diagrams) and section 2.2 (what is indexed vs excluded—no full chat dump, no raw binary `.uasset` bytes).
+Aligns with [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 2.1 (visual architecture diagrams) and section 2.2 (what is indexed vs excludedâ€”no full chat dump, no raw binary `.uasset` bytes).
 
 [Open full-size SVG](docs/architecture-maps/vector-db-end-to-end.svg)
 
@@ -216,7 +216,7 @@ Aligns with [`docs/context/vector-db-implementation-plan.md`](docs/context/vecto
 
 **Index rebuild** rationale: settings-driven **whitelist** and **root presets** bound CPU, disk, and **BYOK embedding** API cost. **Filesystem** corpus reads UTF-8 text for allow-listed extensions only; **Asset Registry** adds deterministic metadata shards; **Blueprint** corpus uses feature lines, not raw assets; **memory** chunks into the index are **optional** and default-off so **tagged memory** stays primary.
 
-See the long view caption in `architecture.dsl` and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) sections 2.2–2.3.
+See the long view caption in `architecture.dsl` and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) sections 2.2â€“2.3.
 
 [Open full-size SVG](docs/architecture-maps/vector-db-index-build.svg)
 
