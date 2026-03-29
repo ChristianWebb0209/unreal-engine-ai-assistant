@@ -2,17 +2,17 @@
 
 This document is the **single source of truth** for how the Unreal AI Editor plugin **assembles, budgets, persists, and injects** editor-side context into LLM requests. It also covers **planning artifacts** (complexity signal, todo plans, plan DAG state) that live in the same persistence layer.
 
-**Related (not duplicated here):** harness iteration and scripts in [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md). For current testing/review workflow, see [`HEADLESS_TESTING_PLAYBOOK.md`](HEADLESS_TESTING_PLAYBOOK.md). Plan-mode DAG vs Agent todo-plan tools: [`planning.md`](planning.md).
+**Related (not duplicated here):** harness iteration and scripts in [`AGENT_HARNESS_HANDOFF.md`](../tooling/AGENT_HARNESS_HANDOFF.md). For current testing/review workflow, see [`HEADLESS_TESTING_PLAYBOOK.md`](HEADLESS_TESTING_PLAYBOOK.md). Plan-mode DAG vs Agent todo-plan tools: [`planning.md`](planning.md).
 
 ---
 
 ## 1. System at a glance
 
-In-editor **context management** is a **logical service** in the plugin process—not a network backend. Context is now assembled by a **ranked candidate pipeline** that includes editor state, attachments, tool snippets, and memory snippets.
+In-editor **context management** is a **logical service** in the plugin processâ€”not a network backend. Context is now assembled by a **ranked candidate pipeline** that includes editor state, attachments, tool snippets, and memory snippets.
 
-Optional: when local retrieval is enabled, the candidate pipeline may also include **`retrieval_snippet`** candidates sourced from the per-project local vector index (see `docs/vector-db-implementation-plan.md`, including **§2.1–2.2** for Structurizr views and **what is / is not indexed**). Retrieval remains **disabled by default** and must degrade safely to deterministic-only behavior.
+Optional: when local retrieval is enabled, the candidate pipeline may also include **`retrieval_snippet`** candidates sourced from the per-project local vector index (see [`vector-db-implementation-plan.md`](vector-db-implementation-plan.md), including **§2.1–2.2** for the visual architecture diagrams and **what is / is not indexed**). Retrieval remains **disabled by default** and must degrade safely to deterministic-only behavior.
 
-**Tool surface (orthogonal):** narrowing or tiering **which tools appear in the LLM tool index** (`unreal_ai_dispatch` + markdown, or native `tools[]`) is handled by the **tool surface pipeline** in `UnrealAiToolSurfacePipeline` / `UnrealAiTurnLlmRequestBuilder`, not by `BuildContextWindow`. It uses a **separate** lexical (BM25) index over catalog text and editor snapshot hints for **domain bias** — not the SQLite vector store used for docs/snippets. See [`tools-expansion.md`](tools-expansion.md) and Structurizr view **`tool-surface-graph`** in [`architecture-maps/architecture.dsl`](architecture-maps/architecture.dsl).
+**Tool surface (orthogonal):** narrowing or tiering **which tools appear in the LLM tool index** (`unreal_ai_dispatch` + markdown, or native `tools[]`) is handled by the **tool surface pipeline** in `UnrealAiToolSurfacePipeline` / `UnrealAiTurnLlmRequestBuilder`, not by `BuildContextWindow`. It uses a **separate** lexical (BM25) index over catalog text and editor snapshot hints for **domain bias** — not the SQLite vector store used for docs/snippets. See [`tools-expansion.md`](../tooling/tools-expansion.md) and the **`tool-surface-graph`** view in [`architecture-maps/architecture.dsl`](../architecture-maps/architecture.dsl).
 
 | Responsibility | Owner |
 |----------------|--------|
@@ -25,7 +25,7 @@ Optional: when local retrieval is enabled, the candidate pipeline may also inclu
 | | **Context service** | **Agent harness** |
 |--|----------------------|-------------------|
 | **Owns** | `context.json`, attachments, bounded **tool-result snippets**, editor snapshot, **active todo plan**, **plan DAG** state | `conversation.json` (roles for the API), turn loop, tool round-trips |
-| **Per LLM request** | `BuildContextWindow` → `FAgentContextBuildResult` (`SystemOrDeveloperBlock`, `ContextBlock`, complexity, user-visible messages) | Prepends **system** content from prompt builder + appends **user/assistant/tool** history; enforces continuation rails |
+| **Per LLM request** | `BuildContextWindow` â†’ `FAgentContextBuildResult` (`SystemOrDeveloperBlock`, `ContextBlock`, complexity, user-visible messages) | Prepends **system** content from prompt builder + appends **user/assistant/tool** history; enforces continuation rails |
 
 Do not duplicate: context is the **editor-specific** layer; the harness owns **orchestration** and **API message list** shape.
 
@@ -44,7 +44,7 @@ flowchart TB
     CB["Content Browser / selection"]
   end
 
-  subgraph CTX["IAgentContextService · FUnrealAiContextService"]
+  subgraph CTX["IAgentContextService Â· FUnrealAiContextService"]
     Load["LoadOrCreate(projectId, threadId)"]
     State["FAgentContextState"]
     Snap["RefreshEditorSnapshotFromEngine()"]
@@ -54,7 +54,7 @@ flowchart TB
     Save["SaveNow / FlushAllSessionsToDisk"]
   end
 
-  subgraph Disk["Local persistence · IUnrealAiPersistence"]
+  subgraph Disk["Local persistence Â· IUnrealAiPersistence"]
     Path["context.json (per project/thread)"]
   end
 
@@ -200,8 +200,8 @@ sequenceDiagram
   U->>C: Send message
   C->>S: LoadOrCreate, mentions, RefreshEditorSnapshot
   S->>P: Load (if cold)
-  C->>H: RunTurn(user text, mode, …)
-  H->>B: Build(request, contextService, …)
+  C->>H: RunTurn(user text, mode, â€¦)
+  H->>B: Build(request, contextService, â€¦)
   B->>S: BuildContextWindow(options)
   Note over S: Complexity assessor + ranked collect/score/pack
   S-->>B: FAgentContextBuildResult + UserVisibleMessages
@@ -217,29 +217,29 @@ sequenceDiagram
 
 ## 3. On-disk layout
 
-Under `%LOCALAPPDATA%\UnrealAiEditor\` (Windows; see PRD §2.5):
+Under `%LOCALAPPDATA%\UnrealAiEditor\` (Windows; see PRD Â§2.5):
 
 ```text
 chats/<project_id>/threads/<thread_id>/context.json
 ```
 
-- **`project_id`**: stable id from the current `.uproject` path ([`UnrealAiProjectId`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiProjectId.cpp)).
+- **`project_id`**: stable id from the current `.uproject` path ([`UnrealAiProjectId`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiProjectId.cpp)).
 - **`thread_id`**: GUID string (one per chat tab / composer). **New chat** generates a new GUID; the previous thread is saved first.
 
-**Module shutdown** calls **`FlushAllSessionsToDisk()`** so in-memory sessions are written before exit ([`UnrealAiEditorModule.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/UnrealAiEditorModule.cpp)).
+**Module shutdown** calls **`FlushAllSessionsToDisk()`** so in-memory sessions are written before exit ([`UnrealAiEditorModule.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/UnrealAiEditorModule.cpp)).
 
 ---
 
 ## 4. `context.json` schema (authoritative)
 
-`schemaVersion` is written from **`FAgentContextState::SchemaVersionField`**. The C++ constant **`FAgentContextState::SchemaVersion`** defines the expected on-disk version (currently **5** in [`AgentContextTypes.h`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextTypes.h)). Older files still load **best-effort** with a warning.
+`schemaVersion` is written from **`FAgentContextState::SchemaVersionField`**. The C++ constant **`FAgentContextState::SchemaVersion`** defines the expected on-disk version (currently **5** in [`AgentContextTypes.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextTypes.h)). Older files still load **best-effort** with a warning.
 
 | Field | Type | Notes |
 |-------|------|--------|
 | `schemaVersion` | number | Must align with loader expectations; bump when adding fields |
-| `attachments` | array | `{ type, payload, label, iconClass? }` — see attachment types below |
+| `attachments` | array | `{ type, payload, label, iconClass? }` â€” see attachment types below |
 | `toolResults` | array | `{ toolName, truncatedResult, timestamp ISO8601 }` |
-| `editorSnapshot` | object? | See §4.1 |
+| `editorSnapshot` | object? | See Â§4.1 |
 | `threadRecentUiOverlay` | array | Thread-local recent UI entries merged with project-global history at build time |
 | `maxContextChars` | number | Per-thread override; `0` = use build defaults |
 | `activeTodoPlan` | string? | Canonical **`unreal_ai.todo_plan`** JSON from `agent_emit_todo_plan` |
@@ -260,7 +260,7 @@ chats/<project_id>/threads/<thread_id>/context.json
 | `recentUiEntries` | array | Prioritized recent UI entries (all focusable panes/widgets, bounded) |
 | `valid` | bool | Snapshot was populated |
 
-**Migration:** v1 files with only `activeAssetPath` are migrated so `contentBrowserSelectedAssets` gets that path when empty ([`AgentContextJson.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextJson.cpp)).
+**Migration:** v1 files with only `activeAssetPath` are migrated so `contentBrowserSelectedAssets` gets that path when empty ([`AgentContextJson.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextJson.cpp)).
 
 ### 4.2 Attachment `type` strings (JSON)
 
@@ -282,7 +282,7 @@ Context selection now supports a unified candidate pipeline:
 
 All manual ranking knobs are intentionally centralized in:
 
-- [`UnrealAiContextRankingPolicy.h`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiContextRankingPolicy.h)
+- [`UnrealAiContextRankingPolicy.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiContextRankingPolicy.h)
 
 That file contains the authoritative hardcoded values and comments justifying why each ranking choice exists.  
 It also includes TODO notes for future embeddings/vector retrieval upgrades (current semantic feature is heuristic-only).
@@ -291,7 +291,7 @@ It also includes TODO notes for future embeddings/vector retrieval upgrades (cur
 
 The context manager can write per-turn decision artifacts for audit/tuning:
 
-- Enable with env var: `UNREAL_AI_CONTEXT_DECISION_LOG=1` (or set verbose context build).
+- Enable via `UnrealAiRuntimeDefaults::ContextDecisionLogEnabled` / `ContextVerboseDefault` (see that header), or verbose flags on harness drivers where supported.
 - Output path: `Saved/UnrealAiEditor/ContextDecisionLogs/<thread_id>/`.
 - Files per turn:
   - `<timestamp>.jsonl` (structured keep/drop events with score breakdowns and reasons)
@@ -328,13 +328,13 @@ Scoring formula components are additive: base type importance + mention + heuris
 
 All defaults above come from:
 
-- [`UnrealAiContextRankingPolicy.h`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiContextRankingPolicy.h)
+- [`UnrealAiContextRankingPolicy.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiContextRankingPolicy.h)
 
 ### 5.1 Inputs: `FAgentContextBuildOptions`
 
-Key fields ([`AgentContextTypes.h`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextTypes.h)):
+Key fields ([`AgentContextTypes.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextTypes.h)):
 
-- **`Mode`**: `Ask` | `Agent` | `Plan` — controls what enters the formatted block (e.g. Ask omits tool results).
+- **`Mode`**: `Ask` | `Agent` | `Plan` â€” controls what enters the formatted block (e.g. Ask omits tool results).
 - **`MaxContextChars`**: hard cap for packed candidate output (default 32k) enforced by score-ordered packing + per-type caps.
 - **`UserMessageForComplexity`**: feeds **`FUnrealAiComplexityAssessor`**.
 - **`bModelSupportsImages`**: from model profile; image-like attachments can be stripped with **`UserVisibleMessages`** explaining why.
@@ -345,7 +345,7 @@ Key fields ([`AgentContextTypes.h`](../Plugins/UnrealAiEditor/Source/UnrealAiEdi
 - **`ComplexityBlock`**, **`ComplexityLabel`**, **`ComplexityScoreNormalized`**, **`bRecommendPlanGate`**, **`ComplexitySignals`**: consumed by prompt chunks (e.g. `{{COMPLEXITY_BLOCK}}`).
 - **`ActiveTodoSummaryText`**: short line for `{{ACTIVE_TODO_SUMMARY}}` when a plan exists.
 - **`bTruncated`**, **`Warnings`**: diagnostics.
-- **`UserVisibleMessages`**: surfaced in chat when the model cannot accept an attachment type ([`UnrealAiTurnLlmRequestBuilder.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Harness/UnrealAiTurnLlmRequestBuilder.cpp)).
+- **`UserVisibleMessages`**: surfaced in chat when the model cannot accept an attachment type ([`UnrealAiTurnLlmRequestBuilder.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Harness/UnrealAiTurnLlmRequestBuilder.cpp)).
 
 ### 5.3 Prompt builder coupling
 
@@ -389,9 +389,9 @@ Bundle scripts report ranking metrics with:
 
 ## 6. UI integration
 
-Primary path: [`SChatComposer.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/SChatComposer.cpp).
+Primary path: [`SChatComposer.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/SChatComposer.cpp).
 
-- **Send**: `LoadOrCreate` → **`@` mention parsing** ([`UnrealAiContextMentionParser`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiContextMentionParser.cpp)) → `RefreshEditorSnapshotFromEngine` → harness builds the request (which calls `BuildContextWindow` internally).
+- **Send**: `LoadOrCreate` â†’ **`@` mention parsing** ([`UnrealAiContextMentionParser`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiContextMentionParser.cpp)) â†’ `RefreshEditorSnapshotFromEngine` â†’ harness builds the request (which calls `BuildContextWindow` internally).
 - **Attach selection**: e.g. `UnrealAiEditorContextQueries::AddContentBrowserSelectionAsAttachments`.
 - **New chat**: `SaveNow` on the current thread, new `ThreadId`, `LoadOrCreate` for the empty thread.
 
@@ -403,7 +403,7 @@ Regex `@([A-Za-z0-9_./]+)`: resolves **full soft object paths** first, then **as
 
 ## 7. Budgets and caps
 
-- **Global context string**: budget-aware candidate packing in `BuildUnifiedContext` trims output by score and per-type caps ([`UnrealAiContextCandidates.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiContextCandidates.cpp)).
+- **Global context string**: budget-aware candidate packing in `BuildUnifiedContext` trims output by score and per-type caps ([`UnrealAiContextCandidates.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiContextCandidates.cpp)).
 - **Per tool result storage**: `FContextRecordPolicy::MaxStoredCharsPerResult` before **`RecordToolResult`** truncates.
 - **Editor lists**: `UnrealAiEditorContextQueries` caps Content Browser selection and open-editor asset lists (`MaxContentBrowserSelectedAssets` / `MaxOpenEditorAssets`).
 - **Recent UI lists**: tracker and ranker cap project-global history, thread overlays, and prompt output top-N.
@@ -416,7 +416,7 @@ These are **context-managed** because they must survive thread reloads and feed 
 
 ### 8.1 Complexity assessor
 
-**`FUnrealAiComplexityAssessor`** ([`UnrealAiComplexityAssessor.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Planning/UnrealAiComplexityAssessor.cpp)) runs inside **`BuildContextWindow`**. It is **deterministic** (message stats, attachment/mention counts, mode, light use of editor snapshot).
+**`FUnrealAiComplexityAssessor`** ([`UnrealAiComplexityAssessor.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Planning/UnrealAiComplexityAssessor.cpp)) runs inside **`BuildContextWindow`**. It is **deterministic** (message stats, attachment/mention counts, mode, light use of editor snapshot).
 
 **Output** includes `ScoreNormalized` (0..1), `Label` (`low` | `medium` | `high`), `Signals[]`, `bRecommendPlanGate`, and a formatted **`ComplexityBlock`** for prompt injection.
 
@@ -426,8 +426,8 @@ These are **context-managed** because they must survive thread reloads and feed 
 
 | Approach | Role |
 |----------|------|
-| **Primary** | Tool **`agent_emit_todo_plan`** — harness validates against **`unreal_ai.todo_plan`**, persists to **`activeTodoPlan`**, resets **`todoStepsDone`**. |
-| **Fallback** | Fenced JSON in assistant text — repair at most once; avoid as the main path if tools are available |
+| **Primary** | Tool **`agent_emit_todo_plan`** â€” harness validates against **`unreal_ai.todo_plan`**, persists to **`activeTodoPlan`**, resets **`todoStepsDone`**. |
+| **Fallback** | Fenced JSON in assistant text â€” repair at most once; avoid as the main path if tools are available |
 
 When a checked-in JSON Schema exists for `unreal_ai.todo_plan`, link it here; until then the harness/tool validation is authoritative.
 
@@ -442,11 +442,11 @@ When a checked-in JSON Schema exists for `unreal_ai.todo_plan`, link it here; un
 
 ### 8.4 Plan DAG
 
-**Plan mode** persists a DAG JSON string and parallel **`planNodeStatus`** entries for node-level status and optional summaries — same “persist canonical artifact, inject summaries” idea as todo plans.
+**Plan mode** persists a DAG JSON string and parallel **`planNodeStatus`** entries for node-level status and optional summaries â€” same â€œpersist canonical artifact, inject summariesâ€ idea as todo plans.
 
 ### 8.5 Harness continuation (where this doc stops)
 
-Sub-turn **rails** (max sub-turns, cancel, optional wall clock), **auto-continue** behavior, and **multi-phase behavior** are covered in [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md). Context management supplies **state** and **formatted blocks**; the harness decides **when** to run the next sub-turn.
+Sub-turn **rails** (max sub-turns, cancel, optional wall clock), **auto-continue** behavior, and **multi-phase behavior** are covered in [`AGENT_HARNESS_HANDOFF.md`](../tooling/AGENT_HARNESS_HANDOFF.md). Context management supplies **state** and **formatted blocks**; the harness decides **when** to run the next sub-turn.
 
 ---
 
@@ -454,8 +454,8 @@ Sub-turn **rails** (max sub-turns, cancel, optional wall clock), **auto-continue
 
 | Chunk | Role |
 |-------|------|
-| [`05-context-and-editor.md`](../Plugins/UnrealAiEditor/prompts/chunks/05-context-and-editor.md) | How to interpret `{{CONTEXT_SERVICE_OUTPUT}}`, `@` paths, stale snapshots |
-| [`03-complexity-and-todo-plan.md`](../Plugins/UnrealAiEditor/prompts/chunks/03-complexity-and-todo-plan.md) | `{{COMPLEXITY_BLOCK}}`, todo plan discipline |
+| [`05-context-and-editor.md`](../../Plugins/UnrealAiEditor/prompts/chunks/05-context-and-editor.md) | How to interpret `{{CONTEXT_SERVICE_OUTPUT}}`, `@` paths, stale snapshots |
+| [`03-complexity-and-todo-plan.md`](../../Plugins/UnrealAiEditor/prompts/chunks/03-complexity-and-todo-plan.md) | `{{COMPLEXITY_BLOCK}}`, todo plan discipline |
 
 ---
 
@@ -463,16 +463,16 @@ Sub-turn **rails** (max sub-turns, cancel, optional wall clock), **auto-continue
 
 | Area | Location |
 |------|----------|
-| Interface | [`IAgentContextService.h`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/IAgentContextService.h) |
-| Types / options / state | [`AgentContextTypes.h`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextTypes.h) |
-| Editor queries | [`UnrealAiEditorContextQueries.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiEditorContextQueries.cpp) |
-| @ parsing | [`UnrealAiContextMentionParser.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiContextMentionParser.cpp) |
-| Format + trim | [`AgentContextFormat.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextFormat.cpp) |
-| JSON load/save | [`AgentContextJson.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextJson.cpp) |
-| Service | [`FUnrealAiContextService.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/FUnrealAiContextService.cpp) |
-| Persistence API | [`IUnrealAiPersistence.h`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Backend/IUnrealAiPersistence.h) — `SaveThreadContextJson` / `LoadThreadContextJson` |
-| Turn assembly | [`UnrealAiTurnLlmRequestBuilder.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Harness/UnrealAiTurnLlmRequestBuilder.cpp) |
-| Prompt tokens | [`UnrealAiPromptBuilder.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Prompt/UnrealAiPromptBuilder.cpp) |
+| Interface | [`IAgentContextService.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/IAgentContextService.h) |
+| Types / options / state | [`AgentContextTypes.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextTypes.h) |
+| Editor queries | [`UnrealAiEditorContextQueries.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiEditorContextQueries.cpp) |
+| @ parsing | [`UnrealAiContextMentionParser.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/UnrealAiContextMentionParser.cpp) |
+| Format + trim | [`AgentContextFormat.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextFormat.cpp) |
+| JSON load/save | [`AgentContextJson.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextJson.cpp) |
+| Service | [`FUnrealAiContextService.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/FUnrealAiContextService.cpp) |
+| Persistence API | [`IUnrealAiPersistence.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Backend/IUnrealAiPersistence.h) â€” `SaveThreadContextJson` / `LoadThreadContextJson` |
+| Turn assembly | [`UnrealAiTurnLlmRequestBuilder.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Harness/UnrealAiTurnLlmRequestBuilder.cpp) |
+| Prompt tokens | [`UnrealAiPromptBuilder.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Prompt/UnrealAiPromptBuilder.cpp) |
 
 ---
 

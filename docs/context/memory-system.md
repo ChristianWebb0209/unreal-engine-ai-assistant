@@ -68,7 +68,7 @@ When retrieval is enabled, the plugin may also index memory records into the loc
 - The deterministic memory service query remains the primary, budget-aware contract.
 - Vectorized memory chunks are treated as an additional recall signal and must still respect ranking gates and budget caps.
 
-See `docs/vector-db-implementation-plan.md` for the local vector index schema and migration behavior.
+See [`vector-db-implementation-plan.md`](vector-db-implementation-plan.md) for the local vector index schema and migration behavior.
 
 ## 5. Extraction/compaction policy
 

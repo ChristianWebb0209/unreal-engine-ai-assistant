@@ -12,11 +12,100 @@ Running log of changes aimed at improving headed harness quality and API reliabi
 
 ---
 
+## 2026-03-28 — timeouts: liberal hardcoded HTTP + harness sync (no env for chat)
+
+### Harness / reliability
+
+- **`UnrealAiRuntimeDefaults.h`:** **`HttpRequestTimeoutSec` 1200s**; **`HarnessSyncWaitMs` 1500000ms** (~25 min/segment); **`StreamToolIncompleteMaxMs` 180000**; source-only (not `.env`).
+- **`FOpenAiCompatibleHttpTransport.cpp`:** Chat timeout uses **`HttpRequestTimeoutSec`** only (429 retry count still optional env).
+- **`UnrealAiHarnessScenarioRunner.cpp`:** Sync wait uses **`HarnessSyncWaitMs`** only.
+- **`run-long-running-headed.ps1`:** No timeout env/parameters; editor focus **off** by default (**`-BringEditorToForeground`** opt-in).
+
+---
+
+## 2026-03-28 — harness: stream tool timeout — placeholder slots + lenient caps
+
+### Harness / reliability
+
+- **`FUnrealAiAgentHarness.cpp`:** Streamed `tool_calls` deltas can use **`index` > 0** on the first chunk; **`MergeToolCallDeltas`** pads with defaulted slots at **0..index-1**. Those rows were “incomplete” forever and burned the **event** budget with **`age_ms=0`**. Now **placeholder** slots (empty id, name, args) are **ignored** for first-seen + incomplete timeout. First-seen maps are keyed **only** by **pending array index** `I` so padding cannot alias with real tools.
+- **`UnrealAiRuntimeDefaults.h`:** **`StreamToolIncompleteMaxEvents`** **12 → 96**, **`StreamToolIncompleteMaxMs`** **2500 → 90000** so slow/chunky provider streams do not false-fail mid-JSON.
+
+---
+
+## 2026-03-28 — harness: streamed tool-call timeout map key + headed script metric label
+
+### Context
+
+- **`run-long-running-headed.ps1`:** Batch banner **`tool_calls`** was misleading—it summed **`tool_finish` JSONL events**, not model tool-call chunks. Renamed display to **`tool_finish_events`** (kept **`tool_calls`** in the brief object as the same count for any legacy readers). Clarifies empty counts when turns fail before any tool completes.
+
+### Tools
+
+- — (none)
+
+### Resolvers
+
+- — (none)
+
+### Prompts
+
+- — (none)
+
+### Harness / reliability
+
+- **`FUnrealAiAgentHarness.cpp`:** Incomplete streamed `unreal_ai_dispatch` tracking stored first-seen telemetry under **`StreamMergeIndex`** but `CheckIncompleteToolCallTimeout` read **`PendingToolCalls` index `I`**, so **`age_ms` stayed 0** and **`age_events`** was measured from the wrong baseline. **`MergeToolCallDeltas`** now assigns **`Slot.StreamMergeIndex`**. After each ToolCalls merge, first-seen maps are seeded for **every** incomplete pending slot using **`MapKey = StreamMergeIndex >= 0 ? StreamMergeIndex : I`**, and timeout uses the same key—restores wall-clock + per-tool event budgets.
+
+---
+
+## 2026-03-28 — viewport framing: reject misused level tokens; clearer errors
+
+### Context
+
+- — (none)
+
+### Tools
+
+- **`UnrealAiToolDispatch_Viewport.cpp` — `viewport_frame_actors`:** Before resolving actors, reject common bad `actor_paths` entries (`PersistentLevel` and `WorldSettings` as the whole string, plus empty strings) with an explicit explanation and **`suggested_correct_call`** to **`scene_fuzzy_search`** (example query `Actor`). When no bounds could be built after resolution, the error message now states that the level instance name must not be used alone.
+- **`UnrealAiToolDispatch_Viewport.cpp` — `viewport_frame_selection`:** Error text when selection cannot be framed now points to discovery + framing, and to **`viewport_camera_get_transform` / dolly / orbit** for camera-only tasks (reduces conflating “no selection” with “cannot move camera”).
+- **`UnrealAiToolCatalog.json` — `viewport_frame_actors` / `viewport_set_view_mode`:** Summary, `actor_paths` description, and failure_modes updated so the catalog no longer reads as if “containing PersistentLevel” could mean passing `PersistentLevel` alone; view mode is documented as independent of framing.
+
+### Resolvers
+
+- — (none)
+
+### Prompts
+
+- **`prompts/chunks/04-tool-calling-contract.md`:** `viewport_frame_actors` example path corrected to a full world shape and explicit “never `PersistentLevel` alone” note.
+
+---
+
+## 2026-03-28 — plan-mode harness: per-segment sync wait; catalog `fast` mode removed
+
+### Context
+
+- **`UnrealAiHarnessScenarioRunner.cpp`:** For **`EUnrealAiAgentMode::Plan`**, the game-thread sync loop now waits on **completion** or on **plan sub-turn** signals with a **fresh** **`UnrealAiRuntimeDefaults::HarnessSyncWaitMs`** window each segment (planner `RunTurn` then each serial node `RunTurn`), instead of one deadline for the entire DAG. Uses manual-reset `PlanSubTurnEvent` + `WaitForDoneOrPlanSubTurnWhilePumpingGameThread` (prefers `Done` when both fire). Pool return on success and timeout paths.
+- **`IAgentRunSink.h` / `FAgentRunFileSink`:** New hook **`OnPlanHarnessSubTurnComplete()`** (optional file-sink event trigger); plan executor calls it after a successful planner parse (non–pause-for-build path) and at the start of each **`OnNodeFinished`** so automation can reset the wait budget.
+- **`FUnrealAiPlanExecutor.cpp`:** Emits **`OnPlanHarnessSubTurnComplete`** after **`OnRunContinuation`** post-planner; **not** emitted when **`bPauseAfterPlannerForBuild`** returns early (editor review path unchanged). **`tests/long-running-tests/run-long-running-headed.ps1`:** Comment + batch banner text updated to describe **per-segment** Plan sync vs single end-to-end deadline.
+
+### Tools
+
+- **`UnrealAiToolCatalog.json`:** Removed redundant **`modes.fast`** entries across tools (Agent roster used **`agent`** only; **`fast` was duplicate truth**).
+- **`UnrealAiToolCatalog.cpp` — `PassesModeAndPack`:** **`EUnrealAiAgentMode::Agent`** no longer falls back to **`modes.fast`** when **`agent`** is false—reduces accidental inclusion from a legacy flag. **Plan** mode still falls back to **`agent`** when **`plan`** is false.
+
+### Resolvers
+
+- — (none)
+
+### Prompts
+
+- — (none)
+
+---
+
 ## 2026-03-28 — pre-iteration: harness sync default, localized catalog nudges (no global prompt bloat)
 
 ### Context
 
-- **`tests/long-running-tests/run-long-running-headed.ps1`:** Default **`-SyncWaitMs`** raised from **60000** to **150000** (150s) so the script’s `UNREAL_AI_HARNESS_SYNC_WAIT_MS` matches the **UnrealAiHarnessScenarioRunner** default intent (C++ uses 150s when env is unset; the script always set 60s before, which starved **plan-mode** turns with `Harness run timed out waiting for completion`). Comment block documents that plan steps often need **≥120s** and suggests **`-SyncWaitMs 180000`** when flaky. On batch start, stdout logs effective sync wait ms.
+- **`tests/long-running-tests/run-long-running-headed.ps1` (historical):** Raised per-run sync budget for plan steps (later **superseded**: **`HarnessSyncWaitMs`** is hardcoded in **`UnrealAiRuntimeDefaults.h`**; script no longer sets timeout env/args).
 
 ### Tools
 

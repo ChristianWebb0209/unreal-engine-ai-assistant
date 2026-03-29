@@ -1,15 +1,16 @@
 # Todo List
 
-## Context Manager
+## Repo Organization
 
-- Audit context manager and create testing harness to assert what gets added and removed from context at various steps.
-- **Harness (initial):** [docs/AGENT_HARNESS_HANDOFF.md](docs/AGENT_HARNESS_HANDOFF.md), `tests/context_workflows/`, `scripts/run-headed-context-workflows.ps1`, `tests/bundle_context_workflow_review.py`, console `UnrealAi.DumpContextWindow`.
-- - Use our harness for testing tooling as a model, and create scripts to let AIs run headed editor and view context at any point.
-- - Get agent to build a set of prompts, then run a full run through and build a QUALITIATIVE analysis of how our context manager is working.
+- We need to completely refactor the testing and scripts folder. There's so much garbage there.
+- - Probably: /tests/long-running-tests just becomes /tests/ and we remove all of the old harness stuff.
+- - Delete all of the old runs that don't fit the newest schema. Do we have all of the insight we need out of old runs? 
+- - - Maybe we make a brief summary of the progression by having an agent go through and note a ton of things from all the runs before we delete them.
 
 ## Blueprint Organizer (In separate plugin)
 
-- We need to ensure that there are two buttons added at the top of the blueprint editor event graph: organize all, and (only if user has selected something), organize selected. Both buttons need to have icons and tooltip hints.
+- Verify everything is working
+- - Verify - that there are two buttons added at the top of the blueprint editor event graph: organize all, and (only if user has selected something), organize selected. Both buttons need to have icons and tooltip hints.
 
 ## Tooling
 
@@ -17,19 +18,6 @@
 - - Ensure fast workflow for batch operations like replace material on every wall in scene, etc. We should make a testing situation for this.
 - Ensure tools catalog has high coverage of editor functionality:
 - - Data assets, animation basics, building components within components (building an actor then attatching a collision mesh, etc.)
-
-## Plan / Plan Mode
-
-- DAG validation: does our DAG orchestration work with not allowing certain tasks to start until previous ones have been completed? Let's make some test cases for this.
-- Worker orchestration
-- - Ensure we establish reasonable budgets. Maybe this should be configurable by model as well?
-- - Conflict detection between subagents is OUT OF SCOPE
-- - - We will handle this in a way that doesn't guarantee safety by simply having the initial prompt decide how it will spawn subagents, and telling it to keep in mind how editing the same assets will lead to conflicts. It should create a DAG where each subagent doesn't conflict, but this could be a source of errors in the future.
-
-## General Agent Tasks
-
-- Work more on and verify stall behavior. Right now stalling is a major issue, and it seems like there is something wrong with the model service layer itself.
-- Stream-first harness follow-up: evaluate optional parallel execution for clearly read-only tools while preserving sequential execution for mutating tools.
 
 # Future Features
 

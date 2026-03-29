@@ -3,23 +3,23 @@
 **Version:** 1.1  
 **Target engine:** Unreal Engine 5.5+ (minor API names may drift — confirm against your installed `Engine/Source` before implementation.)  
 
-**Canonical machine-readable catalog:** A **single JSON** ships with the editor plugin: [`Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json`](../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) (`meta` + `tools[]`). Runtime execution: `FUnrealAiToolExecutionHost` + `UnrealAiToolDispatch.cpp` in `Private/Tools/`. Extend handlers there and keep this document in sync for narrative/Epic links.
+**Canonical machine-readable catalog:** A **single JSON** ships with the editor plugin: [`Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) (`meta` + `tools[]`). Runtime execution: `FUnrealAiToolExecutionHost` + `UnrealAiToolDispatch.cpp` in `Private/Tools/`. Extend handlers there and keep this document in sync for narrative/Epic links.
 
 **This Markdown file** remains the **human-readable** narrative, Epic links, and engineering notes.
 
-**Related:** [`context-management.md`](context-management.md), [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md), [`tools-expansion.md`](tools-expansion.md) (tool surface pipeline, env flags, architecture map), [`tool-catalog-audit-guide.md`](tool-catalog-audit-guide.md) (iterative catalog review using harness results), repo [`README.md`](../README.md).
+**Related:** [`context-management.md`](../context/context-management.md), [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md), [`tools-expansion.md`](tools-expansion.md) (tool surface pipeline, compiled defaults in `UnrealAiRuntimeDefaults.h`, architecture map), [`tool-catalog-audit-guide.md`](tool-catalog-audit-guide.md) (iterative catalog review using harness results), repo [`README.md`](../README.md).
 
 ---
 
 ## Runtime tool surface (wire format + optional eligibility)
 
-The catalog is still the **single schema source**, but **how much** of it reaches the model depends on mode and env:
+The catalog is still the **single schema source**, but **how much** of it reaches the model depends on mode and compiled defaults in [`UnrealAiRuntimeDefaults.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h):
 
 | Mechanism | What it does |
 |-----------|----------------|
-| **Native `tools[]`** | Set `UNREAL_AI_TOOL_SURFACE=native` — full function definitions per enabled tool (large payload). |
-| **Dispatch (default)** | Tiny `tools[]` with `unreal_ai_dispatch` + **markdown tool index** in the system/developer text (`UnrealAiTurnLlmRequestBuilder`). |
-| **Tiered eligibility** | **Default on** for Agent + dispatch + **LLM round 1** (`UnrealAiToolSurfacePipeline` ranks via **BM25 + domain bias + session prior blend**, **dynamic K**, guardrail merge, **budgeted** index). Set `UNREAL_AI_TOOL_ELIGIBILITY=0` or `legacy` for the old full sorted list. See [`tools-expansion.md`](tools-expansion.md) §10 and [`architecture-maps/architecture.dsl`](architecture-maps/architecture.dsl) view **`tool-surface-graph`**. |
+| **Native `tools[]`** | `ToolSurfaceUseDispatch = false` — full function definitions per enabled tool (large payload). |
+| **Dispatch (default)** | `ToolSurfaceUseDispatch = true` — tiny `tools[]` with `unreal_ai_dispatch` + **markdown tool index** in the system/developer text (`UnrealAiTurnLlmRequestBuilder`). |
+| **Tiered eligibility** | **Default on** for Agent + dispatch + **LLM round 1** (`UnrealAiToolSurfacePipeline` ranks via **BM25 + domain bias + session prior blend**, **dynamic K**, guardrail merge, **budgeted** index). Set `ToolEligibilityTelemetryEnabled = false` in the defaults header to skip the tiered path. See [`tools-expansion.md`](tools-expansion.md) §10 and [`architecture-maps/architecture.dsl`](../architecture-maps/architecture.dsl) view **`tool-surface-graph`**. |
 
 Optional per-tool metadata: `tools[].tool_surface.domain_tags` (see `meta.tool_surface` in the catalog JSON). **Docs/project vector retrieval** (`Retrieval Service`) is unrelated; it feeds **context**, not the tool roster.
 
@@ -48,7 +48,7 @@ Every tool below follows this schema (suitable for export to JSON for OpenAI/Ant
 | **`parameters`** | Name, type, required, constraints. |
 | **`returns`** | Structured fields (paths, IDs, booleans). |
 | **`side_effects`** | `none` \| `disk` \| `scene` \| `asset` \| `compile` \| `exec`. |
-| **`permission`** | `read` \| `write` \| `destructive` \| `exec` — maps to Ask/Fast/Agent profiles. |
+| **`permission`** | `read` \| `write` \| `destructive` \| `exec` — maps to Ask/Agent/Plan profiles. |
 | **`ue_entry_points`** | Modules, types, functions (see tables below). |
 | **`threading`** | Typically **game thread** for editor mutation. |
 | **`failure_modes`** | User-visible errors. |
@@ -56,7 +56,7 @@ Every tool below follows this schema (suitable for export to JSON for OpenAI/Ant
 | **`status`** | `research` \| `designed` \| `implemented` \| `future` \| `banned_v1`. |
 
 **Ask mode:** Only tools with `permission: read` (and optionally explicit read-only context tools).  
-**Fast / Agent:** Full catalog subject to profile **allow-lists**.
+**Agent / Plan:** Full catalog subject to profile **allow-lists**.
 
 ---
 
@@ -92,7 +92,7 @@ Every tool below follows this schema (suitable for export to JSON for OpenAI/Ant
 | Tag | Meaning |
 |-----|---------|
 | **`read`** | No mutation of project/world; safe for Ask mode. |
-| **`write`** | Mutates editor state, assets, or scene; needs Fast/Agent + often user confirm. |
+| **`write`** | Mutates editor state, assets, or scene; needs Agent/Plan + often user confirm. |
 | **`destructive`** | Delete, rename with refs, bulk ops — strong confirmation. |
 | **`exec`** | Runs commands, cooks, or OS-level actions — strict allow-list. |
 
@@ -458,7 +458,7 @@ These are the first implementation wave. Each row is expanded in its domain sect
 | Field | Value |
 |-------|--------|
 | **summary** | Destroy an actor in the editor world. |
-| **parameters** | `actor_path`, optional `confirm` (auto-filled in headed runs when `UNREAL_AI_AUTO_RUN_DESTRUCTIVE=1`). |
+| **parameters** | `actor_path`, optional `confirm` (auto-filled in headed runs when `AutoRunDestructiveDefault` is true in `UnrealAiRuntimeDefaults.h`). |
 | **returns** | `success`. |
 | **side_effects** | scene |
 | **permission** | `destructive` |
@@ -972,7 +972,7 @@ These are the first implementation wave. Each row is expanded in its domain sect
 | **permission** | `read` |
 | **ue_entry_points** | Same sources as `FUnrealAiContextService` — Asset Registry, `GEditor`, viewport. |
 | **threading** | Game thread. |
-| **doc_links** | [`context-management.md`](context-management.md) |
+| **doc_links** | [`context-management.md`](../context/context-management.md) |
 | **status** | `research` |
 
 ---
@@ -999,7 +999,7 @@ These are the first implementation wave. Each row is expanded in its domain sect
 | Field | Value |
 |-------|--------|
 | **summary** | Write a text file anywhere under the project directory (same path rules as `project_file_read_text`; confirmation unless headed auto-run). |
-| **parameters** | `relative_path`, `content`, optional `confirm` (auto-filled in headed runs when `UNREAL_AI_AUTO_RUN_DESTRUCTIVE=1`). |
+| **parameters** | `relative_path`, `content`, optional `confirm` (auto-filled in headed runs when `AutoRunDestructiveDefault` is true in `UnrealAiRuntimeDefaults.h`). |
 | **returns** | `success`. |
 | **side_effects** | disk |
 | **permission** | `destructive` |

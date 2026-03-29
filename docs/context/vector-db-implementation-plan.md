@@ -19,19 +19,19 @@ This design is intentionally lightweight:
 ## 2) Alignment with current architecture
 
 This plan extends existing systems documented in:
-- `docs/context-management.md` (`IAgentContextService` pipeline and candidate ranking),
-- `docs/memory-system.md` (staged retrieval and service isolation),
-- `docs/agent-and-tool-requirements.md` (v1 no-vector constraint; this is post-v1 optional),
+- `docs/context/context-management.md` (`IAgentContextService` pipeline and candidate ranking),
+- `docs/context/memory-system.md` (staged retrieval and service isolation),
+- `docs/tooling/agent-and-tool-requirements.md` (v1 no-vector constraint; this is post-v1 optional),
 - `README.md` (local-first plugin architecture summary).
 
-### 2.1 Visual architecture (Structurizr)
+### 2.1 Visual architecture (C4 diagrams)
 
 Regenerated from `docs/architecture-maps/architecture.dsl` (run `scripts/export-architecture-maps.ps1` after edits):
 
 | View key | What it shows |
 |----------|----------------|
 | `vector-db-end-to-end` | Containers: retrieval service, embedding adapter, context + harness consumers, memory feed for index chunks, SQLite + manifest on disk, editor API boundary, LLM provider for `/embeddings`. |
-| `vector-db-query-sequence` | Dynamic sequence: prefetch → `BuildContextWindow` → consume/query → embed (if needed) → SQLite cosine + lexical fallback. |
+| `vector-db-query-sequence` | Dynamic sequence: prefetch â†’ `BuildContextWindow` â†’ consume/query â†’ embed (if needed) â†’ SQLite cosine + lexical fallback. |
 
 Existing `retrieval-components` view still lists internal retrieval components only; the two views above are the **system-level** vector story.
 
@@ -41,22 +41,22 @@ The local vector DB is a **project-scoped semantic index** over **textual corpor
 
 | In scope (indexed into `index.db` when enabled) | Out of scope (not replaced by vectors; handled elsewhere) |
 |---------------------------------------------------|------------------------------------------------------------|
-| **Filesystem text** under configured **root presets** and **`indexedExtensions` whitelist** only (`UnrealAiRetrievalIndexConfig::CollectFilesystemIndexPaths`, `FUnrealAiRetrievalService::BuildOrRebuildIndexNow`). Default whitelist matches legacy behavior (`.h`, `.hpp`, `.cpp`, `.md`, `.txt`, `.ini`) when `indexedExtensions` is empty. | **`Content/` assets as binary blobs** (meshes, textures, most `.uasset` bytes)—never read as raw string for embedding. |
+| **Filesystem text** under configured **root presets** and **`indexedExtensions` whitelist** only (`UnrealAiRetrievalIndexConfig::CollectFilesystemIndexPaths`, `FUnrealAiRetrievalService::BuildOrRebuildIndexNow`). Default whitelist matches legacy behavior (`.h`, `.hpp`, `.cpp`, `.md`, `.txt`, `.ini`) when `indexedExtensions` is empty. | **`Content/` assets as binary blobs** (meshes, textures, most `.uasset` bytes)â€”never read as raw string for embedding. |
 | **Asset Registry** metadata lines (optional): synthetic shards under `virtual://asset_registry/part_*.txt` when `assetRegistryMaxAssets` > 0; no `.uasset` reads. | **Full chat transcript** (`conversation.json` stays in harness; not vector-indexed as the conversation). |
 | **Blueprint feature** text via `UnrealAiBlueprintFeatureExtractor` (not raw `.uasset` embedding). | **Live tool results** and **editor snapshot** (deterministic ranker inputs from `IAgentContextService`). |
-| **Memory** records as chunks **only if** `indexMemoryRecordsInVectorStore` is true (default **false**). Prefer the **tagged memory system** for primary memory UX; see `docs/memory-system.md`. | **Attachments**, **@mentions**, **plan DAG**—same as before (`context-management.md`). |
+| **Memory** records as chunks **only if** `indexMemoryRecordsInVectorStore` is true (default **false**). Prefer the **tagged memory system** for primary memory UX; see [`memory-system.md`](memory-system.md). | **Attachments**, **@mentions**, **plan DAG**—same as before ([`context-management.md`](context-management.md)). |
 | Embeddings stored per chunk in SQLite + **manifest** metadata. | |
 
 Normative intent from day one: **context assembly remains authoritative**; retrieval adds **`retrieval_snippet`** candidates into the **same ranker + budget** as tool results and memory snippets.
 
 ### 2.3 Corpus expansion settings (whitelist, roots, caps)
 
-These fields live under `retrieval` in plugin settings JSON and in **AI Settings → Retrieval** in the editor.
+These fields live under `retrieval` in plugin settings JSON and in **AI Settings â†’ Retrieval** in the editor.
 
 | Setting | Role |
 |---------|------|
-| `rootPreset` | `minimal` — `Source/`, `docs/`. `standard` — also `Config/`, `Plugins/*/Source/`. `extended` — also `Content/` (still **whitelist-only**). Project `.uproject` directory is included when present so `.uproject` / `.uplugin` can be indexed if listed in the whitelist. |
-| `indexedExtensions` | **Allow-list only**: extensions not listed are never opened for text indexing. Empty array ⇒ built-in legacy list above. |
+| `rootPreset` | `minimal` â€” `Source/`, `docs/`. `standard` â€” also `Config/`, `Plugins/*/Source/`. `extended` â€” also `Content/` (still **whitelist-only**). Project `.uproject` directory is included when present so `.uproject` / `.uplugin` can be indexed if listed in the whitelist. |
+| `indexedExtensions` | **Allow-list only**: extensions not listed are never opened for text indexing. Empty array â‡’ built-in legacy list above. |
 | `maxFilesPerRebuild` | Stop after N files (sorted paths); 0 = unlimited. Logged when truncation occurs. |
 | `maxTotalChunksPerRebuild` / `maxEmbeddingCallsPerRebuild` | Hard cap on chunks/embeddings per rebuild (combined with the stricter of the two). Changed sources beyond the cap are deferred to a later rebuild (sorted source order; tail deferred). |
 | `chunkChars`, `chunkOverlap` | Text chunking for files and asset-registry shards (clamped in code). |
@@ -378,7 +378,7 @@ Normative:
 
 ### Phase 3: memory vectorization (optional)
 - Add vector fields for memory retrieval stage.
-- Preserve staged memory gates from `docs/memory-system.md`.
+- Preserve staged memory gates from `docs/context/memory-system.md`.
 
 ## 17) Testing plan
 

@@ -1,8 +1,8 @@
 # Guide: auditing the tool catalog using harness and test results
 
-**Audience:** Humans or coding agents reviewing [`Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json`](../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) for **redundancy**, **unused / underused** entries, and **inaccurate** (misleading or broken) tools.
+**Audience:** Humans or coding agents reviewing [`Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) for **redundancy**, **unused / underused** entries, and **inaccurate** (misleading or broken) tools.
 
-**Related:** [`tool-registry.md`](tool-registry.md), [`fine-tuning-log.md`](fine-tuning-log.md) (coverage audit), [`.cursor/rules/testing-long-running-harness.mdc`](../.cursor/rules/testing-long-running-harness.mdc).
+**Related:** [`tool-registry.md`](tool-registry.md), [`fine-tuning-log.md`](fine-tuning-log.md) (coverage audit), [`.cursor/rules/testing-long-running-harness.mdc`](../../.cursor/rules/testing-long-running-harness.mdc).
 
 ---
 
@@ -23,8 +23,8 @@
 
 Always prefer the **latest** long-running batch unless the task names a specific run.
 
-1. **Batch pointer:** [`tests/long-running-tests/last-suite-summary.json`](../tests/long-running-tests/last-suite-summary.json) — read `batch_output_folder` / `batch_stamp`.
-2. **Classification rollup:** `harness-classification.json` inside that batch folder (from [`tests/classify_harness_run_jsonl.py`](../tests/classify_harness_run_jsonl.py) if present).
+1. **Batch pointer:** [`tests/long-running-tests/last-suite-summary.json`](../../tests/long-running-tests/last-suite-summary.json) — read `batch_output_folder` / `batch_stamp`.
+2. **Classification rollup:** `harness-classification.json` inside that batch folder (from [`tests/classify_harness_run_jsonl.py`](../../tests/classify_harness_run_jsonl.py) if present).
 3. **Per-turn artifacts:** under the batch folder, each suite’s `turns/**/run.jsonl` — lines with `"type":"tool_finish"` (and deltas if you need tool names from stream events, depending on logger format).
 4. **Catalog:** `UnrealAiToolCatalog.json` — `meta.categories`, per-tool `summary`, `parameters`, `permission`, `side_effects`, `status`, `modes`.
 5. **Optional:** static coverage table in [`fine-tuning-log.md`](fine-tuning-log.md) — which tools are **high/low/gap/policy** for current vague suites.

@@ -1,6 +1,6 @@
 # Tool surface expansion — architecture and rollout
 
-This document captures **recommended strategies** for improving **tool-call quality** and **token efficiency** while keeping **clear separation of concerns**. It extends the **existing** design: a single [`UnrealAiToolCatalog.json`](../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json), per-tool `modes` (`ask` / `agent` / `plan`), optional static **core pack** (`UNREAL_AI_TOOL_PACK` + `context_selector.always_include_in_core_pack` + `UNREAL_AI_TOOL_PACK_EXTRA`), and assembly via [`BuildCompactToolIndexAppendix`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tools/UnrealAiToolCatalog.cpp) / [`BuildLlmToolsJsonArrayForMode`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tools/UnrealAiToolCatalog.cpp) from [`UnrealAiTurnLlmRequestBuilder`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Harness/UnrealAiTurnLlmRequestBuilder.cpp).
+This document captures **recommended strategies** for improving **tool-call quality** and **token efficiency** while keeping **clear separation of concerns**. It extends the **existing** design: a single [`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json), per-tool `modes` (`ask` / `agent` / `plan`), optional static **core pack** (`ToolPackRestrictToCore` / `ToolPackExtraCommaSeparated` in [`UnrealAiRuntimeDefaults.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h) + `context_selector.always_include_in_core_pack`), and assembly via [`BuildCompactToolIndexAppendix`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tools/UnrealAiToolCatalog.cpp) / [`BuildLlmToolsJsonArrayForMode`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tools/UnrealAiToolCatalog.cpp) from [`UnrealAiTurnLlmRequestBuilder`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Harness/UnrealAiTurnLlmRequestBuilder.cpp).
 
 **Goals**
 
@@ -37,10 +37,10 @@ Therefore:
 
 | Concern | Today |
 |--------|--------|
-| **Eligibility** | Per-tool `modes`; optional **core pack** env narrows to `always_include_in_core_pack` + extras. |
+| **Eligibility** | Per-tool `modes`; optional **core pack** (defaults header) narrows to `always_include_in_core_pack` + extras. |
 | **Dynamic relevance** | None per turn. |
-| **Wire format** | Default: **`unreal_ai_dispatch`** + markdown index from `BuildCompactToolIndexAppendix`; optional **native** full `tools[]` via `UNREAL_AI_TOOL_SURFACE=native`. |
-| **Context packing** | [`FUnrealAiContextService`](context-management.md) — memories, snapshots, **docs** retrieval — **orthogonal** to tools. |
+| **Wire format** | Default: **`unreal_ai_dispatch`** + markdown index from `BuildCompactToolIndexAppendix`; optional **native** full `tools[]` via `ToolSurfaceUseDispatch = false` in [`UnrealAiRuntimeDefaults.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h). |
+| **Context packing** | [`FUnrealAiContextService`](../context/context-management.md) — memories, snapshots, **docs** retrieval — **orthogonal** to tools. |
 
 The catalog remains the **single source of truth** for schemas; new fields should live **in** or **beside** it (see §2.9).
 
@@ -94,7 +94,7 @@ Per-thread cache with invalidation on topic change.
 |------|----------------|
 | **Ask** | Often static `modes.ask` list; optional light retrieval. |
 | **Agent** | Primary path for eligibility + assembler + budget. |
-| **Plan** | Do **not** assume globally “Plan = no tools.” Align with **planner vs executor** turns in [`UnrealAiTurnLlmRequestBuilder`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Harness/UnrealAiTurnLlmRequestBuilder.cpp) / harness. |
+| **Plan** | Do **not** assume globally “Plan = no tools.” Align with **planner vs executor** turns in [`UnrealAiTurnLlmRequestBuilder`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Harness/UnrealAiTurnLlmRequestBuilder.cpp) / harness. |
 
 ### 2.8 Observability (harness-aligned)
 
@@ -147,13 +147,13 @@ Schema validation, `suggested_correct_call`, arg repair — first-class.
 ## 3. Integration — one precedence stack
 
 1. **Mode filter** (catalog `modes`).
-2. **Optional** `UNREAL_AI_TOOL_PACK` narrow.
+2. **Optional** core-pack narrow (`ToolPackRestrictToCore` / extras in defaults header).
 3. **Shaped query** (§2.10) → **eligibility** (similarity + optional **usage prior** §2.5 + **domain bias** §2.11) → **dynamic K** (§2.12).
 4. **Merge** with mandatory **cheap guardrails** (metadata).
 5. **Budget** + **`BuildCompactToolIndexAppendix` / `BuildLlmToolsJsonArrayForMode`** (or wrappers).
 6. **Micro-iteration** (§2.13) only on failure path.
 
-Env: existing `UNREAL_AI_TOOL_PACK`, `UNREAL_AI_TOOL_SURFACE`; tiered pipeline and usage prior default **on** — use `UNREAL_AI_TOOL_ELIGIBILITY=0` / `UNREAL_AI_TOOL_USAGE_PRIOR=0` to opt out.
+Compiled defaults: `ToolSurfaceUseDispatch`, `ToolEligibilityTelemetryEnabled`, `ToolUsagePriorEnabled`, etc. in [`UnrealAiRuntimeDefaults.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h) — not repo `.env` variables.
 
 ---
 
@@ -245,7 +245,7 @@ flowchart TB
 
 ## 10. Landed implementation (C++) — summary
 
-The plugin implements the **P0–P2** slice of this plan **by default** (opt out with `UNREAL_AI_TOOL_ELIGIBILITY=0` for legacy index only): **query shaping**, **BM25 lexical retrieval** over enabled catalog tools, **editor domain bias**, **dynamic K**, **tiered markdown budget** + guardrails (`always_include_in_core_pack`), **harness telemetry** (`tool_surface_metrics`), **append-only usage JSONL** + **session operational prior**, and a **bounded repair user line** after bad `unreal_ai_dispatch` unwraps. Usage-weighted blending from long-term stored priors (decay, file-backed aggregates) remains **future work** unless you extend the prior module.
+The plugin implements the **P0–P2** slice of this plan **by default** (toggle tiered pipeline via `ToolEligibilityTelemetryEnabled` in the defaults header for experiments): **query shaping**, **BM25 lexical retrieval** over enabled catalog tools, **editor domain bias**, **dynamic K**, **tiered markdown budget** + guardrails (`always_include_in_core_pack`), **harness telemetry** (`tool_surface_metrics`), **append-only usage JSONL** + **session operational prior**, and a **bounded repair user line** after bad `unreal_ai_dispatch` unwraps. Usage-weighted blending from long-term stored priors (decay, file-backed aggregates) remains **future work** unless you extend the prior module.
 
 | Piece | Role | Why separate |
 |-------|------|----------------|
@@ -255,21 +255,21 @@ The plugin implements the **P0–P2** slice of this plan **by default** (opt out
 | `UnrealAiToolKPolicy` | Margin-based K between min/max | Saves tokens when intent is sharp; widens when ambiguous. |
 | `UnrealAiToolUsagePrior` | Session operational ok/fail | Refines “valid call” rate, **not** task success (see **Principle**). |
 | `UnrealAiToolUsageEventLogger` | JSONL for offline analysis | Enables future `w_use` tuning from real traces. |
-| `UnrealAiToolSurfacePipeline` | Orchestrates the above + calls tiered catalog build | Runs unless opted out (`UNREAL_AI_TOOL_ELIGIBILITY=0`); requires Agent, dispatch, round 1. |
+| `UnrealAiToolSurfacePipeline` | Orchestrates the above + calls tiered catalog build | Runs unless `ToolEligibilityTelemetryEnabled` is false; requires Agent, dispatch, round 1. |
 | `FUnrealAiToolCatalog` tiered APIs | Roster + expanded parameter excerpts under char budget | Token-efficient surface vs dumping full schemas for every tool. |
 | `UnrealAiTurnLlmRequestBuilder` | Invokes pipeline before assembling system text | Keeps tool wiring in the request builder; context service stays docs/attachments. |
 | `FUnrealAiAgentHarness` | Telemetry, JSONL, prior updates, repair nudge | Operational observability and bounded repair without forking validation authority. |
 
-**Architecture (Structurizr):** the model [`architecture-maps/architecture.dsl`](../architecture-maps/architecture.dsl) includes a **`tool-surface-graph`** component view and **`tool-surface-sequence`** dynamic view (tool pipeline vs **Retrieval Service** for project/docs vectors). Regenerate SVGs after DSL edits: [`scripts/export-architecture-maps.ps1`](../scripts/export-architecture-maps.ps1) (see also [`vector-db-implementation-plan.md`](vector-db-implementation-plan.md)).
+**Architecture (C4):** the model [`architecture-maps/architecture.dsl`](../architecture-maps/architecture.dsl) includes a **`tool-surface-graph`** component view and **`tool-surface-sequence`** dynamic view (tool pipeline vs **Retrieval Service** for project/docs vectors). Regenerate SVGs after DSL edits: [`scripts/export-architecture-maps.ps1`](../../scripts/export-architecture-maps.ps1) (see also [`vector-db-implementation-plan.md`](../context/vector-db-implementation-plan.md)).
 
-**Env (short):** Tiered eligibility, usage prior blend, JSONL logging, and repair nudges are **on by default** (no env vars required). Set `UNREAL_AI_TOOL_ELIGIBILITY=0` (or `off`/`legacy`) to restore the legacy full sorted tool index; set `UNREAL_AI_TOOL_USAGE_PRIOR=0` to disable the session prior blend. Tunables: `UNREAL_AI_TOOL_K_MIN` / `K_MAX`, `UNREAL_AI_TOOL_EXPANDED_COUNT`, `UNREAL_AI_TOOL_SURFACE_BUDGET_CHARS`, `UNREAL_AI_TOOL_REPAIR` — see `meta.tool_surface.env` in [`UnrealAiToolCatalog.json`](../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json).
+**Defaults (short):** Tiered eligibility, usage prior blend, JSONL logging, and repair nudges are **on by default** in [`UnrealAiRuntimeDefaults.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h) (`ToolEligibilityTelemetryEnabled`, `ToolUsagePriorEnabled`, `ToolUsageLogEnabled`, `ToolRepairNudgeEnabled`, `ToolKMin`/`ToolKMax`, `ToolExpandedCount`, `ToolSurfaceBudgetChars`). The catalog `meta.tool_surface` points at the same header.
 
 ---
 
 ## 11. Related docs
 
 - [`tool-registry.md`](tool-registry.md)
-- [`context-management.md`](context-management.md)
+- [`context-management.md`](../context/context-management.md)
 - [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md)
 
 ---
