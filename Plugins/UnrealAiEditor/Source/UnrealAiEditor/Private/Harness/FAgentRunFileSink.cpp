@@ -3,22 +3,24 @@
 #include "Context/AgentContextTypes.h"
 #include "Context/AgentContextFormat.h"
 #include "Context/IAgentContextService.h"
+#include "Async/Async.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "Logging/LogMacros.h"
 #include "Harness/UnrealAiConversationJson.h"
 #include "Misc/DateTime.h"
 #include "Misc/FileHelper.h"
 #include "Misc/UnrealAiHarnessProgressTelemetry.h"
 #include "Misc/UnrealAiRuntimeDefaults.h"
+#include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
-#include "Prompt/UnrealAiPromptAssemblyStrategy.h"
 #include "UnrealAiEditorSettings.h"
 
 namespace UnrealAiAgentRunFileSinkPriv
@@ -60,6 +62,30 @@ namespace UnrealAiAgentRunFileSinkPriv
 	}
 }
 
+namespace UnrealAiAgentRunFileSinkPriv
+{
+	/** Plain-text trace beside run.jsonl — survives hangs where JSONL never receives run_finished. */
+	static void AppendHarnessProgressLogFile(const FString& JsonlPath, const FString& Line)
+	{
+		if (JsonlPath.IsEmpty())
+		{
+			return;
+		}
+		const FString Dir = FPaths::GetPath(JsonlPath);
+		if (Dir.IsEmpty())
+		{
+			return;
+		}
+		IFileManager::Get().MakeDirectory(*Dir, true);
+		const FString ProgressLogPath = FPaths::Combine(Dir, TEXT("harness_progress.log"));
+		FString Existing;
+		FFileHelper::LoadFileToString(Existing, *ProgressLogPath);
+		const FString Stamp = FDateTime::UtcNow().ToIso8601();
+		Existing += FString::Printf(TEXT("[%s] %s%s"), *Stamp, *Line, LINE_TERMINATOR);
+		FFileHelper::SaveStringToFile(Existing, *ProgressLogPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	}
+}
+
 FAgentRunFileSink::FAgentRunFileSink(
 	FString InJsonlPath,
 	IAgentContextService* InContextService,
@@ -82,6 +108,9 @@ FAgentRunFileSink::FAgentRunFileSink(
 	, CompletionSuccessPtr(InOutSuccess)
 	, CompletionErrorPtr(InOutFinishError)
 {
+	UnrealAiAgentRunFileSinkPriv::AppendHarnessProgressLogFile(
+		JsonlPath,
+		FString::Printf(TEXT("sink_constructed thread_id=%s jsonl=%s"), *ThreadId, *JsonlPath));
 }
 
 FAgentRunFileSink::~FAgentRunFileSink()
@@ -89,9 +118,16 @@ FAgentRunFileSink::~FAgentRunFileSink()
 	// If Succeed()/Fail() never reached OnRunFinished, headed batch scripts stall on missing `"type":"run_finished"`.
 	// If OnRunFinished ran but disk append failed, bFinished was released so this can retry.
 	// After a successful terminal write, compare_exchange in OnRunFinished blocks duplicate lines.
-	OnRunFinished(
+	FinalizeRunFinished(
 		false,
-		TEXT("Harness run sink destroyed before normal completion; run.jsonl may be truncated."));
+		TEXT("Harness run sink destroyed before normal completion; run.jsonl may be truncated."),
+		false);
+}
+
+void FAgentRunFileSink::OnHarnessProgressLog(const FString& Line)
+{
+	UnrealAiAgentRunFileSinkPriv::AppendHarnessProgressLogFile(JsonlPath, Line);
+	UE_LOG(LogTemp, Display, TEXT("UnrealAi harness_progress: %s"), *Line);
 }
 
 void FAgentRunFileSink::AppendHarnessDiagnosticJson(const TSharedPtr<FJsonObject>& Obj)
@@ -149,70 +185,122 @@ void FAgentRunFileSink::MaybeDumpContextWindow(const TCHAR* Reason)
 	FAgentContextBuildOptions Opt;
 	Opt.Mode = EUnrealAiAgentMode::Agent;
 	Opt.ContextBuildInvocationReason = FString::Printf(TEXT("harness_dump_%s"), Reason);
+	bool bVerboseContext = UnrealAiRuntimeDefaults::HarnessContextVerboseDefault;
 	{
-		bool bVerboseContext = UnrealAiRuntimeDefaults::HarnessContextVerboseDefault;
+		const FString V = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_VERBOSE_CONTEXT")).TrimStartAndEnd();
+		if (V == TEXT("0") || V.Equals(TEXT("false"), ESearchCase::IgnoreCase))
 		{
-			const FString V = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_VERBOSE_CONTEXT")).TrimStartAndEnd();
-			if (V == TEXT("0") || V.Equals(TEXT("false"), ESearchCase::IgnoreCase))
-			{
-				bVerboseContext = false;
-			}
-			else if (V == TEXT("1") || V.Equals(TEXT("true"), ESearchCase::IgnoreCase))
-			{
-				bVerboseContext = true;
-			}
+			bVerboseContext = false;
 		}
-		Opt.bVerboseContextBuild = bVerboseContext;
+		else if (V == TEXT("1") || V.Equals(TEXT("true"), ESearchCase::IgnoreCase))
+		{
+			bVerboseContext = true;
+		}
 	}
+	Opt.bVerboseContextBuild = bVerboseContext;
+
+	const FString UtcStart = FDateTime::UtcNow().ToIso8601();
+	const double WallStartSec = FPlatformTime::Seconds();
 	const FAgentContextBuildResult Built = ContextService->BuildContextWindow(Opt);
-	const FString BaseDir = FPaths::GetPath(JsonlPath);
-	const FString Base = BaseDir / FString::Printf(TEXT("context_window_%s.txt"), Reason);
-	FFileHelper::SaveStringToFile(Built.ContextBlock, *Base, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	const double ElapsedMs = (FPlatformTime::Seconds() - WallStartSec) * 1000.0;
+	const FString UtcEnd = FDateTime::UtcNow().ToIso8601();
+
+	UE_LOG(
+		LogTemp,
+		Display,
+		TEXT("UnrealAi harness: context build reason=%s elapsed_ms=%.1f chars=%d verbose=%s"),
+		Reason,
+		ElapsedMs,
+		Built.ContextBlock.Len(),
+		bVerboseContext ? TEXT("yes") : TEXT("no"));
+
 	{
-		TSharedPtr<FJsonObject> TraceJson = MakeShared<FJsonObject>();
-		TraceJson->SetStringField(TEXT("reason"), Reason);
-		TraceJson->SetStringField(TEXT("project_id"), ProjectId);
-		TraceJson->SetStringField(TEXT("thread_id"), ThreadId);
-		TraceJson->SetNumberField(TEXT("context_chars"), static_cast<double>(Built.ContextBlock.Len()));
-		TArray<TSharedPtr<FJsonValue>> WarningArr;
-		for (const FString& W : Built.Warnings)
-		{
-			WarningArr.Add(MakeShared<FJsonValueString>(W));
-		}
-		TraceJson->SetArrayField(TEXT("warnings"), WarningArr);
-		TArray<TSharedPtr<FJsonValue>> VerboseArr;
-		for (const FString& L : Built.VerboseTraceLines)
-		{
-			VerboseArr.Add(MakeShared<FJsonValueString>(L));
-		}
-		TraceJson->SetArrayField(TEXT("verbose_trace_lines"), VerboseArr);
-		FString TraceJsonStr;
+		TSharedPtr<FJsonObject> Tim = MakeShared<FJsonObject>();
+		Tim->SetStringField(TEXT("type"), TEXT("context_build_timing"));
+		Tim->SetStringField(TEXT("reason"), Reason);
+		Tim->SetStringField(TEXT("invocation_reason"), Opt.ContextBuildInvocationReason);
+		Tim->SetNumberField(TEXT("elapsed_ms"), ElapsedMs);
+		Tim->SetNumberField(TEXT("context_chars"), static_cast<double>(Built.ContextBlock.Len()));
+		Tim->SetBoolField(TEXT("verbose"), bVerboseContext);
+		Tim->SetNumberField(TEXT("warnings_count"), static_cast<double>(Built.Warnings.Num()));
+		Tim->SetStringField(TEXT("utc_start"), UtcStart);
+		Tim->SetStringField(TEXT("utc_end"), UtcEnd);
+		Tim->SetStringField(
+			TEXT("note"),
+			TEXT("BuildContextWindow runs on game thread (editor snapshot + retrieval + ranking). Large files may write async after."));
+		AppendJsonObject(Tim);
+	}
+
+	const FString BaseDir = FPaths::GetPath(JsonlPath);
+	const FString ContextTxtPath = BaseDir / FString::Printf(TEXT("context_window_%s.txt"), Reason);
+	const FString ContextBlockCopy = Built.ContextBlock;
+	TSharedPtr<FJsonObject> TraceJson = MakeShared<FJsonObject>();
+	TraceJson->SetStringField(TEXT("reason"), Reason);
+	TraceJson->SetStringField(TEXT("project_id"), ProjectId);
+	TraceJson->SetStringField(TEXT("thread_id"), ThreadId);
+	TraceJson->SetNumberField(TEXT("elapsed_ms"), ElapsedMs);
+	TraceJson->SetStringField(TEXT("utc_start"), UtcStart);
+	TraceJson->SetStringField(TEXT("utc_end"), UtcEnd);
+	TraceJson->SetBoolField(TEXT("verbose"), bVerboseContext);
+	TraceJson->SetNumberField(TEXT("context_chars"), static_cast<double>(Built.ContextBlock.Len()));
+	TArray<TSharedPtr<FJsonValue>> WarningArr;
+	for (const FString& W : Built.Warnings)
+	{
+		WarningArr.Add(MakeShared<FJsonValueString>(W));
+	}
+	TraceJson->SetArrayField(TEXT("warnings"), WarningArr);
+	TArray<TSharedPtr<FJsonValue>> VerboseArr;
+	for (const FString& L : Built.VerboseTraceLines)
+	{
+		VerboseArr.Add(MakeShared<FJsonValueString>(L));
+	}
+	TraceJson->SetArrayField(TEXT("verbose_trace_lines"), VerboseArr);
+	FString TraceJsonStr;
+	{
 		const TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> JsonWriter =
 			TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&TraceJsonStr);
 		FJsonSerializer::Serialize(TraceJson.ToSharedRef(), JsonWriter);
-		const FString TraceJsonPath = BaseDir / FString::Printf(TEXT("context_build_trace_%s.json"), Reason);
-		FFileHelper::SaveStringToFile(TraceJsonStr + TEXT("\n"), *TraceJsonPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 	}
+	const FString TraceJsonPath = BaseDir / FString::Printf(TEXT("context_build_trace_%s.json"), Reason);
+	FString VerboseTxtContent;
+	FString VerboseTxtPath;
 	if (Opt.bVerboseContextBuild && Built.VerboseTraceLines.Num() > 0)
 	{
-		const FString TracePath = BaseDir / FString::Printf(TEXT("context_build_trace_%s.txt"), Reason);
-		FString Trace;
-		Trace += FString::Printf(TEXT("Context build trace (reason=%s)\n"), Reason);
+		VerboseTxtPath = BaseDir / FString::Printf(TEXT("context_build_trace_%s.txt"), Reason);
+		VerboseTxtContent += FString::Printf(TEXT("Context build trace (reason=%s)\n"), Reason);
 		if (Built.Warnings.Num() > 0)
 		{
-			Trace += FString::Printf(TEXT("Warnings (%d)\n"), Built.Warnings.Num());
+			VerboseTxtContent += FString::Printf(TEXT("Warnings (%d)\n"), Built.Warnings.Num());
 			for (const FString& W : Built.Warnings)
 			{
-				Trace += FString::Printf(TEXT("- %s\n"), *W);
+				VerboseTxtContent += FString::Printf(TEXT("- %s\n"), *W);
 			}
-			Trace += TEXT("\n");
+			VerboseTxtContent += TEXT("\n");
 		}
 		for (const FString& L : Built.VerboseTraceLines)
 		{
-			Trace += L + TEXT("\n");
+			VerboseTxtContent += L + TEXT("\n");
 		}
-		FFileHelper::SaveStringToFile(Trace, *TracePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 	}
+	Async(EAsyncExecution::LargeThreadPool,
+		[ContextTxtPath, ContextBlockCopy, TraceJsonPath, TraceJsonStr, VerboseTxtPath, VerboseTxtContent]()
+		{
+			FFileHelper::SaveStringToFile(
+				ContextBlockCopy,
+				*ContextTxtPath,
+				FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+			FFileHelper::SaveStringToFile(
+				TraceJsonStr + TEXT("\n"),
+				*TraceJsonPath,
+				FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+			if (!VerboseTxtPath.IsEmpty())
+			{
+				FFileHelper::SaveStringToFile(
+					VerboseTxtContent,
+					*VerboseTxtPath,
+					FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+			}
+		});
 }
 
 void FAgentRunFileSink::OnRunStarted(const FUnrealAiRunIds& Ids)
@@ -221,10 +309,6 @@ void FAgentRunFileSink::OnRunStarted(const FUnrealAiRunIds& Ids)
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetStringField(TEXT("type"), TEXT("run_started"));
 	O->SetStringField(TEXT("run_id"), Ids.RunId.ToString(EGuidFormats::DigitsWithHyphens));
-	{
-		const EUnrealAiPromptAssemblyKind PromptKind = UnrealAiPromptAssembly::GetEffectiveAssemblyKind();
-		O->SetStringField(TEXT("prompt_assembly_kind"), UnrealAiPromptAssembly::KindToTelemetryString(PromptKind));
-	}
 	AppendJsonObject(O);
 	MaybeDumpContextWindow(TEXT("run_started"));
 }
@@ -388,6 +472,9 @@ void FAgentRunFileSink::OnPlanHarnessSubTurnComplete()
 		O->SetStringField(TEXT("note"), TEXT("Planner or plan-node RunTurn finished; sync wait resets for next segment."));
 		AppendJsonObject(O);
 	}
+	OnHarnessProgressLog(FString::Printf(
+		TEXT("OnPlanHarnessSubTurnComplete sub_turn_index=%d -> PlanSubTurnEvent trigger (sync window reset)"),
+		PlanSubTurnCompleteCount));
 	// Do not call MaybeDumpContextWindow here: it runs on the game thread and duplicates OnRunContinuation
 	// (context_window_continuation_*) while blocking the next LLM segment; can stall or trip watchdogs.
 	NotifyPlanHarnessSyncSegmentBoundary();
@@ -401,6 +488,14 @@ void FAgentRunFileSink::OnLlmRequestPreparedForHttp(
 	const FUnrealAiLlmRequest& LlmRequest)
 {
 	using namespace UnrealAiAgentRunFileSinkPriv;
+	const float HttpSec = LlmRequest.HttpTimeoutOverrideSec > 0.f ? LlmRequest.HttpTimeoutOverrideSec : UnrealAiWaitTime::HttpRequestTimeoutSec;
+	OnHarnessProgressLog(FString::Printf(
+		TEXT("HTTP outbound: thread=%s mode=%s llm_round=%d http_timeout_sec=%.0f (0=use default) stream=%s"),
+		*TurnRequest.ThreadId,
+		*AgentModeString(TurnRequest.Mode),
+		LlmRound,
+		HttpSec,
+		LlmRequest.bStream ? TEXT("yes") : TEXT("no")));
 	// FAgentRunFileSink is headed-harness / automation only: log full prompts unless explicitly disabled.
 	if (!ShouldLogLlmRequestsToHarnessRunFile())
 	{
@@ -414,10 +509,6 @@ void FAgentRunFileSink::OnLlmRequestPreparedForHttp(
 	O->SetStringField(TEXT("thread_id"), TurnRequest.ThreadId);
 	O->SetStringField(TEXT("agent_mode"), AgentModeString(TurnRequest.Mode));
 	O->SetStringField(TEXT("model_profile_id"), TurnRequest.ModelProfileId);
-	{
-		const EUnrealAiPromptAssemblyKind PromptKind = UnrealAiPromptAssembly::GetEffectiveAssemblyKind();
-		O->SetStringField(TEXT("prompt_assembly_kind"), UnrealAiPromptAssembly::KindToTelemetryString(PromptKind));
-	}
 	O->SetStringField(TEXT("user_text"), TurnRequest.UserText);
 	O->SetNumberField(TEXT("llm_round"), static_cast<double>(LlmRound));
 	O->SetNumberField(TEXT("effective_max_llm_rounds"), static_cast<double>(EffectiveMaxLlmRounds));
@@ -473,11 +564,20 @@ void FAgentRunFileSink::OnLlmRequestPreparedForHttp(
 
 void FAgentRunFileSink::OnRunFinished(const bool bSuccess, const FString& ErrorMessage)
 {
+	FinalizeRunFinished(bSuccess, ErrorMessage, true);
+}
+
+void FAgentRunFileSink::FinalizeRunFinished(const bool bSuccess, const FString& ErrorMessage, const bool bSignalCompletion)
+{
 	bool bExpected = false;
 	if (!bFinished.compare_exchange_strong(bExpected, true, std::memory_order_relaxed))
 	{
 		return;
 	}
+	OnHarnessProgressLog(FString::Printf(
+		TEXT("OnRunFinished (terminal) success=%s err_len=%d"),
+		bSuccess ? TEXT("yes") : TEXT("no"),
+		ErrorMessage.Len()));
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetStringField(TEXT("type"), TEXT("run_finished"));
 	O->SetBoolField(TEXT("success"), bSuccess);
@@ -507,15 +607,15 @@ void FAgentRunFileSink::OnRunFinished(const bool bSuccess, const FString& ErrorM
 	{
 		MaybeDumpContextWindow(TEXT("run_finished"));
 	}
-	if (CompletionSuccessPtr)
+	if (bSignalCompletion && CompletionSuccessPtr)
 	{
 		*CompletionSuccessPtr = bSuccess;
 	}
-	if (CompletionErrorPtr)
+	if (bSignalCompletion && CompletionErrorPtr)
 	{
 		*CompletionErrorPtr = ErrorMessage;
 	}
-	if (DoneEvent)
+	if (bSignalCompletion && DoneEvent)
 	{
 		DoneEvent->Trigger();
 	}

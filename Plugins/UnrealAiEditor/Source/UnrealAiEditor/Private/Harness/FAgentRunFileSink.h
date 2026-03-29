@@ -70,6 +70,7 @@ public:
 		int32 LlmRound,
 		int32 EffectiveMaxLlmRounds,
 		const FUnrealAiLlmRequest& LlmRequest) override;
+	virtual void OnHarnessProgressLog(const FString& Line) override;
 
 	const FString& GetJsonlPath() const { return JsonlPath; }
 
@@ -77,6 +78,7 @@ public:
 	void AppendHarnessDiagnosticJson(const TSharedPtr<FJsonObject>& Obj);
 
 private:
+	void FinalizeRunFinished(bool bSuccess, const FString& ErrorMessage, bool bSignalCompletion);
 	bool AppendJsonObject(const TSharedPtr<FJsonObject>& Obj, bool bLogOnFailure = true);
 	bool AppendRunFinishedLineWithRetry(const TSharedPtr<FJsonObject>& Obj);
 	void MaybeDumpContextWindow(const TCHAR* Reason);
