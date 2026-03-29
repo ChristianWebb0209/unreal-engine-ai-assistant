@@ -113,7 +113,7 @@ def main() -> int:
         print("OK: no contract violations" + (" (strict: no bOk=false)" if args.strict else ""))
     else:
         print()
-        print("FAIL: fix dispatch/catalog/fixtures; see tests/TOOL_ITERATION_AGENT_PROMPT.md")
+        print("FAIL: fix dispatch/catalog contract; see docs/tooling/AGENT_HARNESS_HANDOFF.md")
 
     return exit_fail
 

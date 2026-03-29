@@ -20,9 +20,8 @@
     .\tests\long-running-tests\run-long-running-headed.ps1 -ScenarioFolder my-suite -DryRun
   Bandwidth: -MaxSuites N runs only the first N suite files (recursive sort order). Use 0 for all (default).
     N may be negative (e.g. -MaxSuites -1 = first suite only, -2 = first two). Same as positive |N|.
-  Budget (harness): primary stop = 4 consecutive identical tool failures OR per-turn token cap (default 500k);
-    round cap is a 512 backstop. -MaxLlmRounds 0 = do not set UNREAL_AI_HARNESS_MAX_LLM_ROUNDS (use profile/backstop).
-    -MaxTurnTokens 0 = omit UNREAL_AI_HARNESS_MAX_TOKENS_PER_TURN (harness default); -1 = unlimited tokens.
+  Budget (harness): primary stop = 4 consecutive identical tool failures OR per-turn token cap (model profile / default 500k);
+    round cap is a 512 backstop. -MaxLlmRounds / -MaxTurnTokens are recorded in summary.json only; tune limits in the model profile JSON (env overrides removed).
 
   JSON schema (suite files):
   {
@@ -38,36 +37,41 @@
   Notes
   - "type" values allowed: ask, agent, plan.
   - "plan" is mapped to harness mode "plan".
-  - Output layout (each script invocation gets one new folder; older batches are kept):
-      <scenario-folder>\runs\<run_localMachineTimestamp>\  (created at batch start using local machine time, ms resolution)
-        - last-suite-summary.json  (copy also written to <scenario-folder>\last-suite-summary.json as latest)
+  - Output layout (each script invocation gets one new folder under the central runs directory; older batches are kept):
+      tests\long-running-tests\runs\run-<index>-<localMachineTimestamp>\
+        Index is a monotonic integer across all scenarios. Timestamp uses local machine time with ms resolution.
+        - last-suite-summary.json  (copy also written to tests\long-running-tests\last-suite-summary.json as latest pointer)
         - editor_console_saved.log  (single-session mode: full Unreal Saved/Logs copy for the whole batch)
         <path-slug>\
           - summary.json
           - workflow-input.json (copy of source)
           - thread_id.txt
           - editor_console_saved.log (or _chunkNN): Unreal project log after that suite's editor session(s)
-          - editor_console_stdout.txt / editor_console_stderr.txt when available (process streams; UE_LOG harness output is in Unreal's -log window + Saved/Logs, not stdout)
+          - editor_console_stdout.txt / editor_console_stderr.txt (process streams; UE_LOG harness output is primarily in Unreal's -log window + Saved/Logs, not stdout)
           - turn_messages\turn_XX.txt
           - turns\step_XX\run.jsonl (+ context dumps)
           - turns\step_XX\context_decision_logs\*.jsonl
         In single-session mode, the same full-session log is also copied to each suite folder as editor_console_full_batch.log
 
-  Context observability defaults (enabled unless already set)
-  - UNREAL_AI_HARNESS_DUMP_CONTEXT=1
-  - UNREAL_AI_CONTEXT_DECISION_LOG=1
-  - UNREAL_AI_CONTEXT_VERBOSE=1
-  - UNREAL_AI_HARNESS_RUN_FINISHED_CONTEXT_DUMP=0 (default; set to 1 for full final context dump — can block on retrieval/vector index)
+  Context observability is controlled in C++ (UnrealAiRuntimeDefaults.h). -ReduceContextNoise passes nodump as the 5th RunAgentTurn arg for quieter batches.
 
-  -ReduceContextNoise: force UNREAL_AI_CONTEXT_DECISION_LOG=0 and UNREAL_AI_CONTEXT_VERBOSE=0 for quieter long batches (does not change UNREAL_AI_HARNESS_DUMP_CONTEXT unless you set it in the environment).
+  Interactive viewing (headed runs): use the main Unreal Editor window (large viewport/tabs). The script does not steal focus (-BringEditorToForeground to opt in). -log opens a separate log console — that is not the level viewport.
 
-  -MirrorEditorProcessStreamsToHost: echo the editor process stdout/stderr lines to this PowerShell console as well as editor_console_stdout/stderr .txt.
-    Default is off: Unreal on Windows rarely mirrors UE_LOG to process stdout; live harness progress uses the Unreal log window (-log) and LogTemp. Use this only to debug Chromium/launcher lines.
+  Logging (defaults — no extra flags)
+  - By default: process stdout/stderr are captured to editor_console_stdout/stderr .txt under the run folder; harness/UE_LOG
+    output is shown in the Unreal -log console window and appended to Saved/Logs/<project>.log (not streamed into PowerShell).
 
-  Per-turn harness sync (UNREAL_AI_HARNESS_SYNC_WAIT_MS)
-  - Default -SyncWaitMs is 150000 (150s), matching UnrealAiHarnessScenarioRunner when this script sets the env var.
-  - Plan-mode turns (suite type "plan") run multiple planner/agent substeps and often need >=120s wall time; if you see
-    "Harness run timed out waiting for completion" on plan steps, raise -SyncWaitMs (e.g. 180000) and re-run.
+  -LiveProjectLog: also tail Saved/Logs/<project>.log into this PowerShell window while the editor runs (useful in Cursor).
+
+  -NoLiveProjectLog: force-disable host tail (default is already off; use if you pass -LiveProjectLog elsewhere and want off).
+
+  -MirrorEditorProcessStreamsToHost: also echo the editor process stdout/stderr lines to this PowerShell (in addition to tee files). Default is off; Unreal on Windows rarely mirrors UE_LOG to process stdout.
+
+  -Unattended: pass Unreal's -unattended (automation mode: fewer prompts; some builds limit normal editor interaction).
+    Default is OFF so you can click the running editor and watch tools run. Use -Unattended for CI or when you need fully non-interactive shutdown.
+
+  Harness HTTP timeout + per-segment sync wait are hardcoded in UnrealAiWaitTimePolicy.h (namespace UnrealAiWaitTime; not .env / not script args).
+  Plan-mode applies that budget per planner pass and per DAG node.
 #>
 [CmdletBinding()]
 param(
@@ -78,8 +82,6 @@ param(
     [string]$SuiteFileName = 'suite.json',
     [int]$MaxLlmRounds = 0,
     [int]$MaxTurnTokens = 0,
-    [int]$SyncWaitMs = 150000,
-    [int]$HttpTimeoutSec = 20,
     [int]$EditorExitTimeoutSec = 0,
     [int]$MaxExecCmdChars = 7000,
     [int]$MaxSuites = 0,
@@ -88,22 +90,29 @@ param(
     [switch]$DryRun,
     [switch]$SkipClassification,
     [switch]$ReduceContextNoise,
-    [switch]$MirrorEditorProcessStreamsToHost
+    [switch]$MirrorEditorProcessStreamsToHost,
+    [switch]$LiveProjectLog,
+    [switch]$NoLiveProjectLog,
+    [switch]$Unattended,
+    [switch]$BringEditorToForeground
 )
 
 $ErrorActionPreference = 'Stop'
+$batchRunsRoot = $null
+$batchRunIndexUsed = 0
+$lastSummaryPointer = Join-Path $PSScriptRoot 'last-suite-summary.json'
+# Default: Unreal -log + Saved/Logs only; use -LiveProjectLog to stream project log into this PowerShell (old Cursor-centric default).
+$Script:StreamProjectLogToHost = $false
+if ($LiveProjectLog) { $Script:StreamProjectLogToHost = $true }
+if ($NoLiveProjectLog) { $Script:StreamProjectLogToHost = $false }
 $Script:SpawnedEditorPids = @()
 $Script:RunStartUtc = (Get-Date).ToUniversalTime()
+$Script:BatchEndBrief = $null
 
 $RepoRootForEnv = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $RepoRootForEnv 'scripts\Import-RepoDotenv.ps1')
 Import-RepoDotenv -RepoRoot $RepoRootForEnv
 . (Join-Path $RepoRootForEnv 'scripts\Set-UnrealAiHeadedToolPackDefaults.ps1')
-
-if ($ReduceContextNoise) {
-    $env:UNREAL_AI_CONTEXT_DECISION_LOG = '0'
-    $env:UNREAL_AI_CONTEXT_VERBOSE = '0'
-}
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = $RepoRootForEnv
@@ -120,51 +129,6 @@ $UProject = Join-Path $ProjectRoot 'blank.uproject'
 if (-not (Test-Path $EditorExe)) {
     Write-Error "UnrealEditor.exe not found: $EditorExe (set UE_ENGINE_ROOT or pass -EngineRoot)."
 }
-
-if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HARNESS_DUMP_CONTEXT)) {
-    $env:UNREAL_AI_HARNESS_DUMP_CONTEXT = '1'
-}
-if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_CONTEXT_DECISION_LOG)) {
-    $env:UNREAL_AI_CONTEXT_DECISION_LOG = '1'
-}
-if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_CONTEXT_VERBOSE)) {
-    $env:UNREAL_AI_CONTEXT_VERBOSE = '1'
-}
-if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_LLM_STREAM)) {
-    $env:UNREAL_AI_LLM_STREAM = '0'
-}
-# Final context dump after each turn can block on retrieval/vector DB and delays DoneEvent + Quit.
-# Default off; set UNREAL_AI_HARNESS_RUN_FINISHED_CONTEXT_DUMP=1 to enable (see FAgentRunFileSink).
-if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HARNESS_RUN_FINISHED_CONTEXT_DUMP)) {
-    $env:UNREAL_AI_HARNESS_RUN_FINISHED_CONTEXT_DUMP = '0'
-}
-if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_EMBEDDING_HTTP_TIMEOUT_SEC)) {
-    $env:UNREAL_AI_EMBEDDING_HTTP_TIMEOUT_SEC = '3'
-}
-if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HARNESS_ROUND_MIN_DELAY_MS)) {
-    $env:UNREAL_AI_HARNESS_ROUND_MIN_DELAY_MS = '800'
-}
-# Align with FOpenAiCompatibleHttpTransport default (max 8): long batches hit TPM; 2 attempts is usually too low.
-if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HTTP_429_MAX_ATTEMPTS)) {
-    $env:UNREAL_AI_HTTP_429_MAX_ATTEMPTS = '6'
-}
-# Client-side sliding-window TPM (UnrealAiHarnessTpmThrottle). Strict mode uses pessimistic token upper bounds
-# so window_sum + next_request stays within budget (tune UNREAL_AI_HARNESS_TPM_* if you still see TPM 429s).
-# TPM_PER_MINUTE unset = disabled for normal editor runs.
-if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HARNESS_TPM_PER_MINUTE)) {
-    $env:UNREAL_AI_HARNESS_TPM_PER_MINUTE = '200000'
-}
-if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HARNESS_EMBEDDING_TPM_PER_MINUTE)) {
-    $env:UNREAL_AI_HARNESS_EMBEDDING_TPM_PER_MINUTE = '200000'
-}
-if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HARNESS_TPM_WINDOW_SEC)) {
-    $env:UNREAL_AI_HARNESS_TPM_WINDOW_SEC = '60'
-}
-if ([string]::IsNullOrWhiteSpace($env:UNREAL_AI_HARNESS_TPM_STRICT)) {
-    $env:UNREAL_AI_HARNESS_TPM_STRICT = '1'
-}
-$env:UNREAL_AI_HARNESS_SYNC_WAIT_MS = [string]([Math]::Max(10000, $SyncWaitMs))
-$env:UNREAL_AI_HTTP_REQUEST_TIMEOUT_SEC = [string]([Math]::Max(5, $HttpTimeoutSec))
 
 function Resolve-ScenarioFolder {
     param([string]$PathLike)
@@ -280,6 +244,7 @@ function Get-RunJsonlQuickStats {
         exists = $false
         has_run_started = $false
         has_run_finished = $false
+        tool_finish_count = 0
         tool_fail_count = 0
         blocker_hint_count = 0
         line_count = 0
@@ -298,6 +263,7 @@ function Get-RunJsonlQuickStats {
         }
         $stats.has_run_started = ($raw -match '"type"\s*:\s*"run_started"')
         $stats.has_run_finished = ($raw -match '"type"\s*:\s*"run_finished"')
+        $stats.tool_finish_count = [regex]::Matches($raw, '"type"\s*:\s*"tool_finish"').Count
         $stats.tool_fail_count = [regex]::Matches($raw, '"type":"tool_finish"[^\r\n]*"success":false').Count
         $stats.blocker_hint_count = [regex]::Matches($raw, 'Blocked Summary|explicit_blocker').Count
         $stats.line_count = [regex]::Matches($raw, '\r?\n').Count + 1
@@ -437,6 +403,32 @@ function Stop-UnrealEditorConsoleTee {
     catch { }
 }
 
+function Try-BringUnrealMainWindowToForeground {
+    param([System.Diagnostics.Process]$Proc)
+    if ($null -eq $Proc) { return }
+    try {
+        $h = [IntPtr]::Zero
+        for ($i = 0; $i -lt 20; $i++) {
+            try { $Proc.Refresh() } catch { }
+            if ($Proc.HasExited) { return }
+            $h = $Proc.MainWindowHandle
+            if ($h -ne [IntPtr]::Zero) { break }
+            Start-Sleep -Milliseconds 350
+        }
+        if ($h -eq [IntPtr]::Zero) { return }
+        if (-not ('UnrealAiHarness.NativeWin32' -as [type])) {
+            Add-Type -Namespace UnrealAiHarness -Name NativeWin32 -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);
+'@ -ErrorAction Stop
+        }
+        $SW_RESTORE = 9
+        [void][UnrealAiHarness.NativeWin32]::ShowWindow($h, $SW_RESTORE)
+        [void][UnrealAiHarness.NativeWin32]::SetForegroundWindow($h)
+    }
+    catch { }
+}
+
 function Invoke-HeadedEditorDynamic {
     param(
         [string]$ExecCmds,
@@ -444,23 +436,32 @@ function Invoke-HeadedEditorDynamic {
         [int]$TurnCount,
         [string]$SessionLogDir = '',
         [string]$SessionLogFileSuffix = '',
-        [bool]$MirrorProcessStreamsToHost = $false
+        [bool]$MirrorProcessStreamsToHost = $false,
+        [bool]$LiveProjectLogToHost = $false,
+        [bool]$BringEditorToForeground = $false
     )
-    # Harness / module code uses UE_LOG(LogTemp, ...). There is no LogUnrealAiHarness category; without LogTemp Verbose,
-    # the separate log window from -log can look empty even while Saved/Logs/ has the full file.
-    $editorCliArgs = @(
-        "`"$UProject`"",
-        '-nop4',
-        '-nosplash',
-        '-log',
-        '-unattended',
-        '-LogCmds=LogTemp Verbose, LogAutomationController Verbose, LogAutomationCommandLine Verbose',
-        "-ExecCmds=`"$ExecCmds`""
-    )
+    # Harness uses UE_LOG(LogTemp, ...). Process stdout/stderr are redirected for tee files; Unreal does not always mirror
+    # UE_LOG to those pipes. Prefer Unreal -log + Saved/Logs; optional LiveProjectLogToHost tails the file into PowerShell.
+    $editorCliArgs = [System.Collections.Generic.List[string]]::new()
+    [void]$editorCliArgs.Add("`"$UProject`"")
+    [void]$editorCliArgs.Add('-nop4')
+    [void]$editorCliArgs.Add('-nosplash')
+    [void]$editorCliArgs.Add('-log')
+    if ($Unattended) {
+        [void]$editorCliArgs.Add('-unattended')
+    }
+    [void]$editorCliArgs.Add('-LogCmds=LogTemp Verbose, LogAutomationController Verbose, LogAutomationCommandLine Verbose')
+    [void]$editorCliArgs.Add("-ExecCmds=`"$ExecCmds`"")
 
     $useWatchdog = ($EditorExitTimeoutSec -gt 0)
     $watchdogDeadlineUtc = if ($useWatchdog) { (Get-Date).ToUniversalTime().AddSeconds($EditorExitTimeoutSec) } else { $null }
     Write-Host ("Running headed editor... mode={0}" -f $(if ($useWatchdog) { "dynamic+watchdog" } else { "dynamic-no-watchdog" })) -ForegroundColor Cyan
+    if ($Unattended) {
+        Write-Host 'Unreal -unattended: automation mode (viewport interaction may be limited in some builds).' -ForegroundColor DarkYellow
+    }
+    else {
+        Write-Host 'Interactive editor: -unattended omitted — click the viewport to watch (pass -Unattended for CI / fully non-interactive).' -ForegroundColor DarkGray
+    }
     $existingEditorPids = @((Get-Process -Name 'UnrealEditor' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id))
 
     $stdOutPath = $null
@@ -477,14 +478,16 @@ function Invoke-HeadedEditorDynamic {
     $teeSourceOut = $null
     $teeSourceErr = $null
     $launcher = $null
+    $harnessProgressStartedAt = $null
 
     if ($null -ne $stdOutPath -and $null -ne $stdErrPath) {
         if ($MirrorProcessStreamsToHost) {
-            Write-Host 'Editor process stdout/stderr: mirroring to this console + editor_console_stdout/stderr .txt (UE_LOG still primarily in Unreal -log window).' -ForegroundColor DarkGray
+            Write-Host 'Editor process stdout/stderr: mirroring to this console + editor_console_stdout/stderr .txt (UE_LOG still primarily in Unreal -log window + Saved/Logs).' -ForegroundColor DarkGray
         }
         else {
-            Write-Host 'Harness progress: watch the Unreal Editor log window (-log) or Saved/Logs; stdout/stderr tee -> editor_console_stdout/stderr .txt only.' -ForegroundColor DarkGray
+            Write-Host 'Harness progress: watch Unreal -log window and Saved/Logs; pass -LiveProjectLog to tail project log here; stdout/stderr tee -> editor_console_stdout/stderr .txt only.' -ForegroundColor DarkGray
         }
+        $harnessProgressStartedAt = Get-Date
         $teeOutWriter = New-Object System.IO.StreamWriter($stdOutPath, $false, [System.Text.UTF8Encoding]::new($false))
         $teeErrWriter = New-Object System.IO.StreamWriter($stdErrPath, $false, [System.Text.UTF8Encoding]::new($false))
         $teeOutWriter.AutoFlush = $true
@@ -496,13 +499,16 @@ function Invoke-HeadedEditorDynamic {
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $EditorExe
         $psi.Arguments = [string]::Join(' ', $editorCliArgs)
+        $psi.WorkingDirectory = $ProjectRoot
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
-        $psi.RedirectStandardInput = $true
+        # Do not redirect stdin: piping stdin can confuse Windows focus/input for GUI processes (user could not click the viewport reliably).
+        $psi.RedirectStandardInput = $false
         $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
         $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
-        $psi.CreateNoWindow = $true
+        # Do not hide the process window: GUI editor should stay a normal top-level window; -unattended is what limits interaction.
+        $psi.CreateNoWindow = $false
 
         $launcher = New-Object System.Diagnostics.Process
         $launcher.EnableRaisingEvents = $true
@@ -534,11 +540,12 @@ function Invoke-HeadedEditorDynamic {
         $launcher.BeginErrorReadLine()
     }
     else {
+        # Session log dir missing — no tee paths; launch without redirect (rare for this script).
         $spArgs = @{
-            FilePath    = $EditorExe
-            ArgumentList = $editorCliArgs
-            PassThru    = $true
-            NoNewWindow = $true
+            FilePath         = $EditorExe
+            ArgumentList     = @($editorCliArgs)
+            WorkingDirectory = $ProjectRoot
+            PassThru         = $true
         }
         $launcher = Start-Process @spArgs
     }
@@ -578,56 +585,153 @@ function Invoke-HeadedEditorDynamic {
         $Script:SpawnedEditorPids += $p.Id
     }
 
-    $allFinished = $false
-    while ($true) {
-        try { $p.Refresh() } catch {}
-        if ($p.HasExited) { break }
-        $now = (Get-Date).ToUniversalTime()
-        $done = 0
-        foreach ($j in $ExpectedRunJsonls) {
-            if (Test-RunJsonlFinished -RunJsonlPath $j) { $done++ }
-        }
-        if ($ExpectedRunJsonls.Count -gt 0 -and $done -ge $ExpectedRunJsonls.Count) {
-            $allFinished = $true
-            break
-        }
-        if ($useWatchdog -and $now -ge $watchdogDeadlineUtc) {
-            Write-Warning ("Watchdog timeout waiting for run completion ({0}/{1} turns finished). Forcing shutdown." -f $done, $ExpectedRunJsonls.Count)
-            break
-        }
-        Start-Sleep -Milliseconds 200
+    if ($BringEditorToForeground -and -not $Unattended) {
+        Write-Host 'Bringing Unreal Editor main window forward (best-effort; click the editor if focus stays on PowerShell).' -ForegroundColor DarkGray
+        Try-BringUnrealMainWindowToForeground -Proc $p
+        Start-Sleep -Milliseconds 2200
+        Try-BringUnrealMainWindowToForeground -Proc $p
     }
 
-    if (-not $p.HasExited) {
-        try { [void]$p.CloseMainWindow() } catch {}
+    $tailJob = $null
+    if ($LiveProjectLogToHost) {
+        Write-Host 'Live log: streaming project Saved/Logs *.log -> this console (the separate Unreal -log window may be sparse when stdout is redirected; UE_LOG still appends to Saved/Logs).' -ForegroundColor DarkCyan
+        $tailJob = Start-Job -ScriptBlock {
+            param([string]$Root)
+            function Get-PrimaryLogPath([string]$ProjectRootPath) {
+                $logsDir = Join-Path $ProjectRootPath 'Saved\Logs'
+                if (-not (Test-Path -LiteralPath $logsDir)) { return $null }
+                $uproject = Get-ChildItem -LiteralPath $ProjectRootPath -Filter '*.uproject' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                $base = if ($uproject) { $uproject.BaseName } else { 'blank' }
+                $primary = Join-Path $logsDir ("{0}.log" -f $base)
+                if (Test-Path -LiteralPath $primary) { return $primary }
+                $newest = Get-ChildItem -LiteralPath $logsDir -Filter '*.log' -File -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                if ($newest) { return $newest.FullName }
+                return $null
+            }
+            $logPath = $null
+            for ($i = 0; $i -lt 600; $i++) {
+                $logPath = Get-PrimaryLogPath -ProjectRootPath $Root
+                if ($null -ne $logPath) { break }
+                Start-Sleep -Milliseconds 200
+            }
+            if ($null -eq $logPath) {
+                Write-Output '[live-log] Timed out waiting for Saved\Logs\*.log'
+                return
+            }
+            Get-Content -LiteralPath $logPath -Wait -Tail 40 -Encoding UTF8
+        } -ArgumentList $ProjectRoot
+    }
+
+    try {
+        if ($null -eq $harnessProgressStartedAt) {
+            $harnessProgressStartedAt = Get-Date
+        }
+        $prevConsoleWindowTitle = $null
+        try { $prevConsoleWindowTitle = $Host.UI.RawUI.WindowTitle } catch { }
+        $lastHarnessTimerUiUtc = [DateTime]::MinValue
+        $harnessTimerStatusLine = $false
+        $allFinished = $false
+        while ($true) {
+            if ($null -ne $tailJob) {
+                $chunk = Receive-Job -Job $tailJob -ErrorAction SilentlyContinue
+                if ($null -ne $chunk) {
+                    foreach ($line in @($chunk)) {
+                        if ($null -ne $line) {
+                            Write-Host $line
+                        }
+                    }
+                }
+            }
+            $tickNow = Get-Date
+            if (($tickNow - $lastHarnessTimerUiUtc).TotalMilliseconds -ge 500) {
+                $lastHarnessTimerUiUtc = $tickNow
+                $elapsed = $tickNow - $harnessProgressStartedAt
+                $h = [int][math]::Floor($elapsed.TotalHours)
+                $elapsedStr = '{0:00}:{1:00}:{2:00}' -f $h, $elapsed.Minutes, $elapsed.Seconds
+                try {
+                    $Host.UI.RawUI.WindowTitle = "Unreal AI harness | elapsed $elapsedStr"
+                }
+                catch { }
+                $showInlineTimer = (-not $LiveProjectLogToHost) -and (-not $MirrorProcessStreamsToHost)
+                if ($showInlineTimer) {
+                    Write-Host "`rHarness elapsed $elapsedStr  " -NoNewline -ForegroundColor DarkGray
+                    $harnessTimerStatusLine = $true
+                }
+            }
+            try { $p.Refresh() } catch {}
+            if ($p.HasExited) { break }
+            $now = (Get-Date).ToUniversalTime()
+            $done = 0
+            foreach ($j in $ExpectedRunJsonls) {
+                if (Test-RunJsonlFinished -RunJsonlPath $j) { $done++ }
+            }
+            if ($ExpectedRunJsonls.Count -gt 0 -and $done -ge $ExpectedRunJsonls.Count) {
+                $allFinished = $true
+                break
+            }
+            if ($useWatchdog -and $now -ge $watchdogDeadlineUtc) {
+                Write-Warning ("Watchdog timeout waiting for run completion ({0}/{1} turns finished). Forcing shutdown." -f $done, $ExpectedRunJsonls.Count)
+                break
+            }
+            Start-Sleep -Milliseconds 200
+        }
+
+        if ($harnessTimerStatusLine) {
+            Write-Host ''
+        }
+
+        if (-not $p.HasExited) {
+            try { [void]$p.CloseMainWindow() } catch {}
+            try { $p.Refresh() } catch {}
+            if (-not $p.WaitForExit(2500)) {
+                Stop-UnrealEditorProcessTree -Proc $p
+            }
+        }
         try { $p.Refresh() } catch {}
-        if (-not $p.WaitForExit(2500)) {
+        if (-not $p.HasExited) {
             Stop-UnrealEditorProcessTree -Proc $p
         }
-    }
-    try { $p.Refresh() } catch {}
-    if (-not $p.HasExited) {
-        Stop-UnrealEditorProcessTree -Proc $p
-    }
 
-    if (-not $teeCleanupDone -and $null -ne $teeSourceOut) {
-        Stop-UnrealEditorConsoleTee -Process $launcher -OutWriter $teeOutWriter -ErrWriter $teeErrWriter -SourceIdOut $teeSourceOut -SourceIdErr $teeSourceErr
-        $teeCleanupDone = $true
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($SessionLogDir)) {
-        $logName = if ([string]::IsNullOrWhiteSpace($SessionLogFileSuffix)) {
-            'editor_console_saved.log'
-        } else {
-            ('editor_console_saved{0}.log' -f $SessionLogFileSuffix)
+        if (-not $teeCleanupDone -and $null -ne $teeSourceOut) {
+            Stop-UnrealEditorConsoleTee -Process $launcher -OutWriter $teeOutWriter -ErrWriter $teeErrWriter -SourceIdOut $teeSourceOut -SourceIdErr $teeSourceErr
+            $teeCleanupDone = $true
         }
-        Save-UnrealEditorSessionLogs -ProjectRootPath $ProjectRoot -DestinationDir $SessionLogDir -DestFileName $logName
-    }
 
-    $exitCode = if ($p.HasExited) { [int]$p.ExitCode } else { -1003 }
-    return [ordered]@{
-        exit_code = $exitCode
-        all_finished = $allFinished
+        if (-not [string]::IsNullOrWhiteSpace($SessionLogDir)) {
+            $logName = if ([string]::IsNullOrWhiteSpace($SessionLogFileSuffix)) {
+                'editor_console_saved.log'
+            } else {
+                ('editor_console_saved{0}.log' -f $SessionLogFileSuffix)
+            }
+            Save-UnrealEditorSessionLogs -ProjectRootPath $ProjectRoot -DestinationDir $SessionLogDir -DestFileName $logName
+        }
+
+        $exitCode = if ($p.HasExited) { [int]$p.ExitCode } else { -1003 }
+        return [ordered]@{
+            exit_code = $exitCode
+            all_finished = $allFinished
+        }
+    }
+    finally {
+        try {
+            if ($null -ne $prevConsoleWindowTitle) {
+                $Host.UI.RawUI.WindowTitle = $prevConsoleWindowTitle
+            }
+        }
+        catch { }
+        if ($null -ne $tailJob) {
+            Stop-Job -Job $tailJob -ErrorAction SilentlyContinue
+            $rest = Receive-Job -Job $tailJob -ErrorAction SilentlyContinue
+            if ($null -ne $rest) {
+                foreach ($line in @($rest)) {
+                    if ($null -ne $line) {
+                        Write-Host $line
+                    }
+                }
+            }
+            Remove-Job -Job $tailJob -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -654,26 +758,38 @@ if ($MaxSuites -ne 0) {
     Write-Host ("MaxSuites={0}: running {1} of {2} suite file(s) (sorted by path)." -f $MaxSuites, $suiteFiles.Count, $suitesDiscoveredCount) -ForegroundColor Yellow
 }
 
-# One folder per batch using local machine clock (not UTC). Milliseconds avoid same-second collisions.
+# One folder per batch: tests/long-running-tests/runs/run-<index>-<local timestamp> (index monotonic across all scenarios).
 $batchStartedLocal = Get-Date
 $batchStampCore = $batchStartedLocal.ToString('yyyyMMdd-HHmmss_fff')
-$runsParent = Join-Path $scenarioAbs 'runs'
+$runsParent = Join-Path $PSScriptRoot 'runs'
 if (-not (Test-Path -LiteralPath $runsParent)) {
     New-Item -ItemType Directory -Force -Path $runsParent | Out-Null
 }
-$batchFolderBase = "run_$batchStampCore"
-$batchRunsRoot = Join-Path $runsParent $batchFolderBase
-$suffix = 0
-while (Test-Path -LiteralPath $batchRunsRoot) {
-    $suffix++
-    $batchRunsRoot = Join-Path $runsParent ("{0}_{1}" -f $batchFolderBase, $suffix)
+$maxRunIndex = 0
+Get-ChildItem -LiteralPath $runsParent -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($_.Name -match '^run-(\d+)-') {
+        $n = [int]$Matches[1]
+        if ($n -gt $maxRunIndex) {
+            $maxRunIndex = $n
+        }
+    }
 }
+$batchRunIndex = $maxRunIndex + 1
+while ($true) {
+    $batchFolderBase = 'run-{0}-{1}' -f $batchRunIndex, $batchStampCore
+    $batchRunsRoot = Join-Path $runsParent $batchFolderBase
+    if (-not (Test-Path -LiteralPath $batchRunsRoot)) {
+        break
+    }
+    $batchRunIndex++
+}
+$batchRunIndexUsed = $batchRunIndex
 New-Item -ItemType Directory -Force -Path $batchRunsRoot | Out-Null
 $batchStamp = [System.IO.Path]::GetFileName($batchRunsRoot)
 $batchStartedLocalIso = $batchStartedLocal.ToString('o')
 $batchStartedUtcIso = $batchStartedLocal.ToUniversalTime().ToString('o')
-Write-Host ("Batch output (local time): {0}" -f $batchRunsRoot) -ForegroundColor Cyan
-Write-Host ("Harness per-turn sync wait: UNREAL_AI_HARNESS_SYNC_WAIT_MS={0} ms (~{1} s); plan turns may need -SyncWaitMs 180000 if timeouts occur." -f $env:UNREAL_AI_HARNESS_SYNC_WAIT_MS, [int]([double]$env:UNREAL_AI_HARNESS_SYNC_WAIT_MS / 1000.0)) -ForegroundColor DarkGray
+Write-Host ("Batch output: run_index={0} | {1}" -f $batchRunIndexUsed, $batchRunsRoot) -ForegroundColor Cyan
+Write-Host 'Harness limits: UnrealAiWaitTime in UnrealAiWaitTimePolicy.h (HttpRequestTimeoutSec, HarnessSyncWaitMs, etc.).' -ForegroundColor DarkGray
 
 $allStatuses = @()
 $previousThreadId = $null
@@ -721,7 +837,8 @@ foreach ($jf in $suiteFiles) {
         [System.IO.File]::WriteAllText($msgPath, $req, (New-Object System.Text.UTF8Encoding($false)))
         $msgForCmd = ConvertTo-ShortWinPath $msgPath
         $stepForCmd = ConvertTo-ShortWinPath $stepDir
-        $suiteExecParts.Add(('UnrealAi.RunAgentTurn "{0}" "{1}" "{2}" "{3}"' -f $msgForCmd, $threadId, $mode, $stepForCmd))
+        $dumpArg = if ($ReduceContextNoise) { 'nodump' } else { 'dumpcontext' }
+        $suiteExecParts.Add(('UnrealAi.RunAgentTurn "{0}" "{1}" "{2}" "{3}" {4}' -f $msgForCmd, $threadId, $mode, $stepForCmd, $dumpArg))
         $suiteExpectedRunJsonls.Add((Join-Path $stepDir 'run.jsonl'))
         $turnStatus += [ordered]@{
             turn_index = $i
@@ -799,13 +916,8 @@ try {
             Start-Sleep -Milliseconds 800
         }
 
-        Remove-Item Env:\UNREAL_AI_HARNESS_MAX_LLM_ROUNDS -ErrorAction SilentlyContinue
-        Remove-Item Env:\UNREAL_AI_HARNESS_MAX_TOKENS_PER_TURN -ErrorAction SilentlyContinue
-        if ($MaxLlmRounds -gt 0) {
-            $env:UNREAL_AI_HARNESS_MAX_LLM_ROUNDS = [string]([Math]::Max(1, $MaxLlmRounds))
-        }
-        if ($MaxTurnTokens -ne 0) {
-            $env:UNREAL_AI_HARNESS_MAX_TOKENS_PER_TURN = [string]$MaxTurnTokens
+        if ($MaxLlmRounds -gt 0 -or $MaxTurnTokens -ne 0) {
+            Write-Warning "MaxLlmRounds/MaxTurnTokens are no longer applied via environment; configure maxAgentLlmRounds / maxAgentTurnTokens in the model profile (values recorded in summary.json only)."
         }
         $totalTurns = 0
         foreach ($suiteSummary in $allStatuses) {
@@ -881,7 +993,7 @@ try {
                     $suiteCmds = ($suiteExec -join ',')
                     Write-Host ("Running headed editor (per-suite) {0} chunk {1}/{2}" -f $suiteSummary.path_slug, $chunkIndex, $chunks.Count) -ForegroundColor Cyan
                     $chunkSuffix = if ($chunks.Count -gt 1) { ('_chunk{0:D2}' -f $chunkIndex) } else { '' }
-                    $runResult = Invoke-HeadedEditorDynamic -ExecCmds $suiteCmds -ExpectedRunJsonls $suiteExpected -TurnCount $suiteExpected.Count -SessionLogDir $suiteSummary.run_root -SessionLogFileSuffix $chunkSuffix -MirrorProcessStreamsToHost:$MirrorEditorProcessStreamsToHost
+                    $runResult = Invoke-HeadedEditorDynamic -ExecCmds $suiteCmds -ExpectedRunJsonls $suiteExpected -TurnCount $suiteExpected.Count -SessionLogDir $suiteSummary.run_root -SessionLogFileSuffix $chunkSuffix -MirrorProcessStreamsToHost:$MirrorEditorProcessStreamsToHost -LiveProjectLogToHost:$Script:StreamProjectLogToHost -BringEditorToForeground:$BringEditorToForeground
                     $chunkExit = [int]$runResult.exit_code
                     if ($ex -eq 0 -and $chunkExit -ne 0) {
                         $ex = $chunkExit
@@ -899,7 +1011,7 @@ try {
         }
         else {
             Write-Host ("ExecCmds length={0} (limit {1}) - single editor session" -f $execCmdLen, $MaxExecCmdChars) -ForegroundColor DarkGray
-            $runResult = Invoke-HeadedEditorDynamic -ExecCmds $execCmds -ExpectedRunJsonls @($allExpectedRunJsonls) -TurnCount $allExpectedRunJsonls.Count -SessionLogDir $batchRunsRoot -MirrorProcessStreamsToHost:$MirrorEditorProcessStreamsToHost
+            $runResult = Invoke-HeadedEditorDynamic -ExecCmds $execCmds -ExpectedRunJsonls @($allExpectedRunJsonls) -TurnCount $allExpectedRunJsonls.Count -SessionLogDir $batchRunsRoot -MirrorProcessStreamsToHost:$MirrorEditorProcessStreamsToHost -LiveProjectLogToHost:$Script:StreamProjectLogToHost -BringEditorToForeground:$BringEditorToForeground
             $batchExitCode = [int]$runResult.exit_code
             $batchAllJsonlsFinished = [bool]$runResult.all_finished
             $Script:PerSuiteExitBySlug = @{}
@@ -932,6 +1044,7 @@ try {
             $suiteProducedCount = 0
             $suiteFinishedCount = 0
             $suiteStartedOnlyCount = 0
+            $suiteToolFinishEvents = 0
             $suiteToolFailEvents = 0
             $suiteBlockerHints = 0
             if ($suiteTurnCount -gt 0) {
@@ -942,6 +1055,7 @@ try {
                     if ($quick.has_run_started -and -not $quick.has_run_finished -and $quick.line_count -le 2) {
                         $suiteStartedOnlyCount++
                     }
+                    $suiteToolFinishEvents += [int]$quick.tool_finish_count
                     $suiteToolFailEvents += [int]$quick.tool_fail_count
                     $suiteBlockerHints += [int]$quick.blocker_hint_count
                     if (-not $quick.has_run_finished) {
@@ -976,6 +1090,7 @@ try {
             $suiteSummary.run_jsonl_produced_count = $suiteProducedCount
             $suiteSummary.run_jsonl_finished_count = $suiteFinishedCount
             $suiteSummary.run_jsonl_started_only_count = $suiteStartedOnlyCount
+            $suiteSummary.tool_finish_event_count = $suiteToolFinishEvents
             $suiteSummary.tool_fail_event_count = $suiteToolFailEvents
             $suiteSummary.blocker_hint_count = $suiteBlockerHints
             $suiteSummary.finished_utc = (Get-Date).ToUniversalTime().ToString('o')
@@ -986,8 +1101,6 @@ try {
             }
         }
 
-        Remove-Item Env:\UNREAL_AI_HARNESS_MAX_LLM_ROUNDS -ErrorAction SilentlyContinue
-        Remove-Item Env:\UNREAL_AI_HARNESS_MAX_TOKENS_PER_TURN -ErrorAction SilentlyContinue
         $batchFailed = ($batchExitCode -ne 0) -or (-not $batchAllJsonlsFinished) -or ($failedSuiteCount -gt 0)
         if (-not $batchAllJsonlsFinished) {
             Write-Warning "Batch incomplete: not all expected run.jsonl files reached run_finished (sync timeout, crash, or stuck turn)."
@@ -1001,6 +1114,7 @@ try {
         $totalProduced = 0
         $totalFinished = 0
         $totalStartedOnly = 0
+        $totalToolFinishes = 0
         $totalToolFails = 0
         $totalBlockers = 0
         foreach ($suiteSummary in $allStatuses) {
@@ -1008,21 +1122,31 @@ try {
             $totalProduced += [int]$suiteSummary.run_jsonl_produced_count
             $totalFinished += [int]$suiteSummary.run_jsonl_finished_count
             $totalStartedOnly += [int]$suiteSummary.run_jsonl_started_only_count
+            $totalToolFinishes += [int]$suiteSummary.tool_finish_event_count
             $totalToolFails += [int]$suiteSummary.tool_fail_event_count
             $totalBlockers += [int]$suiteSummary.blocker_hint_count
         }
         $elapsedSec = [Math]::Round(((Get-Date).ToUniversalTime() - $Script:RunStartUtc).TotalSeconds, 1)
         Write-Host ("Batch stats: expected_turns={0} produced_run_jsonl={1} finished_turns={2} missing_finished={3}" -f $totalExpected, $totalProduced, $totalFinished, ($totalExpected - $totalFinished)) -ForegroundColor DarkCyan
-        Write-Host ("Batch signals: started_only_turns={0} tool_fail_events={1} blocker_hints={2} elapsed_sec={3}" -f $totalStartedOnly, $totalToolFails, $totalBlockers, $elapsedSec) -ForegroundColor DarkCyan
-        foreach ($suiteSummary in $allStatuses) {
-            $suiteExpected = [int](@($suiteSummary.expected_run_jsonls).Count)
-            $suiteFinished = [int]$suiteSummary.run_jsonl_finished_count
-            $suiteProduced = [int]$suiteSummary.run_jsonl_produced_count
-            Write-Host ("  Suite stats: {0} finished={1}/{2} produced={3} started_only={4} tool_fails={5} blockers={6}" -f $suiteSummary.path_slug, $suiteFinished, $suiteExpected, $suiteProduced, [int]$suiteSummary.run_jsonl_started_only_count, [int]$suiteSummary.tool_fail_event_count, [int]$suiteSummary.blocker_hint_count) -ForegroundColor DarkGray
-        }
+        Write-Host ("Batch signals: tool_finish_events={0} tool_fail_events={1} blocker_hints={2} started_only_turns={3} elapsed_sec={4}  (tool_finish_events = tool_finish lines in run.jsonl, not stream chunks)" -f $totalToolFinishes, $totalToolFails, $totalBlockers, $totalStartedOnly, $elapsedSec) -ForegroundColor DarkCyan
 
         $exitCode = if ($batchFailed) { 1 } else { 0 }
         $dynamicDone = -not $batchFailed
+        $Script:BatchEndBrief = [ordered]@{
+            suites = $allStatuses.Count
+            expected_turns = $totalExpected
+            finished_turns = $totalFinished
+            tool_finish_events = $totalToolFinishes
+            tool_calls = $totalToolFinishes
+            tool_failures = $totalToolFails
+            blocker_hints = $totalBlockers
+            failed_suites = $failedSuiteCount
+            batch_editor_exit = $batchExitCode
+            all_jsonls_finished = $batchAllJsonlsFinished
+            harness_exit = $exitCode
+            all_terminal = $dynamicDone
+            elapsed_sec = $elapsedSec
+        }
     }
 }
 finally {
@@ -1039,6 +1163,8 @@ $suiteSummary = [ordered]@{
     suites_discovered = $suitesDiscoveredCount
     max_suites = $MaxSuites
     batch_stamp = $batchStamp
+    batch_run_index = $batchRunIndexUsed
+    runs_root = $runsParent
     batch_output_folder = $batchRunsRoot
     batch_stamp_local_core = $batchStampCore
     batch_started_local = $batchStartedLocalIso
@@ -1062,10 +1188,12 @@ if (-not $DryRun -and $allStatuses.Count -gt 0) {
     }
 }
 $summaryJson = ($suiteSummary | ConvertTo-Json -Depth 8) + "`n"
-$summaryJson | Set-Content -LiteralPath (Join-Path $batchRunsRoot 'last-suite-summary.json') -Encoding UTF8
-$summaryJson | Set-Content -LiteralPath (Join-Path $scenarioAbs 'last-suite-summary.json') -Encoding UTF8
+if ($null -ne $batchRunsRoot) {
+    $summaryJson | Set-Content -LiteralPath (Join-Path $batchRunsRoot 'last-suite-summary.json') -Encoding UTF8
+    $summaryJson | Set-Content -LiteralPath $lastSummaryPointer -Encoding UTF8
+}
 
-if (-not $DryRun -and $allStatuses.Count -gt 0 -and -not $SkipClassification) {
+if ($null -ne $batchRunsRoot -and -not $DryRun -and $allStatuses.Count -gt 0 -and -not $SkipClassification) {
     $classifier = Join-Path $RepoRootForEnv 'tests\classify_harness_run_jsonl.py'
     if (Test-Path -LiteralPath $classifier) {
         Write-Host 'Classifying run.jsonl outcomes (harness-classification.json)...' -ForegroundColor DarkCyan
@@ -1083,12 +1211,46 @@ if (-not $DryRun -and $allStatuses.Count -gt 0 -and -not $SkipClassification) {
     }
 }
 
+$exitHarness = 0
 if (-not $DryRun) {
     $failed = if ($exitCode -ne 0) { 1 } else { 0 }
-    Write-Host ("Completed suites={0} editor_exit={1} all_finished={2} failed_suites={3}" -f $allStatuses.Count, $exitCode, $dynamicDone, $failedSuiteCount) -ForegroundColor Cyan
-    if ($failed -gt 0) { exit 1 }
+    if ($null -ne $Script:BatchEndBrief) {
+        $b = $Script:BatchEndBrief
+        Write-Host ''
+        Write-Host '--- Run summary ---' -ForegroundColor Cyan
+            Write-Host ("  Tool finishes: {0} | Tool failures: {1} | Blocker hints: {2} | Turns finished: {3}/{4}" -f $b.tool_finish_events, $b.tool_failures, $b.blocker_hints, $b.finished_turns, $b.expected_turns) -ForegroundColor Cyan
+        Write-Host ("  Suites: {0} | Failed suites: {1} | Batch editor exit: {2} | All run.jsonl finished: {3} | Harness exit: {4} | All terminal: {5} | {6}s" -f $b.suites, $b.failed_suites, $b.batch_editor_exit, $b.all_jsonls_finished, $b.harness_exit, $b.all_terminal, $b.elapsed_sec) -ForegroundColor Cyan
+    }
+    else {
+        Write-Host ("Completed suites={0} editor_exit={1} all_finished={2} failed_suites={3}" -f $allStatuses.Count, $exitCode, $dynamicDone, $failedSuiteCount) -ForegroundColor Cyan
+    }
+    if ($failed -gt 0) { $exitHarness = 1 }
 }
 else {
     Write-Host ("DryRun: suites prepared={0}" -f $allStatuses.Count) -ForegroundColor Cyan
 }
+
+if ($batchRunsRoot -and (Test-Path -LiteralPath $batchRunsRoot)) {
+    try {
+        $absRunDir = (Resolve-Path -LiteralPath $batchRunsRoot).Path
+    }
+    catch {
+        $absRunDir = $batchRunsRoot
+    }
+    $absSummaryFile = Join-Path $absRunDir 'last-suite-summary.json'
+    Write-Host ''
+    Write-Host ("Batch output folder: {0}" -f $absRunDir) -ForegroundColor Green
+    Write-Host ("last-suite-summary.json (full detail): {0}" -f $absSummaryFile) -ForegroundColor DarkGray
+    if (Test-Path -LiteralPath $lastSummaryPointer) {
+        try {
+            $ptrAbs = (Resolve-Path -LiteralPath $lastSummaryPointer).Path
+        }
+        catch {
+            $ptrAbs = $lastSummaryPointer
+        }
+        Write-Host ("Latest pointer: {0}" -f $ptrAbs) -ForegroundColor DarkGray
+    }
+}
+
+if ($exitHarness -ne 0) { exit $exitHarness }
 exit 0

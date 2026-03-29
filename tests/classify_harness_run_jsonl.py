@@ -27,6 +27,9 @@ def classify_run_finished_error(msg: str) -> str:
     low = m.lower()
     if "429" in m or "rate limit" in low or "tpm" in low or "rate_limit" in low:
         return "rate_limit"
+    # Harness automation sync cancel — message contains "timed out" but is not HTTP transport
+    if "harness run timed out" in low or "forced terminal" in low:
+        return "harness_policy"
     if "timedout" in low or "timed out" in low or "timeout" in low:
         return "http_timeout"
     if "400" in m and ("http" in low or "json" in low):
@@ -34,8 +37,6 @@ def classify_run_finished_error(msg: str) -> str:
     if "invalid json" in low or "parse the json body" in low:
         return "invalid_request"
     if "action-intent" in low or "max tool" in low or "llm rounds exceeded" in low:
-        return "harness_policy"
-    if "harness run timed out" in low or "forced terminal" in low:
         return "harness_policy"
     if m.startswith("HTTP ") and re.match(r"HTTP \d+", m):
         code = m.split()[1].rstrip(":")
@@ -186,7 +187,6 @@ def main() -> int:
     out_json_path.parent.mkdir(parents=True, exist_ok=True)
     out_json_path.write_text(text, encoding="utf-8")
     print(f"Wrote {out_json_path}")
-    print(text)
     return 0
 
 
