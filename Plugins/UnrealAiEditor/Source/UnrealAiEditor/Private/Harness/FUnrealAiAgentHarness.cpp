@@ -7,7 +7,8 @@
 #include "Harness/FUnrealAiConversationStore.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Harness/IAgentRunSink.h"
-#include "Harness/FUnrealAiPlanExecutor.h"
+#include "Planning/FUnrealAiPlanExecutor.h"
+#include "Planning/UnrealAiPlanPlannerHarness.h"
 #include "Harness/ILlmTransport.h"
 #include "Harness/UnrealAiTurnLlmRequestBuilder.h"
 #include "Harness/IToolExecutionHost.h"
@@ -54,6 +55,40 @@ namespace UnrealAiAgentHarnessPriv
 		uint8 Digest[16];
 		Md5.Final(Digest);
 		return BytesToHex(Digest, 16);
+	}
+
+	static FString SerializeSuggestedCorrectCallForNudge(const TSharedPtr<FJsonObject>& Obj)
+	{
+		if (!Obj.IsValid())
+		{
+			return FString();
+		}
+		FString Out;
+		const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Out);
+		if (FJsonSerializer::Serialize(Obj.ToSharedRef(), Writer))
+		{
+			return Out;
+		}
+		return FString();
+	}
+
+	/** Extract compact JSON for harness repeated-validation nudge when resolvers return ErrorWithSuggestedCall. */
+	static void TryCaptureSuggestedCorrectCallFromToolContent(const FString& ModelToolContent, FString& OutSerialized)
+	{
+		OutSerialized.Reset();
+		TSharedPtr<FJsonObject> Root;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ModelToolContent);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			return;
+		}
+		const TSharedPtr<FJsonObject>* Suggested = nullptr;
+		if (!Root->TryGetObjectField(TEXT("suggested_correct_call"), Suggested) || !Suggested || !Suggested->IsValid())
+		{
+			return;
+		}
+		OutSerialized = SerializeSuggestedCorrectCallForNudge(*Suggested);
 	}
 
 	static FString BuildToolSelectorRanksJson(const FUnrealAiToolSurfaceTelemetry& Tel)
@@ -408,6 +443,8 @@ namespace UnrealAiAgentHarnessPriv
 		TMap<int32, int32> ToolCallFirstSeenEventCount;
 		TMap<int32, double> ToolCallFirstSeenSeconds;
 		FString LastToolFailureSignature;
+		/** Latest `suggested_correct_call` JSON from a failed tool (for repeated-validation nudge). */
+		FString LastSuggestedCorrectCallSerialized;
 		int32 RepeatedToolFailureCount = 0;
 		TMap<FString, int32> ToolInvokeCountByName;
 		TMap<FString, int32> ToolInvokeCountBySignature;
@@ -466,6 +503,7 @@ namespace UnrealAiAgentHarnessPriv
 		void EmitEnforcementSummary();
 
 		bool ShouldSuppressIdleAbort() const;
+		void MaybeFailIfHttpCompleteWithoutFinish();
 
 		static constexpr int32 CharPerTokenApprox = 4;
 	};
@@ -679,9 +717,13 @@ namespace UnrealAiAgentHarnessPriv
 		}
 		ParsedMax = FMath::Clamp(ParsedMax, 1, GHarnessMaxLlmRoundBackstop);
 		EffectiveMaxLlmRounds = ParsedMax;
-		if (Request.Mode == EUnrealAiAgentMode::Plan)
+		if (UnrealAiPlanPlannerHarness::IsPlanPlannerPass(Request.Mode))
 		{
 			EffectiveMaxLlmRounds = FMath::Min(EffectiveMaxLlmRounds, UnrealAiWaitTime::PlannerMaxLlmRounds);
+		}
+		else if (Request.Mode == EUnrealAiAgentMode::Agent && Request.ThreadId.Contains(TEXT("_plan_")))
+		{
+			EffectiveMaxLlmRounds = FMath::Min(EffectiveMaxLlmRounds, UnrealAiWaitTime::PlanNodeMaxLlmRounds);
 		}
 
 		if (!bRetrySameRound)
@@ -741,6 +783,7 @@ namespace UnrealAiAgentHarnessPriv
 		bCurrentRoundRepeatedEmptySearch = false;
 		CurrentRoundExecutedToolNames.Reset();
 		UnwrapFailuresThisRound = 0;
+		LastSuggestedCorrectCallSerialized.Reset();
 
 		FUnrealAiLlmRequest LlmReq;
 		FString BuildErr;
@@ -888,7 +931,7 @@ namespace UnrealAiAgentHarnessPriv
 			return true;
 		}
 		// Plan-mode planner uses ToolsJson []; do not let spurious incomplete streamed tool slots block idle abort.
-		if (Request.Mode == EUnrealAiAgentMode::Plan)
+		if (UnrealAiPlanPlannerHarness::IsPlanPlannerPass(Request.Mode))
 		{
 			return CompletedToolCallQueue.Num() > 0;
 		}
@@ -980,6 +1023,38 @@ namespace UnrealAiAgentHarnessPriv
 		return false;
 	}
 
+	void FAgentTurnRunner::MaybeFailIfHttpCompleteWithoutFinish()
+	{
+		if (bCancelled.load(std::memory_order_relaxed) || bTerminal.load(std::memory_order_relaxed) || bFinishReceived)
+		{
+			return;
+		}
+		if (!Transport.IsValid() || Transport->HasActiveRequest())
+		{
+			return;
+		}
+		const uint32 GraceMs = UnrealAiWaitTime::HarnessStreamNoFinishGraceMs;
+		if (GraceMs == 0)
+		{
+			return;
+		}
+		double AsstIdle = -1.0;
+		double HttpIdle = -1.0;
+		double LlmSubmitIdle = -1.0;
+		UnrealAiHarnessProgressTelemetry::GetStreamIdleSeconds(AsstIdle, HttpIdle, LlmSubmitIdle);
+		(void)LlmSubmitIdle;
+		const double ThreshSec = static_cast<double>(GraceMs) / 1000.0;
+		if (AsstIdle < 0.0 || HttpIdle < 0.0)
+		{
+			return;
+		}
+		if (AsstIdle < ThreshSec || HttpIdle < ThreshSec)
+		{
+			return;
+		}
+		Fail(TEXT("HTTP response completed without a terminal stream Finish event (incomplete SSE or provider error)."));
+	}
+
 	void FAgentTurnRunner::HandleEvent(const FUnrealAiLlmStreamEvent& Ev)
 	{
 		if (bCancelled.load(std::memory_order_relaxed) || bTerminal.load(std::memory_order_relaxed))
@@ -1036,7 +1111,7 @@ namespace UnrealAiAgentHarnessPriv
 				break;
 			}
 			// Planner pass: ToolsJson is []; streamed tool_calls are non-actionable — always assistant-only terminal.
-			if (Request.Mode == EUnrealAiAgentMode::Plan)
+			if (UnrealAiPlanPlannerHarness::IsPlanPlannerPass(Request.Mode))
 			{
 				if (PendingToolCalls.Num() > 0 || Ev.FinishReason == TEXT("tool_calls"))
 				{
@@ -1089,6 +1164,7 @@ namespace UnrealAiAgentHarnessPriv
 		default:
 			break;
 		}
+		MaybeFailIfHttpCompleteWithoutFinish();
 	}
 
 	void FAgentTurnRunner::StartOrContinueStreamedToolExecution()
@@ -1268,10 +1344,19 @@ namespace UnrealAiAgentHarnessPriv
 			++CurrentRoundToolSuccessCount;
 			LastToolFailureSignature.Reset();
 			RepeatedToolFailureCount = 0;
+			LastSuggestedCorrectCallSerialized.Reset();
 		}
 		else
 		{
 			++CurrentRoundToolFailCount;
+			{
+				FString Captured;
+				UnrealAiAgentHarnessPriv::TryCaptureSuggestedCorrectCallFromToolContent(ModelToolContent, Captured);
+				if (!Captured.IsEmpty())
+				{
+					LastSuggestedCorrectCallSerialized = MoveTemp(Captured);
+				}
+			}
 			const FString FailureSig = InvokeSignature;
 			if (!FailureSig.IsEmpty() && FailureSig == LastToolFailureSignature)
 			{
@@ -1456,6 +1541,12 @@ namespace UnrealAiAgentHarnessPriv
 			RepairNudge.Content = TEXT(
 				"[Harness][reason=repeated_validation_failure] The same tool validation failure repeated multiple times. Repair-or-stop now: either call one corrected tool invocation with fixed arguments, or provide a concise blocked summary with the exact failing tool and required fields. Last failing pattern: ");
 			RepairNudge.Content += LastToolFailureSignature;
+			if (!LastSuggestedCorrectCallSerialized.IsEmpty())
+			{
+				RepairNudge.Content += TEXT(" If the last tool message included `suggested_correct_call`, use that exact inner tool_id + arguments on the next `unreal_ai_dispatch` retry. suggested_correct_call: ");
+				RepairNudge.Content += LastSuggestedCorrectCallSerialized.Left(1800);
+				EmitEnforcementEvent(TEXT("suggested_call_validation_nudge"), TEXT("appended_last_suggested_call"));
+			}
 			Conv->GetMessagesMutable().Add(RepairNudge);
 		}
 		if (bRepeatedToolLoop && Request.Mode == EUnrealAiAgentMode::Agent && !bTodoPlanOnly)
@@ -1490,7 +1581,7 @@ namespace UnrealAiAgentHarnessPriv
 			Conv->GetMessagesMutable().Add(Nudge);
 		}
 		// Intentionally no generic "tool_round_complete" nudge after normal agent tool rounds: headed/long-run
-		// harness prioritizes orchestration + tool/schema metrics; task completion is reviewed qualitatively.
+		// harness prioritizes tool/schema metrics; task completion is reviewed qualitatively.
 		{
 			const FString LastRealUser = GetLastRealUserMessage(Conv->GetMessages());
 			// Plan-mode planner passes are DAG-only (no tools); do not treat as Agent action-intent turns.
@@ -1582,7 +1673,7 @@ namespace UnrealAiAgentHarnessPriv
 		// empty assistant message (streaming quirk or "done" signal) even though work is unfinished—treat
 		// that as a stall, not a successful completion, and schedule another round while under the cap.
 		const bool bAgentModeWantsToolExecution = (Request.Mode == EUnrealAiAgentMode::Agent);
-		const bool bPlanPlannerPass = (Request.Mode == EUnrealAiAgentMode::Plan);
+		const bool bPlanPlannerPass = UnrealAiPlanPlannerHarness::IsPlanPlannerPass(Request.Mode);
 		const FString LastRealUser = GetLastRealUserMessage(Conv->GetMessages());
 		const bool bActionIntent = UserLikelyRequestsActionTool(LastRealUser);
 		const bool bHasExplicitBlocker = AssistantContainsExplicitBlocker(AssistantBuffer);
@@ -1619,9 +1710,7 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			FUnrealAiConversationMessage Nudge;
 			Nudge.Role = TEXT("user");
-			Nudge.Content = TEXT(
-				"[Harness][reason=empty_planner] The model returned an empty assistant message. Output a single JSON object for the plan ")
-				TEXT("(schema unreal_ai.plan_dag, nodes array with id/title/hint/dependsOn). No tools—JSON only.");
+			Nudge.Content = UnrealAiPlanPlannerHarness::GetEmptyPlannerNudgeUserMessage();
 			Conv->GetMessagesMutable().Add(Nudge);
 			AssistantBuffer.Reset();
 			DispatchLlm();
@@ -1662,6 +1751,20 @@ FUnrealAiAgentHarness::FUnrealAiAgentHarness(
 }
 
 FUnrealAiAgentHarness::~FUnrealAiAgentHarness() = default;
+
+void FUnrealAiAgentHarness::FailInProgressTurnForScenarioIdleAbort()
+{
+	if (!ActiveRunner.IsValid())
+	{
+		return;
+	}
+	if (ActiveRunner->bTerminal.load(std::memory_order_relaxed))
+	{
+		return;
+	}
+	ActiveRunner->Fail(
+		TEXT("Headed harness idle abort: sync wait exceeded stream-idle threshold (HarnessSyncIdleAbortMs) with no completion."));
+}
 
 void FUnrealAiAgentHarness::CancelTurn()
 {

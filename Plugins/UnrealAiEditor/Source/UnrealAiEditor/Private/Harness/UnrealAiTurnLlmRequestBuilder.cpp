@@ -5,6 +5,7 @@
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Harness/ILlmTransport.h"
 #include "Harness/UnrealAiAgentTypes.h"
+#include "Misc/Paths.h"
 #include "Misc/UnrealAiRuntimeDefaults.h"
 #include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Prompt/UnrealAiPromptBuilder.h"
@@ -133,9 +134,23 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 			P.bIncludeExecutionSubturnChunk = !St->ActiveTodoPlanJson.IsEmpty();
 		}
 	}
+	if (Request.Mode == EUnrealAiAgentMode::Agent && Request.ThreadId.Contains(TEXT("_plan_")))
+	{
+		P.bIncludePlanNodeExecutionChunk = true;
+	}
 	P.bIncludePlanDagChunk = (Request.Mode == EUnrealAiAgentMode::Plan);
 
 	const FString SystemContent = UnrealAiPromptBuilder::BuildSystemDeveloperContent(P);
+	FString SystemAugmented = SystemContent;
+	{
+		const FString UProjectBase = FPaths::GetCleanFilename(FPaths::GetProjectFilePath());
+		if (!UProjectBase.IsEmpty())
+		{
+			SystemAugmented += FString::Printf(
+				TEXT("\n\n## Project workspace (factual)\n- **Project manifest file (basename):** `%s` — for `project_file_read_text` / manifest reads, use this exact basename (not placeholder names from documentation examples).\n"),
+				*UProjectBase);
+		}
+	}
 
 	if (!Catalog->IsLoaded())
 	{
@@ -166,7 +181,6 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	}
 	const FUnrealAiToolPackOptions* PackPtr = PackOpt.bRestrictToCorePack ? &PackOpt : nullptr;
 
-	FString SystemAugmented = SystemContent;
 	FString ToolsJson;
 	const bool bWantDispatchSurface = UnrealAiRuntimeDefaults::ToolSurfaceUseDispatch && !Request.bForceNativeToolSurface;
 	bool bUsingDispatchSurface = false;

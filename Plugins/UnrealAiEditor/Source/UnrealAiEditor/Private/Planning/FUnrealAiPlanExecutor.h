@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Harness/UnrealAiAgentTypes.h"
-#include "Harness/UnrealAiPlanDag.h"
+#include "Planning/UnrealAiPlanDag.h"
 
 class IUnrealAiAgentHarness;
 class IAgentContextService;
@@ -73,4 +73,11 @@ private:
 	uint32 PlanMaxWallMsCached = 0;
 	/** Monotonic seconds when the active plan execution window started (planner + nodes; resets after pause-for-build resume). */
 	double PlanWallStartSec = 0.0;
+
+	/** Snapshot of user message for the plan run (repair prompts append harness validation errors). */
+	FString OriginalPlannerUserText;
+	/** When non-empty, the next planner `RunTurn` uses this as `UserText` instead of `ParentRequest.UserText`. */
+	FString PendingPlannerUserTextOverride;
+	/** After one failed parse/validate, a second planner pass may run with augmented user text; only one repair. */
+	bool bPlannerDagRepairConsumed = false;
 };

@@ -12,7 +12,7 @@
 #include "HAL/PlatformTime.h"
 #include "Harness/FAgentRunFileSink.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
-#include "Harness/FUnrealAiPlanExecutor.h"
+#include "Planning/FUnrealAiPlanExecutor.h"
 #include "Harness/IUnrealAiAgentHarness.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "HttpManager.h"
@@ -27,21 +27,40 @@
 
 namespace UnrealAiHarnessScenarioRunnerPriv
 {
-	/** Early exit when HTTP is done, stream telemetry is idle, and harness is not doing tool work. */
-	static bool TryHarnessIdleAbort(IUnrealAiAgentHarness* Harness)
+	static uint32 GetEffectiveHarnessSyncIdleAbortMs(IUnrealAiAgentHarness* Harness, const bool bScenarioSyncWait)
 	{
-		const uint32 IdleMs = UnrealAiWaitTime::HarnessSyncIdleAbortMs;
+		uint32 IdleMs = UnrealAiWaitTime::HarnessSyncIdleAbortMs;
+		if (bScenarioSyncWait && Harness && Harness->IsPlanPipelineActive())
+		{
+			const uint32 PlanPipelineMs = UnrealAiWaitTime::HarnessPlanPipelineSyncIdleAbortMs;
+			if (PlanPipelineMs > 0)
+			{
+				IdleMs = PlanPipelineMs;
+			}
+		}
+		return IdleMs;
+	}
+
+	/** Early exit when HTTP is done, stream telemetry is idle, and harness is not doing tool work. */
+	static bool TryHarnessIdleAbort(IUnrealAiAgentHarness* Harness, const bool bScenarioSyncWait)
+	{
+		const uint32 IdleMs = GetEffectiveHarnessSyncIdleAbortMs(Harness, bScenarioSyncWait);
 		if (IdleMs == 0 || !Harness)
 		{
 			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(IdleMs == 0 ? TEXT("idle_abort_disabled") : TEXT("no_harness"));
 			return false;
 		}
-		if (!Harness->IsTurnInProgress() && !Harness->IsPlanPipelineActive())
+		// Headed sync wait: do not block idle abort when both turn and plan report inactive — that is the
+		// "DoneEvent never signaled" dead state (see headed plan-mode smoke runs). UI/chat does not use this helper.
+		if (!bScenarioSyncWait && !Harness->IsTurnInProgress() && !Harness->IsPlanPipelineActive())
 		{
 			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("turn_not_in_progress"));
 			return false;
 		}
-		if (Harness->HasActiveLlmTransportRequest())
+		// Non-scenario: never idle-abort while the transport still considers a request in flight (UI/chat).
+		// Headed scenario: a wedged connection can keep ActiveRequest true for the full HTTP timeout (~4 min) with
+		// no tokens — fall through and let telemetry (assistant + LLM-submit idle) decide.
+		if (Harness->HasActiveLlmTransportRequest() && !bScenarioSyncWait)
 		{
 			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("active_llm_transport"));
 			return false;
@@ -50,6 +69,21 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		{
 			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("suppress_idle_abort"));
 			return false;
+		}
+		// Headed scenario: do not idle-abort while a request is in flight and no assistant delta has
+		// arrived yet (time-to-first-token can exceed HarnessSyncIdleAbortMs). Post-first-token stall
+		// uses normal idle thresholds. UI path still uses active_llm_transport skip above.
+		if (bScenarioSyncWait && Harness->HasActiveLlmTransportRequest())
+		{
+			double AsstPre = -1.0;
+			double HttpPre = -1.0;
+			double LlmPre = -1.0;
+			UnrealAiHarnessProgressTelemetry::GetStreamIdleSeconds(AsstPre, HttpPre, LlmPre);
+			if (AsstPre < 0.0)
+			{
+				UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("awaiting_first_assistant_delta"));
+				return false;
+			}
 		}
 		double AsstIdle = -1.0;
 		double HttpIdle = -1.0;
@@ -124,7 +158,7 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 			{
 				return true;
 			}
-			if (HarnessForIdle && bOutIdleAbort && TryHarnessIdleAbort(HarnessForIdle))
+			if (HarnessForIdle && bOutIdleAbort && TryHarnessIdleAbort(HarnessForIdle, true))
 			{
 				*bOutIdleAbort = true;
 				return false;
@@ -167,7 +201,7 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 			{
 				return EPlanHarnessSyncSegment::SubTurn;
 			}
-			if (HarnessForIdle && bOutIdleAbort && TryHarnessIdleAbort(HarnessForIdle))
+			if (HarnessForIdle && bOutIdleAbort && TryHarnessIdleAbort(HarnessForIdle, true))
 			{
 				*bOutIdleAbort = true;
 				return EPlanHarnessSyncSegment::IdleAbort;
@@ -184,7 +218,7 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		{
 			return EPlanHarnessSyncSegment::SubTurn;
 		}
-		if (HarnessForIdle && bOutIdleAbort && TryHarnessIdleAbort(HarnessForIdle))
+		if (HarnessForIdle && bOutIdleAbort && TryHarnessIdleAbort(HarnessForIdle, true))
 		{
 			*bOutIdleAbort = true;
 			return EPlanHarnessSyncSegment::IdleAbort;
@@ -276,6 +310,10 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 			WaitMs / 1000,
 			Mode == EUnrealAiAgentMode::Plan ? TEXT(" (Plan mode: per planner + per node)") : TEXT(""));
 
+		// Must outlive the entire sync wait: FCollectingSink calls WeakExec.Pin() -> OnPlannerFinished -> Finish() ->
+		// FAgentRunFileSink::OnRunFinished (DoneEvent). If the executor is destroyed when the Plan { } block ends, Pin()
+		// is null, the parent sink never finishes, and the runner hits the forced-timeout path even after idle abort.
+		TSharedPtr<FUnrealAiPlanExecutor> PlanExecutorLifetime;
 		if (Mode == EUnrealAiAgentMode::Plan)
 		{
 			// Same pipeline as SChatComposer Plan mode: planner DAG pass + per-node Agent runs.
@@ -284,8 +322,7 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 			{
 				PlanOpts.bHarnessPlannerOnlyNoExecute = true;
 			}
-			const TSharedRef<FUnrealAiPlanExecutor> PlanRun = FUnrealAiPlanExecutor::Start(Harness, Ctx, Req, Sink, PlanOpts);
-			(void)PlanRun;
+			PlanExecutorLifetime = FUnrealAiPlanExecutor::Start(Harness, Ctx, Req, Sink, PlanOpts);
 		}
 		else
 		{
@@ -334,7 +371,7 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 			const FString ModeLabel = AgentModeToLabel(Mode);
 			if (bIdleAbort)
 			{
-				const uint32 IdleAbortMs = UnrealAiWaitTime::HarnessSyncIdleAbortMs;
+				const uint32 IdleAbortMs = UnrealAiHarnessScenarioRunnerPriv::GetEffectiveHarnessSyncIdleAbortMs(Harness, true);
 				const TSharedPtr<FJsonObject> IdleDiag = UnrealAiHarnessProgressTelemetry::BuildHarnessSyncIdleAbortDiagnosticJson(
 					ModeLabel,
 					IdleAbortMs,
@@ -356,6 +393,7 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 				{
 					Sink->AppendHarnessDiagnosticJson(IdleDiag);
 				}
+				Harness->FailInProgressTurnForScenarioIdleAbort();
 			}
 			else
 			{

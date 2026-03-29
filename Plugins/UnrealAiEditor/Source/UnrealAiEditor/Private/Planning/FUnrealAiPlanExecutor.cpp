@@ -1,4 +1,4 @@
-#include "Harness/FUnrealAiPlanExecutor.h"
+#include "Planning/FUnrealAiPlanExecutor.h"
 
 #include "Context/IAgentContextService.h"
 #include "HAL/PlatformTime.h"
@@ -9,6 +9,18 @@
 
 namespace UnrealAiPlanExecutorPriv
 {
+	static FString MakePlannerDagRepairUserText(const FString& OriginalUser, const FString& Err)
+	{
+		return OriginalUser
+			+ TEXT("\n\n---\n[Plan harness] Previous planner output did not parse or validate as unreal_ai.plan_dag.\n")
+			+ TEXT("Error: ")
+			+ Err
+			+ TEXT(
+				"\nReturn a single corrected JSON object only: schema unreal_ai.plan_dag, top-level nodes[] with id, title, hint, "
+				"and dependsOn or depends_on (string ids). Each dependency must reference an existing node id; the graph must be "
+				"acyclic (no self-edges). No markdown fences or prose outside the JSON.\n---");
+	}
+
 	class FCollectingSink final : public IAgentRunSink
 	{
 	public:
@@ -76,6 +88,13 @@ namespace UnrealAiPlanExecutorPriv
 		}
 		virtual void OnRunContinuation(int32 PhaseIndex, int32 TotalPhasesHint) override
 		{
+			// Child Agent-mode harness calls OnRunContinuation(LlmRound-1, EffectiveMaxLlmRounds) — second value is
+			// the LLM round cap (e.g. 512), not "total plan phases". Forwarding that to the parent mislabels run.jsonl
+			// as total_phases_hint=512. Plan phase hints are emitted only from FUnrealAiPlanExecutor (planner + per node).
+			if (!WorkerNodeId.IsEmpty())
+			{
+				return;
+			}
 			ForwardIfPossible([&](IAgentRunSink& P) { P.OnRunContinuation(PhaseIndex, TotalPhasesHint); });
 		}
 		virtual void OnTodoPlanEmitted(const FString& Title, const FString& PlanJson) override
@@ -110,6 +129,7 @@ TSharedRef<FUnrealAiPlanExecutor> FUnrealAiPlanExecutor::Start(
 	Exec->ParentSink = MoveTemp(InParentSink);
 	Exec->bPauseAfterPlannerForBuild = Options.bPauseAfterPlannerForBuild;
 	Exec->bHarnessPlannerOnlyNoExecute = Options.bHarnessPlannerOnlyNoExecute;
+	Exec->OriginalPlannerUserText = InParentRequest.UserText;
 	Exec->bRunning = true;
 	Exec->PlanExecutionPhase = 0;
 	Exec->ParentIds.RunId = FGuid::NewGuid();
@@ -124,11 +144,11 @@ TSharedRef<FUnrealAiPlanExecutor> FUnrealAiPlanExecutor::Start(
 	{
 		Exec->ParentSink->OnRunStarted(Exec->ParentIds);
 	}
-	Exec->BeginPlannerTurn();
 	if (InHarness)
 	{
 		InHarness->NotifyPlanExecutorStarted(Exec.ToSharedPtr());
 	}
+	Exec->BeginPlannerTurn();
 	return Exec;
 }
 
@@ -160,12 +180,18 @@ TSharedRef<FUnrealAiPlanExecutor> FUnrealAiPlanExecutor::ResumeExecutionFromDag(
 	FString Err;
 	if (!UnrealAiPlanDag::ParseDagJson(DagJsonText, Exec->Dag, Err))
 	{
-		Exec->Finish(false, FString::Printf(TEXT("Invalid DAG JSON: %s"), *Err));
+		Exec->Finish(false,
+			FString::Printf(
+				TEXT("Invalid DAG JSON (parse): %s Dependencies must use dependsOn/depends_on arrays of string ids that exist on nodes."),
+				*Err));
 		return Exec;
 	}
 	if (!UnrealAiPlanDag::ValidateDag(Exec->Dag, 64, Err))
 	{
-		Exec->Finish(false, FString::Printf(TEXT("DAG validation failed: %s"), *Err));
+		Exec->Finish(false,
+			FString::Printf(
+				TEXT("DAG validation failed: %s Ensure dependsOn references existing node ids, no self-dependencies, and no cycles."),
+				*Err));
 		return Exec;
 	}
 	if (InContextService)
@@ -275,6 +301,11 @@ void FUnrealAiPlanExecutor::BeginPlannerTurn()
 	}
 	FUnrealAiAgentTurnRequest PlannerReq = ParentRequest;
 	PlannerReq.Mode = EUnrealAiAgentMode::Plan;
+	if (!PendingPlannerUserTextOverride.IsEmpty())
+	{
+		PlannerReq.UserText = PendingPlannerUserTextOverride;
+		PendingPlannerUserTextOverride.Reset();
+	}
 	const TSharedRef<UnrealAiPlanExecutorPriv::FCollectingSink> Sink = MakeShared<UnrealAiPlanExecutorPriv::FCollectingSink>();
 	Sink->ForwardTarget = ParentSink;
 	Sink->bForwardStreamToParent = true;
@@ -323,12 +354,32 @@ void FUnrealAiPlanExecutor::OnPlannerFinished(bool bSuccess, const FString& Erro
 	FString ParseError;
 	if (!UnrealAiPlanDag::ParseDagJson(PlannerText, Dag, ParseError))
 	{
-		Finish(false, FString::Printf(TEXT("Planner returned invalid DAG JSON: %s"), *ParseError));
+		if (!bPlannerDagRepairConsumed)
+		{
+			bPlannerDagRepairConsumed = true;
+			PendingPlannerUserTextOverride = UnrealAiPlanExecutorPriv::MakePlannerDagRepairUserText(OriginalPlannerUserText, ParseError);
+			BeginPlannerTurn();
+			return;
+		}
+		Finish(false,
+			FString::Printf(
+				TEXT("Planner output is still invalid JSON after one repair attempt: %s"),
+				*ParseError));
 		return;
 	}
 	if (!UnrealAiPlanDag::ValidateDag(Dag, 64, ParseError))
 	{
-		Finish(false, FString::Printf(TEXT("Planner DAG failed validation: %s"), *ParseError));
+		if (!bPlannerDagRepairConsumed)
+		{
+			bPlannerDagRepairConsumed = true;
+			PendingPlannerUserTextOverride = UnrealAiPlanExecutorPriv::MakePlannerDagRepairUserText(OriginalPlannerUserText, ParseError);
+			BeginPlannerTurn();
+			return;
+		}
+		Finish(false,
+			FString::Printf(
+				TEXT("Planner DAG still failed validation after one repair attempt: %s Each dependsOn must reference an existing node id; graph must be acyclic."),
+				*ParseError));
 		return;
 	}
 	if (ContextService)
@@ -433,7 +484,7 @@ void FUnrealAiPlanExecutor::BeginNextReadyNode()
 
 	FUnrealAiAgentTurnRequest ChildReq = ParentRequest;
 	ChildReq.Mode = EUnrealAiAgentMode::Agent;
-	ChildReq.LlmRoundBudgetFloor = 64;
+	ChildReq.LlmRoundBudgetFloor = FMath::Min(64, FMath::Max(1, UnrealAiWaitTime::PlanNodeMaxLlmRounds));
 	ChildReq.ThreadId = FString::Printf(TEXT("%s_plan_%s"), *ParentRequest.ThreadId, *NodeId);
 	ChildReq.UserText = FString::Printf(
 		TEXT("Execute plan node '%s'.\nTitle: %s\nHint: %s"),

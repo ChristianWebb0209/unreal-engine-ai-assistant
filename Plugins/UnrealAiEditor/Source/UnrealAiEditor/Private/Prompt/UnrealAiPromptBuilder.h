@@ -13,6 +13,8 @@ struct FUnrealAiPromptAssembleParams
 	FString ThreadId;
 	bool bIncludeExecutionSubturnChunk = false;
 	bool bIncludePlanDagChunk = false;
+	/** Plan-mode node execution: Agent turn on thread id `*_plan_*` (serial DAG node harness). */
+	bool bIncludePlanNodeExecutionChunk = false;
 };
 
 namespace UnrealAiPromptBuilder

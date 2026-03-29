@@ -1,7 +1,7 @@
-#include "Context/UnrealAiActiveTodoSummary.h"
+#include "Planning/UnrealAiStructuredPlanSummary.h"
 
 #include "Dom/JsonObject.h"
-#include "Harness/UnrealAiPlanDag.h"
+#include "Planning/UnrealAiPlanDag.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 

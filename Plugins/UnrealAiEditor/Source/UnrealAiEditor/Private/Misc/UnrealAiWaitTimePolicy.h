@@ -22,6 +22,19 @@ namespace UnrealAiWaitTime
 	 */
 	inline constexpr uint32 HarnessSyncIdleAbortMs = 3000;
 
+	/**
+	 * Headed scenario sync: when a plan pipeline is active (planner + serial node turns), post-tool / post-token
+	 * gaps can exceed HarnessSyncIdleAbortMs without being a true stall. 0 = use HarnessSyncIdleAbortMs only.
+	 */
+	inline constexpr uint32 HarnessPlanPipelineSyncIdleAbortMs = 45000;
+
+	/**
+	 * If the HTTP layer reports the response complete (incl. SSE parse) but the runner never receives
+	 * a Finish event, fail the turn after this much idle time on both HTTP and assistant telemetry.
+	 * 0 = disabled. Complements headed sync idle abort (same order of magnitude).
+	 */
+	inline constexpr uint32 HarnessStreamNoFinishGraceMs = 5000;
+
 	/** After CancelTurn(), drain window so sink/game-thread work can flush before forced terminal. */
 	inline constexpr uint32 HarnessCancelDrainWaitMs = 5000;
 
@@ -31,8 +44,12 @@ namespace UnrealAiWaitTime
 	/** Max LLM rounds for EUnrealAiAgentMode::Plan (planner DAG only); agent plan nodes keep profile limits. */
 	inline constexpr int32 PlannerMaxLlmRounds = 16;
 
+	/** Upper bound on LLM rounds for Agent turns whose thread id is a plan node (`*_plan_*`); applied in harness DispatchLlm. */
+	inline constexpr int32 PlanNodeMaxLlmRounds = 12;
+
 	// --- Streamed tool-call incomplete guard (SSE can split tool JSON across chunks) ---
-	inline constexpr int32 StreamToolIncompleteMaxEvents = 64;
+	/** Run-20 step_01: `stream_tool_call_incomplete_timeout` at age_events=64 (age_ms=4) — provider fragmented many tiny SSE chunks before tool JSON closed. */
+	inline constexpr int32 StreamToolIncompleteMaxEvents = 128;
 	inline constexpr int32 StreamToolIncompleteMaxMs = 120000; // 2 min
 
 	// --- Optional pacing between LLM submits (0 = off) ---

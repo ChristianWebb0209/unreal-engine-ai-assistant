@@ -115,7 +115,7 @@ namespace UnrealAiContextRankingPolicy
 			// Retrieved local code/doc chunks can be high signal when query-matched.
 			return 66.f;
 		case ECandidateType::PlanState:
-			// Important in orchestration mode; generally less critical in simple turns.
+			// Active plan/todo state; useful during multi-step work; generally less critical in simple turns.
 			return 60.f;
 		default:
 			return 40.f;

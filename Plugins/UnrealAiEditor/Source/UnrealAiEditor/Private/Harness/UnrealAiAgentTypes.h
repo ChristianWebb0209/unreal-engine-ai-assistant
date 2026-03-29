@@ -138,13 +138,3 @@ struct FUnrealAiAgentTurnRequest
 	/** Skip dispatch + tiered tool index; emit full per-tool JSON (headless tests / diagnostics). */
 	bool bForceNativeToolSurface = false;
 };
-
-/** Structured result from a Level-B worker (parent merge consumes this). */
-struct FUnrealAiWorkerResult
-{
-	FString Status;
-	FString Summary;
-	TArray<FString> Artifacts;
-	TArray<FString> Errors;
-	TArray<FString> FollowUpQuestions;
-};

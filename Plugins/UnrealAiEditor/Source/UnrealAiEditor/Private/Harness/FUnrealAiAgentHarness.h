@@ -36,6 +36,7 @@ public:
 
 	virtual void RunTurn(const FUnrealAiAgentTurnRequest& Request, TSharedPtr<IAgentRunSink> Sink) override;
 	virtual void CancelTurn() override;
+	virtual void FailInProgressTurnForScenarioIdleAbort() override;
 	virtual bool IsTurnInProgress() const override;
 	virtual bool HasActiveLlmTransportRequest() const override;
 	virtual bool ShouldSuppressIdleAbort() const override;

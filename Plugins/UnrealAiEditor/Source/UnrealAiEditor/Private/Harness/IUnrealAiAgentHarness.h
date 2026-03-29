@@ -16,6 +16,9 @@ public:
 
 	virtual void CancelTurn() = 0;
 
+	/** Headed harness: best-effort Fail() on the active turn before CancelTurn when idle-abort triggers (explicit jsonl error). */
+	virtual void FailInProgressTurnForScenarioIdleAbort() {}
+
 	/** True while a turn is actively streaming or executing tools. */
 	virtual bool IsTurnInProgress() const = 0;
 

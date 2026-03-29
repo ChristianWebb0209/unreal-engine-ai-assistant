@@ -210,10 +210,6 @@ void FAgentRunFileSink::OnRunContinuation(const int32 PhaseIndex, const int32 To
 	AppendJsonObject(O);
 	const FString Reason = FString::Printf(TEXT("continuation_%d"), PhaseIndex);
 	MaybeDumpContextWindow(*Reason);
-	if (PlanSubTurnEvent)
-	{
-		NotifyPlanHarnessSyncSegmentBoundary();
-	}
 }
 
 void FAgentRunFileSink::OnTodoPlanEmitted(const FString& Title, const FString& PlanJson)
