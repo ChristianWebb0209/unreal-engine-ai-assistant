@@ -61,7 +61,7 @@ jobs:
         shell: bash
         run: |
           if [ -n "$(git status --porcelain)" ]; then
-            git add architecture.svg README.md docs/architecture-maps
+            git add README.md docs/architecture-maps
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit -m "docs: regenerate architecture maps"
