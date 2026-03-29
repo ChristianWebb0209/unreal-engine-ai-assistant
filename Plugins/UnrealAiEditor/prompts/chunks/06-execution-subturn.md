@@ -12,5 +12,6 @@ After **`agent_emit_todo_plan`** alone, the harness appends a short **user** nud
 - If the **previous tool** failed, fix args or strategy before advancing the plan.
 - If the harness indicates dynamic escalation (too many tool calls or repeated failures), queue remaining work into `activeTodoPlan` and continue from the first pending step.
 - If the same tool/action pattern repeats without progress, stop looping: replan into explicit pending steps or return a concise blocked summary.
+- **Paths in execution:** step titles and plan hints are not tool arguments—resolve real `object_path` / `actor_path` from tools/context, not from plan wording alone.
 
 Do not paste the full step list unless the user or harness requests a repair.

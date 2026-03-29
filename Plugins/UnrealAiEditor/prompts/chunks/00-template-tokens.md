@@ -11,3 +11,5 @@ These are **not** sent verbatim to the model. Document them in one place so prom
 | `{{TOOL_PACK_NAME}}` | harness | Optional label for routed packs (core vs domain). |
 | `{{MAX_PLAN_STEPS}}` | harness policy | e.g. `12` — model must not exceed when emitting plans. |
 | `{{CONTINUATION_ROUND}}` | harness | e.g. `2 / 5` for UI honesty (optional line in sub-turns). |
+
+**Author note:** `00` is not instructional model text. When editing other chunks, **do not** add copy-pastable `/Game/...` or tutorial asset names as “examples”—use placeholders and **`01`**/**`04`**; see **Examples contract** in **`01-identity.md`**.

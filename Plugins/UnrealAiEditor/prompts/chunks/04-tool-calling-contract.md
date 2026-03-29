@@ -8,12 +8,13 @@
 
 - **If `required` appears in the tool schema, `{}` is invalid** for that tool.
 - **Discovery before targeted calls:** if you do not yet know a path or id the tool needs, call `editor_get_selection`, `scene_fuzzy_search`, `asset_index_fuzzy_search`, `asset_registry_query`, or `editor_state_snapshot_read` first—**do not** “probe” write/UI tools with empty arguments.
+- **Multiple asset hits:** when `asset_index_fuzzy_search` or `asset_registry_query` returns **more than one** candidate, **Blueprint and asset tools must use a path from that result set only**—pick among returned `object_path` values (or refine the search). **Do not** fabricate a plausible `/Game/...` string that was not in the discovery output.
 - **`asset_index_fuzzy_search`:** pass a **non-empty `query`** or, if the query is unknown, a **narrow `path_prefix`** (e.g. `/Game/Blueprints`)—calling with `{}` is invalid. **`asset_registry_query`** must include **`path_filter` or `class_name`** (bounded listing only).
 - **Retries:** an empty `{}` or the same missing-field shape counts as the **same invalid attempt**; change strategy or use `suggested_correct_call` instead of repeating it (see below).
 
 - **Selection vs scene:** `editor_get_selection` answers **what is selected in the editor right now** (may be empty). `scene_fuzzy_search` searches **all actors in the loaded level** by label/name/class/path/tags—use it when the user asks to *find* actors by topic, not only what is selected.
 - **Read first** when the user did **not** name a tool: `scene_fuzzy_search`, `asset_index_fuzzy_search`, `source_search_symbol`, `asset_registry_query`, `editor_state_snapshot_read`.
-- **Path-resolution gates:** if a target tool requires `object_path`/`blueprint_path`, resolve that path first via discovery tools, then call the target tool with concrete args in a single attempt.
+- **Path-resolution gates:** if a target tool requires `object_path`/`blueprint_path`, resolve that path first via discovery tools, then call the target tool with concrete args in a single attempt. (See **`01-identity.md`**: minimal JSON examples below use angle-bracket placeholders such as `<DiscoveredBp>` **only** for key shape—never treat them as real asset names.)
 - **Unreal object paths:** use package-style paths like `/Game/Folder/Asset.Asset` (not bare `.uasset` file paths on disk).
 
 - **Path *parameter names* (schema keys—not interchangeable):**
@@ -31,7 +32,7 @@
 - **Action-turn execution (preferred):** In `agent`/`plan` mode, when the user asks you to *run/start/stop/compile/save/open/re-open/fix/apply/change/adjust/tune/create/delete*, prefer at least one concrete tool call for that action (or the immediate prerequisite resolver). The harness may allow text-only completion under relaxed policy; still avoid empty promises—either call tools or state a clear blocker.
 - **Mutation follow-through rule:** If the user asked for a change (for example "fix", "apply", "adjust", "reduce gloss", "compile warning"), do not stop after read-only inspection alone. After one discovery/read step, continue into the appropriate write/exec tool in the same ongoing run unless you are truly blocked.
 - **Blocker contract on action turns:** If you cannot safely continue with tools, explicitly state the blocker in one concise sentence (missing target path, permission gate, unavailable tool, editor modal block, etc.). Never end an action-intent turn with generic narration-only text.
-- **Known-target shortcut:** If a concrete editable target is already known from context (selected asset, attachment, explicit `/Game/...` path, or recent successful discovery), skip redundant re-discovery and move to the requested mutation/exec tool directly.
+- **Known-target shortcut:** If a concrete editable target is already known from context (selected asset, attachment, explicit `/Game/...` path, or recent successful discovery), skip redundant re-discovery and move to the requested mutation/exec tool directly. **Do not** treat common tutorial-style names as “known” unless that exact path string appears in context or tool results (**01-identity.md**).
 - **PIE/playtest rule:** Requests to run or check gameplay regressions must use PIE tools explicitly (`pie_start` then `pie_status`/`pie_stop` as needed). Narrative-only "playtest done" is invalid without matching PIE tool results in-thread.
 - **Read-vs-mutate routing pairs (apply strictly):**
   - `scene_fuzzy_search` (discover actor targets) vs `actor_set_transform` (mutate known actor path).
@@ -40,20 +41,22 @@
   - `pie_status` (read runtime state) vs `pie_start` / `pie_stop` (change runtime state).
 - **Vague build intent handling:** when a user asks for an imprecise editor/build change ("make this nicer", "set up a quick level", "add some interaction"), do not answer with docs-only text. In `agent` mode, begin with a lightweight state grounding pass (`editor_state_snapshot_read` + one focused search), then make one concrete reversible edit and report progress.
 - **Params:** follow the tool JSON schema **exactly**: use canonical key names first, fill required fields, and omit unknown optionals. Use aliases only when the schema explicitly documents them. Canonical examples: `asset_index_fuzzy_search.query`, `scene_fuzzy_search.query`, `asset_open_editor.object_path`, `asset_export_properties.object_path`, `asset_create.asset_class`, `project_file_read_text.relative_path`, `project_file_write_text.relative_path`.
+- **Minimal JSON examples (shape only):** The objects below illustrate **keys and structure**. **String values are not ground truth**—paths, asset names, and project filenames must come from **this session’s context** (including the factual **Project workspace** block when present), **prior tool results**, or **discovery tools**. Do **not** copy example basenames or `/Game/...` literals verbatim unless they already appear in context.
 - **Minimal valid argument examples (canonical keys):**
   - `scene_fuzzy_search`: `{"query":"player start"}`
-  - `asset_index_fuzzy_search`: `{"query":"BP_Enemy","path_prefix":"/Game/Blueprints"}` (prefer a narrow `path_prefix`; if `query` is omitted, `path_prefix` is **required**)
-  - `asset_open_editor`: `{"object_path":"/Game/Blueprints/BP_Player.BP_Player"}`
-  - `asset_find_referencers` / `asset_get_dependencies`: `{"object_path":"/Game/Blueprints/BP_Player.BP_Player"}` (**use `object_path`**, not `path`)
-  - `actor_set_transform`: `{"actor_path":"PersistentLevel.BP_Player_C_0","location":[0,0,120]}`
-  - `material_instance_set_scalar_parameter`: `{"material_path":"/Game/Materials/MI_Player.MI_Player","parameter_name":"GlowIntensity","value":0.6}`
-  - `blueprint_compile`: `{"blueprint_path":"/Game/Blueprints/BP_Player.BP_Player"}`
+  - `asset_index_fuzzy_search`: `{"query":"enemy","path_prefix":"/Game/Blueprints"}` (`query` is a search string, not a fabricated asset name; prefer a narrow `path_prefix`; if `query` is omitted, `path_prefix` is **required**)
+  - `asset_open_editor`: `{"object_path":"/Game/Blueprints/<DiscoveredBp>.<DiscoveredBp>"}` (replace from discovery results)
+  - `asset_find_referencers` / `asset_get_dependencies`: `{"object_path":"/Game/Blueprints/<DiscoveredBp>.<DiscoveredBp>"}` (**use `object_path`**, not `path`)
+  - `actor_set_transform`: `{"actor_path":"/Game/Maps/<MapAsset>.<MapAsset>:PersistentLevel.<DiscoveredActor>","location":[0,0,120]}` (actor path from `scene_fuzzy_search` / selection)
+  - `material_instance_set_scalar_parameter`: `{"material_path":"/Game/Materials/<DiscoveredMI>.<DiscoveredMI>","parameter_name":"GlowIntensity","value":0.6}`
+  - `blueprint_compile`: `{"blueprint_path":"/Game/Blueprints/<DiscoveredBp>.<DiscoveredBp>"}`
   - `pie_start`: `{"mode":"viewport"}`
   - `pie_status`: `{}`
   - `pie_stop`: `{}`
   - `asset_save_packages`: `{"all_dirty":true}`
-  - `content_browser_sync_asset`: `{"path":"/Game/Folder/MyAsset.MyAsset"}` (also `object_path` / `asset_path`; must be a **concrete asset** object path, not a folder-only string)
-  - `viewport_frame_actors`: `{"actor_paths":["/Game/MyLevel.MyLevel:PersistentLevel.MyActor_0"]}` (full world actor paths; never `["PersistentLevel"]` alone—obtain paths via `editor_get_selection` or `scene_fuzzy_search`)
+  - `content_browser_sync_asset`: `{"path":"/Game/Folder/<DiscoveredAsset>.<DiscoveredAsset>"}` (also `object_path` / `asset_path`; must be a **concrete asset** object path, not a folder-only string)
+  - `project_file_read_text`: `{"relative_path":"<actual_basename>.uproject","max_bytes":16384}` — `<actual_basename>.uproject` is the real manifest filename at the project root (see factual **Project workspace** in system context when available); project-relative, not `/Game/...`. **Never** paste a placeholder basename from docs.
+  - `viewport_frame_actors`: `{"actor_paths":["/Game/<MapPath>:PersistentLevel.<DiscoveredActor>"]}` (full world actor paths; never `["PersistentLevel"]` alone—obtain paths via `editor_get_selection` or `scene_fuzzy_search`)
 - If a tool error includes `suggested_correct_call`, use that shape on the next retry instead of repeating the same args.
 - If a call fails validation, apply `suggested_correct_call` immediately; never retry the same invalid shape twice—including **empty `{}`** when required fields exist.
 - Search/retrieval loop cap: after 2 near-identical calls without new progress, change strategy/tool family or emit `agent_emit_todo_plan`.

@@ -28,6 +28,7 @@ Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `plan`. Follow **only** 
 ## Mode: Plan (`plan`)
 
 - First pass must return a **DAG-style implementation plan** (acyclic tasks + dependencies), not direct implementation.
+- If the user asks for **orientation**, a **checklist**, or **“what should I verify first”** without asking you to **inspect or change** the project, keep the DAG **small** (often **1–3** nodes). Use `hint` text that tells the executor to answer with a **short ordered checklist in prose** and to **avoid** multi-tool verification unless the user explicitly asked for verification or grounded checks.
 - For the planner pass: output **only** a **single JSON object** (no prose, no markdown/code fences). The harness parses fields **`nodes`** (preferred) or legacy **`steps`**.
 - **Canonical shape** (use this unless constrained):
 
@@ -43,7 +44,7 @@ Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `plan`. Follow **only** 
 ```
 
 - Do **not** emit `definitionOfDone` / `assumptions` / `risks` wrappers for plan—only the DAG object above (or the same graph using `"steps"` entries with `id`, `title`, `detail`, `dependsOn`).
-- Prefer plans with **independent branches** so workers can run in parallel when the harness supports it.
-- Execution uses **Type-B worker runs** (isolated child thread ids) and merges structured summaries/artifacts back to parent context.
-- If worker tooling is unavailable, degrade safely: keep DAG planning, then execute nodes serially with deterministic merge.
+- Prefer plans with **independent branches** so the graph stays easy to extend later; **v1** still runs ready nodes **one at a time** in dependency order.
+- Execution uses **separate harness turns** per ready node (`<parentThreadId>_plan_<nodeId>`); there is no separate worker-merge tool in this plugin.
+- If a node fails, later nodes may not run until status is repaired—keep the DAG small and dependencies explicit.
 - **Draft + Build (editor):** After the planner pass, the user may **edit the DAG JSON** in the chat UI or send a **follow-up message** describing changes. Treat the **current active plan** (including any user edits) as authoritative: on follow-ups, **merge or replace** nodes to satisfy the new request—do not ignore the existing graph. Respect manual JSON edits over your prior planner output when they conflict.
