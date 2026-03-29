@@ -2,7 +2,7 @@
 
 #include "Context/AgentContextTypes.h"
 #include "Context/IAgentContextService.h"
-#include "HAL/PlatformMisc.h"
+#include "Misc/UnrealAiRuntimeDefaults.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Misc/SecureHash.h"
 #include "Tools/UnrealAiToolBm25Index.h"
@@ -14,45 +14,14 @@
 
 namespace UnrealAiToolSurfacePipelinePriv
 {
-	/** Default on (empty env). Opt out: 0/off/false/no/legacy. */
-	static bool EnvEligibilityDisabledByUser()
-	{
-		const FString E = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_TOOL_ELIGIBILITY")).TrimStartAndEnd().ToLower();
-		return E == TEXT("0") || E == TEXT("off") || E == TEXT("false") || E == TEXT("no") || E == TEXT("legacy")
-			|| E == TEXT("disable") || E == TEXT("disabled");
-	}
-
-	static bool EnvEligibilityEnabled()
-	{
-		return !EnvEligibilityDisabledByUser();
-	}
-
-	/** Default on (empty env). Opt out: 0/off/false/no. */
-	static bool EnvUsagePriorDisabledByUser()
-	{
-		const FString E = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_TOOL_USAGE_PRIOR")).TrimStartAndEnd().ToLower();
-		return E == TEXT("0") || E == TEXT("off") || E == TEXT("false") || E == TEXT("no");
-	}
-
-	static bool EnvUsagePriorEnabled()
-	{
-		return !EnvUsagePriorDisabledByUser();
-	}
-
-	static int32 ReadEnvInt(const TCHAR* Name, int32 Def, int32 MinV, int32 MaxV)
-	{
-		const FString V = FPlatformMisc::GetEnvironmentVariable(Name).TrimStartAndEnd();
-		if (V.IsEmpty())
-		{
-			return Def;
-		}
-		return FMath::Clamp(FCString::Atoi(*V), MinV, MaxV);
-	}
-
 	struct FScored
 	{
 		FString ToolId;
 		float Score = 0.f;
+		float Bm25Norm01 = 0.f;
+		float ContextMult = 1.f;
+		float UsagePrior01 = 0.f;
+		bool bUsagePriorBlended = false;
 		bool bGuardrail = false;
 	};
 
@@ -80,7 +49,7 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 {
 	OutToolIndexMarkdown.Reset();
 	OutTelemetry = FUnrealAiToolSurfaceTelemetry();
-	if (!UnrealAiToolSurfacePipelinePriv::EnvEligibilityEnabled())
+	if (!UnrealAiRuntimeDefaults::ToolEligibilityTelemetryEnabled)
 	{
 		OutTelemetry.ToolSurfaceMode = TEXT("off");
 		return false;
@@ -137,17 +106,25 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 			UnrealAiToolSurfacePipelinePriv::FScored Row;
 			Row.ToolId = Tid;
 			const float Bm = RawScores.FindRef(Tid) / MaxS;
+			Row.Bm25Norm01 = Bm;
 			TArray<FString> ToolTags;
 			UnrealAiToolContextBias::CollectToolDomainTags(Def, ToolTags);
 			const float Mult = UnrealAiToolContextBias::ScoreMultiplierForTool(ToolTags, ActiveTags);
+			Row.ContextMult = Mult;
 			float Combined = Bm * Mult;
-			const bool bPrior = UnrealAiToolSurfacePipelinePriv::EnvUsagePriorEnabled();
+			const bool bPrior = UnrealAiRuntimeDefaults::ToolUsagePriorEnabled;
 			if (bPrior)
 			{
 				const float Prior = UnrealAiToolUsagePrior::GetOperationalPrior01(Tid);
+				Row.UsagePrior01 = Prior;
+				Row.bUsagePriorBlended = true;
 				const float WUse = 0.3f;
 				const float WSim = 0.7f;
 				Combined = WSim * Combined + WUse * Prior;
+			}
+			else
+			{
+				Row.UsagePrior01 = UnrealAiToolUsagePrior::GetOperationalPrior01(Tid);
 			}
 			Row.Score = Combined;
 			bool bGr = false;
@@ -178,8 +155,9 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 		}
 	}
 
-	const int32 KMin = UnrealAiToolSurfacePipelinePriv::ReadEnvInt(TEXT("UNREAL_AI_TOOL_K_MIN"), 8, 1, 512);
-	const int32 KMax = UnrealAiToolSurfacePipelinePriv::ReadEnvInt(TEXT("UNREAL_AI_TOOL_K_MAX"), 36, KMin, 512);
+	// Defaults keep the tiered appendix smaller so user + history retain more of the context window.
+	const int32 KMin = UnrealAiRuntimeDefaults::ToolKMin;
+	const int32 KMax = FMath::Clamp(UnrealAiRuntimeDefaults::ToolKMax, KMin, 512);
 	const int32 Keffective = UnrealAiToolKPolicy::ComputeEffectiveK(NonGuardScores, KMin, KMax);
 
 	TSet<FString> GuardrailIds;
@@ -207,8 +185,35 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 		++Taken;
 	}
 
-	const int32 ExpandedCount = UnrealAiToolSurfacePipelinePriv::ReadEnvInt(TEXT("UNREAL_AI_TOOL_EXPANDED_COUNT"), 6, 0, 64);
-	const int32 Budget = UnrealAiToolSurfacePipelinePriv::ReadEnvInt(TEXT("UNREAL_AI_TOOL_SURFACE_BUDGET_CHARS"), 120000, 8000, 2000000);
+	TMap<FString, UnrealAiToolSurfacePipelinePriv::FScored> ScoreById;
+	ScoreById.Reserve(Pool.Num());
+	for (const UnrealAiToolSurfacePipelinePriv::FScored& R : Pool)
+	{
+		ScoreById.Add(R.ToolId, R);
+	}
+	int32 RankIx = 0;
+	for (const FString& Tid : Ordered)
+	{
+		FUnrealAiToolSurfaceRankedEntry E;
+		E.Rank = RankIx++;
+		E.ToolId = Tid;
+		if (const UnrealAiToolSurfacePipelinePriv::FScored* Found = ScoreById.Find(Tid))
+		{
+			E.CombinedScore = Found->Score;
+			E.Bm25Norm01 = Found->Bm25Norm01;
+			E.ContextMultiplier = Found->ContextMult;
+			E.UsagePrior01 = Found->UsagePrior01;
+			E.bUsagePriorBlended = Found->bUsagePriorBlended;
+			E.bGuardrail = Found->bGuardrail;
+			E.SelectionReason = Found->bGuardrail ? TEXT("guardrail_always_in_core_pack")
+												: (Found->bUsagePriorBlended ? TEXT("ranked_bm25_x_context_blended_with_usage_prior")
+																			: TEXT("ranked_bm25_x_context"));
+		}
+		OutTelemetry.RankedTools.Add(E);
+	}
+
+	const int32 ExpandedCount = UnrealAiRuntimeDefaults::ToolExpandedCount;
+	const int32 Budget = UnrealAiRuntimeDefaults::ToolSurfaceBudgetChars;
 
 	Catalog->BuildCompactToolIndexAppendixTiered(
 		Request.Mode,

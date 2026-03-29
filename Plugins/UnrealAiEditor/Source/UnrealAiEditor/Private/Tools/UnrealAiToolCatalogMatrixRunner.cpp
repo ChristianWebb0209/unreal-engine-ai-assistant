@@ -4,7 +4,6 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
-#include "HAL/PlatformMisc.h"
 #include "HAL/PlatformTime.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -56,39 +55,13 @@ namespace UnrealAiToolCatalogMatrixRunnerPriv
 		ContractViolations.Add(MakeShared<FJsonValueObject>(V.ToSharedRef()));
 	}
 
-	static bool TryLoadFixtureArgs(const FString& ToolId, TSharedPtr<FJsonObject>& OutArgs, FString& OutViolationReason)
-	{
-		const FString Path = FPaths::Combine(FPaths::ProjectDir(), TEXT("tests"), TEXT("fixtures"), ToolId + TEXT(".json"));
-		if (!FPaths::FileExists(Path))
-		{
-			OutArgs = MakeShared<FJsonObject>();
-			OutViolationReason.Reset();
-			return true;
-		}
-		FString JsonStr;
-		if (!FFileHelper::LoadFileToString(JsonStr, *Path))
-		{
-			OutViolationReason = TEXT("fixture: failed to read file");
-			return false;
-		}
-		TSharedPtr<FJsonObject> Parsed;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonStr);
-		if (!FJsonSerializer::Deserialize(Reader, Parsed) || !Parsed.IsValid())
-		{
-			OutViolationReason = TEXT("fixture: invalid JSON");
-			return false;
-		}
-		OutArgs = Parsed;
-		OutViolationReason.Reset();
-		return true;
-	}
 }
 
 bool UnrealAiToolCatalogMatrixRunner::RunAndWriteJson(const FString& MatrixFilter, TArray<FString>* OutViolationMessages)
 {
 	using namespace UnrealAiToolCatalogMatrixRunnerPriv;
 
-	const FString GitCommit = FPlatformMisc::GetEnvironmentVariable(TEXT("GIT_COMMIT"));
+	const FString GitCommit; // optional CI metadata; not required for matrix output
 
 	FUnrealAiToolCatalog Cat;
 	if (!Cat.LoadFromPlugin() || !Cat.IsLoaded())
@@ -130,19 +103,7 @@ bool UnrealAiToolCatalogMatrixRunner::RunAndWriteJson(const FString& MatrixFilte
 			return;
 		}
 
-		TSharedPtr<FJsonObject> Args;
-		FString FixtureErr;
-		if (!TryLoadFixtureArgs(ToolId, Args, FixtureErr))
-		{
-			AppendViolation(ContractViolations, ToolId, FixtureErr);
-			TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
-			Row->SetStringField(TEXT("tool_id"), ToolId);
-			Row->SetBoolField(TEXT("skipped"), false);
-			Row->SetStringField(TEXT("tier"), TEXT("fixture_error"));
-			Row->SetStringField(TEXT("error_message"), FixtureErr);
-			ResultRows.Add(MakeShared<FJsonValueObject>(Row.ToSharedRef()));
-			return;
-		}
+		const TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
 
 		++Invoked;
 

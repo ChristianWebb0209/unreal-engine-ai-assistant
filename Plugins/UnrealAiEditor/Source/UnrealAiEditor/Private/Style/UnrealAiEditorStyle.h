@@ -88,6 +88,8 @@ public:
 	static void ApplyChatBubbleColorsFromSettings();
 	static FSlateColor ColorBackgroundCanvas();
 	static FSlateColor ColorTextPrimary();
+	/** User-authored chat bubble text (warm off-white; not #fff — easier on dark taupe bubbles). */
+	static FSlateColor ColorChatUserMessage();
 	/** Secondary / hint text (sidebars, metadata, panel hints). */
 	static FSlateColor ColorTextMuted();
 	/** Footer and lowest-emphasis labels (composer hint line). */
@@ -98,9 +100,9 @@ public:
 	static FSlateColor ColorTextMetaHint();
 	/** Italic “thinking” subline (slightly transparent). */
 	static FSlateColor ColorThinkingSubline();
-	/** Near-white for rendered markdown headings. */
+	/** Assistant markdown headings — bright but not pure white (cool-tinted). */
 	static FSlateColor ColorMarkdownHeading();
-	/** Default paragraph / list body in rendered markdown. */
+	/** Assistant reply body (cool blue-gray; contrasts with ColorChatUserMessage). */
 	static FSlateColor ColorMarkdownBody();
 	/** Todo checkbox color when item is done (markdown). */
 	static FLinearColor LinearColorMarkdownTodoDoneCheck();
@@ -116,6 +118,14 @@ public:
 	static FLinearColor LinearColorModeMenuPopoverBg();
 	/** Chat window title strip behind header text. */
 	static FLinearColor LinearColorChatHeaderStrip();
+
+	/**
+	 * Tool call card (SToolCallCard): inner panel behind header + body — Starship / Cursor-style charcoal
+	 * with a slight cool bias; avoids pure black (#000) on expandable + JSON wells.
+	 */
+	static FLinearColor LinearColorToolCallCardInset();
+	/** Read-only arguments / result text wells inside tool cards (slightly deeper than inset). */
+	static FLinearColor LinearColorToolCallCodeWell();
 
 	/** Single plugin-wide checkbox / toggle appearance (clone of editor default; customize in Initialize). */
 	static FName CheckboxStyleName();

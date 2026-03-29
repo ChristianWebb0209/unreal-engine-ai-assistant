@@ -14,7 +14,7 @@
 #include "Serialization/JsonWriter.h"
 #include "HAL/Event.h"
 #include "HAL/PlatformProcess.h"
-#include "HAL/PlatformMisc.h"
+#include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Misc/ScopeLock.h"
 
 namespace
@@ -97,23 +97,7 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne(
 
 	// Embeddings should be quick for small query text.
 	// Keep this fail-fast so a bad network path does not consume most of a harness turn.
-	float TimeoutSec = 3.0f;
-	{
-		const FString EmbTimeoutEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_EMBEDDING_HTTP_TIMEOUT_SEC"));
-		if (!EmbTimeoutEnv.IsEmpty())
-		{
-			float Parsed = FCString::Atof(*EmbTimeoutEnv);
-			if (Parsed < 1.0f)
-			{
-				Parsed = 1.0f;
-			}
-			if (Parsed > 30.0f)
-			{
-				Parsed = 30.0f;
-			}
-			TimeoutSec = Parsed;
-		}
-	}
+	const float TimeoutSec = UnrealAiWaitTime::EmbeddingHttpTimeoutSec;
 	HttpRequest->SetTimeout(TimeoutSec);
 
 	UnrealAiHarnessTpmThrottle::MaybeWaitBeforeEmbeddingRequest(Request.InputText.Len());

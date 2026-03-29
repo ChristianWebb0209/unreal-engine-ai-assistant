@@ -26,6 +26,33 @@ namespace UnrealAiViewportFrameInternal
 {
 	static constexpr float MinFallbackExtentUU = 128.f;
 
+	/** Detect common model mistakes: level-instance tokens passed as if they were actor paths. */
+	static bool TryExplainMisusedFramingPath(const FString& RawPath, FString& OutExplanation)
+	{
+		FString P = RawPath;
+		P.TrimStartAndEndInline();
+		if (P.IsEmpty())
+		{
+			OutExplanation = TEXT("Empty string in actor_paths is invalid.");
+			return true;
+		}
+		const FString L = P.ToLower();
+		if (L == TEXT("persistentlevel"))
+		{
+			OutExplanation = TEXT(
+				"`PersistentLevel` names the level instance, not a placeable actor path. "
+				"Run scene_fuzzy_search (or editor_get_selection) and pass full world actor paths that include a concrete actor after PersistentLevel.");
+			return true;
+		}
+		if (L == TEXT("worldsettings"))
+		{
+			OutExplanation = TEXT(
+				"`WorldSettings` is not a useful viewport framing target. Discover a visible level actor with scene_fuzzy_search, then call viewport_frame_actors again.");
+			return true;
+		}
+		return false;
+	}
+
 	static void AddActorBounds(FBox& Bounds, AActor* A)
 	{
 		if (!A)
@@ -216,6 +243,24 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameActors(const TShared
 			TEXT("editor_get_selection"),
 			SuggestedArgs);
 	}
+	for (const TSharedPtr<FJsonValue>& V : *Paths)
+	{
+		FString P;
+		if (!V.IsValid() || !V->TryGetString(P))
+		{
+			continue;
+		}
+		FString Misuse;
+		if (UnrealAiViewportFrameInternal::TryExplainMisusedFramingPath(P, Misuse))
+		{
+			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+			SuggestedArgs->SetStringField(TEXT("query"), TEXT("Actor"));
+			return UnrealAiToolJson::ErrorWithSuggestedCall(
+				FString::Printf(TEXT("viewport_frame_actors: %s"), *Misuse),
+				TEXT("scene_fuzzy_search"),
+				SuggestedArgs);
+		}
+	}
 	FEditorViewportClient* VC = GetVc();
 	UWorld* World = UnrealAiGetEditorWorld();
 	if (!VC || !World)
@@ -237,7 +282,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameActors(const TShared
 	}
 	if (!Bounds.IsValid || Bounds.GetExtent().IsNearlyZero(1.f))
 	{
-		return UnrealAiToolJson::Error(TEXT("No resolvable actors for framing"));
+		return UnrealAiToolJson::Error(
+			TEXT("No resolvable actors for framing. "
+				 "Pass full world actor paths from editor_get_selection or scene_fuzzy_search. "
+				 "Do not use the level instance name alone (e.g. a single path `PersistentLevel` is invalid)."));
 	}
 	bool bUiSuppressed = false;
 	if (FUnrealAiEditorModule::IsEditorFocusEnabled())
@@ -280,7 +328,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameSelection(const TSha
 	}
 	if (!Bounds.IsValid || Bounds.GetExtent().IsNearlyZero(1.f))
 	{
-		return UnrealAiToolJson::Error(TEXT("Empty selection or not enough geometry to frame"));
+		return UnrealAiToolJson::Error(
+			TEXT("Empty selection or not enough geometry to frame. "
+				 "Select actors in the level first, or use scene_fuzzy_search + viewport_frame_actors with concrete paths. "
+				 "For camera position/FOV or dolly/orbit tasks, use viewport_camera_get_transform / viewport_camera_dolly / viewport_camera_orbit instead of framing."));
 	}
 	bool bUiSuppressed = false;
 	if (FUnrealAiEditorModule::IsEditorFocusEnabled())

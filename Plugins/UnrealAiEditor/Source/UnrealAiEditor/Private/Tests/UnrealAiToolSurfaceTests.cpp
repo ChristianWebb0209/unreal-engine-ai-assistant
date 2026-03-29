@@ -40,6 +40,12 @@ bool FUnrealAiToolQueryShaperTest::RunTest(const FString& Parameters)
 	UnrealAiToolQueryShaper::ShapeForRetrieval(TEXT("Please create a new Blueprint for the character"), Shaped, Shape);
 	TestEqual(TEXT("heuristic shape"), static_cast<int32>(Shape), static_cast<int32>(EUnrealAiToolQueryShape::Heuristic));
 	TestTrue(TEXT("shaped mentions blueprint"), Shaped.Contains(TEXT("blueprint"), ESearchCase::IgnoreCase));
+
+	UnrealAiToolQueryShaper::ShapeForRetrieval(
+		TEXT("Use the editor world collision / line trace tool from the viewport camera"), Shaped, Shape);
+	TestEqual(TEXT("trace prompt uses physics_trace heuristic"), static_cast<int32>(Shape),
+		static_cast<int32>(EUnrealAiToolQueryShape::Heuristic));
+	TestTrue(TEXT("shaped mentions physics_trace"), Shaped.Contains(TEXT("physics_trace")));
 	return true;
 }
 

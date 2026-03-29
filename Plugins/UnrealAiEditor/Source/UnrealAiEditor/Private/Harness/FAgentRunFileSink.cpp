@@ -6,9 +6,10 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "HAL/FileManager.h"
-#include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
+#include "Misc/UnrealAiHarnessProgressTelemetry.h"
+#include "Misc/UnrealAiRuntimeDefaults.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -22,7 +23,8 @@ FAgentRunFileSink::FAgentRunFileSink(
 	const bool bInDumpOnFinished,
 	FEvent* InDoneEvent,
 	bool* InOutSuccess,
-	FString* InOutFinishError)
+	FString* InOutFinishError,
+	FEvent* InPlanSubTurnEvent)
 	: JsonlPath(MoveTemp(InJsonlPath))
 	, ContextService(InContextService)
 	, ProjectId(InProjectId)
@@ -30,9 +32,15 @@ FAgentRunFileSink::FAgentRunFileSink(
 	, bDumpContextAfterEachTool(bInDumpAfterTool)
 	, bDumpContextOnRunFinished(bInDumpOnFinished)
 	, DoneEvent(InDoneEvent)
+	, PlanSubTurnEvent(InPlanSubTurnEvent)
 	, CompletionSuccessPtr(InOutSuccess)
 	, CompletionErrorPtr(InOutFinishError)
 {
+}
+
+void FAgentRunFileSink::AppendHarnessDiagnosticJson(const TSharedPtr<FJsonObject>& Obj)
+{
+	AppendJsonObject(Obj);
 }
 
 void FAgentRunFileSink::AppendJsonObject(const TSharedPtr<FJsonObject>& Obj)
@@ -59,11 +67,7 @@ void FAgentRunFileSink::MaybeDumpContextWindow(const TCHAR* Reason)
 	Opt.Mode = EUnrealAiAgentMode::Agent;
 	Opt.ContextBuildInvocationReason = FString::Printf(TEXT("harness_dump_%s"), Reason);
 	{
-		const FString EnvVerbose = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_CONTEXT_VERBOSE"));
-		const bool bVerbose = EnvVerbose.Equals(TEXT("1"), ESearchCase::IgnoreCase)
-			|| EnvVerbose.Equals(TEXT("true"), ESearchCase::IgnoreCase)
-			|| EnvVerbose.Equals(TEXT("yes"), ESearchCase::IgnoreCase);
-		Opt.bVerboseContextBuild = bVerbose;
+		Opt.bVerboseContextBuild = UnrealAiRuntimeDefaults::ContextVerboseDefault;
 	}
 	const FAgentContextBuildResult Built = ContextService->BuildContextWindow(Opt);
 	const FString BaseDir = FPaths::GetPath(JsonlPath);
@@ -118,6 +122,7 @@ void FAgentRunFileSink::MaybeDumpContextWindow(const TCHAR* Reason)
 
 void FAgentRunFileSink::OnRunStarted(const FUnrealAiRunIds& Ids)
 {
+	UnrealAiHarnessProgressTelemetry::ResetForRun();
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetStringField(TEXT("type"), TEXT("run_started"));
 	O->SetStringField(TEXT("run_id"), Ids.RunId.ToString(EGuidFormats::DigitsWithHyphens));
@@ -140,6 +145,7 @@ void FAgentRunFileSink::OnContextUserMessages(const TArray<FString>& Messages)
 
 void FAgentRunFileSink::OnAssistantDelta(const FString& Chunk)
 {
+	UnrealAiHarnessProgressTelemetry::NotifyAssistantDelta();
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetStringField(TEXT("type"), TEXT("assistant_delta"));
 	O->SetStringField(TEXT("chunk"), Chunk);
@@ -148,6 +154,7 @@ void FAgentRunFileSink::OnAssistantDelta(const FString& Chunk)
 
 void FAgentRunFileSink::OnThinkingDelta(const FString& Chunk)
 {
+	UnrealAiHarnessProgressTelemetry::NotifyThinkingDelta();
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetStringField(TEXT("type"), TEXT("thinking_delta"));
 	O->SetStringField(TEXT("chunk"), Chunk);
@@ -171,6 +178,7 @@ void FAgentRunFileSink::OnToolCallFinished(
 	const FString& ResultPreview,
 	const TSharedPtr<FUnrealAiToolEditorPresentation>& EditorPresentation)
 {
+	UnrealAiHarnessProgressTelemetry::NotifyToolFinish(ToolName);
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetStringField(TEXT("type"), TEXT("tool_finish"));
 	O->SetStringField(TEXT("tool"), ToolName);
@@ -202,6 +210,10 @@ void FAgentRunFileSink::OnRunContinuation(const int32 PhaseIndex, const int32 To
 	AppendJsonObject(O);
 	const FString Reason = FString::Printf(TEXT("continuation_%d"), PhaseIndex);
 	MaybeDumpContextWindow(*Reason);
+	if (PlanSubTurnEvent)
+	{
+		NotifyPlanHarnessSyncSegmentBoundary();
+	}
 }
 
 void FAgentRunFileSink::OnTodoPlanEmitted(const FString& Title, const FString& PlanJson)
@@ -261,6 +273,20 @@ void FAgentRunFileSink::OnEnforcementSummary(
 	AppendJsonObject(O);
 }
 
+void FAgentRunFileSink::NotifyPlanHarnessSyncSegmentBoundary()
+{
+	UnrealAiHarnessProgressTelemetry::NotifyPlanSubTurnComplete();
+	if (PlanSubTurnEvent)
+	{
+		PlanSubTurnEvent->Trigger();
+	}
+}
+
+void FAgentRunFileSink::OnPlanHarnessSubTurnComplete()
+{
+	NotifyPlanHarnessSyncSegmentBoundary();
+}
+
 void FAgentRunFileSink::OnRunFinished(const bool bSuccess, const FString& ErrorMessage)
 {
 	bool bExpected = false;
@@ -276,15 +302,7 @@ void FAgentRunFileSink::OnRunFinished(const bool bSuccess, const FString& ErrorM
 	// BuildContextWindow for "run_finished" can block on retrieval/vector index; the harness does not
 	// signal DoneEvent until after this returns, so ExecCmds (e.g. Quit) is delayed and automation may
 	// try to kill the editor while still inside this path. Opt-in only via env (default: skip).
-	bool bDumpRunFinishedContext = false;
-	{
-		const FString Env = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_RUN_FINISHED_CONTEXT_DUMP"));
-		if (Env.Equals(TEXT("1"), ESearchCase::IgnoreCase) || Env.Equals(TEXT("true"), ESearchCase::IgnoreCase)
-			|| Env.Equals(TEXT("yes"), ESearchCase::IgnoreCase))
-		{
-			bDumpRunFinishedContext = true;
-		}
-	}
+	const bool bDumpRunFinishedContext = UnrealAiRuntimeDefaults::HarnessRunFinishedContextDump;
 	if (bDumpContextOnRunFinished && bDumpRunFinishedContext)
 	{
 		MaybeDumpContextWindow(TEXT("run_finished"));

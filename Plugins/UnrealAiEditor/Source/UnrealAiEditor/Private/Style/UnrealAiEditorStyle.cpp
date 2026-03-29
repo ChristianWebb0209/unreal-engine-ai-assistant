@@ -14,10 +14,10 @@ TSharedPtr<FSlateStyleSet> FUnrealAiEditorStyle::StyleSet = nullptr;
 
 namespace UnrealAiEditorBubbleColors
 {
-	/** User message bubble: #1e1e1e (sRGB → linear for Slate). */
+	/** User bubble fill — slightly warm charcoal (vs. flat #1e1e1e) for separation from assistant lane. */
 	static FLinearColor UserBubbleFill()
 	{
-		return FLinearColor(FColor(0x1e, 0x1e, 0x1e, 0xff));
+		return FLinearColor(FColor(0x26, 0x23, 0x21, 0xff));
 	}
 
 	static FLinearColor AssistantBubbleFill()
@@ -50,6 +50,13 @@ void FUnrealAiEditorStyle::Initialize()
 	Style->Set("UnrealAiEditor.AssistantLane", new FSlateColorBrush(FLinearColor(0.14f, 0.16f, 0.2f, 0.55f)));
 	Style->Set("UnrealAiEditor.DebugNav", new FSlateColorBrush(FLinearColor(0.10f, 0.13f, 0.12f, 1.f)));
 	Style->Set("UnrealAiEditor.DebugInspect", new FSlateColorBrush(FLinearColor(0.09f, 0.11f, 0.14f, 1.f)));
+	// Tool call cards: neutral shell + code wells (rounded; aligns with dark editor panels, not #000).
+	Style->Set(
+		"UnrealAiEditor.ToolCallCardOuter",
+		new FSlateRoundedBoxBrush(FLinearColor(0.13f, 0.14f, 0.165f, 1.f), 8.f));
+	Style->Set(
+		"UnrealAiEditor.ToolCallCodeWell",
+		new FSlateRoundedBoxBrush(FLinearColor(0.105f, 0.11f, 0.128f, 1.f), 4.f));
 	ApplyChatBubbleColorsFromSettings();
 
 	// Agent Chat branding: engine SVG under Content/Editor/Slate (avoids missing FAppStyle "Icons.*" names on some versions).
@@ -134,7 +141,14 @@ FSlateColor FUnrealAiEditorStyle::ColorBackgroundCanvas()
 
 FSlateColor FUnrealAiEditorStyle::ColorTextPrimary()
 {
-	return FSlateColor(FLinearColor(0.902f, 0.902f, 0.902f, 1.f));
+	// Editor-style soft gray (Starship labels); avoids pure white on dark panels.
+	return FSlateColor(FLinearColor(0.84f, 0.86f, 0.89f, 1.f));
+}
+
+FSlateColor FUnrealAiEditorStyle::ColorChatUserMessage()
+{
+	// Warm off-white: readable on UserBubble without harsh #ffffff.
+	return FSlateColor(FLinearColor(0.9f, 0.87f, 0.83f, 1.f));
 }
 
 FSlateColor FUnrealAiEditorStyle::ColorTextMuted()
@@ -149,7 +163,7 @@ FSlateColor FUnrealAiEditorStyle::ColorTextFooter()
 
 FSlateColor FUnrealAiEditorStyle::ColorComposerForegroundBright()
 {
-	return FSlateColor(FLinearColor(0.94f, 0.96f, 1.f, 1.f));
+	return FSlateColor(FLinearColor(0.88f, 0.9f, 0.94f, 1.f));
 }
 
 FSlateColor FUnrealAiEditorStyle::ColorTextMetaHint()
@@ -164,12 +178,13 @@ FSlateColor FUnrealAiEditorStyle::ColorThinkingSubline()
 
 FSlateColor FUnrealAiEditorStyle::ColorMarkdownHeading()
 {
-	return FSlateColor(FLinearColor(0.98f, 0.98f, 1.f, 1.f));
+	return FSlateColor(FLinearColor(0.86f, 0.88f, 0.93f, 1.f));
 }
 
 FSlateColor FUnrealAiEditorStyle::ColorMarkdownBody()
 {
-	return FSlateColor(FLinearColor(0.92f, 0.93f, 0.95f, 1.f));
+	// Cool slate — clearly distinct from ColorChatUserMessage (warm) on the timeline.
+	return FSlateColor(FLinearColor(0.76f, 0.81f, 0.87f, 1.f));
 }
 
 FLinearColor FUnrealAiEditorStyle::LinearColorMarkdownTodoDoneCheck()
@@ -210,6 +225,16 @@ FLinearColor FUnrealAiEditorStyle::LinearColorModeMenuPopoverBg()
 FLinearColor FUnrealAiEditorStyle::LinearColorChatHeaderStrip()
 {
 	return FLinearColor(0.12f, 0.12f, 0.12f, 1.f);
+}
+
+FLinearColor FUnrealAiEditorStyle::LinearColorToolCallCardInset()
+{
+	return FLinearColor(0.118f, 0.124f, 0.142f, 1.f);
+}
+
+FLinearColor FUnrealAiEditorStyle::LinearColorToolCallCodeWell()
+{
+	return FLinearColor(0.102f, 0.108f, 0.125f, 1.f);
 }
 
 FName FUnrealAiEditorStyle::CheckboxStyleName()

@@ -23,6 +23,7 @@ public:
 	 * @param DoneEvent If non-null, Trigger() is called from OnRunFinished (success or failure).
 	 * @param OutSuccess If non-null, written with harness success before DoneEvent triggers.
 	 * @param OutFinishError If non-null, written with error text on failure.
+	 * @param PlanSubTurnEvent If non-null (manual-reset), Trigger() from OnPlanHarnessSubTurnComplete for plan-mode budget resets.
 	 */
 	FAgentRunFileSink(
 		FString JsonlPath,
@@ -33,7 +34,8 @@ public:
 		bool bDumpContextOnRunFinished,
 		FEvent* DoneEvent,
 		bool* OutSuccess = nullptr,
-		FString* OutFinishError = nullptr);
+		FString* OutFinishError = nullptr,
+		FEvent* PlanSubTurnEvent = nullptr);
 
 	virtual void OnRunStarted(const FUnrealAiRunIds& Ids) override;
 	virtual void OnContextUserMessages(const TArray<FString>& Messages) override;
@@ -59,12 +61,18 @@ public:
 		int32 MutationIntentTurns,
 		int32 MutationReadOnlyNudges) override;
 	virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) override;
+	virtual void OnPlanHarnessSubTurnComplete() override;
 
 	const FString& GetJsonlPath() const { return JsonlPath; }
+
+	/** Extra JSONL lines from the harness runner (e.g. timeout diagnostics) not routed through IAgentRunSink events. */
+	void AppendHarnessDiagnosticJson(const TSharedPtr<FJsonObject>& Obj);
 
 private:
 	void AppendJsonObject(const TSharedPtr<FJsonObject>& Obj);
 	void MaybeDumpContextWindow(const TCHAR* Reason);
+	/** Plan-mode headed harness: signal automation to reset per-segment sync wait (PlanSubTurnEvent). */
+	void NotifyPlanHarnessSyncSegmentBoundary();
 
 	FString JsonlPath;
 	IAgentContextService* ContextService = nullptr;
@@ -73,6 +81,7 @@ private:
 	bool bDumpContextAfterEachTool = false;
 	bool bDumpContextOnRunFinished = true;
 	FEvent* DoneEvent = nullptr;
+	FEvent* PlanSubTurnEvent = nullptr;
 	bool* CompletionSuccessPtr = nullptr;
 	FString* CompletionErrorPtr = nullptr;
 	std::atomic<bool> bFinished{false};

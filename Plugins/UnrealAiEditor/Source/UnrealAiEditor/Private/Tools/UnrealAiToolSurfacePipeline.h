@@ -12,7 +12,7 @@ struct FUnrealAiToolSurfaceTelemetry;
 namespace UnrealAiToolSurfacePipeline
 {
 	/**
-	 * Tiered markdown tool index + telemetry when eligibility is not opted out (default: on; set UNREAL_AI_TOOL_ELIGIBILITY=0 to use legacy full index).
+	 * Tiered markdown tool index + telemetry when eligibility is not opted out (default: on; toggle ToolEligibilityTelemetryEnabled in UnrealAiRuntimeDefaults.h for legacy full index experiments).
 	 * Returns false when feature off or not applicable; caller falls back to catalog defaults.
 	 */
 	bool TryBuildTieredToolSurface(

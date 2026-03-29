@@ -74,7 +74,7 @@ namespace UnrealAiPromptBuilderPriv
 				Ie = Found;
 			}
 		}
-		// Shared title + intro only (before first mode subsection). Using Left(Is) would re-include prior modes for Fast/Agent.
+		// Shared title + intro only (before first mode subsection). Using Left(Is) would re-include prior mode blocks.
 		const int32 FirstModeHeader = Chunk02.Find(TEXT("## Mode:"));
 		FString Preamble;
 		if (FirstModeHeader != INDEX_NONE && FirstModeHeader <= Is)

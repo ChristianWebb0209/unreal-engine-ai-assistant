@@ -424,7 +424,7 @@ void SChatMessageList::RebuildTranscript()
 											  .WrapTextAt(800.f)
 											  .Text(FText::FromString(B.UserText))
 											  .Font(FUnrealAiEditorStyle::FontBodyRegular11())
-											  .ColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 1.f)))
+											  .ColorAndOpacity(FUnrealAiEditorStyle::ColorChatUserMessage())
 									  ]
 							  ]);
 

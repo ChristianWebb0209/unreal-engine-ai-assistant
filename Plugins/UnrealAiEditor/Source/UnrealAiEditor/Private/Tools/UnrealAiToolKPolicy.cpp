@@ -18,11 +18,12 @@ int32 UnrealAiToolKPolicy::ComputeEffectiveK(const TArray<float>& SortedDescScor
 	const float Den = FMath::Max(1.e-6f, S0);
 	const float Margin = (S0 - S1) / Den;
 	int32 K = KMax;
-	if (Margin > 0.18f)
+	// Prefer a tight tool set when the top match is clearly ahead (saves appendix tokens).
+	if (Margin > 0.14f)
 	{
 		K = KMin;
 	}
-	else if (Margin > 0.08f)
+	else if (Margin > 0.06f)
 	{
 		K = (KMin + KMax) / 2;
 	}

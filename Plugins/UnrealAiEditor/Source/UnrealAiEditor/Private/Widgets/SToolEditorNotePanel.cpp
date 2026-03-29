@@ -11,9 +11,15 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SWrapBox.h"
 
+#include "Style/UnrealAiEditorStyle.h"
+#include "Styling/AppStyle.h"
+
 void SToolEditorNotePanel::Construct(const FArguments& InArgs)
 {
 	EditorPresentation = InArgs._EditorPresentation;
+
+	FLinearColor NotePanelShell = FUnrealAiEditorStyle::LinearColorToolCallCardInset();
+	NotePanelShell.A = 0.45f;
 
 	if (!EditorPresentation.IsValid())
 	{
@@ -69,7 +75,8 @@ void SToolEditorNotePanel::Construct(const FArguments& InArgs)
 			.Padding(0.f, 0.f, 0.f, 2.f)
 			[
 				SNew(SBorder)
-					.BorderBackgroundColor(FLinearColor(0.07f, 0.08f, 0.1f, 0.9f))
+					.BorderImage(FAppStyle::GetBrush(TEXT("NoBorder")))
+					.BorderBackgroundColor(FUnrealAiEditorStyle::LinearColorToolCallCodeWell())
 					.Padding(FMargin(8.f, 6.f))
 					[
 						LinksWrap
@@ -80,7 +87,8 @@ void SToolEditorNotePanel::Construct(const FArguments& InArgs)
 	ChildSlot
 		[
 			SNew(SBorder)
-				.BorderBackgroundColor(FLinearColor(0.05f, 0.06f, 0.08f, 0.45f))
+				.BorderImage(FAppStyle::GetBrush(TEXT("NoBorder")))
+				.BorderBackgroundColor(NotePanelShell)
 				.Padding(FMargin(6.f))
 				[
 					Root

@@ -25,12 +25,12 @@ struct FUnrealAiModelCapabilities
 	bool bSupportsImages = true;
 	/**
 	 * Soft backstop: max tool↔LLM iterations per user send (each round = one completion, possibly + tool calls).
-	 * Primary limits are repeated identical tool failures and MaxAgentTurnTokens; this remains a safety ceiling (clamped e.g. 1–512).
+	 * Primary limits are repeated identical tool failures, consecutive identical successful no-progress tools (agent harness), and MaxAgentTurnTokens; this remains a safety ceiling (clamped e.g. 1–512).
 	 */
 	int32 MaxAgentLlmRounds = 512;
 	/**
 	 * Max total prompt+completion tokens for one agent turn (one user message / RunTurn). 0 = use harness default
-	 * or UNREAL_AI_HARNESS_MAX_TOKENS_PER_TURN. Set to -1 in JSON via a sentinel if we add UI later; env "0" disables the cap.
+	 * Profile field maxAgentTurnTokens; 0 uses harness default budget.
 	 */
 	int32 MaxAgentTurnTokens = 0;
 };
@@ -81,6 +81,24 @@ struct FUnrealAiLlmStreamEvent
 	FString ErrorMessage;
 };
 
+/** One row in the final tool roster order (guardrails first, then top‑K by combined score). */
+struct FUnrealAiToolSurfaceRankedEntry
+{
+	int32 Rank = 0;
+	FString ToolId;
+	float CombinedScore = 0.f;
+	/** BM25 similarity vs hybrid query, normalized by max score in pool (0–1). */
+	float Bm25Norm01 = 0.f;
+	/** Domain tag context multiplier from UnrealAiToolContextBias. */
+	float ContextMultiplier = 1.f;
+	/** Operational usage prior in [0,1] (same signal blended when usage prior is enabled). */
+	float UsagePrior01 = 0.f;
+	bool bUsagePriorBlended = false;
+	bool bGuardrail = false;
+	/** Short human-readable why this row appears (guardrail vs score-ranked). */
+	FString SelectionReason;
+};
+
 /** Observability for tool surface assembly (tools-expansion.md §2.8). */
 struct FUnrealAiToolSurfaceTelemetry
 {
@@ -88,6 +106,7 @@ struct FUnrealAiToolSurfaceTelemetry
 	FString ToolSurfaceMode;
 	int32 EligibleCount = 0;
 	int32 RosterChars = 0;
+	/** First N tools that receive expanded appendix entries (see UnrealAiRuntimeDefaults::ToolExpandedCount); subset of RankedTools. */
 	TArray<FString> ExpandedToolIds;
 	int32 BudgetRemaining = 0;
 	int32 RetrievalLatencyMs = 0;
@@ -96,6 +115,8 @@ struct FUnrealAiToolSurfaceTelemetry
 	FString QueryShape;
 	/** Fingerprint of hybrid retrieval query for usage logging (may be empty when eligibility off). */
 	FString QueryHash;
+	/** Full ordered roster passed to the tiered index (guardrails + top‑K), with per-tool scoring breakdown. */
+	TArray<FUnrealAiToolSurfaceRankedEntry> RankedTools;
 };
 
 /** Request into the harness from UI / tabs. */
@@ -114,6 +135,8 @@ struct FUnrealAiAgentTurnRequest
 	 * Plan worker nodes set this so multi-tool steps are not cut off at the profile default.
 	 */
 	int32 LlmRoundBudgetFloor = 0;
+	/** Skip dispatch + tiered tool index; emit full per-tool JSON (headless tests / diagnostics). */
+	bool bForceNativeToolSurface = false;
 };
 
 /** Structured result from a Level-B worker (parent merge consumes this). */

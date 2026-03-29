@@ -39,6 +39,11 @@ public:
 	virtual void OnTodoPlanEmitted(const FString& Title, const FString& PlanJson) = 0;
 	/** Plan-mode DAG JSON ready for user review / Build (editor UI only). */
 	virtual void OnPlanDraftReady(const FString& DagJsonText) {}
+	/**
+	 * Plan harness only: planner turn or a plan-node agent turn has finished (next phase may start).
+	 * Used by automation to reset per-segment sync wait budgets so a multi-node plan does not share one timeout.
+	 */
+	virtual void OnPlanHarnessSubTurnComplete() {}
 	/** Planning-policy runtime signal for observability (agent mode heuristics/escalation). */
 	virtual void OnPlanningDecision(const FString& ModeUsed, const TArray<FString>& TriggerReasons, int32 ReplanCount, int32 QueueStepsPending) {}
 	/** Per-turn enforcement signal for action/mutation execution policy observability. */

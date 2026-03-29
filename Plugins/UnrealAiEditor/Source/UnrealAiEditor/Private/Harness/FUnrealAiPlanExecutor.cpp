@@ -1,6 +1,8 @@
 #include "Harness/FUnrealAiPlanExecutor.h"
 
 #include "Context/IAgentContextService.h"
+#include "HAL/PlatformTime.h"
+#include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Harness/IAgentRunSink.h"
 #include "Harness/IUnrealAiAgentHarness.h"
 #include "Templates/Function.h"
@@ -112,6 +114,11 @@ TSharedRef<FUnrealAiPlanExecutor> FUnrealAiPlanExecutor::Start(
 	Exec->ParentIds.RunId = FGuid::NewGuid();
 	Exec->ParentIds.ParentRunId.Invalidate();
 	Exec->ParentIds.WorkerIndex = INDEX_NONE;
+	Exec->PlanMaxWallMsCached = UnrealAiWaitTime::HarnessPlanMaxWallMs;
+	if (Exec->PlanMaxWallMsCached > 0)
+	{
+		Exec->PlanWallStartSec = FPlatformTime::Seconds();
+	}
 	if (Exec->ParentSink.IsValid())
 	{
 		Exec->ParentSink->OnRunStarted(Exec->ParentIds);
@@ -139,6 +146,11 @@ TSharedRef<FUnrealAiPlanExecutor> FUnrealAiPlanExecutor::ResumeExecutionFromDag(
 	Exec->ParentIds.RunId = FGuid::NewGuid();
 	Exec->ParentIds.ParentRunId.Invalidate();
 	Exec->ParentIds.WorkerIndex = INDEX_NONE;
+	Exec->PlanMaxWallMsCached = UnrealAiWaitTime::HarnessPlanMaxWallMs;
+	if (Exec->PlanMaxWallMsCached > 0)
+	{
+		Exec->PlanWallStartSec = FPlatformTime::Seconds();
+	}
 
 	FString Err;
 	if (!UnrealAiPlanDag::ParseDagJson(DagJsonText, Exec->Dag, Err))
@@ -191,6 +203,11 @@ void FUnrealAiPlanExecutor::ResumeNodeExecution()
 		return;
 	}
 	bAwaitingBuild = false;
+	// User may spend arbitrary time editing the DAG; restart wall clock when execution resumes.
+	if (PlanMaxWallMsCached > 0)
+	{
+		PlanWallStartSec = FPlatformTime::Seconds();
+	}
 	if (ParentSink.IsValid())
 	{
 		const int32 TotalPhases = 1 + Dag.Nodes.Num();
@@ -214,8 +231,34 @@ void FUnrealAiPlanExecutor::Cancel()
 	}
 }
 
+bool FUnrealAiPlanExecutor::CheckPlanWallBudgetOrFinish()
+{
+	if (PlanMaxWallMsCached == 0 || !bRunning)
+	{
+		return true;
+	}
+	const double ElapsedMs = (FPlatformTime::Seconds() - PlanWallStartSec) * 1000.0;
+	if (ElapsedMs <= static_cast<double>(PlanMaxWallMsCached))
+	{
+		return true;
+	}
+	UE_LOG(LogTemp, Warning, TEXT("UnrealAi plan: wall budget exceeded (elapsed %.0f ms, limit %u ms)."), ElapsedMs, PlanMaxWallMsCached);
+	if (Harness && Harness->IsTurnInProgress())
+	{
+		Harness->CancelTurn();
+	}
+	Finish(false, FString::Printf(
+		TEXT("Plan exceeded maximum wall time (%u ms). Reduce DAG scope or adjust HarnessPlanMaxWallMs in UnrealAiWaitTimePolicy.h."),
+		PlanMaxWallMsCached));
+	return false;
+}
+
 void FUnrealAiPlanExecutor::BeginPlannerTurn()
 {
+	if (!CheckPlanWallBudgetOrFinish())
+	{
+		return;
+	}
 	if (!Harness)
 	{
 		Finish(false, TEXT("Harness unavailable for plan planner."));
@@ -224,6 +267,8 @@ void FUnrealAiPlanExecutor::BeginPlannerTurn()
 	FUnrealAiAgentTurnRequest PlannerReq = ParentRequest;
 	PlannerReq.Mode = EUnrealAiAgentMode::Plan;
 	const TSharedRef<UnrealAiPlanExecutorPriv::FCollectingSink> Sink = MakeShared<UnrealAiPlanExecutorPriv::FCollectingSink>();
+	Sink->ForwardTarget = ParentSink;
+	Sink->bForwardStreamToParent = true;
 	const TWeakPtr<FUnrealAiPlanExecutor> WeakExec = AsShared();
 	Sink->OnFinished = [WeakExec](bool bSuccess, const FString& ErrorText, const FString& Text)
 	{
@@ -233,6 +278,11 @@ void FUnrealAiPlanExecutor::BeginPlannerTurn()
 		}
 	};
 	Harness->RunTurn(PlannerReq, Sink);
+	// Round 1 has no OnRunContinuation; reset headed-harness sync window as soon as the planner turn is scheduled.
+	if (ParentSink.IsValid())
+	{
+		ParentSink->OnPlanHarnessSubTurnComplete();
+	}
 }
 
 void FUnrealAiPlanExecutor::OnPlannerFinished(bool bSuccess, const FString& ErrorText, const FString& PlannerText)
@@ -299,6 +349,12 @@ void FUnrealAiPlanExecutor::OnPlannerFinished(bool bSuccess, const FString& Erro
 		ParentSink->OnAssistantDelta(FString::Printf(TEXT("Plan ready: %d nodes. Executing serially.\n"), Dag.Nodes.Num()));
 		const int32 TotalPhases = 1 + Dag.Nodes.Num();
 		ParentSink->OnRunContinuation(0, TotalPhases);
+		// Planner harness RunTurn finished; automation may reset per-segment sync wait before node execution.
+		ParentSink->OnPlanHarnessSubTurnComplete();
+	}
+	if (!CheckPlanWallBudgetOrFinish())
+	{
+		return;
 	}
 	BeginNextReadyNode();
 }
@@ -308,6 +364,10 @@ void FUnrealAiPlanExecutor::BeginNextReadyNode()
 	if (bCancelled)
 	{
 		Finish(false, TEXT("Plan cancelled."));
+		return;
+	}
+	if (!CheckPlanWallBudgetOrFinish())
+	{
 		return;
 	}
 	if (ContextService)
@@ -380,6 +440,11 @@ void FUnrealAiPlanExecutor::BeginNextReadyNode()
 
 void FUnrealAiPlanExecutor::OnNodeFinished(const FString& NodeId, bool bSuccess, const FString& ErrorText, const FString& AssistantText)
 {
+	if (ParentSink.IsValid())
+	{
+		// Node agent RunTurn finished; automation may reset per-segment sync wait before the next node or Finish().
+		ParentSink->OnPlanHarnessSubTurnComplete();
+	}
 	const FString Summary = AssistantText.Left(300);
 	if (ContextService)
 	{

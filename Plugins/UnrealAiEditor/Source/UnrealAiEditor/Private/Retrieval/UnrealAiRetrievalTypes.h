@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 
@@ -47,7 +47,7 @@ struct FUnrealAiRetrievalSettings
 
 	/**
 	 * When false (default), memory records are not embedded into the vector index.
-	 * The tagged memory system remains the primary memory UX; see docs/memory-system.md.
+	 * The tagged memory system remains the primary memory UX; see docs/context/memory-system.md.
 	 */
 	bool bIndexMemoryRecordsInVectorStore = false;
 

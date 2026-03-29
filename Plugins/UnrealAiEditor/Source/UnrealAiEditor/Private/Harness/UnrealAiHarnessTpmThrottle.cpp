@@ -2,7 +2,7 @@
 
 #include "Harness/ILlmTransport.h"
 #include "Harness/UnrealAiAgentTypes.h"
-#include "HAL/PlatformMisc.h"
+#include "Misc/UnrealAiRuntimeDefaults.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/ScopeLock.h"
@@ -15,43 +15,25 @@ namespace UnrealAiHarnessTpmThrottle
 		TArray<TPair<double, int32>> GChatEvents;
 		TArray<TPair<double, int32>> GEmbeddingEvents;
 
-		static int32 ReadEnvIntClamped(const TCHAR* Name, const int32 DefaultValue, const int32 MinV, const int32 MaxV)
-		{
-			const FString Raw = FPlatformMisc::GetEnvironmentVariable(Name);
-			if (Raw.IsEmpty())
-			{
-				return DefaultValue;
-			}
-			return FMath::Clamp(FCString::Atoi(*Raw), MinV, MaxV);
-		}
-
 		static double GetWindowSeconds()
 		{
-			const int32 W = ReadEnvIntClamped(TEXT("UNREAL_AI_HARNESS_TPM_WINDOW_SEC"), 60, 10, 120);
-			return static_cast<double>(W);
+			return static_cast<double>(UnrealAiRuntimeDefaults::HarnessTpmWindowSec);
 		}
 
 		static bool IsStrictTpmEnabled()
 		{
-			const FString R = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_TPM_STRICT"));
-			if (R.IsEmpty())
-			{
-				return true;
-			}
-			const FString L = R.TrimStartAndEnd().ToLower();
-			return !(L == TEXT("0") || L == TEXT("false") || L == TEXT("no") || L == TEXT("off"));
+			return UnrealAiRuntimeDefaults::HarnessTpmStrict;
 		}
 
 		static int32 GetSafetyBasisPoints(const bool bStrict)
 		{
-			const int32 Def = bStrict ? 125 : 110;
-			return ReadEnvIntClamped(TEXT("UNREAL_AI_HARNESS_TPM_ESTIMATE_SAFETY_BP"), Def, 100, 400);
+			return bStrict ? UnrealAiRuntimeDefaults::HarnessTpmEstimateSafetyBpStrict
+						   : UnrealAiRuntimeDefaults::HarnessTpmEstimateSafetyBpLoose;
 		}
 
-		/** Tokens to reserve below UNREAL_AI_HARNESS_TPM_PER_MINUTE so admission stays strictly under the cap (default 0). */
 		static int32 GetAdmissionHeadroomTokens()
 		{
-			return ReadEnvIntClamped(TEXT("UNREAL_AI_HARNESS_TPM_HEADROOM_TOKENS"), 0, 0, 50'000);
+			return UnrealAiRuntimeDefaults::HarnessTpmHeadroomTokens;
 		}
 
 		static int32 EffectiveBudgetTpm(const int32 BudgetTpm)
@@ -66,8 +48,8 @@ namespace UnrealAiHarnessTpmThrottle
 
 		static void GetBudgets(int32& OutChatTpm, int32& OutEmbedTpm)
 		{
-			OutChatTpm = ReadEnvIntClamped(TEXT("UNREAL_AI_HARNESS_TPM_PER_MINUTE"), 0, 0, 10'000'000);
-			const int32 EmbedRaw = ReadEnvIntClamped(TEXT("UNREAL_AI_HARNESS_EMBEDDING_TPM_PER_MINUTE"), 0, 0, 10'000'000);
+			OutChatTpm = UnrealAiRuntimeDefaults::HarnessTpmPerMinute;
+			const int32 EmbedRaw = UnrealAiRuntimeDefaults::HarnessEmbeddingTpmPerMinute;
 			if (EmbedRaw > 0)
 			{
 				OutEmbedTpm = EmbedRaw;
@@ -234,10 +216,10 @@ namespace UnrealAiHarnessTpmThrottle
 		if (bStrict)
 		{
 			// Pessimistic chars→tokens (smaller divisor ⇒ more tokens) + JSON/chat envelope overhead.
-			const int32 Div = ReadEnvIntClamped(TEXT("UNREAL_AI_HARNESS_TPM_PROMPT_DIVISOR"), 3, 2, 8);
+			const int32 Div = UnrealAiRuntimeDefaults::HarnessTpmPromptDivisor;
 			const int64 Ceil = (Chars + static_cast<int64>(Div) - 1) / static_cast<int64>(Div);
 			PromptEst = static_cast<int32>(FMath::Min<int64>(Ceil, INT32_MAX));
-			const int32 Overhead = ReadEnvIntClamped(TEXT("UNREAL_AI_HARNESS_TPM_CHAT_OVERHEAD_TOKENS"), 512, 0, 500'000);
+			const int32 Overhead = UnrealAiRuntimeDefaults::HarnessTpmChatOverheadTokens;
 			PromptEst = FMath::Min(INT32_MAX, PromptEst + Overhead);
 		}
 		else
@@ -297,10 +279,10 @@ namespace UnrealAiHarnessTpmThrottle
 		int32 PromptEst = 1;
 		if (bStrict)
 		{
-			const int32 Div = ReadEnvIntClamped(TEXT("UNREAL_AI_HARNESS_TPM_PROMPT_DIVISOR"), 3, 2, 8);
+			const int32 Div = UnrealAiRuntimeDefaults::HarnessTpmPromptDivisor;
 			const int64 Ceil = (Chars + static_cast<int64>(Div) - 1) / static_cast<int64>(FMath::Max(1, Div));
 			PromptEst = static_cast<int32>(FMath::Min<int64>(FMath::Max(1LL, Ceil), INT32_MAX));
-			const int32 Overhead = ReadEnvIntClamped(TEXT("UNREAL_AI_HARNESS_TPM_EMBED_OVERHEAD_TOKENS"), 64, 0, 100'000);
+			const int32 Overhead = UnrealAiRuntimeDefaults::HarnessTpmEmbedOverheadTokens;
 			PromptEst = FMath::Min(INT32_MAX, PromptEst + Overhead);
 		}
 		else

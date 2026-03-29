@@ -8,8 +8,9 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
-#include "HAL/PlatformMisc.h"
 #include "Misc/DateTime.h"
+#include "Misc/UnrealAiHarnessProgressTelemetry.h"
+#include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Misc/DefaultValueHelper.h"
 
 namespace OpenAiTransportUtil
@@ -507,25 +508,7 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 	HttpRequest->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *Key));
 	HttpRequest->SetContentAsString(BodyStr);
-	// Hard cap 30s: agent chat in-editor should complete quickly; longer waits usually mean wrong URL, blocked TLS, or huge payloads.
-	// Override: UNREAL_AI_HTTP_REQUEST_TIMEOUT_SEC (clamped to 5-30). Same limit for streaming and non-streaming.
-	float TimeoutSec = 30.0f;
-	{
-		const FString TEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HTTP_REQUEST_TIMEOUT_SEC"));
-		if (!TEnv.IsEmpty())
-		{
-			float Parsed = FCString::Atof(*TEnv);
-			if (Parsed < 5.0f)
-			{
-				Parsed = 5.0f;
-			}
-			if (Parsed > 30.0f)
-			{
-				Parsed = 30.0f;
-			}
-			TimeoutSec = Parsed;
-		}
-	}
+	const float TimeoutSec = UnrealAiWaitTime::HttpRequestTimeoutSec;
 	HttpRequest->SetTimeout(TimeoutSec);
 
 	UE_LOG(LogTemp, Display,
@@ -538,15 +521,7 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 		Request.ToolsJsonArray.Len());
 
 	// Best-effort 429 backoff/retry: prevents single-turn failures when the org TPM bucket is briefly exhausted.
-	// Override: UNREAL_AI_HTTP_429_MAX_ATTEMPTS (clamped 1-8). Default leaves room for TPM + parse fallbacks.
-	int32 MaxAttempts = 5;
-	{
-		const FString MaxAttemptsEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HTTP_429_MAX_ATTEMPTS"));
-		if (!MaxAttemptsEnv.IsEmpty())
-		{
-			MaxAttempts = FMath::Clamp(FCString::Atoi(*MaxAttemptsEnv), 1, 8);
-		}
-	}
+	const int32 MaxAttempts = UnrealAiWaitTime::Http429MaxAttempts;
 	TSharedRef<int32, ESPMode::ThreadSafe> Attempt = MakeShared<int32, ESPMode::ThreadSafe>(0);
 
 	TSharedRef<TFunction<void()>, ESPMode::ThreadSafe> SendAttempt = MakeShared<TFunction<void()>>();
@@ -622,6 +597,8 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 					OpenAiTransportUtil::EmitError(OnEvent, FString::Printf(TEXT("HTTP %d: %s"), Code, *RespBody.Left(500)));
 					return;
 				}
+
+				UnrealAiHarnessProgressTelemetry::NotifyHttpResponseComplete();
 
 				if (bStream)
 				{

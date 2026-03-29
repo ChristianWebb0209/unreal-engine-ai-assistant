@@ -29,13 +29,8 @@
     ],
     "tool_count": 81,
     "tool_surface": {
-      "description": "Optional per-tool overrides under tools[].tool_surface — domain_tags, centrality, worst_case_cost, requires_strict_args (tools-expansion.md).",
-      "env": {
-        "UNREAL_AI_TOOL_ELIGIBILITY": "Default ON (BM25 tiered index + dynamic K for Agent+dispatch round 1). Set 0|off|false|legacy to use the legacy full sorted tool list.",
-        "UNREAL_AI_TOOL_USAGE_PRIOR": "Default ON — 0.7/0.3 blend with session operational prior. Set 0|off|false to disable blend.",
-        "UNREAL_AI_TOOL_USAGE_LOG": "Default ON — JSONL under Saved/UnrealAi/tool_usage_events.jsonl. Set 0|off|false to disable.",
-        "UNREAL_AI_TOOL_REPAIR": "Default ON — schema repair nudge after bad dispatch unwrap. Set 0|off|false to disable."
-      }
+      "description": "Optional per-tool overrides under tools[].tool_surface — domain_tags, centrality, worst_case_cost, requires_strict_args (tools-expansion.md). Tiered eligibility, usage prior, JSONL logging, and repair nudges are toggled in source: Plugins/UnrealAiEditor/.../Misc/UnrealAiRuntimeDefaults.h (not environment variables).",
+      "runtime_defaults_header": "Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h"
     },
     "invocation": {
       "focused_flag": "Optional JSON field \"focused\": true on supported tools. Stripped before handlers; after a successful run the editor opens or foregrounds the related Blueprint, asset, Content Browser selection, or project source file in the IDE. Tools list this property explicitly where the catalog schema is strict (additionalProperties: false)."
@@ -52,7 +47,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -109,7 +103,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -153,7 +146,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -194,7 +186,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -233,7 +224,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -294,7 +284,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -341,7 +330,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -381,7 +369,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -438,7 +425,6 @@
       "tier": "future",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -482,7 +468,6 @@
       "tier": "experimental",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -515,7 +500,6 @@
       "tier": "experimental",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -548,7 +532,6 @@
       "tier": "experimental",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -582,7 +565,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -627,7 +609,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -670,7 +651,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -710,7 +690,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -760,7 +739,6 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -812,7 +790,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -907,7 +884,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -954,7 +930,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -997,7 +972,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1036,7 +1010,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1100,7 +1073,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1151,7 +1123,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1348,7 +1319,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1396,7 +1366,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1447,7 +1416,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1482,7 +1450,7 @@
     },
     {
       "tool_id": "collision_trace_editor_world",
-      "summary": "Line/sphere trace in editor world.",
+      "summary": "Line/sphere trace in editor world (collision, raycast, hit from camera or points).",
       "category": "physics_collision",
       "tags": [
         "physics"
@@ -1490,7 +1458,6 @@
       "tier": "future",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1498,6 +1465,20 @@
         "priority": 20,
         "always_include_in_core_pack": false,
         "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "collision",
+          "line",
+          "trace",
+          "raycast",
+          "sweep",
+          "hit",
+          "physics",
+          "editor",
+          "world",
+          "viewport"
+        ]
       },
       "parameters": {
         "type": "object",
@@ -1539,7 +1520,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1583,7 +1563,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1622,7 +1601,6 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1671,7 +1649,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1710,7 +1687,6 @@
       "tier": "experimental",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1744,7 +1720,6 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1785,7 +1760,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1824,7 +1798,6 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1874,13 +1847,12 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
       "context_selector": {
         "priority": 80,
-        "always_include_in_core_pack": true,
+        "always_include_in_core_pack": false,
         "embedding_hint": null
       },
       "parameters": {
@@ -1917,7 +1889,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -1961,7 +1932,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2005,7 +1975,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2044,7 +2013,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2084,7 +2052,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2125,7 +2092,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2174,7 +2140,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2225,7 +2190,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2264,7 +2228,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2303,7 +2266,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2349,7 +2311,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2386,7 +2347,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2425,7 +2385,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2471,7 +2430,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2516,7 +2474,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2549,7 +2506,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2583,7 +2539,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2634,7 +2589,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2688,7 +2642,6 @@
       "tier": "experimental",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2722,7 +2675,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2766,7 +2718,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2807,7 +2758,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2843,7 +2793,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2914,7 +2863,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -2983,7 +2931,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3061,7 +3008,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3109,7 +3055,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3160,13 +3105,12 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
       "context_selector": {
         "priority": 86,
-        "always_include_in_core_pack": true,
+        "always_include_in_core_pack": false,
         "embedding_hint": null
       },
       "parameters": {
@@ -3211,7 +3155,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3250,13 +3193,12 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
       "context_selector": {
         "priority": 88,
-        "always_include_in_core_pack": true,
+        "always_include_in_core_pack": false,
         "embedding_hint": null
       },
       "parameters": {
@@ -3306,13 +3248,12 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
       "context_selector": {
         "priority": 87,
-        "always_include_in_core_pack": true,
+        "always_include_in_core_pack": false,
         "embedding_hint": null
       },
       "parameters": {
@@ -3362,7 +3303,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3403,7 +3343,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3460,7 +3399,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3504,7 +3442,6 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3550,7 +3487,7 @@
     },
     {
       "tool_id": "viewport_frame_actors",
-      "summary": "Frame specific level actors by `actor_paths` (bounds + FOV fit). Requires at least one world actor path—use `editor_get_selection` or `scene_fuzzy_search` first if paths are unknown. To frame whatever is already selected without paths, use `viewport_frame_selection` instead.",
+      "summary": "Frame specific level actors by `actor_paths` (bounds + FOV fit). Each path must be a full world actor path (typically includes `PersistentLevel` as a segment plus a concrete actor name after it). Never pass `PersistentLevel` alone or other level-instance tokens as the only path—discover actors with `scene_fuzzy_search` or `editor_get_selection` first. To frame the current selection without paths, use `viewport_frame_selection`.",
       "category": "selection_framing",
       "tags": [
         "viewport",
@@ -3559,7 +3496,6 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3577,7 +3513,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Non-empty list of level actor paths (e.g. containing PersistentLevel). Obtain from selection or scene search if not already known."
+            "description": "Non-empty list of full world actor paths, e.g. `/Game/MyMap.MyMap:PersistentLevel.StaticMeshActor_0`. The string `PersistentLevel` by itself is not a valid entry. Obtain paths from `editor_get_selection` or `scene_fuzzy_search`."
           },
           "margin_scale": {
             "type": "number"
@@ -3601,7 +3537,8 @@
       "ue_entry_points": "AActor::GetComponentsBoundingBox; FEditorViewportClient",
       "threading": "game_thread",
       "failure_modes": [
-        "Missing actor_paths: discover actors first or use viewport_frame_selection if the selection is already set."
+        "Missing actor_paths: discover actors first or use viewport_frame_selection if the selection is already set.",
+        "Passing only `PersistentLevel` or `WorldSettings` as a path is rejected with a suggested_correct_call to scene_fuzzy_search."
       ],
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/AActor"
@@ -3619,7 +3556,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3649,7 +3585,7 @@
     },
     {
       "tool_id": "viewport_set_view_mode",
-      "summary": "Switch editor viewport rendering mode (Lit, Wireframe, ...).",
+      "summary": "Switch editor viewport rendering mode (Lit, Wireframe, Unlit, …). Does not require actor selection or viewport framing—call this tool directly when the user asks to change view mode.",
       "category": "viewport_camera",
       "tags": [
         "viewport",
@@ -3658,7 +3594,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3666,6 +3601,17 @@
         "priority": 45,
         "always_include_in_core_pack": false,
         "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "unlit",
+          "wireframe",
+          "lit",
+          "view",
+          "mode",
+          "rendering",
+          "viewport"
+        ]
       },
       "parameters": {
         "type": "object",
@@ -3698,7 +3644,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3755,7 +3700,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3818,7 +3762,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3862,7 +3805,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3912,7 +3854,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3953,7 +3894,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -3994,7 +3934,6 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -4039,7 +3978,6 @@
       "tier": "standard",
       "modes": {
         "ask": true,
-        "fast": true,
         "agent": true,
         "plan": true
       },
@@ -4088,7 +4026,6 @@
       "tier": "future",
       "modes": {
         "ask": false,
-        "fast": true,
         "agent": true,
         "plan": true
       },

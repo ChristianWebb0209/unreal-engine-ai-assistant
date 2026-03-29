@@ -49,6 +49,9 @@ private:
 	void OnNodeFinished(const FString& NodeId, bool bSuccess, const FString& ErrorText, const FString& AssistantText);
 	void Finish(bool bSuccess, const FString& ErrorText);
 
+	/** If UnrealAiWaitTime::HarnessPlanMaxWallMs > 0, wall clock from PlanWallStartSec must stay within budget between planner/node segments. */
+	bool CheckPlanWallBudgetOrFinish();
+
 	IUnrealAiAgentHarness* Harness = nullptr;
 	IAgentContextService* ContextService = nullptr;
 	FUnrealAiAgentTurnRequest ParentRequest;
@@ -62,4 +65,9 @@ private:
 	TArray<FString> ReadyNodeIds;
 	FUnrealAiPlanDag Dag;
 	FUnrealAiRunIds ParentIds;
+
+	/** 0 = disabled. Cached when a plan run starts (see UnrealAiWaitTime::HarnessPlanMaxWallMs). */
+	uint32 PlanMaxWallMsCached = 0;
+	/** Monotonic seconds when the active plan execution window started (planner + nodes; resets after pause-for-build resume). */
+	double PlanWallStartSec = 0.0;
 };

@@ -22,6 +22,7 @@
 #include "Backend/UnrealAiBackendRegistry.h"
 #include "Context/UnrealAiProjectId.h"
 #include "Misc/CoreMisc.h"
+#include "Misc/UnrealAiRuntimeDefaults.h"
 
 namespace UnrealAiToolDispatchInternal
 {
@@ -69,14 +70,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	}
 
 	const TSharedPtr<FJsonObject>& A = Args.IsValid() ? Args : MakeShared<FJsonObject>();
-	const bool bAutoRunDestructive = []() {
-		const FString Raw = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_AUTO_RUN_DESTRUCTIVE"));
-		FString V = Raw;
-		V.TrimStartAndEndInline();
-		V = V.ToLower();
-		return !V.IsEmpty()
-			&& (V.Equals(TEXT("1")) || V.Equals(TEXT("true")) || V.Equals(TEXT("yes")) || V.Equals(TEXT("on")));
-	}();
+	const bool bAutoRunDestructive = UnrealAiRuntimeDefaults::AutoRunDestructiveDefault;
 
 	const FString ProjectId = ResolveProjectId(SessionProjectId);
 	const FString ThreadId = ResolveThreadId(SessionThreadId);

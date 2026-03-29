@@ -3,8 +3,8 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "HAL/FileManager.h"
-#include "HAL/PlatformMisc.h"
 #include "Misc/FileHelper.h"
+#include "Misc/UnrealAiRuntimeDefaults.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -110,14 +110,7 @@ namespace UnrealAiContextDecisionLogger
 
 	bool ShouldLogDecisions(const bool bVerboseContextBuild)
 	{
-		if (bVerboseContextBuild)
-		{
-			return true;
-		}
-		const FString Env = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_CONTEXT_DECISION_LOG"));
-		return Env.Equals(TEXT("1"), ESearchCase::IgnoreCase)
-			|| Env.Equals(TEXT("true"), ESearchCase::IgnoreCase)
-			|| Env.Equals(TEXT("yes"), ESearchCase::IgnoreCase);
+		return bVerboseContextBuild || UnrealAiRuntimeDefaults::ContextDecisionLogEnabled;
 	}
 
 	void WriteDecisionLog(

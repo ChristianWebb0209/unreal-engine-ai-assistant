@@ -61,12 +61,13 @@ bool UnrealAiBlueprintThumbnailCapture::TryCaptureBlueprintThumbnailPng(
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(OutAbsPngPath), true);
 
 	FObjectThumbnail Thumb;
+	// NeverFlush can capture before dependent textures stream, producing the engine default (magenta) texture in the PNG.
 	ThumbnailTools::RenderThumbnail(
 		Obj,
 		// Max width/height are maximum; render may pick smaller based on aspect.
 		MaxWidth,
 		MaxHeight,
-		ThumbnailTools::EThumbnailTextureFlushMode::NeverFlush,
+		ThumbnailTools::EThumbnailTextureFlushMode::AlwaysFlush,
 		nullptr,
 		&Thumb);
 

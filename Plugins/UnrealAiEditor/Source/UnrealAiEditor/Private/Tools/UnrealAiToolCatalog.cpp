@@ -35,10 +35,6 @@ namespace UnrealAiToolCatalogPriv
 				break;
 			case EUnrealAiAgentMode::Agent:
 				(*Modes)->TryGetBoolField(TEXT("agent"), bInclude);
-				if (!bInclude)
-				{
-					(*Modes)->TryGetBoolField(TEXT("fast"), bInclude);
-				}
 				break;
 			case EUnrealAiAgentMode::Plan:
 				(*Modes)->TryGetBoolField(TEXT("plan"), bInclude);
@@ -379,9 +375,9 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
 		Obj->TryGetStringField(TEXT("summary"), Summary);
 		FString ParamsJson;
 		TryGetToolParametersJsonString(Tid, ParamsJson);
-		if (ParamsJson.Len() > 1200)
+		if (ParamsJson.Len() > 900)
 		{
-			ParamsJson.LeftInline(1200);
+			ParamsJson.LeftInline(900);
 			ParamsJson += TEXT("...");
 		}
 		FSeg S;

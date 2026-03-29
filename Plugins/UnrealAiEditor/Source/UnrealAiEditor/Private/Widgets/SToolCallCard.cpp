@@ -1,6 +1,7 @@
 #include "Widgets/SToolCallCard.h"
 
 #include "Style/UnrealAiEditorStyle.h"
+#include "Styling/AppStyle.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
@@ -74,42 +75,44 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 
 	ChildSlot
 		[SNew(SBorder)
-				.BorderBackgroundColor_Lambda([this, BaseTint = CategoryTint]() -> FSlateColor
-				{
-					if (!bRunning)
-					{
-						return FSlateColor(BaseTint);
-					}
-					const float T = FMath::Abs(FMath::Sin(static_cast<float>(FPlatformTime::Seconds()) * 3.2f));
-					const FLinearColor Dim = BaseTint * FLinearColor(0.42f, 0.42f, 0.42f, 0.55f);
-					const FLinearColor Bright = BaseTint * FLinearColor(0.95f, 0.95f, 0.95f, 0.95f);
-					return FSlateColor(FLinearColor::LerpUsingHSV(Dim, Bright, T));
-				})
-				.Padding(FMargin(2.f))
+				.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.ToolCallCardOuter")))
+				.Padding(FMargin(0.f))
 				[
-					SNew(SExpandableArea)
-						.InitiallyCollapsed(InArgs._bInitiallyCollapsed)
-						.OnAreaExpansionChanged(
-							FOnBooleanValueChanged::CreateSP(this, &SToolCallCard::HandleExpansionChanged))
-						.AreaTitle(FText::GetEmpty())
-						.BorderBackgroundColor(FLinearColor(0.09f, 0.09f, 0.1f, 0.98f))
-						.HeaderContent()
-						[
-							SNew(SHorizontalBox)
-							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 6.f, 0.f))
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Fill)
+					[
+						SNew(SBorder)
+							.BorderImage(FAppStyle::GetBrush(TEXT("NoBorder")))
+							.BorderBackgroundColor_Lambda([this, BaseTint = CategoryTint]() -> FSlateColor
+							{
+								if (!bRunning)
+								{
+									return FSlateColor(BaseTint);
+								}
+								const float T =
+									FMath::Abs(FMath::Sin(static_cast<float>(FPlatformTime::Seconds()) * 3.2f));
+								const FLinearColor Dim = BaseTint * FLinearColor(0.55f, 0.55f, 0.55f, 0.85f);
+								const FLinearColor Bright = BaseTint * FLinearColor(1.f, 1.f, 1.f, 1.f);
+								return FSlateColor(FLinearColor::LerpUsingHSV(Dim, Bright, T));
+							})
+							.VAlign(VAlign_Fill)
 							[
-								SNew(SBox)
-									.WidthOverride(3.f)
-									.HeightOverride(18.f)
-									[
-										SNew(SBorder)
-											.BorderBackgroundColor(DotColor)
-											[
-												SNew(SSpacer)
-											]
-									]
+								SNew(SBox).WidthOverride(4.f)[SNew(SSpacer)]
 							]
-							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 4.f, 0.f))
+					]
+					+ SHorizontalBox::Slot().FillWidth(1.f)
+					[
+						SNew(SExpandableArea)
+							.InitiallyCollapsed(InArgs._bInitiallyCollapsed)
+							.OnAreaExpansionChanged(
+								FOnBooleanValueChanged::CreateSP(this, &SToolCallCard::HandleExpansionChanged))
+							.AreaTitle(FText::GetEmpty())
+							.BorderImage(FAppStyle::GetBrush(TEXT("NoBorder")))
+							.BorderBackgroundColor(FUnrealAiEditorStyle::LinearColorToolCallCardInset())
+							.HeaderContent()
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(6.f, 0.f, 4.f, 0.f))
 							[
 								SNew(STextBlock)
 									.Text(FText::FromString(TEXT("\u2022")))
@@ -167,15 +170,20 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 							]
 							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 0.f, 4.f, 4.f))
 							[
-								SNew(SBox)
-									.MinDesiredWidth(200.f)
-									.MaxDesiredHeight(160.f)
+								SNew(SBorder)
+									.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.ToolCallCodeWell")))
+									.Padding(FMargin(6.f, 5.f))
 									[
-										SNew(SMultiLineEditableText)
-											.IsReadOnly(true)
-											.AutoWrapText(true)
-											.Font(FUnrealAiEditorStyle::FontMono8())
-											.Text(FText::FromString(ArgsPreview.IsEmpty() ? TEXT("(empty)") : ArgsPreview))
+										SNew(SBox)
+											.MinDesiredWidth(200.f)
+											.MaxDesiredHeight(160.f)
+											[
+												SNew(SMultiLineEditableText)
+													.IsReadOnly(true)
+													.AutoWrapText(true)
+													.Font(FUnrealAiEditorStyle::FontMono8())
+													.Text(FText::FromString(ArgsPreview.IsEmpty() ? TEXT("(empty)") : ArgsPreview))
+											]
 									]
 							]
 							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 0.f, 4.f, 2.f))
@@ -187,16 +195,21 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 							]
 							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 0.f, 4.f, 2.f))
 							[
-								SNew(SBox)
-									.MinDesiredWidth(200.f)
-									.MaxDesiredHeight(200.f)
+								SNew(SBorder)
+									.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.ToolCallCodeWell")))
+									.Padding(FMargin(6.f, 5.f))
 									[
-										SNew(SMultiLineEditableText)
-											.IsReadOnly(true)
-											.AutoWrapText(true)
-											.Font(FUnrealAiEditorStyle::FontMono8())
-											.Text(FText::FromString(
-												ResultPreview.IsEmpty() && bRunning ? FString(TEXT("…")) : ResultPreview))
+										SNew(SBox)
+											.MinDesiredWidth(200.f)
+											.MaxDesiredHeight(200.f)
+											[
+												SNew(SMultiLineEditableText)
+													.IsReadOnly(true)
+													.AutoWrapText(true)
+													.Font(FUnrealAiEditorStyle::FontMono8())
+													.Text(FText::FromString(
+														ResultPreview.IsEmpty() && bRunning ? FString(TEXT("…")) : ResultPreview))
+											]
 									]
 							]
 							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 2.f, 0.f, 0.f))
@@ -205,7 +218,9 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 									.EditorPresentation(EditorPresentation)
 							]
 						]
-				]];
+					]
+				]
+		];
 
 	RegisterPulseTimerIfNeeded();
 }

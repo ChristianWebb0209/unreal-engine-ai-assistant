@@ -45,7 +45,7 @@
   - `pie_stop`: `{}`
   - `asset_save_packages`: `{"all_dirty":true}`
   - `content_browser_sync_asset`: `{"path":"/Game/Folder/MyAsset.MyAsset"}` (also `object_path` / `asset_path`; must be a **concrete asset** object path, not a folder-only string)
-  - `viewport_frame_actors`: `{"actor_paths":["/Game/MyLevel.PersistentLevel.MyActor"]}` (world actor paths; obtain via `editor_get_selection` or `scene_fuzzy_search` if unknown)
+  - `viewport_frame_actors`: `{"actor_paths":["/Game/MyLevel.MyLevel:PersistentLevel.MyActor_0"]}` (full world actor paths; never `["PersistentLevel"]` alone—obtain paths via `editor_get_selection` or `scene_fuzzy_search`)
 - If a tool error includes `suggested_correct_call`, use that shape on the next retry instead of repeating the same args.
 - If a call fails validation, apply `suggested_correct_call` immediately; never retry the same invalid shape twice—including **empty `{}`** when required fields exist.
 - Search/retrieval loop cap: after 2 near-identical calls without new progress, change strategy/tool family or emit `agent_emit_todo_plan`.
@@ -81,7 +81,7 @@ For **gameplay Blueprint** work (movement, overlap, timers, health, spawners), r
 
 ## Blueprint IR + Unreal Blueprint Formatter (graph plugin)
 
-Unreal AI Editor is built to use **`UnrealBlueprintFormatter`** as shipped: it is an **enabled plugin dependency** and the AI module **links** the formatter module. From this repo’s root, **`.\build-editor.ps1`** **clones or `git pull --ff-only`** the formatter into `Plugins/UnrealBlueprintFormatter` before building. Use **`-SkipBlueprintFormatterSync`** or **`UE_SKIP_BLUEPRINT_FORMATTER_SYNC=1`** only when you intentionally manage that folder yourself.
+Unreal AI Editor is built to use **`UnrealBlueprintFormatter`** as shipped: it is an **enabled plugin dependency** and the AI module **links** the formatter module. From this repo’s root, **`.\build-editor.ps1`** **clones or `git pull --ff-only`** the formatter into `Plugins/UnrealBlueprintFormatter` before building. Use **`-SkipBlueprintFormatterSync`** on **`.\build-editor.ps1`** only when you intentionally manage that folder yourself.
 
 ### Read / write loop
 

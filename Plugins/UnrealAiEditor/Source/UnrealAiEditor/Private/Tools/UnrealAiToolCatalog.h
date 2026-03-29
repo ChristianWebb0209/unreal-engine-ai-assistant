@@ -7,7 +7,7 @@
 
 struct FUnrealAiModelCapabilities;
 
-/** When `UNREAL_AI_TOOL_PACK=core`, only tools with catalog `context_selector.always_include_in_core_pack` plus `AdditionalToolIds` are sent (still subject to mode + native-tools caps). */
+/** When ToolPackRestrictToCore is true in UnrealAiRuntimeDefaults.h, only tools with catalog `context_selector.always_include_in_core_pack` plus `AdditionalToolIds` are sent (still subject to mode + native-tools caps). */
 struct FUnrealAiToolPackOptions
 {
 	bool bRestrictToCorePack = false;

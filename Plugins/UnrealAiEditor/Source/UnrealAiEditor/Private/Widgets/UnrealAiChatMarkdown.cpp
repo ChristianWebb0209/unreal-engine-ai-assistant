@@ -485,7 +485,7 @@ namespace UnrealAiChatMarkdown
 					UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 						ItemText,
 						FUnrealAiEditorStyle::FontBodyRegular11(),
-						FUnrealAiEditorStyle::ColorComposerForegroundBright())
+						FUnrealAiEditorStyle::ColorMarkdownBody())
 				]
 			];
 	}
@@ -715,7 +715,7 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownToolNoteBody(const FString& Markdown)
 					]
 					+ SHorizontalBox::Slot().FillWidth(1.f)
 					[
-						MakeBody(L.Text, BodyFont(), FSlateColor(FLinearColor(0.92f, 0.93f, 0.95f, 1.f)))
+						MakeBody(L.Text, BodyFont(), FUnrealAiEditorStyle::ColorMarkdownBody())
 					]
 				];
 			break;

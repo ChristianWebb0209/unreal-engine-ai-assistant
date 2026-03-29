@@ -19,12 +19,15 @@
 #include "Backend/IUnrealAiPersistence.h"
 #include "Memory/FUnrealAiMemoryCompactor.h"
 #include "Memory/IUnrealAiMemoryService.h"
-#include "HAL/PlatformMisc.h"
 #include "Harness/UnrealAiLlmInvocationService.h"
 #include "Harness/UnrealAiHarnessTpmThrottle.h"
 #include "Misc/UnrealAiEditorModalMonitor.h"
+#include "Misc/UnrealAiHarnessProgressTelemetry.h"
+#include "Misc/UnrealAiRuntimeDefaults.h"
+#include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Widgets/UnrealAiToolUi.h"
 #include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -42,17 +45,6 @@ namespace UnrealAiAgentHarnessPriv
 	/** Hard backstop on LLM↔tool iterations if token/repeat limits do not apply first. */
 	static constexpr int32 GHarnessMaxLlmRoundBackstop = 512;
 
-	static int32 ReadEnvInt(const TCHAR* Name, const int32 DefaultValue, const int32 MinValue = 0, const int32 MaxValue = INT32_MAX)
-	{
-		const FString Raw = FPlatformMisc::GetEnvironmentVariable(Name);
-		if (Raw.IsEmpty())
-		{
-			return DefaultValue;
-		}
-		const int32 Parsed = FCString::Atoi(*Raw);
-		return FMath::Clamp(Parsed, MinValue, MaxValue);
-	}
-
 	static FString HashUtf8Query(const FString& S)
 	{
 		FTCHARToUTF8 Utf(*S);
@@ -63,24 +55,37 @@ namespace UnrealAiAgentHarnessPriv
 		return BytesToHex(Digest, 16);
 	}
 
-	static bool EnvToolUsageLogEnabled()
+	static FString BuildToolSelectorRanksJson(const FUnrealAiToolSurfaceTelemetry& Tel)
 	{
-		const FString E = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_TOOL_USAGE_LOG")).TrimStartAndEnd().ToLower();
-		if (E.IsEmpty())
+		TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+		Root->SetStringField(TEXT("query_shape"), Tel.QueryShape);
+		Root->SetStringField(TEXT("query_hash"), Tel.QueryHash);
+		Root->SetNumberField(TEXT("k_effective"), static_cast<double>(Tel.KEffective));
+		Root->SetNumberField(TEXT("eligible_count"), static_cast<double>(Tel.EligibleCount));
+		TArray<TSharedPtr<FJsonValue>> ToolsArr;
+		for (const FUnrealAiToolSurfaceRankedEntry& E : Tel.RankedTools)
 		{
-			return true;
+			TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+			O->SetNumberField(TEXT("rank"), static_cast<double>(E.Rank));
+			O->SetStringField(TEXT("tool_id"), E.ToolId);
+			O->SetNumberField(TEXT("combined"), static_cast<double>(E.CombinedScore));
+			O->SetNumberField(TEXT("bm25_norm"), static_cast<double>(E.Bm25Norm01));
+			O->SetNumberField(TEXT("context_mult"), static_cast<double>(E.ContextMultiplier));
+			O->SetNumberField(TEXT("usage_prior"), static_cast<double>(E.UsagePrior01));
+			O->SetBoolField(TEXT("prior_blended"), E.bUsagePriorBlended);
+			O->SetBoolField(TEXT("guardrail"), E.bGuardrail);
+			O->SetStringField(TEXT("selection_reason"), E.SelectionReason);
+			ToolsArr.Add(MakeShared<FJsonValueObject>(O.ToSharedRef()));
 		}
-		return E == TEXT("1") || E == TEXT("true") || E == TEXT("yes") || E == TEXT("on");
-	}
-
-	static bool EnvToolRepairNudgeEnabled()
-	{
-		const FString E = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_TOOL_REPAIR")).TrimStartAndEnd().ToLower();
-		if (E.IsEmpty())
+		Root->SetArrayField(TEXT("tools"), ToolsArr);
+		FString Out;
+		const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Out);
+		if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
 		{
-			return true;
+			return FString();
 		}
-		return !(E == TEXT("0") || E == TEXT("off") || E == TEXT("false") || E == TEXT("no"));
+		return Out;
 	}
 
 	static FString BuildToolRepairUserLine(FUnrealAiToolCatalog* InCatalog, const TArray<FUnrealAiToolCallSpec>& Calls)
@@ -341,6 +346,7 @@ namespace UnrealAiAgentHarnessPriv
 					Acc.AddDefaulted();
 				}
 				FUnrealAiToolCallSpec& Slot = Acc[D.StreamMergeIndex];
+				Slot.StreamMergeIndex = D.StreamMergeIndex;
 				if (!D.Id.IsEmpty())
 				{
 					Slot.Id = D.Id;
@@ -356,6 +362,12 @@ namespace UnrealAiAgentHarnessPriv
 				Acc.Add(D);
 			}
 		}
+	}
+
+	/** Padding rows created when the first streamed chunk uses index>0; never timeout those. */
+	static bool IsPlaceholderPendingToolSlot(const FUnrealAiToolCallSpec& Tc)
+	{
+		return Tc.Name.IsEmpty() && Tc.Id.IsEmpty() && Tc.ArgumentsJson.IsEmpty();
 	}
 
 	struct FAgentTurnRunner : public TSharedFromThis<FAgentTurnRunner>
@@ -401,6 +413,10 @@ namespace UnrealAiAgentHarnessPriv
 		// Counts repeated non-progress discovery/search results (e.g. empty low-confidence searches).
 		// Used to trigger replan-or-stop earlier than max rounds.
 		TMap<FString, int32> NonProgressEmptySearchCountByToolName;
+		/** Consecutive successful invocations with identical (name+args) signature — spans LLM rounds within one user send. */
+		FString LastConsecutiveIdenticalOkSignature;
+		int32 ConsecutiveIdenticalOkCount = 0;
+		bool bPendingFailRepeatedIdenticalOk = false;
 		int32 ReplanCount = 0;
 		int32 QueueStepsPending = 0;
 		bool bFinishSeen = false;
@@ -547,21 +563,21 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			const TArray<FUnrealAiConversationMessage>& Ms = Conv->GetMessages();
 			const int32 UserTurns = CountConversationUserTurnsForMemory(Ms);
-			const int32 TurnInterval = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_TURN_INTERVAL"), 4, 1, 1000);
-			const int32 TokenThreshold = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_TOKEN_THRESHOLD"), 3000, 0, 5000000);
-			const int32 PromptThreshold = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_PROMPT_THRESHOLD"), 1800, 0, 5000000);
+			const int32 TurnInterval = UnrealAiRuntimeDefaults::MemoryCompactTurnInterval;
+			const int32 TokenThreshold = UnrealAiRuntimeDefaults::MemoryCompactTokenThreshold;
+			const int32 PromptThreshold = UnrealAiRuntimeDefaults::MemoryCompactPromptThreshold;
 			const bool bByTurns = (UserTurns > 0) && ((UserTurns % TurnInterval) == 0);
 			const bool bByTokens = AccumulatedUsage.TotalTokens >= TokenThreshold;
 			const bool bByPromptChars = Request.UserText.Len() >= PromptThreshold;
 			if (bByTurns || bByTokens || bByPromptChars)
 			{
-				const int32 HistoryMessages = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_HISTORY_MESSAGES"), 12, 4, 128);
-				const int32 MaxBodyChars = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_MAX_BODY_CHARS"), 2400, 400, 20000);
-				const int32 MaxToCreate = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_MAX_CREATE"), 1, 1, 16);
-				const float MinConfidence = static_cast<float>(ReadEnvInt(TEXT("UNREAL_AI_MEMORY_COMPACT_MIN_CONFIDENCE_PERCENT"), 55, 0, 100)) / 100.0f;
-				const int32 PruneMaxItems = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_PRUNE_MAX_ITEMS"), 120, 1, 20000);
-				const int32 PruneRetentionDays = ReadEnvInt(TEXT("UNREAL_AI_MEMORY_PRUNE_RETENTION_DAYS"), 90, 0, 3650);
-				const float PruneMinConfidence = static_cast<float>(ReadEnvInt(TEXT("UNREAL_AI_MEMORY_PRUNE_MIN_CONFIDENCE_PERCENT"), 30, 0, 100)) / 100.0f;
+				const int32 HistoryMessages = UnrealAiRuntimeDefaults::MemoryCompactHistoryMessages;
+				const int32 MaxBodyChars = UnrealAiRuntimeDefaults::MemoryCompactMaxBodyChars;
+				const int32 MaxToCreate = UnrealAiRuntimeDefaults::MemoryCompactMaxCreate;
+				const float MinConfidence = static_cast<float>(UnrealAiRuntimeDefaults::MemoryCompactMinConfidencePercent) / 100.0f;
+				const int32 PruneMaxItems = UnrealAiRuntimeDefaults::MemoryPruneMaxItems;
+				const int32 PruneRetentionDays = UnrealAiRuntimeDefaults::MemoryPruneRetentionDays;
+				const float PruneMinConfidence = static_cast<float>(UnrealAiRuntimeDefaults::MemoryPruneMinConfidencePercent) / 100.0f;
 
 				FString ConversationForCompactor;
 				const int32 Start = FMath::Max(0, Ms.Num() - HistoryMessages);
@@ -645,43 +661,25 @@ namespace UnrealAiAgentHarnessPriv
 		}
 		FUnrealAiModelCapabilities CapLimits;
 		Profiles->GetEffectiveCapabilities(Request.ModelProfileId, CapLimits);
-		// Per-turn token budget. Env overrides profile when set. 0 = no token cap. Default 500k when both unset.
+		// Per-turn token budget from profile. 0 = no token cap. Default 500k when profile unset.
 		int32 EffectiveMaxTurnTokens = CapLimits.MaxAgentTurnTokens;
+		if (EffectiveMaxTurnTokens <= 0)
 		{
-			const FString TokEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_MAX_TOKENS_PER_TURN"));
-			if (TokEnv.Equals(TEXT("-1"), ESearchCase::IgnoreCase) || TokEnv.Equals(TEXT("unlimited"), ESearchCase::IgnoreCase))
-			{
-				EffectiveMaxTurnTokens = 0;
-			}
-			else if (!TokEnv.IsEmpty())
-			{
-				EffectiveMaxTurnTokens = FCString::Atoi(*TokEnv);
-			}
-			else if (EffectiveMaxTurnTokens <= 0)
-			{
-				EffectiveMaxTurnTokens = GHarnessDefaultMaxTurnTokens;
-			}
+			EffectiveMaxTurnTokens = GHarnessDefaultMaxTurnTokens;
 		}
 		EffectiveMaxTurnTokensHint = EffectiveMaxTurnTokens;
 		int32 ParsedMax = CapLimits.MaxAgentLlmRounds > 0 ? CapLimits.MaxAgentLlmRounds : GHarnessMaxLlmRoundBackstop;
 		ParsedMax = FMath::Clamp(ParsedMax, 1, GHarnessMaxLlmRoundBackstop);
-		{
-			const FString MaxRoundsEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_MAX_LLM_ROUNDS"));
-			if (!MaxRoundsEnv.IsEmpty())
-			{
-				const int32 EnvMax = FCString::Atoi(*MaxRoundsEnv);
-				if (EnvMax > 0)
-				{
-					ParsedMax = FMath::Min(ParsedMax, EnvMax);
-				}
-			}
-		}
 		if (Request.LlmRoundBudgetFloor > 0)
 		{
 			ParsedMax = FMath::Max(ParsedMax, Request.LlmRoundBudgetFloor);
 		}
 		ParsedMax = FMath::Clamp(ParsedMax, 1, GHarnessMaxLlmRoundBackstop);
 		EffectiveMaxLlmRounds = ParsedMax;
+		if (Request.Mode == EUnrealAiAgentMode::Plan)
+		{
+			EffectiveMaxLlmRounds = FMath::Min(EffectiveMaxLlmRounds, UnrealAiWaitTime::PlannerMaxLlmRounds);
+		}
 
 		if (!bRetrySameRound)
 		{
@@ -696,7 +694,7 @@ namespace UnrealAiAgentHarnessPriv
 			if (EffectiveMaxTurnTokens > 0 && AccumulatedUsage.TotalTokens >= EffectiveMaxTurnTokens)
 			{
 				Fail(FString::Printf(
-					TEXT("Agent turn token budget exceeded (%d tokens, limit %d). Raise maxAgentTurnTokens in the model profile or UNREAL_AI_HARNESS_MAX_TOKENS_PER_TURN, or set the env to -1 for unlimited."),
+					TEXT("Agent turn token budget exceeded (%d tokens, limit %d). Raise maxAgentTurnTokens in the model profile or set it to 0 for unlimited."),
 					AccumulatedUsage.TotalTokens,
 					EffectiveMaxTurnTokens));
 				return;
@@ -705,7 +703,7 @@ namespace UnrealAiAgentHarnessPriv
 			{
 				const bool bHasRepeatValidationFailures = RepeatedToolFailureCount >= 2;
 				Fail(FString::Printf(
-					TEXT("LLM round backstop reached (%d rounds). Primary limits are repeated identical tool failures (%d max) and token budget; increase maxAgentLlmRounds or UNREAL_AI_HARNESS_MAX_LLM_ROUNDS only if needed. %s"),
+					TEXT("LLM round backstop reached (%d rounds). Primary limits are repeated identical tool failures (%d max) and token budget; increase maxAgentLlmRounds in the model profile only if needed. %s"),
 					EffectiveMaxLlmRounds,
 					GHarnessRepeatedFailureStopCount,
 					bHasRepeatValidationFailures
@@ -798,6 +796,14 @@ namespace UnrealAiAgentHarnessPriv
 					*ToolSurfaceTel.QueryShape,
 					*ToolSurfaceTel.QueryHash,
 					*ExpandedCsv));
+			if (UnrealAiRuntimeDefaults::ToolSelectorVerboseLogEnabled && ToolSurfaceTel.RankedTools.Num() > 0)
+			{
+				const FString RanksJson = UnrealAiAgentHarnessPriv::BuildToolSelectorRanksJson(ToolSurfaceTel);
+				if (!RanksJson.IsEmpty())
+				{
+					Sink->OnEnforcementEvent(TEXT("tool_selector_ranks"), RanksJson);
+				}
+			}
 		}
 		if (Sink.IsValid() && ContextUserMsgs.Num() > 0)
 		{
@@ -805,15 +811,7 @@ namespace UnrealAiAgentHarnessPriv
 		}
 
 		// Optional pacing to reduce request burstiness and provider 429 rate limits.
-		int32 MinDelayMs = 0;
-		{
-			const FString DelayEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_ROUND_MIN_DELAY_MS"));
-			if (!DelayEnv.IsEmpty())
-			{
-				const int32 Parsed = FCString::Atoi(*DelayEnv);
-				MinDelayMs = FMath::Clamp(Parsed, 0, 5000);
-			}
-		}
+		const int32 MinDelayMs = FMath::Clamp(UnrealAiWaitTime::HarnessRoundMinDelayMs, 0, 5000);
 		if (MinDelayMs > 0 && LastLlmSubmitSeconds > 0.0)
 		{
 			const double NowSec = FPlatformTime::Seconds();
@@ -832,6 +830,7 @@ namespace UnrealAiAgentHarnessPriv
 		UnrealAiHarnessTpmThrottle::MaybeWaitBeforeChatRequest(LlmReq, CharPerTokenApprox);
 
 		const TSharedPtr<FAgentTurnRunner> Self = AsShared();
+		UnrealAiHarnessProgressTelemetry::NotifyLlmSubmit();
 		UE_LOG(LogTemp, Display,
 			TEXT("UnrealAi harness: LLM round %d/%d — submitting HTTP request (stream=%s). "
 				 "No viewport progress until tools execute."),
@@ -900,8 +899,8 @@ namespace UnrealAiAgentHarnessPriv
 
 	bool FAgentTurnRunner::CheckIncompleteToolCallTimeout(const bool bForceOnFinish)
 	{
-		const int32 MaxEvents = ReadEnvInt(TEXT("UNREAL_AI_STREAM_TOOL_INCOMPLETE_MAX_EVENTS"), 12, 1, 1000);
-		const int32 MaxMs = ReadEnvInt(TEXT("UNREAL_AI_STREAM_TOOL_INCOMPLETE_MAX_MS"), 2500, 100, 600000);
+		const int32 MaxEvents = UnrealAiWaitTime::StreamToolIncompleteMaxEvents;
+		const int32 MaxMs = UnrealAiWaitTime::StreamToolIncompleteMaxMs;
 		const double NowSec = FPlatformTime::Seconds();
 		for (int32 I = 0; I < PendingToolCalls.Num(); ++I)
 		{
@@ -910,10 +909,15 @@ namespace UnrealAiAgentHarnessPriv
 			{
 				continue;
 			}
+			if (UnrealAiAgentHarnessPriv::IsPlaceholderPendingToolSlot(Tc))
+			{
+				continue;
+			}
 			if (!Tc.Id.IsEmpty() && ExecutedToolCallIds.Contains(Tc.Id))
 			{
 				continue;
 			}
+			// Key by pending-array index only: matches MergeToolCallDeltas padding (index>0 first chunk leaves empty slot 0).
 			const int32 FirstSeenEvent = ToolCallFirstSeenEventCount.FindRef(I);
 			const double FirstSeenSec = ToolCallFirstSeenSeconds.FindRef(I);
 			const int32 AgeEvents = FMath::Max(0, StreamToolEventCount - FirstSeenEvent);
@@ -957,13 +961,19 @@ namespace UnrealAiAgentHarnessPriv
 		case EUnrealAiLlmStreamEventType::ToolCalls:
 			++StreamToolEventCount;
 			MergeToolCallDeltas(PendingToolCalls, Ev.ToolCalls);
-			for (const FUnrealAiToolCallSpec& Tc : Ev.ToolCalls)
+			for (int32 Idx = 0; Idx < PendingToolCalls.Num(); ++Idx)
 			{
-				if (Tc.StreamMergeIndex >= 0)
+				const FUnrealAiToolCallSpec& Slot = PendingToolCalls[Idx];
+				if (IsToolCallReadyForExecution(Slot))
 				{
-					ToolCallFirstSeenEventCount.FindOrAdd(Tc.StreamMergeIndex, StreamToolEventCount);
-					ToolCallFirstSeenSeconds.FindOrAdd(Tc.StreamMergeIndex, FPlatformTime::Seconds());
+					continue;
 				}
+				if (UnrealAiAgentHarnessPriv::IsPlaceholderPendingToolSlot(Slot))
+				{
+					continue;
+				}
+				ToolCallFirstSeenEventCount.FindOrAdd(Idx, StreamToolEventCount);
+				ToolCallFirstSeenSeconds.FindOrAdd(Idx, FPlatformTime::Seconds());
 			}
 			EnqueueNewlyCompleteCalls();
 			StartOrContinueStreamedToolExecution();
@@ -1083,11 +1093,13 @@ namespace UnrealAiAgentHarnessPriv
 				ExecutedToolCallIds.Add(Tc.Id);
 			}
 			EmitEnforcementEvent(TEXT("stream_tool_exec_done"), FString::Printf(TEXT("id=%s ok=0"), *Tc.Id));
-			if (UnrealAiAgentHarnessPriv::EnvToolUsageLogEnabled())
+			if (UnrealAiRuntimeDefaults::ToolUsageLogEnabled)
 			{
 				UnrealAiToolUsageEventLogger::AppendOperationalEvent(UsageQueryHash, Tc.Name, false, Request.ThreadId);
 			}
 			UnrealAiToolUsagePrior::NoteSessionOutcome(Tc.Name, false);
+			LastConsecutiveIdenticalOkSignature.Reset();
+			ConsecutiveIdenticalOkCount = 0;
 			return;
 		}
 		if (Sink.IsValid())
@@ -1109,6 +1121,36 @@ namespace UnrealAiAgentHarnessPriv
 		if (bRepeatSignature && !Inv.bOk)
 		{
 			bCurrentRoundRepeatedToolLoop = true;
+		}
+		if (Inv.bOk)
+		{
+			if (Request.Mode == EUnrealAiAgentMode::Agent && InvokeName != TEXT("agent_emit_todo_plan"))
+			{
+				if (!InvokeSignature.IsEmpty() && InvokeSignature == LastConsecutiveIdenticalOkSignature)
+				{
+					++ConsecutiveIdenticalOkCount;
+				}
+				else
+				{
+					LastConsecutiveIdenticalOkSignature = InvokeSignature;
+					ConsecutiveIdenticalOkCount = 1;
+				}
+				if (ConsecutiveIdenticalOkCount >= GHarnessRepeatedFailureStopCount)
+				{
+					bPendingFailRepeatedIdenticalOk = true;
+					bCurrentRoundRepeatedToolLoop = true;
+				}
+			}
+			else
+			{
+				LastConsecutiveIdenticalOkSignature.Reset();
+				ConsecutiveIdenticalOkCount = 0;
+			}
+		}
+		else
+		{
+			LastConsecutiveIdenticalOkSignature.Reset();
+			ConsecutiveIdenticalOkCount = 0;
 		}
 		if (!DialogFootnote.IsEmpty())
 		{
@@ -1215,7 +1257,7 @@ namespace UnrealAiAgentHarnessPriv
 			ExecutedToolCallIds.Add(Tc.Id);
 		}
 		EmitEnforcementEvent(TEXT("stream_tool_exec_done"), FString::Printf(TEXT("id=%s ok=%d"), *Tc.Id, Inv.bOk ? 1 : 0));
-		if (UnrealAiAgentHarnessPriv::EnvToolUsageLogEnabled())
+		if (UnrealAiRuntimeDefaults::ToolUsageLogEnabled)
 		{
 			UnrealAiToolUsageEventLogger::AppendOperationalEvent(UsageQueryHash, InvokeName, Inv.bOk, Request.ThreadId);
 		}
@@ -1320,6 +1362,10 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			TriggerReasons.Add(TEXT("repeated_empty_search"));
 		}
+		if (bPendingFailRepeatedIdenticalOk)
+		{
+			TriggerReasons.Add(TEXT("repeated_identical_ok"));
+		}
 		if (bTodoPlanOnly)
 		{
 			TriggerReasons.Add(TEXT("explicit_todo_plan"));
@@ -1329,6 +1375,16 @@ namespace UnrealAiAgentHarnessPriv
 			TriggerReasons.Add(TEXT("act_now"));
 		}
 		EmitPlanningDecision(bTodoPlanOnly ? TEXT("explicit") : TEXT("implicit"), TriggerReasons);
+		if (bPendingFailRepeatedIdenticalOk)
+		{
+			AccumulateRoundUsage();
+			EmitEnforcementEvent(TEXT("repeated_identical_ok_abort"), LastConsecutiveIdenticalOkSignature.Left(240));
+			Fail(FString::Printf(
+				TEXT("Stopped after %d consecutive identical successful tool calls with no progress (%s). Use a different tool, change arguments based on new information, emit `agent_emit_todo_plan`, or state a concise blocker."),
+				GHarnessRepeatedFailureStopCount,
+				LastConsecutiveIdenticalOkSignature.IsEmpty() ? TEXT("unknown signature") : *LastConsecutiveIdenticalOkSignature));
+			return;
+		}
 		const bool bRepeatedValidationLoop = RepeatedToolFailureCount >= 3;
 		if (bRepeatedValidationLoop && Request.Mode != EUnrealAiAgentMode::Ask)
 		{
@@ -1422,10 +1478,10 @@ namespace UnrealAiAgentHarnessPriv
 				}
 			}
 		}
-		if (UnwrapFailuresThisRound > 0 && UnrealAiAgentHarnessPriv::EnvToolRepairNudgeEnabled()
+		if (UnwrapFailuresThisRound > 0 && UnrealAiRuntimeDefaults::ToolRepairNudgeEnabled
 			&& Request.Mode == EUnrealAiAgentMode::Agent && Conv.IsValid() && Catalog)
 		{
-			const int32 MaxRepair = UnrealAiAgentHarnessPriv::ReadEnvInt(TEXT("UNREAL_AI_TOOL_REPAIR_MAX_PER_USER_SEND"), 1, 0, 4);
+			const int32 MaxRepair = UnrealAiRuntimeDefaults::ToolRepairMaxPerUserSend;
 			if (ToolRepairNudgesThisRun < MaxRepair)
 			{
 				const FString RepairLine = UnrealAiAgentHarnessPriv::BuildToolRepairUserLine(Catalog, PendingToolCalls);

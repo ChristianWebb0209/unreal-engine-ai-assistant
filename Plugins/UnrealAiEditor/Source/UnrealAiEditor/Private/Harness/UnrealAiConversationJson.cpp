@@ -148,8 +148,16 @@ namespace UnrealAiConversationJson
 
 	bool MessagesToChatCompletionsJsonArray(const TArray<FUnrealAiConversationMessage>& Messages, FString& OutJsonArray)
 	{
+		TArray<FUnrealAiConversationMessage> Sanitized = Messages;
+		if (Sanitized.Num() > 1 && Sanitized[0].Role == TEXT("system"))
+		{
+			while (Sanitized.Num() > 1 && Sanitized[1].Role == TEXT("tool"))
+			{
+				Sanitized.RemoveAt(1);
+			}
+		}
 		TArray<TSharedPtr<FJsonValue>> Arr;
-		for (const FUnrealAiConversationMessage& M : Messages)
+		for (const FUnrealAiConversationMessage& M : Sanitized)
 		{
 			Arr.Add(MakeShared<FJsonValueObject>(MessageToJsonObject(M).ToSharedRef()));
 		}

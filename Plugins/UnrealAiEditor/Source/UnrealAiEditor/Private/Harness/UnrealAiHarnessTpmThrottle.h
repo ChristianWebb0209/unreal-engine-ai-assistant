@@ -5,7 +5,7 @@
 struct FUnrealAiLlmRequest;
 
 /**
- * Opt-in (UNREAL_AI_HARNESS_TPM_PER_MINUTE / embedding env) sliding-window token budgets
+ * TPM sliding-window token budgets (defaults in UnrealAiRuntimeDefaults.h)
  * for long-running harness batches. Strict mode (default when TPM is enabled) uses pessimistic
  * per-request upper bounds so Sum + estimate stays within budget — reduces 429s at the cost of wall time.
  */

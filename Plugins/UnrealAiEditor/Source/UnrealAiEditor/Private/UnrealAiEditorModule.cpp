@@ -47,6 +47,7 @@
 #include "WorkspaceMenuStructure.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/UnrealAiEditorModalMonitor.h"
+#include "Misc/UnrealAiRuntimeDefaults.h"
 #include "Misc/UnrealAiRecentUiTracker.h"
 #include "Misc/Guid.h"
 #include "WorkspaceMenuStructureModule.h"
@@ -54,7 +55,6 @@
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
-#include "HAL/PlatformMisc.h"
 #include "Misc/Paths.h"
 #include "Tools/UnrealAiToolCatalogMatrixRunner.h"
 #include "Tools/UnrealAiBlueprintFormatterBridge.h"
@@ -187,26 +187,16 @@ void FUnrealAiEditorModule::StartupModule()
 
 	GUnrealAiRunAgentTurnConsole = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("UnrealAi.RunAgentTurn"),
-		TEXT("Run one agent harness turn (same path as Agent Chat). Args: <MessageFilePath> [ThreadGuid] [agent|ask|plan] [OutputDir] [dumpcontext|nodump]. If no file arg is passed, reads UNREAL_AI_HARNESS_MESSAGE_FILE (UTF-8 text); optional UNREAL_AI_HARNESS_THREAD_GUID and UNREAL_AI_HARNESS_AGENT_MODE (ask|plan|agent) when thread/mode are not on the command line. Writes Saved/UnrealAiEditor/HarnessRuns/<ts>/run.jsonl and optional context_window_*.txt. Set UNREAL_AI_HARNESS_DUMP_CONTEXT=1 to dump context after each tool (overridable by 5th arg)."),
+		TEXT("Run one agent harness turn (same path as Agent Chat). Args: <MessageFilePath> [ThreadGuid] [agent|ask|plan] [OutputDir] [dumpcontext|nodump]. UTF-8 text file required as first arg. Default per-tool context dumps follow UnrealAiRuntimeDefaults::HarnessDumpContextAfterEachToolDefault unless the 5th arg overrides. Writes Saved/UnrealAiEditor/HarnessRuns/<ts>/run.jsonl and optional context_window_*.txt."),
 		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 		{
-			FString MsgFilePath;
-			int32 BaseIdx = 0;
-			if (Args.Num() >= 1 && !Args[0].IsEmpty())
+			if (Args.Num() < 1 || Args[0].IsEmpty())
 			{
-				MsgFilePath = Args[0];
-				BaseIdx = 1;
-			}
-			else
-			{
-				MsgFilePath = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_MESSAGE_FILE"));
-				BaseIdx = 0;
-			}
-			if (MsgFilePath.IsEmpty())
-			{
-				UE_LOG(LogTemp, Error, TEXT("UnrealAi.RunAgentTurn: pass a UTF-8 message file as first arg, or set UNREAL_AI_HARNESS_MESSAGE_FILE"));
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.RunAgentTurn: pass a UTF-8 message file as first arg"));
 				return;
 			}
+			const FString& MsgFilePath = Args[0];
+			const int32 BaseIdx = 1;
 			FString Msg;
 			if (!FFileHelper::LoadFileToString(Msg, *MsgFilePath))
 			{
@@ -214,16 +204,13 @@ void FUnrealAiEditorModule::StartupModule()
 				return;
 			}
 			FString ThreadId;
-			if (Args.Num() > BaseIdx)
+			if (Args.Num() > BaseIdx && !Args[BaseIdx].IsEmpty())
 			{
 				ThreadId = Args[BaseIdx];
 			}
 			else
 			{
-				const FString ThreadEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_THREAD_GUID"));
-				ThreadId = ThreadEnv.IsEmpty()
-					? FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens)
-					: ThreadEnv;
+				ThreadId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens);
 			}
 			EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Agent;
 			if (Args.Num() > BaseIdx + 1)
@@ -237,33 +224,8 @@ void FUnrealAiEditorModule::StartupModule()
 					Mode = EUnrealAiAgentMode::Plan;
 				}
 			}
-			else
-			{
-				const FString ModeEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_AGENT_MODE"));
-				if (ModeEnv.Equals(TEXT("ask"), ESearchCase::IgnoreCase))
-				{
-					Mode = EUnrealAiAgentMode::Ask;
-				}
-				else if (ModeEnv.Equals(TEXT("plan"), ESearchCase::IgnoreCase))
-				{
-					Mode = EUnrealAiAgentMode::Plan;
-				}
-			}
 			FString OutDir = (Args.Num() > BaseIdx + 2) ? Args[BaseIdx + 2] : FString();
-			if (OutDir.IsEmpty())
-			{
-				OutDir = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_OUTPUT_DIR"));
-			}
-			bool bDumpContextAfterEachTool = false;
-			{
-				const FString EnvDump = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_DUMP_CONTEXT"));
-				if (EnvDump.Equals(TEXT("1"), ESearchCase::IgnoreCase)
-					|| EnvDump.Equals(TEXT("true"), ESearchCase::IgnoreCase)
-					|| EnvDump.Equals(TEXT("yes"), ESearchCase::IgnoreCase))
-				{
-					bDumpContextAfterEachTool = true;
-				}
-			}
+			bool bDumpContextAfterEachTool = UnrealAiRuntimeDefaults::HarnessDumpContextAfterEachToolDefault;
 			if (Args.Num() > BaseIdx + 3)
 			{
 				if (Args[BaseIdx + 3].Equals(TEXT("dumpcontext"), ESearchCase::IgnoreCase))
@@ -373,13 +335,7 @@ void FUnrealAiEditorModule::StartupModule()
 			FAgentContextBuildOptions Opt;
 			Opt.Mode = EUnrealAiAgentMode::Agent;
 			Opt.ContextBuildInvocationReason = TEXT("console_dump_context_window");
-			{
-				const FString EnvVerbose = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_CONTEXT_VERBOSE"));
-				const bool bVerbose = EnvVerbose.Equals(TEXT("1"), ESearchCase::IgnoreCase)
-					|| EnvVerbose.Equals(TEXT("true"), ESearchCase::IgnoreCase)
-					|| EnvVerbose.Equals(TEXT("yes"), ESearchCase::IgnoreCase);
-				Opt.bVerboseContextBuild = bVerbose;
-			}
+			Opt.bVerboseContextBuild = UnrealAiRuntimeDefaults::ContextVerboseDefault;
 			const FAgentContextBuildResult Built = Ctx->BuildContextWindow(Opt);
 			const FString Ts = FDateTime::UtcNow().ToString(TEXT("%Y%m%d_%H%M%S"));
 			const FString OutDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAiEditor/ContextSnapshots"));

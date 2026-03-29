@@ -18,4 +18,4 @@ These tools have **`context_selector.always_include_in_core_pack`: true** in `Un
 | `viewport_capture_png` | capture_vision |
 | `viewport_frame_actors` | selection_framing |
 
-**Note:** Harnesses may still filter by **mode** (`ask` / `fast` / `agent`) and **tier**; banned tools must never be exposed regardless of this list.
+**Note:** Harnesses may still filter by **mode** (`ask` / `agent` / `plan`) and **tier**; banned tools must never be exposed regardless of this list.

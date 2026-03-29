@@ -1,9 +1,9 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Context/AgentContextTypes.h"
 
-/** Deterministic complexity signal (see docs/context-management.md §8.1). */
+/** Deterministic complexity signal (see docs/context/context-management.md Â§8.1). */
 struct FUnrealAiComplexityAssessment
 {
 	float ScoreNormalized = 0.f;
