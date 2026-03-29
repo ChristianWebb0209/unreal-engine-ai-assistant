@@ -37,6 +37,8 @@ public:
 		FString* OutFinishError = nullptr,
 		FEvent* PlanSubTurnEvent = nullptr);
 
+	virtual ~FAgentRunFileSink() override;
+
 	virtual void OnRunStarted(const FUnrealAiRunIds& Ids) override;
 	virtual void OnContextUserMessages(const TArray<FString>& Messages) override;
 	virtual void OnAssistantDelta(const FString& Chunk) override;
@@ -62,6 +64,12 @@ public:
 		int32 MutationReadOnlyNudges) override;
 	virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) override;
 	virtual void OnPlanHarnessSubTurnComplete() override;
+	virtual void OnLlmRequestPreparedForHttp(
+		const FUnrealAiAgentTurnRequest& TurnRequest,
+		const FGuid& RunId,
+		int32 LlmRound,
+		int32 EffectiveMaxLlmRounds,
+		const FUnrealAiLlmRequest& LlmRequest) override;
 
 	const FString& GetJsonlPath() const { return JsonlPath; }
 
@@ -69,7 +77,8 @@ public:
 	void AppendHarnessDiagnosticJson(const TSharedPtr<FJsonObject>& Obj);
 
 private:
-	void AppendJsonObject(const TSharedPtr<FJsonObject>& Obj);
+	bool AppendJsonObject(const TSharedPtr<FJsonObject>& Obj, bool bLogOnFailure = true);
+	bool AppendRunFinishedLineWithRetry(const TSharedPtr<FJsonObject>& Obj);
 	void MaybeDumpContextWindow(const TCHAR* Reason);
 	/** Plan-mode headed harness: signal automation to reset per-segment sync wait (PlanSubTurnEvent). */
 	void NotifyPlanHarnessSyncSegmentBoundary();
@@ -85,4 +94,6 @@ private:
 	bool* CompletionSuccessPtr = nullptr;
 	FString* CompletionErrorPtr = nullptr;
 	std::atomic<bool> bFinished{false};
+	/** Increments for each FUnrealAiPlanExecutor plan sub-turn (planner done, each node done). */
+	int32 PlanSubTurnCompleteCount = 0;
 };

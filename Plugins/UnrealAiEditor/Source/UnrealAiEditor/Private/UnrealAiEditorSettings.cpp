@@ -10,6 +10,8 @@ UUnrealAiEditorSettings::UUnrealAiEditorSettings(const FObjectInitializer& Objec
 	, bAssistantTypewriter(true)
 	, AssistantTypewriterCps(88.f)
 	, bAutoContinuePlanSteps(true)
+	, bUseSubagents(true)
+	, bLogLlmRequestsToHarnessRunFile(true)
 {
 }
 

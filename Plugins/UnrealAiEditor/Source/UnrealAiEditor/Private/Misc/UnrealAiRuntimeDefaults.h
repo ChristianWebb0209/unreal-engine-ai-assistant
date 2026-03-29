@@ -10,6 +10,9 @@ namespace UnrealAiRuntimeDefaults
 {
 	// --- FAgentRunFileSink / context dumps ---
 	inline constexpr bool ContextVerboseDefault = false;
+	/** Verbose context_build_trace lines (large; opt-in via UNREAL_AI_HARNESS_VERBOSE_CONTEXT=1). */
+	inline constexpr bool HarnessContextVerboseDefault = false;
+	/** Dump context at run_finished (blocks DoneEvent; opt-in via UNREAL_AI_HARNESS_DUMP_CONTEXT_ON_FINISH=1). */
 	inline constexpr bool HarnessRunFinishedContextDump = false;
 	/** When RunAgentTurn has no dumpcontext|nodump 5th arg, mirror long-running harness default. */
 	inline constexpr bool HarnessDumpContextAfterEachToolDefault = true;

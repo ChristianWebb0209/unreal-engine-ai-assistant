@@ -73,4 +73,42 @@ bool FUnrealAiPlanReadySetTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiPlanTransitiveDependentsTest,
+	"UnrealAiEditor.Harness.PlanTransitiveDependents",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiPlanTransitiveDependentsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	// n1 -> n2 -> n4; n1 -> n3; independent chain n5 -> n6
+	FUnrealAiPlanDag Dag;
+	Dag.Nodes = {
+		{TEXT("n1"), TEXT(""), TEXT(""), {}},
+		{TEXT("n2"), TEXT(""), TEXT(""), {TEXT("n1")}},
+		{TEXT("n3"), TEXT(""), TEXT(""), {TEXT("n1")}},
+		{TEXT("n4"), TEXT(""), TEXT(""), {TEXT("n2")}},
+		{TEXT("n5"), TEXT(""), TEXT(""), {}},
+		{TEXT("n6"), TEXT(""), TEXT(""), {TEXT("n5")}},
+	};
+	TArray<FString> Out;
+	UnrealAiPlanDag::CollectTransitiveDependents(Dag, TEXT("n1"), Out);
+	TestEqual(TEXT("n1 transitive count"), Out.Num(), 3);
+	TestTrue(TEXT("n2 in transitive"), Out.Contains(TEXT("n2")));
+	TestTrue(TEXT("n3 in transitive"), Out.Contains(TEXT("n3")));
+	TestTrue(TEXT("n4 in transitive"), Out.Contains(TEXT("n4")));
+	TestFalse(TEXT("n5 not in transitive"), Out.Contains(TEXT("n5")));
+	TestFalse(TEXT("n6 not in transitive"), Out.Contains(TEXT("n6")));
+
+	Out.Reset();
+	UnrealAiPlanDag::CollectTransitiveDependents(Dag, TEXT("n5"), Out);
+	TestEqual(TEXT("n5 transitive count"), Out.Num(), 1);
+	TestTrue(TEXT("n6 under n5"), Out.Contains(TEXT("n6")));
+
+	Out.Reset();
+	UnrealAiPlanDag::CollectTransitiveDependents(Dag, TEXT(""), Out);
+	TestEqual(TEXT("empty failed id"), Out.Num(), 0);
+	return true;
+}
+
 #endif

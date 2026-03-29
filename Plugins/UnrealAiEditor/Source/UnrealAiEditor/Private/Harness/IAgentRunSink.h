@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Harness/ILlmTransport.h"
 #include "Harness/UnrealAiAgentTypes.h"
 
 struct FUnrealAiToolEditorPresentation;
@@ -56,5 +57,16 @@ public:
 		int32 ActionNoToolNudges,
 		int32 MutationIntentTurns,
 		int32 MutationReadOnlyNudges) {}
+	/**
+	 * Immediately before the harness submits an HTTP chat-completions request (after UnrealAiTurnLlmRequestBuilder::Build).
+	 * Default: no-op. FAgentRunFileSink logs every outbound request to llm_requests.jsonl unless disabled (editor Harness setting default on; UNREAL_AI_LOG_LLM_REQUESTS=0).
+	 * API keys are not written; see payload field api_key_redacted.
+	 */
+	virtual void OnLlmRequestPreparedForHttp(
+		const FUnrealAiAgentTurnRequest& TurnRequest,
+		const FGuid& RunId,
+		int32 LlmRound,
+		int32 EffectiveMaxLlmRounds,
+		const FUnrealAiLlmRequest& LlmRequest) {}
 	virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) = 0;
 };

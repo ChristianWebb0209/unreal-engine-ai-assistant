@@ -48,4 +48,18 @@ public:
 	/** When off, the harness should pause between plan steps (UI hint; harness wiring may follow). */
 	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Auto-continue plan steps"))
 	bool bAutoContinuePlanSteps;
+
+	/**
+	 * When true (default), future plan-DAG execution may schedule parallel child Agent runs for independent ready nodes.
+	 * When false, plan nodes always run serially (current behavior). See docs/planning/subagents-architecture.md.
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Use subagents (parallel plan nodes)"))
+	bool bUseSubagents = true;
+
+	/**
+	 * Headed harness only: append each outbound LLM payload (messages + tools + model) to llm_requests.jsonl beside run.jsonl.
+	 * Overridden when environment variable UNREAL_AI_LOG_LLM_REQUESTS is set to 1/true or 0/false.
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "Harness", meta = (DisplayName = "Log LLM requests to harness run folder"))
+	bool bLogLlmRequestsToHarnessRunFile = true;
 };
