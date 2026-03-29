@@ -7,6 +7,7 @@
 #include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Harness/IAgentRunSink.h"
 #include "Harness/IUnrealAiAgentHarness.h"
+#include "Logging/LogMacros.h"
 #include "Templates/Function.h"
 
 namespace UnrealAiPlanExecutorPriv
@@ -119,6 +120,10 @@ namespace UnrealAiPlanExecutorPriv
 			ForwardIfPossible([&](IAgentRunSink& P)
 			{ P.OnLlmRequestPreparedForHttp(TurnRequest, RunId, LlmRound, EffectiveMaxLlmRounds, LlmRequest); });
 		}
+		virtual void OnHarnessProgressLog(const FString& Line) override
+		{
+			ForwardIfPossible([&](IAgentRunSink& P) { P.OnHarnessProgressLog(Line); });
+		}
 		virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) override
 		{
 			if (OnFinished)
@@ -162,6 +167,11 @@ TSharedRef<FUnrealAiPlanExecutor> FUnrealAiPlanExecutor::Start(
 	{
 		InHarness->NotifyPlanExecutorStarted(Exec.ToSharedPtr());
 	}
+	if (Exec->ParentSink.IsValid())
+	{
+		Exec->ParentSink->OnHarnessProgressLog(TEXT("FUnrealAiPlanExecutor::Start -> BeginPlannerTurn (planner HTTP next)"));
+	}
+	UE_LOG(LogTemp, Display, TEXT("UnrealAi plan: executor Start -> BeginPlannerTurn"));
 	Exec->BeginPlannerTurn();
 	return Exec;
 }
@@ -331,11 +341,25 @@ void FUnrealAiPlanExecutor::BeginPlannerTurn()
 			Self->OnPlannerFinished(bSuccess, ErrorText, Text);
 		}
 	};
+	if (ParentSink.IsValid())
+	{
+		ParentSink->OnHarnessProgressLog(TEXT("BeginPlannerTurn: calling Harness->RunTurn (planner pass, mode=plan)"));
+	}
+	UE_LOG(LogTemp, Display, TEXT("UnrealAi plan: BeginPlannerTurn -> RunTurn (planner)"));
 	Harness->RunTurn(PlannerReq, Sink);
 }
 
 void FUnrealAiPlanExecutor::OnPlannerFinished(bool bSuccess, const FString& ErrorText, const FString& PlannerText)
 {
+	if (ParentSink.IsValid())
+	{
+		ParentSink->OnHarnessProgressLog(FString::Printf(
+			TEXT("OnPlannerFinished: success=%s err_len=%d dag_text_len=%d"),
+			bSuccess ? TEXT("1") : TEXT("0"),
+			ErrorText.Len(),
+			PlannerText.Len()));
+	}
+	UE_LOG(LogTemp, Display, TEXT("UnrealAi plan: OnPlannerFinished success=%s"), bSuccess ? TEXT("yes") : TEXT("no"));
 	if (bCancelled)
 	{
 		Finish(false, TEXT("Plan cancelled."));
@@ -434,7 +458,11 @@ void FUnrealAiPlanExecutor::OnPlannerFinished(bool bSuccess, const FString& Erro
 		ParentSink->OnRunContinuation(0, TotalPhases);
 		// Planner harness RunTurn finished; automation may reset per-segment sync wait before node execution.
 		ParentSink->OnPlanHarnessSubTurnComplete();
+		ParentSink->OnHarnessProgressLog(FString::Printf(
+			TEXT("DAG parsed: %d nodes; OnPlanHarnessSubTurnComplete fired -> scenario runner should reset sync window; next BeginNextReadyNode"),
+			Dag.Nodes.Num()));
 	}
+	UE_LOG(LogTemp, Display, TEXT("UnrealAi plan: DAG valid (%d nodes) -> BeginNextReadyNode"), Dag.Nodes.Num());
 	if (!CheckPlanWallBudgetOrFinish())
 	{
 		return;
@@ -529,6 +557,14 @@ void FUnrealAiPlanExecutor::BeginNextReadyNode()
 			Self->OnNodeFinished(NodeId, bSuccess, Error, AssistantText);
 		}
 	};
+	if (ParentSink.IsValid())
+	{
+		ParentSink->OnHarnessProgressLog(FString::Printf(
+			TEXT("BeginNextReadyNode: calling Harness->RunTurn for node_id=%s child_thread=%s (agent tools enabled)"),
+			*NodeId,
+			*ChildReq.ThreadId));
+	}
+	UE_LOG(LogTemp, Display, TEXT("UnrealAi plan: RunTurn plan_node=%s thread=%s"), *NodeId, *ChildReq.ThreadId);
 	Harness->RunTurn(ChildReq, Sink);
 }
 
@@ -536,9 +572,15 @@ void FUnrealAiPlanExecutor::OnNodeFinished(const FString& NodeId, bool bSuccess,
 {
 	if (ParentSink.IsValid())
 	{
+		ParentSink->OnHarnessProgressLog(FString::Printf(
+			TEXT("OnNodeFinished: node_id=%s success=%s assistant_len=%d"),
+			*NodeId,
+			bSuccess ? TEXT("1") : TEXT("0"),
+			AssistantText.Len()));
 		// Node agent RunTurn finished; automation may reset per-segment sync wait before the next node or Finish().
 		ParentSink->OnPlanHarnessSubTurnComplete();
 	}
+	UE_LOG(LogTemp, Display, TEXT("UnrealAi plan: OnNodeFinished node=%s success=%s"), *NodeId, bSuccess ? TEXT("yes") : TEXT("no"));
 	const FString Summary = AssistantText.Left(300);
 	if (!bSuccess)
 	{
@@ -546,6 +588,9 @@ void FUnrealAiPlanExecutor::OnNodeFinished(const FString& NodeId, bool bSuccess,
 	}
 	if (ContextService)
 	{
+		// Child node RunTurn uses ThreadId "<parent>_plan_<node>"; context service active session follows that thread.
+		// Plan DAG readiness (GetReadyNodeIds) reads PlanNodeStatusById on the parent thread — restore it before updating status.
+		ContextService->LoadOrCreate(ParentRequest.ProjectId, ParentRequest.ThreadId);
 		ContextService->SetPlanNodeStatus(NodeId, bSuccess ? TEXT("success") : TEXT("failed"), Summary);
 		if (!bSuccess)
 		{
