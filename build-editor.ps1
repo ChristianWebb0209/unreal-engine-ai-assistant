@@ -14,13 +14,10 @@
     .\build-editor.ps1 -AutomationTests
     .\build-editor.ps1 -AutomationTests -Headless
     .\build-editor.ps1 -GenerateProjectFiles
-    Set UE_ENGINE_ROOT in repo .env or: $env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\build-editor.ps1
+    Set UE_ENGINE_ROOT in repo .env (see .env.example) or: $env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\build-editor.ps1
     .\build-editor.ps1 -SkipBlueprintFormatterSync   # offline / local formatter tree
-    .\build-editor.ps1 -HeadedScenarioSmoke -SkipBlueprintFormatterSync
-      # headed UnrealEditor: RunCatalogMatrix + two UnrealAi.RunAgentTurn console scenarios (see scripts\run-headed-scenario-smoke.ps1)
-    # Live headed qualitative suite (real API, manifest-driven): scripts\run-headed-live-scenarios.ps1 — docs\AGENT_HARNESS_HANDOFF.md
-    # Context manager multi-turn workflows: scripts\run-headed-context-workflows.ps1 — docs\AGENT_HARNESS_HANDOFF.md
-    # Full harness + iteration context for agents: docs\AGENT_HARNESS_HANDOFF.md
+    # Batch headed suites + full logging: tests\long-running-tests\run-long-running-headed.ps1 — docs\tooling\AGENT_HARNESS_HANDOFF.md
+    # Full harness + iteration context for agents: docs\tooling\AGENT_HARNESS_HANDOFF.md
 
   Each build syncs Plugins\UnrealBlueprintFormatter from git (clone or pull --ff-only) unless skipped.
 
@@ -41,7 +38,6 @@ param(
     [switch]$Headless,
     [switch]$Restart,
     [switch]$AutomationTests,
-    [switch]$HeadedScenarioSmoke,
     [switch]$SkipBlueprintFormatterSync,
     [string]$BlueprintFormatterRepoUrl = 'https://github.com/ChristianWebb0209/ue-blueprint-formatter.git',
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -60,9 +56,6 @@ foreach ($r in $RemainingArguments) {
     }
     if ($r -eq '--SkipBlueprintFormatterSync' -or $r -eq '-SkipBlueprintFormatterSync') {
         $SkipBlueprintFormatterSync = $true
-    }
-    if ($r -eq '--HeadedScenarioSmoke' -or $r -eq '-HeadedScenarioSmoke') {
-        $HeadedScenarioSmoke = $true
     }
 }
 
@@ -130,10 +123,6 @@ function Sync-UnrealBlueprintFormatterPlugin {
     )
     if ($Skip) {
         Write-Host 'Skipping UnrealBlueprintFormatter git sync (-SkipBlueprintFormatterSync).' -ForegroundColor Yellow
-        return
-    }
-    if ($env:UE_SKIP_BLUEPRINT_FORMATTER_SYNC -eq '1' -or $env:UE_SKIP_BLUEPRINT_FORMATTER_SYNC -eq 'true') {
-        Write-Host 'Skipping UnrealBlueprintFormatter git sync (UE_SKIP_BLUEPRINT_FORMATTER_SYNC).' -ForegroundColor Yellow
         return
     }
     $gitExe = Get-Command git -ErrorAction SilentlyContinue
@@ -217,16 +206,6 @@ Write-Host "Building BlankEditor (Development | Win64)..." -ForegroundColor Cyan
 $BuildExit = $LASTEXITCODE
 if ($BuildExit -ne 0) {
     exit $BuildExit
-}
-
-if ($HeadedScenarioSmoke) {
-    $SmokeScript = Join-Path $ProjectRoot 'scripts\run-headed-scenario-smoke.ps1'
-    if (-not (Test-Path $SmokeScript)) {
-        Write-Error "Missing headed scenario script: $SmokeScript"
-    }
-    Write-Host 'Running headed console scenarios (UnrealEditor.exe, real RHI)...' -ForegroundColor Cyan
-    & $SmokeScript -EngineRoot $EngineRoot
-    exit $LASTEXITCODE
 }
 
 if ($AutomationTests) {
