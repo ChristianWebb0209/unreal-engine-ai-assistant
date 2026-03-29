@@ -1,16 +1,8 @@
 # Todo List
 
-## Repo Organization
+## Context
 
-- We need to completely refactor the testing and scripts folder. There's so much garbage there.
-- - Probably: /tests/long-running-tests just becomes /tests/ and we remove all of the old harness stuff.
-- - Delete all of the old runs that don't fit the newest schema. Do we have all of the insight we need out of old runs? 
-- - - Maybe we make a brief summary of the progression by having an agent go through and note a ton of things from all the runs before we delete them.
-
-## Blueprint Organizer (In separate plugin)
-
-- Verify everything is working
-- - Verify - that there are two buttons added at the top of the blueprint editor event graph: organize all, and (only if user has selected something), organize selected. Both buttons need to have icons and tooltip hints.
+- We need to think about the prompt chunks more and find some more aggressive ways to prune them without losing accuracy. Our current agents take like a whole minute for a simple task, and they use so many tokens.
 
 ## Tooling
 
@@ -18,6 +10,19 @@
 - - Ensure fast workflow for batch operations like replace material on every wall in scene, etc. We should make a testing situation for this.
 - Ensure tools catalog has high coverage of editor functionality:
 - - Data assets, animation basics, building components within components (building an actor then attatching a collision mesh, etc.)
+- (Consider) We should redo the entire tools catalog. I think we can implement some basic semantic patterns like get_ tools where the model knows that each get_ tool has a corresponding set_ tool, we could also make a unified set_setting tool that has a specific schema to indicate which type of setting it is (based on UEs literal schemea), like viewport (change from lit to unlit), project settings, editor settings. 
+- - We should analyze how unreal exposes functions to set and get all different types of settings to build this tool, and try to find similar patterns to reduce the complexity of other bunches of tools.
+
+## Subagents and plan mode
+
+- Plan mode still stalls out constantly.
+- We need to implement /planning/subagents-architecture.md
+- - Subagents aren't really required for v1, but since we already built out Plan mode to use DAG, this won't be too hard to add.
+
+## Blueprint Organizer (In separate plugin)
+
+- Verify everything is working
+- - Verify - that there are two buttons added at the top of the blueprint editor event graph: organize all, and (only if user has selected something), organize selected. Both buttons need to have icons and tooltip hints.
 
 # Future Features
 

@@ -73,7 +73,7 @@ Ask and Agent modes give predictable behavior, cost, and risk profiles.
 | Aspect | Specification |
 |--------|----------------|
 | **Tools** | **Enabled** via the normal harness tool loop (`unreal_ai_dispatch` / native tools). |
-| **Use case** | Multi-step editing, asset/scene work, Blueprint IR, diagnosticsâ€”with optional **todo plans** via **`agent_emit_todo_plan`** (`unreal_ai.todo_plan`). |
+| **Use case** | Multi-step editing, asset/scene work, Blueprint IR, diagnostics; for structured DAG plans use **Plan mode** (`unreal_ai.plan_dag`). **`agent_emit_todo_plan`** is deprecated (not exposed to the model). |
 | **Implementation** | Single **agent harness** in-process; **no** subagent spawn or worker-merge tools in this product build. |
 
 **Rationale:** One conversation + tool surface keeps behavior predictable inside the editor.
@@ -82,12 +82,12 @@ Ask and Agent modes give predictable behavior, cost, and risk profiles.
 
 ## 3. Planning surfaces (implemented)
 
-The plugin implements **two** planning paths (see [`planning.md`](../planning.md)):
+The plugin’s **structured** planning path is **Plan-mode DAG** (`FUnrealAiPlanExecutor`, schema **`unreal_ai.plan_dag`**; see [`../planning/subagents-architecture.md`](../planning/subagents-architecture.md) and prompt chunks **`09`/`11`**). Legacy **`unreal_ai.todo_plan`** persistence may still exist on disk.
 
 | Mechanism | Entry | Code |
 |-----------|--------|------|
 | **Plan-mode DAG** | Plan chat: assistant emits **`unreal_ai.plan_dag`** JSON (no tools in planner pass). | `Private/Planning/UnrealAiPlanDag`, `Private/Planning/FUnrealAiPlanExecutor` |
-| **Agent todo plan** | Agent mode: tool **`agent_emit_todo_plan`** persists **`unreal_ai.todo_plan`**. | Context service + harness; summaries via `Private/Planning/UnrealAiStructuredPlanSummary` |
+| **Legacy todo plan** | **`agent_emit_todo_plan`** deprecated (not in model tool list); **`activeTodoPlan`** may load from old saves. | Context service + harness; summaries via `Private/Planning/UnrealAiStructuredPlanSummary` |
 
 Serial execution of DAG nodes uses distinct thread ids per node; there is **no** separate merge orchestrator.
 

@@ -2,8 +2,7 @@
 
 | Folder | Contents |
 |--------|----------|
-| [`planning.md`](planning.md) | Plan DAG vs Agent todo plan, **`Private/Planning/`** layout, why orchestration tools were removed, how to re-add subagents later, smoke-test pointers. |
-| [`agent-modes.md`](agent-modes.md) | **Ask / Agent / Plan** — purpose, behavior, important files, headed idle abort, `total_phases_hint` vs 512. |
+| [`planning/subagents-architecture.md`](planning/subagents-architecture.md) | **Plan DAG / subagents:** serial execution today, safety rules, **`bUseSubagents`**, future parallel notes. Implementation: **`Plugins/UnrealAiEditor/.../Private/Planning/`** (`FUnrealAiPlanExecutor`, `UnrealAiPlanDag`). |
 | [`context/`](context/) | Context window assembly, retrieval, memory, efficiency notes (`context-management.md`, `memory-system.md`, `vector-db-implementation-plan.md`, …). |
 | [`tooling/`](tooling/) | Harness iteration, tool catalog narrative, tools expansion, audits, agent requirements, Fab tool plan. |
 | [`api/`](api/) | HTTP / transport behavior and limits (`timeout-handling.md`). |

@@ -2,7 +2,7 @@
 
 This document is the **single source of truth** for how the Unreal AI Editor plugin **assembles, budgets, persists, and injects** editor-side context into LLM requests. It also covers **planning artifacts** (complexity signal, todo plans, plan DAG state) that live in the same persistence layer.
 
-**Related (not duplicated here):** harness iteration and scripts in [`AGENT_HARNESS_HANDOFF.md`](../tooling/AGENT_HARNESS_HANDOFF.md). For current testing/review workflow, see [`HEADLESS_TESTING_PLAYBOOK.md`](HEADLESS_TESTING_PLAYBOOK.md). Plan-mode DAG vs Agent todo-plan tools: [`planning.md`](../planning.md) (implementations under `Private/Planning/`).
+**Related (not duplicated here):** harness iteration and scripts in [`AGENT_HARNESS_HANDOFF.md`](../tooling/AGENT_HARNESS_HANDOFF.md). For current testing/review workflow, see [`HEADLESS_TESTING_PLAYBOOK.md`](HEADLESS_TESTING_PLAYBOOK.md). Plan-mode DAG: C++ under `Plugins/UnrealAiEditor/.../Private/Planning/`; overview [`planning/subagents-architecture.md`](../planning/subagents-architecture.md); prompts **`09-plan-dag.md`** / **`11-plan-node-execution.md`**. Legacy todo persistence may still appear in state.
 
 ---
 
@@ -242,7 +242,7 @@ chats/<project_id>/threads/<thread_id>/context.json
 | `editorSnapshot` | object? | See Â§4.1 |
 | `threadRecentUiOverlay` | array | Thread-local recent UI entries merged with project-global history at build time |
 | `maxContextChars` | number | Per-thread override; `0` = use build defaults |
-| `activeTodoPlan` | string? | Canonical **`unreal_ai.todo_plan`** JSON from `agent_emit_todo_plan` |
+| `activeTodoPlan` | string? | Legacy **`unreal_ai.todo_plan`** JSON (tool not exposed to the model; may load from old sessions) |
 | `todoStepsDone` | bool[] | Parallel to `steps` in the plan JSON |
 | `activePlanDag` | string? | Canonical **`unreal_ai.plan_dag`** JSON (Plan mode); parse/validate helpers in `Private/Planning/UnrealAiPlanDag` |
 | `planNodeStatus` | array | `{ nodeId, status, summary? }` for DAG execution |
@@ -349,7 +349,7 @@ Key fields ([`AgentContextTypes.h`](../../Plugins/UnrealAiEditor/Source/UnrealAi
 
 ### 5.3 Prompt builder coupling
 
-`UnrealAiTurnLlmRequestBuilder` sets **`bIncludeExecutionSubturnChunk`** when **`ActiveTodoPlanJson`** is non-empty so execution sub-turn prompts stay aligned with the persisted plan. **`bIncludePlanDagChunk`** is set when **`Mode == Plan`** (see [`planning.md`](planning.md)).
+`UnrealAiTurnLlmRequestBuilder` sets **`bIncludeExecutionSubturnChunk`** when **`ActiveTodoPlanJson`** is non-empty so execution sub-turn prompts stay aligned with the persisted plan. **`bIncludePlanDagChunk`** is set when **`Mode == Plan`** (planner pass; see **`09-plan-dag.md`**).
 
 After assembly, message **character budget** can be enforced by dropping oldest **non-system** messages until under **`maxContextTokens * charPerTokenApprox`** (see builder).
 
@@ -420,14 +420,15 @@ These are **context-managed** because they must survive thread reloads and feed 
 
 **Output** includes `ScoreNormalized` (0..1), `Label` (`low` | `medium` | `high`), `Signals[]`, `bRecommendPlanGate`, and a formatted **`ComplexityBlock`** for prompt injection.
 
-**Why code + score?** Fixed thresholds stay stable across prompt edits; the model still *sees* pressure to emit a structured plan before risky work.
+**Why code + score?** Fixed thresholds stay stable across prompt edits; the model still *sees* pressure toward **Plan mode** or a concise handoff before risky work.
 
-### 8.2 Todo plan transport
+### 8.2 Legacy todo plan persistence
 
 | Approach | Role |
 |----------|------|
-| **Primary** | Tool **`agent_emit_todo_plan`** â€” harness validates against **`unreal_ai.todo_plan`**, persists to **`activeTodoPlan`**, resets **`todoStepsDone`**. |
-| **Fallback** | Fenced JSON in assistant text â€” repair at most once; avoid as the main path if tools are available |
+| **Deprecated (model)** | Tool **`agent_emit_todo_plan`** is not in the catalog tool list for Agent/Plan; new sessions do not call it from the LLM. |
+| **Legacy / disk** | Existing **`activeTodoPlan`** may still load; harness dispatch path validates **`unreal_ai.todo_plan`** if invoked. |
+| **Fallback** | Fenced JSON in assistant text — repair at most once; avoid as the main path |
 
 When a checked-in JSON Schema exists for `unreal_ai.todo_plan`, link it here; until then the harness/tool validation is authoritative.
 

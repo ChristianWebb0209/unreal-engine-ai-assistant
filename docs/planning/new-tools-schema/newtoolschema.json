@@ -1,0 +1,600 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local/unreal-ai-editor/docs/planning/new-tools-schema/newtoolschema.json",
+  "title": "Unreal AI Editor — vNext tools catalog + dispatch parameter definitions",
+  "description": "Design-target schema implementing optimizations from optimized-tools-catalog-pitch.md and tools-catalog-settings-unification.md: canonical params (aliases resolved in resolver), naming families, BM25 retrieval metadata, consolidated families where noted, settings envelope, and explicit routing hints for legacy handler mapping. Does not replace the live UnrealAiToolCatalog.json until implemented.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["meta", "tools"],
+  "properties": {
+    "meta": { "$ref": "#/$defs/CatalogMeta" },
+    "tools": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/ToolDefinition" }
+    }
+  },
+  "$defs": {
+    "CatalogMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["catalog_version", "ue_target", "retrieval_index", "resolver_contract"],
+      "properties": {
+        "catalog_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+",
+          "description": "Semantic version of this catalog document."
+        },
+        "ue_target": { "type": "string", "description": "e.g. UE 5.7+" },
+        "schema_ref": { "type": "string", "description": "URI/path to this file." },
+        "categories": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Stable category strings; each tool.category must be a member for BM25 consistency."
+        },
+        "tool_count": { "type": "integer", "minimum": 1 },
+        "retrieval_index": { "$ref": "#/$defs/RetrievalIndexSpec" },
+        "optimization": { "$ref": "#/$defs/OptimizationHooks" },
+        "naming_patterns": { "$ref": "#/$defs/NamingPatternsDoc" },
+        "resolver_contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version"],
+          "properties": {
+            "version": {
+              "type": "string",
+              "description": "Bump when resolver stages or alias tables change.",
+              "default": "1.0.0"
+            },
+            "architecture_doc": {
+              "type": "string",
+              "default": "docs/planning/new-tools-schema/resolver-architecture.md",
+              "description": "Human spec for resolver pipeline."
+            }
+          }
+        },
+        "invocation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "focused_flag": {
+              "type": "string",
+              "description": "Optional boolean focused on tools; stripped before handler; not in BM25 index."
+            }
+          }
+        }
+      }
+    },
+    "RetrievalIndexSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Mirrors pitch §1.4: what BM25 indexes vs what must be tuned indirectly.",
+      "required": ["bm25_document_formula", "indexed_fields", "not_indexed_fields"],
+      "properties": {
+        "bm25_document_formula": {
+          "type": "string",
+          "const": "tool_id + summary + category + tags + tool_surface.domain_tags"
+        },
+        "indexed_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [
+            "tool_id",
+            "summary",
+            "category",
+            "tags",
+            "tool_surface.domain_tags"
+          ]
+        },
+        "not_indexed_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [
+            "parameters",
+            "failure_modes",
+            "ue_entry_points",
+            "embedding_hint",
+            "routing"
+          ]
+        },
+        "query_shaper_alignment": {
+          "type": "string",
+          "description": "Per-tool optional query_shaper_keywords on ToolDefinition should echo UnrealAiToolQueryShaper tokens (viewport_rendering, physics_trace, level_actor, pie, material, blueprint, …)."
+        }
+      }
+    },
+    "OptimizationHooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tiered_appendix_char_budget": {
+          "type": "integer",
+          "description": "~900 chars per expanded tool parameter excerpt; compact schemas matter."
+        },
+        "tool_surface_budget_chars": { "type": "integer" },
+        "additional_properties_false": {
+          "type": "string",
+          "description": "Published tool parameters must use additionalProperties:false where the API validates."
+        },
+        "avoid_schema_aliases": {
+          "type": "string",
+          "description": "Prefer one canonical key; list legacy aliases only in resolver alias tables, not in schema."
+        },
+        "core_pack_discipline": {
+          "type": "string",
+          "description": "always_include_in_core_pack only for small safe tools."
+        }
+      }
+    },
+    "NamingPatternsDoc": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "query_get": { "type": "string" },
+        "set_apply": { "type": "string" },
+        "search_fuzzy": { "type": "string" },
+        "viewport_prefix": { "type": "string" },
+        "project_file_prefix": { "type": "string" },
+        "console_escape": { "type": "string" },
+        "settings_envelope": { "type": "string" },
+        "imperative_verbs": { "type": "string" }
+      }
+    },
+    "ToolSurfaceMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "domain_tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Viewport, BlueprintGraph, AssetEditor, MaterialEditor, PIE + retrieval synonyms."
+        },
+        "centrality": { "type": "string" },
+        "worst_case_cost": { "type": "string" },
+        "requires_strict_args": { "type": "boolean" }
+      }
+    },
+    "ToolRouting": {
+      "type": "object",
+      "description": "Hints for the resolver: how to map vNext tool_id + arguments to one or more legacy handler invocations.",
+      "additionalProperties": false,
+      "required": ["strategy"],
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "legacy_singleton",
+            "legacy_family",
+            "setting_registry",
+            "composite_sequence"
+          ]
+        },
+        "legacy_targets": {
+          "type": "array",
+          "description": "For legacy_family: ordered list of legacy tool_ids this vNext tool may emit.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tool_id"],
+            "properties": {
+              "tool_id": { "type": "string" },
+              "when": {
+                "type": "object",
+                "description": "Optional JSON-logic-style conditions on discriminator fields (e.g. operation == dolly)."
+              }
+            }
+          }
+        },
+        "resolver_notes": {
+          "type": "string",
+          "description": "Human-readable edge cases for implementers."
+        }
+      }
+    },
+    "ToolDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool_id",
+        "summary",
+        "category",
+        "tags",
+        "modes",
+        "parameters",
+        "permission",
+        "threading",
+        "naming_family",
+        "routing"
+      ],
+      "properties": {
+        "tool_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 16,
+          "description": "Must name paired read/write tools when applicable (BM25 teaching)."
+        },
+        "category": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "tier": { "type": "string" },
+        "naming_family": {
+          "type": "string",
+          "enum": [
+            "query_get",
+            "set_apply",
+            "search",
+            "imperative",
+            "settings",
+            "composite"
+          ],
+          "description": "composite = merged family tool (viewport_camera_control, etc.)."
+        },
+        "paired_tool_id": {
+          "type": ["string", "null"],
+          "description": "Opposite read/write partner when naming_family implies pairing."
+        },
+        "query_shaper_keywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Optional extra tokens merged into BM25 doc text for this tool only (if pipeline supports per-tool injection)."
+        },
+        "modes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ask", "agent", "plan"],
+          "properties": {
+            "ask": { "type": "boolean" },
+            "agent": { "type": "boolean" },
+            "plan": { "type": "boolean" }
+          }
+        },
+        "context_selector": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "priority": { "type": "integer" },
+            "always_include_in_core_pack": { "type": "boolean" },
+            "embedding_hint": { "type": ["string", "null"] }
+          }
+        },
+        "tool_surface": { "$ref": "#/$defs/ToolSurfaceMeta" },
+        "parameters": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "JSON Schema for arguments; use $ref to $defs.*Parameters for shared shapes."
+        },
+        "routing": { "$ref": "#/$defs/ToolRouting" },
+        "side_effects": { "type": "string" },
+        "permission": {
+          "type": "string",
+          "enum": ["read", "write", "destructive", "exec"]
+        },
+        "ue_entry_points": { "type": "string" },
+        "threading": {
+          "type": "string",
+          "enum": ["game_thread", "async", "any"]
+        },
+        "failure_modes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "status": {
+          "type": "string",
+          "enum": ["implemented", "research", "future", "deprecated", "proposed"]
+        }
+      }
+    },
+    "UnrealPathKind": {
+      "type": "string",
+      "enum": [
+        "asset_object_path",
+        "actor_world_path",
+        "package_folder_prefix",
+        "project_relative_file",
+        "native_class_path"
+      ],
+      "description": "Resolver uses this to disambiguate mistaken keys (object_path vs path vs path_prefix)."
+    },
+    "DispatchIncomingCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_id", "arguments"],
+      "description": "Shape of unreal_ai_dispatch payload before resolver normalization.",
+      "properties": {
+        "tool_id": { "type": "string" },
+        "arguments": { "type": "object" }
+      }
+    },
+    "BlueprintApplyIrParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blueprint_path", "nodes"],
+      "properties": {
+        "blueprint_path": { "type": "string", "minLength": 1 },
+        "graph_name": { "type": "string" },
+        "create_if_missing": { "type": "boolean" },
+        "parent_class": { "type": "string" },
+        "focused": { "type": "boolean" },
+        "merge_policy": { "type": "string", "enum": ["create_new", "append_to_existing"] },
+        "layout_scope": { "type": "string", "enum": ["ir_nodes", "full_graph"] },
+        "auto_layout": { "type": "boolean" },
+        "variables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type"],
+            "properties": {
+              "name": { "type": "string" },
+              "type": { "type": "string" }
+            }
+          }
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["node_id", "op"],
+            "properties": {
+              "node_id": { "type": "string" },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "event_begin_play",
+                  "event_tick",
+                  "custom_event",
+                  "branch",
+                  "sequence",
+                  "call_function",
+                  "delay",
+                  "get_variable",
+                  "set_variable",
+                  "dynamic_cast"
+                ]
+              },
+              "x": { "type": "integer" },
+              "y": { "type": "integer" },
+              "class_path": { "type": "string" },
+              "function_name": { "type": "string" },
+              "variable": { "type": "string" }
+            }
+          }
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["from", "to"],
+            "properties": {
+              "from": { "type": "string" },
+              "to": { "type": "string" }
+            }
+          }
+        },
+        "defaults": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["node_id", "pin"],
+            "properties": {
+              "node_id": { "type": "string" },
+              "pin": { "type": "string" },
+              "value": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "ViewportCameraControlParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation"],
+      "description": "vNext merge of viewport_camera_dolly|orbit|pan|pilot|get_transform|set_transform. Resolver maps operation to legacy tool_id + args.",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": [
+            "dolly",
+            "orbit",
+            "pan",
+            "pilot",
+            "get_transform",
+            "set_transform"
+          ]
+        },
+        "dolly_units": { "type": "number" },
+        "fov_delta": { "type": "number" },
+        "mode": { "type": "string", "enum": ["dolly", "fov"] },
+        "pivot": { "type": "string" },
+        "yaw_deg": { "type": "number" },
+        "pitch_deg": { "type": "number" },
+        "radius": { "type": "number" },
+        "relative": { "type": "boolean" },
+        "delta": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "space": { "type": "string", "enum": ["world", "camera"] },
+        "actor_path": { "type": "string" },
+        "unpilot": { "type": "boolean" },
+        "viewport_index": { "type": "integer" },
+        "location": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "rotation": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "b_snap": { "type": "boolean" }
+      }
+    },
+    "ViewportCaptureParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capture_kind"],
+      "description": "Merge of viewport_capture_png + viewport_capture_delayed.",
+      "properties": {
+        "capture_kind": {
+          "type": "string",
+          "enum": ["immediate_png", "after_frames"]
+        },
+        "filename_slug": { "type": "string" },
+        "delay_frames": { "type": "integer" },
+        "resolution_scale": { "type": "number" },
+        "include_ui": { "type": "boolean" }
+      }
+    },
+    "ViewportFrameParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target"],
+      "description": "Merge of viewport_frame_actors + viewport_frame_selection.",
+      "properties": {
+        "target": { "type": "string", "enum": ["selection", "actors"] },
+        "actor_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "margin_scale": { "type": "number" }
+      }
+    },
+    "AssetGraphQueryParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relation", "object_path"],
+      "description": "Merge of asset_find_referencers + asset_get_dependencies.",
+      "properties": {
+        "relation": {
+          "type": "string",
+          "enum": ["referencers", "dependencies"]
+        },
+        "object_path": { "type": "string", "minLength": 1 }
+      }
+    },
+    "MaterialInstanceSetParameterParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value_kind", "material_path", "parameter_name"],
+      "description": "Merge of scalar + vector MI tools; resolver branches on value_kind.",
+      "properties": {
+        "value_kind": { "type": "string", "enum": ["scalar", "vector"] },
+        "material_path": { "type": "string", "minLength": 1 },
+        "parameter_name": { "type": "string", "minLength": 1 },
+        "value": { "type": "number" },
+        "linear_color": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 4
+        }
+      }
+    },
+    "AssetRegistryQueryCanonicalParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Canonical only; resolver accepts legacy alias keys and rewrites.",
+      "properties": {
+        "path_filter": { "type": "string", "minLength": 1 },
+        "class_name": { "type": "string", "minLength": 1 },
+        "max_results": { "type": "integer" }
+      }
+    },
+    "SettingEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "key"],
+      "properties": {
+        "domain": {
+          "type": "string",
+          "enum": [
+            "editor_preference",
+            "project_setting",
+            "cvar",
+            "viewport_session",
+            "plugin_setting",
+            "map_world_settings"
+          ]
+        },
+        "key": { "type": "string", "minLength": 1 },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_path": { "type": "string" },
+            "plugin_id": { "type": "string" },
+            "map_path": { "type": "string" },
+            "viewport_id": { "type": "string" }
+          }
+        },
+        "value_kind": {
+          "type": "string",
+          "enum": [
+            "bool",
+            "int",
+            "float",
+            "string",
+            "enum",
+            "linear_color",
+            "vector"
+          ]
+        }
+      }
+    },
+    "SettingQueryParameters": {
+      "type": "object",
+      "description": "Future tool setting_query: identical instance shape to SettingEnvelope; response not part of this schema.",
+      "additionalProperties": false,
+      "required": ["domain", "key"],
+      "properties": {
+        "domain": { "$ref": "#/$defs/SettingEnvelope/properties/domain" },
+        "key": { "$ref": "#/$defs/SettingEnvelope/properties/key" },
+        "scope": { "$ref": "#/$defs/SettingEnvelope/properties/scope" },
+        "value_kind": { "$ref": "#/$defs/SettingEnvelope/properties/value_kind" }
+      }
+    },
+    "SettingApplyParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "key", "value"],
+      "properties": {
+        "domain": { "$ref": "#/$defs/SettingEnvelope/properties/domain" },
+        "key": { "$ref": "#/$defs/SettingEnvelope/properties/key" },
+        "scope": { "$ref": "#/$defs/SettingEnvelope/properties/scope" },
+        "value_kind": { "$ref": "#/$defs/SettingEnvelope/properties/value_kind" },
+        "value": {},
+        "confirm": { "type": "boolean" },
+        "dry_run": { "type": "boolean" }
+      }
+    },
+    "AliasTableEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_id", "canonical_key", "legacy_keys"],
+      "description": "Resolver data: map any legacy key in arguments to canonical_key before validation.",
+      "properties": {
+        "tool_id": { "type": "string" },
+        "canonical_key": { "type": "string" },
+        "legacy_keys": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}
