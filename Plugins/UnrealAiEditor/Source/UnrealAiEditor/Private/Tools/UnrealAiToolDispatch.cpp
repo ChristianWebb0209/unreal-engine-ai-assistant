@@ -451,10 +451,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_AgentEmitTodoPlan(Registry, ProjectId, ThreadId, A);
 	}
-	if (ToolId == TEXT("worker_merge_results"))
-	{
-		return UnrealAiDispatch_WorkerMergeResults(A);
-	}
 	if (ToolId == TEXT("tool_audit_append"))
 	{
 		return UnrealAiDispatch_ToolAuditAppend(A);
@@ -508,10 +504,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	if (ToolId == TEXT("pcg_generate"))
 	{
 		return UnrealAiDispatch_PcgGenerate(A);
-	}
-	if (ToolId == TEXT("subagent_spawn"))
-	{
-		return UnrealAiDispatch_SubagentSpawn(A);
 	}
 
 	if (ToolId == TEXT("scene_fuzzy_search.query"))

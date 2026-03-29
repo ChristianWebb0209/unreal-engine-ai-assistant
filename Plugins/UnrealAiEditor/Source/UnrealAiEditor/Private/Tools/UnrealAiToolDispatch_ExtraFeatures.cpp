@@ -117,9 +117,3 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_PcgGenerate(const TSharedPtr<FJso
 	(void)Args;
 	return UnrealAiToolJson::Error(TEXT("pcg_generate: requires PCG component context; not implemented in this plugin build."));
 }
-
-FUnrealAiToolInvocationResult UnrealAiDispatch_SubagentSpawn(const TSharedPtr<FJsonObject>& Args)
-{
-	(void)Args;
-	return UnrealAiToolJson::Error(TEXT("subagent_spawn is not available in this plugin build."));
-}

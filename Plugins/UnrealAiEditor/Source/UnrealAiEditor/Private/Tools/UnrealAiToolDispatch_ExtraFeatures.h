@@ -11,4 +11,3 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MetasoundOpenEditor(const TShared
 FUnrealAiToolInvocationResult UnrealAiDispatch_FoliagePaintInstances(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_LandscapeImportHeightmap(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_PcgGenerate(const TSharedPtr<FJsonObject>& Args);
-FUnrealAiToolInvocationResult UnrealAiDispatch_SubagentSpawn(const TSharedPtr<FJsonObject>& Args);

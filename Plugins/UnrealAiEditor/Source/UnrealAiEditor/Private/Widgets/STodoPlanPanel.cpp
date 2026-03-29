@@ -3,7 +3,7 @@
 #include "Backend/UnrealAiBackendRegistry.h"
 #include "Context/AgentContextTypes.h"
 #include "Context/IAgentContextService.h"
-#include "Harness/UnrealAiPlanDag.h"
+#include "Planning/UnrealAiPlanDag.h"
 #include "Context/UnrealAiProjectId.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Widgets/Input/SCheckBox.h"

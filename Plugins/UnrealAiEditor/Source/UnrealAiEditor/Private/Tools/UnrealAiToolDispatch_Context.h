@@ -19,5 +19,4 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AgentEmitTodoPlan(
 	const FString& ProjectId,
 	const FString& ThreadId,
 	const TSharedPtr<FJsonObject>& Args);
-FUnrealAiToolInvocationResult UnrealAiDispatch_WorkerMergeResults(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_ToolAuditAppend(const TSharedPtr<FJsonObject>& Args);

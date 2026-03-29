@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Misc/Paths.h"
 #include "Tools/UnrealAiToolDispatch.h"
 #include "Tools/UnrealAiAssetFactoryResolver.h"
 #include "Tools/UnrealAiToolJson.h"
@@ -436,6 +437,21 @@ bool FUnrealAiGenericAssetToolsContractTest::RunTest(const FString& Parameters)
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
 		TestTrue(TEXT("project_file_read_text missing relative_path: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
 		TestTrue(TEXT("project_file_read_text missing relative_path: has suggested_correct_call"), O->HasField(TEXT("suggested_correct_call")));
+		const TSharedPtr<FJsonObject>* Suggested = nullptr;
+		TestTrue(TEXT("project_file_read_text: suggested_correct_call object"), O->TryGetObjectField(TEXT("suggested_correct_call"), Suggested) && Suggested && Suggested->IsValid());
+		const TSharedPtr<FJsonObject>* InnerArgs = nullptr;
+		TestTrue(TEXT("project_file_read_text: suggested arguments"), (*Suggested)->TryGetObjectField(TEXT("arguments"), InnerArgs) && InnerArgs && InnerArgs->IsValid());
+		FString RelPath;
+		TestTrue(TEXT("project_file_read_text: suggested relative_path"), (*InnerArgs)->TryGetStringField(TEXT("relative_path"), RelPath));
+		const FString ExpectedUProj = FPaths::GetCleanFilename(FPaths::GetProjectFilePath());
+		if (!ExpectedUProj.IsEmpty())
+		{
+			TestEqual(TEXT("project_file_read_text: suggested path matches project .uproject"), RelPath, ExpectedUProj);
+		}
+		else
+		{
+			TestTrue(TEXT("project_file_read_text: suggested path non-empty fallback"), !RelPath.IsEmpty());
+		}
 	}
 
 	{

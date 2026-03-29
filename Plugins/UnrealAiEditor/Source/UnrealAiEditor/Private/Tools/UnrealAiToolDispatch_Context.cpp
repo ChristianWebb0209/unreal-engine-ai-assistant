@@ -21,7 +21,6 @@
 #include "UObject/SoftObjectPath.h"
 #include "UObject/TopLevelAssetPath.h"
 #include "HAL/FileManager.h"
-#include "Harness/FUnrealAiWorkerOrchestrator.h"
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRegistryQuery(const TSharedPtr<FJsonObject>& Args)
 {
@@ -488,99 +487,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_EngineMessageLogRead(const TShare
 	O->SetArrayField(TEXT("lines"), Arr);
 	O->SetStringField(TEXT("source"), Latest);
 	return UnrealAiToolJson::Ok(O);
-}
-
-FUnrealAiToolInvocationResult UnrealAiDispatch_WorkerMergeResults(const TSharedPtr<FJsonObject>& Args)
-{
-	if (!Args.IsValid())
-	{
-		return UnrealAiToolJson::Error(TEXT("invalid arguments"));
-	}
-	FString ParentRunId;
-	const TArray<TSharedPtr<FJsonValue>>* WorkerArr = nullptr;
-	if (!Args->TryGetStringField(TEXT("parent_run_id"), ParentRunId) || ParentRunId.IsEmpty()
-		|| !Args->TryGetArrayField(TEXT("worker_results"), WorkerArr) || !WorkerArr || WorkerArr->Num() == 0)
-	{
-		return UnrealAiToolJson::Error(TEXT("parent_run_id and worker_results[] are required"));
-	}
-	TArray<FUnrealAiWorkerResult> Workers;
-	for (const TSharedPtr<FJsonValue>& V : *WorkerArr)
-	{
-		const TSharedPtr<FJsonObject>* O = nullptr;
-		if (!V.IsValid() || !V->TryGetObject(O) || !O->IsValid())
-		{
-			continue;
-		}
-		FUnrealAiWorkerResult R;
-		(*O)->TryGetStringField(TEXT("status"), R.Status);
-		(*O)->TryGetStringField(TEXT("summary"), R.Summary);
-		const TArray<TSharedPtr<FJsonValue>>* Errs = nullptr;
-		if ((*O)->TryGetArrayField(TEXT("errors"), Errs) && Errs)
-		{
-			for (const TSharedPtr<FJsonValue>& E : *Errs)
-			{
-				FString S;
-				if (E.IsValid() && E->TryGetString(S))
-				{
-					R.Errors.Add(S);
-				}
-			}
-		}
-		const TArray<TSharedPtr<FJsonValue>>* Arts = nullptr;
-		if ((*O)->TryGetArrayField(TEXT("artifacts"), Arts) && Arts)
-		{
-			for (const TSharedPtr<FJsonValue>& E : *Arts)
-			{
-				FString S;
-				if (E.IsValid() && E->TryGetString(S))
-				{
-					R.Artifacts.Add(S);
-				}
-			}
-		}
-		const TArray<TSharedPtr<FJsonValue>>* Fuq = nullptr;
-		if ((*O)->TryGetArrayField(TEXT("follow_up_questions"), Fuq) && Fuq)
-		{
-			for (const TSharedPtr<FJsonValue>& E : *Fuq)
-			{
-				FString S;
-				if (E.IsValid() && E->TryGetString(S))
-				{
-					R.FollowUpQuestions.Add(S);
-				}
-			}
-		}
-		Workers.Add(R);
-	}
-	if (Workers.Num() == 0)
-	{
-		return UnrealAiToolJson::Error(TEXT("No valid worker_results objects"));
-	}
-	const FUnrealAiWorkerResult M = FUnrealAiWorkerOrchestrator::MergeDeterministic(Workers);
-	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
-	Out->SetBoolField(TEXT("ok"), true);
-	Out->SetStringField(TEXT("parent_run_id"), ParentRunId);
-	Out->SetStringField(TEXT("merged_status"), M.Status);
-	Out->SetStringField(TEXT("merged_summary"), M.Summary);
-	TArray<TSharedPtr<FJsonValue>> ErrArr;
-	for (const FString& E : M.Errors)
-	{
-		ErrArr.Add(MakeShareable(new FJsonValueString(E)));
-	}
-	Out->SetArrayField(TEXT("merged_errors"), ErrArr);
-	TArray<TSharedPtr<FJsonValue>> ArtArr;
-	for (const FString& A : M.Artifacts)
-	{
-		ArtArr.Add(MakeShareable(new FJsonValueString(A)));
-	}
-	Out->SetArrayField(TEXT("merged_artifacts"), ArtArr);
-	TArray<TSharedPtr<FJsonValue>> FuqArr;
-	for (const FString& Q : M.FollowUpQuestions)
-	{
-		FuqArr.Add(MakeShareable(new FJsonValueString(Q)));
-	}
-	Out->SetArrayField(TEXT("merged_follow_up_questions"), FuqArr);
-	return UnrealAiToolJson::Ok(Out);
 }
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_ToolAuditAppend(const TSharedPtr<FJsonObject>& Args)

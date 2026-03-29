@@ -8,6 +8,27 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
+namespace UnrealAiProjectFileDispatchPriv
+{
+	/** Prefer the real `.uproject` path (project-relative); fallback to a config file if unavailable. */
+	static void FillSuggestedArgsForReadText(TSharedPtr<FJsonObject>& OutSuggestedArgs)
+	{
+		OutSuggestedArgs->SetNumberField(TEXT("max_bytes"), 1024.0);
+		const FString ProjectFileAbs = FPaths::GetProjectFilePath();
+		if (!ProjectFileAbs.IsEmpty())
+		{
+			FString RelToProject = ProjectFileAbs;
+			if (FPaths::MakePathRelativeTo(RelToProject, *FPaths::ProjectDir()))
+			{
+				RelToProject.ReplaceInline(TEXT("\\"), TEXT("/"));
+				OutSuggestedArgs->SetStringField(TEXT("relative_path"), RelToProject);
+				return;
+			}
+		}
+		OutSuggestedArgs->SetStringField(TEXT("relative_path"), TEXT("Config/DefaultEngine.ini"));
+	}
+}
+
 FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileReadText(const TSharedPtr<FJsonObject>& Args)
 {
 	FString Rel;
@@ -21,10 +42,9 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileReadText(const TShared
 			|| Rel.IsEmpty())
 		{
 			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
-			SuggestedArgs->SetStringField(TEXT("relative_path"), TEXT("Config/DefaultEngine.ini"));
-			SuggestedArgs->SetNumberField(TEXT("max_bytes"), 1024.0);
+			UnrealAiProjectFileDispatchPriv::FillSuggestedArgsForReadText(SuggestedArgs);
 			return UnrealAiToolJson::ErrorWithSuggestedCall(
-				TEXT("relative_path is required (alias: file_path)."),
+				TEXT("relative_path is required (alias: file_path). For engine/plugin association, read the `.uproject` file at the project root (see suggested_correct_call); Config/DefaultEngine.ini is another common text file."),
 				TEXT("project_file_read_text"),
 				SuggestedArgs);
 		}
