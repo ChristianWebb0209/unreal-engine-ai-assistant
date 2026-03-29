@@ -4,6 +4,91 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 ---
 
+## Entry 33 — `FAgentRunFileSink`: `bFinished` release when `run_finished` append fails (verify headed smoke)
+
+- **`FAgentRunFileSink::OnRunFinished`:** After **`compare_exchange`** claims the terminal slot, if **`AppendRunFinishedLineWithRetry`** returns false, **`bFinished`** is **cleared** so **`~FAgentRunFileSink`** can call **`OnRunFinished`** again and retry the line (avoids a state where the disk never gets `run_finished` but `bFinished` blocks the destructor path). **`DoneEvent` / completion pointers** still run so the headed runner does not deadlock. Warning log: `run_finished append failed; released finish slot for destructor retry`.
+- **Destructor comment** updated to describe append-failure vs successful single terminal.
+- **Build:** `./build-editor.ps1 -Headless` (or `-Restart` if LNK1104) applied after this change.
+- **Headed verification (operator):** Re-run **`tests/long-running-tests/plan-mode-smoke/`**; confirm `step_01/run.jsonl` contains `"type":"run_finished"` (see `Test-RunJsonlFinished` in `run-long-running-headed.ps1`). Inspect **`success`** / **`error_message`** as needed. Optional: confirm `llm_requests.jsonl` still shows **`## Original request (from user)`** on `*_plan_*` threads (plan-node work, **Entry 31**).
+
+---
+
+## Entry 32 — `FAgentRunFileSink`: forced `run_finished`, append retries
+
+- **`FAgentRunFileSink` (`FAgentRunFileSink.cpp` / `.h`):** **`~FAgentRunFileSink`** calls **`OnRunFinished(false, …)`** when the sink is destroyed without a prior normal terminal — headed batch scripts use `"type":"run_finished"` in `run.jsonl` (`Test-RunJsonlFinished`); duplicate **`OnRunFinished`** is suppressed after a **successful** disk write (**Entry 33** handles failed append + destructor retry).
+- **Append path:** **`AppendJsonObject`** returns **`bool`**, logs a **Warning** on failure (when logging enabled for that call), and **`AppendRunFinishedLineWithRetry`** writes the **`run_finished`** line with up to **four** attempts (10 ms between retries) plus an **Error** if all fail; **`DoneEvent` / completion pointers** still run after the append attempt so the sync runner does not deadlock.
+
+---
+
+## Entry 31 — Plan-mode node relevance: parent goal in user text, DAG merge for child threads, complexity/query alignment
+
+- **`FUnrealAiPlanExecutor::BeginNextReadyNode`:** Plan-node `UserText` is no longer the short synthetic line only. It now leads with **`## Original request (from user)`** (from `OriginalPlannerUserText` / parent request, **4k char cap**), then **`## Current plan node`** with execute/title/hint and a **this-node-only** instruction aligned with the user goal.
+- **`FUnrealAiContextService::BuildContextWindow`:** For thread ids matching `<parent>_plan_<nodeId>` (parent parsed via **last** `_plan_` marker), merge **parent** state into the working copy for the build: **`ActivePlanDagJson`**, **`PlanNodeStatusById`**, **`PlanNodeSummaryById`** — so packed context and Plan DAG candidates see the full graph on node turns (child persistence alone was empty).
+- **`FUnrealAiAgentTurnRequest`:** Optional **`ContextComplexityUserText`** — when non-empty, used for retrieval prefetch, **`UserMessageForComplexity`**, usage query hash fallback, and **tiered tool-surface** hybrid query (otherwise **`UserText`**). Plan nodes leave it empty; expanded **`UserText`** carries the full task for tiering/memory.
+- **Prompts:** **`09-plan-dag.md`**, **`02-operating-modes.md`** — hints must trace to the user message; discourage vague “verify setup” filler. **`11-plan-node-execution.md`** — original request block referenced; snapshot loop guidance.
+- **Verification:** `./build-editor.ps1 -Headless` after C++ edits. **Headed** `plan-mode-smoke`: user runs locally; inspect `llm_requests.jsonl` for `*_plan_*` rows (**parent goal** + tool surface telemetry).
+
+---
+
+## Entry 30 — Run-29 failures: harness idle, prompts, catalog, suite turns
+
+- **`UnrealAiWaitTimePolicy.h`:** **`HarnessSyncIdleAbortMs`** **3000 → 12000** — headed sync idle abort was tight for post-tool assistant completion (run-29 **step_03** missing `run_finished`).
+- **Prompts:** **`10-mvp-gameplay-and-tooling.md`** — multiple-match line now includes **`blueprint_apply_ir`** in the forbidden-guess list. **`04-tool-calling-contract.md`** — multiple-asset hits explicitly name **`blueprint_apply_ir`**, **`asset_find_referencers`**, **`asset_get_dependencies`**, etc.
+- **`UnrealAiToolCatalog.json`:** **`blueprint_apply_ir`** / **`asset_find_referencers`** summaries: use **`object_path`** from discovery only.
+- **`realistic-user-agent-basket-rerun/suite.json`:** Turn 1 — explicit discover → **`blueprint_apply_ir`** only with paths from tool output. Turn 3 — **`asset_find_referencers`** with path from discovery + conclude without unrelated tool chains.
+- **Doc:** [`run-29-basket-followup.md`](run-29-basket-followup.md) lists these under **Fixes applied (Entry 30)**.
+- **Build:** Recompile plugin (`.\build-editor.ps1 -Headless` or `-Restart` if LNK1104) before re-running the headed basket.
+
+---
+
+## Entry 29 — Run-29 follow-up doc + basket `coverage_notes`
+
+- **[`tests/long-running-tests/run-29-basket-followup.md`](run-29-basket-followup.md):** Expanded with baseline table (run-29 per-step classification), root-cause notes (apply_ir discovery, referencers terminal), run-29 vs **current 6-step** mapping, rerun commands (`run-long-running-headed.ps1`, `classify_harness_run_jsonl.py`), success criteria, glossary (IR), and pointers to Entries 22/24/28.
+- **`realistic-user-agent-basket-rerun/suite.json`:** `coverage_notes` now point at the follow-up doc and summarize the 6 agent turns without plan-mode wording.
+- **Ready to re-run:** No plugin code change required for a **progress check**—rebuild if prompts/catalog were edited since last compile; then headed batch on `realistic-user-agent-basket-rerun` and classify. Compare to [`runs/run-29-20260328-212119_364/harness-classification.json`](runs/run-29-20260328-212119_364/harness-classification.json) (target: 6/6 `run_finished`, 0 failed suite, minimal `tool_finish_false`).
+
+---
+
+## Entry 28 — `new-test-basket-04` / `06` + `realistic-user-agent-basket-rerun` trims
+
+- **`new-test-basket-04`:** **9** agent turns; `suite_id` suffix `pcg_natural_lead_in`.
+- **`new-test-basket-06`:** **7** turns (6 agent + 1 ask).
+- **`realistic-user-agent-basket-rerun`:** **6** agent turns; `coverage_notes` aligned to current steps.
+- **Six-basket line count:** **56** turn lines across **`new-test-basket-01`–`06`**. Run-29 follow-up: [`run-29-basket-followup.md`](run-29-basket-followup.md).
+
+---
+
+## Entry 27 — Six `new-test-basket-NN` slices (≤10 turns each)
+
+- **Replaces** the former three large baskets (`new-test-basket-1` … `3`, removed): same global order split into **`new-test-basket-01`** … **`new-test-basket-06`** for faster iteration (see **Entry 28** for current line counts). `suite_id` values end in `_of_06_*`; `coverage_notes` give slice scope.
+
+---
+
+## Entry 26 — `passed-tests` vs `regression-watchlist`, three `new-test-basket-*` suites
+
+- **`tests/long-running-tests/passed-tests/suite.json`:** Trimmed to **11 high-confidence** turns (manifest, level sequence honest skip, handoff, ask grounding, multi-step viewport, `DefaultEngine.ini` peek, source symbol search, ask reflection, shader compile wait, run-13 coffee + forward trace with clean spelling). **Removed** chain-dependent, write-heavy, typo-resolution, and thin-content risks to the watchlist suite.
+- **`tests/long-running-tests/regression-watchlist/suite.json`:** New suite (**not** named “shaky tests”) for **13** turns that are still useful regressions but **project-sensitive** or historically uneven (actor move, MI open, viewport typo framing, duplicate, fuzzy typo, PlayerStart search, blueprint peek, explicit physics trace, run-13 character-BP chain, deps/overview, visibility, AnimBP skim).
+- **Superseded by Entry 27:** Former **`new-test-basket-1` … `new-test-basket-3`** held migrated content from **`gap-tools-coverage`**, **`gap-tools-extended`**, **`fine-tune-05-gap-tools`**; now use **`new-test-basket-01` … `06`** (see Entry 27).
+- **Docs:** `coverage_notes` in each JSON describe scope; Entry 24 still references older `passed-tests` size—superseded by this split.
+
+---
+
+## Entry 25 — Subagents architecture doc + `bUseSubagents` setting (default on)
+
+- **`docs/planning/subagents-architecture.md`:** Current serial plan-DAG architecture; safety rules and minimum task size for future parallel nodes; phased rollout; proposed new files (`UnrealAiPlanParallelPolicy`, `FUnrealAiPlanWaveScheduler`); linked from [`docs/README.md`](../docs/README.md).
+- **`UUnrealAiEditorSettings`:** **`bUseSubagents`** (`Config = Editor`, default **true**) — display **Use subagents (parallel plan nodes)**; parallel scheduling not implemented yet; when false, executor should **keep serial** once parallel exists.
+- **Build:** Recompile plugin after settings change.
+
+---
+
+## Entry 24 — Run-29 basket postmortem, `passed-tests` suite, basket steps 5–6
+
+- **Run-29** ([`runs/run-29-20260328-212119_364`](runs/run-29-20260328-212119_364)): **Not a full success** — `failed_suite_count` 1, `batch_all_expected_run_jsonls_finished` false, **3/5** `run.jsonl` with `run_finished`. **step_03:** `asset_find_referencers` succeeded; stream ended **without** `run_finished` (truncated log). **step_05:** Planner emitted JSON + 3 nodes; executor then ran **tools** on plan nodes (`editor_state_snapshot_read`, `scene_fuzzy_search`)—`run.jsonl` incomplete vs “prose checklist only” ask; likely timeout/editor exit before terminal. **step_01:** `blueprint_apply_ir` `tool_finish_false` then recovery (same class as earlier scratch-float runs).
+- **`tests/long-running-tests/passed-tests/suite.json`:** Expanded to **~23 turns** from archived `workflow-input.json` across **run-22** (Entry 20 basket drops), **run-20** (Entry 17 duplicate + typo drops), **full mixed-salad** vs lean (ask + long viewport + scene + blueprint peek + ini + source + reflection), **run-13** basket turns 1–5 (passed per run-20 focus), plus **fine-tune-05** lines (shader compile wait, visibility, anim BP read). See file `coverage_notes` for paths.
+- **`realistic-user-agent-basket-rerun/suite.json`:** Inserted **step_5** `.uproject` read, **step_6** viewport forward trace; plan turn now **step_7**; `coverage_notes` summarize run-29 and next steps.
+
+---
+
 ## Entry 23 — Plan DAG hardening: repair loop, idle abort, plan-node prompts (audit completion)
 
 - **`FUnrealAiPlanExecutor`:** One-shot **planner repair** after invalid JSON or failed `ValidateDag` (augmented user text via `MakePlannerDagRepairUserText`); `OriginalPlannerUserText` captured in `Start()`. Clearer `Finish` strings for `ResumeExecutionFromDag` parse/validate. Plan child `LlmRoundBudgetFloor` aligned with `PlanNodeMaxLlmRounds`.
@@ -11,7 +96,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 - **`UnrealAiWaitTimePolicy.h`:** `HarnessPlanPipelineSyncIdleAbortMs` (45s default), `PlanNodeMaxLlmRounds` (12).
 - **`UnrealAiHarnessScenarioRunner`:** `GetEffectiveHarnessSyncIdleAbortMs` when `IsPlanPipelineActive`; idle-abort diagnostics use the **effective** ms (not always 3s).
 - **Prompts:** `02-operating-modes.md` (Plan checklist scope), `09-plan-dag.md` (v1 cost), new `11-plan-node-execution.md`; `UnrealAiPromptBuilder` / `UnrealAiTurnLlmRequestBuilder` inject chunk 11 for `*_plan_*` Agent threads.
-- **`docs/planning.md`:** Documents repair, plan-node rounds, plan-pipeline idle abort.
+- **Docs:** Plan DAG behavior also described in prompt chunks and `docs/planning/subagents-architecture.md` (repair, plan-node rounds, plan-pipeline idle abort were covered in code + chunks).
 - **Build:** `.\build-editor.ps1 -Restart -Headless` after changes; use **`-Restart`** if `LNK1104` on the plugin DLL.
 - **Headed verification:** User runs `plan-mode-smoke` locally (not automated here).
 
@@ -231,4 +316,4 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 ---
 
-<!-- Next change: prepend `## Entry 23 — …` above Entry 22 (do not renumber existing entries). -->
+<!-- Next change: prepend `## Entry 25 — …` above Entry 24 (do not renumber existing entries). -->

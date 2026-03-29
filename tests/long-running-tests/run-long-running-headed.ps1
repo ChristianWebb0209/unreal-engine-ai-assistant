@@ -27,6 +27,9 @@
   - last-suite-summary.json includes batch_editor_exit_code from UnrealEditor-Cmd; value 1 often appears after Quit even when every run.jsonl reached run_finished.
   - Judge batch quality on run_jsonl_finished_count / all_turns_reached_terminal and failed_suite_count, not only editor_exit_code.
   - Optional env: UNREAL_AI_HEADED_BATCH_IGNORE_EDITOR_NONZERO_EXIT=1 treats "all jsonls finished + no failed suite" as batch pass even if the editor process exited nonzero.
+  - UNREAL_AI_LOG_LLM_REQUESTS: this script defaults it to 1 when unset (llm_requests.jsonl next to run.jsonl). Set to 0 to disable, or define in .env. Editor Settings can still apply when the var is unset in the editor-only workflow.
+
+  Prompt assembly: headed runs default to clearing UNREAL_AI_PROMPT_ASSEMBLY so the editor uses linear `prompts/chunks` (same as a normal editor launch). -PromptAssembly FromEnv keeps .env values; Legacy forces legacy for older scripts.
 
   JSON schema (suite files):
   {
@@ -44,7 +47,7 @@
   - "plan" is mapped to harness mode "plan".
   - Output layout (each script invocation gets one new folder under the central runs directory; older batches are kept):
       tests\long-running-tests\runs\run-<index>-<localMachineTimestamp>\
-        Index is a monotonic integer across all scenarios. Timestamp uses local machine time with ms resolution.
+        Index is a monotonic integer across all scenarios. Timestamp uses local machine time, 12-hour clock, hh-mm-ss-tt segments (no milliseconds).
         - last-suite-summary.json  (batch metadata; only under this run folder)
         - editor_console_saved.log  (single-session mode: full Unreal Saved/Logs copy for the whole batch)
         <path-slug>\
@@ -58,7 +61,7 @@
           - turns\step_XX\context_decision_logs\*.jsonl
         In single-session mode, the same full-session log is also copied to each suite folder as editor_console_full_batch.log
 
-  Context observability is controlled in C++ (UnrealAiRuntimeDefaults.h). -ReduceContextNoise passes nodump as the 5th RunAgentTurn arg for quieter batches.
+  Per-tool context dumps: default is full logging (5th arg dumpcontext). Use -ReduceContextNoise to pass nodump and skip context_window_after_tool_*.txt (continuation/plan_sub_turn/run_started dumps still occur). LLM payloads go to llm_requests.jsonl by default; sync segment lines go to run.jsonl.
 
   Interactive viewing (headed runs): use the main Unreal Editor window (large viewport/tabs). The script does not steal focus (-BringEditorToForeground to opt in). -log opens a separate log console — that is not the level viewport.
 
@@ -100,7 +103,9 @@ param(
     [switch]$LiveProjectLog,
     [switch]$NoLiveProjectLog,
     [switch]$Unattended,
-    [switch]$BringEditorToForeground
+    [switch]$BringEditorToForeground,
+    [ValidateSet('Inherit', 'Default', 'FromEnv', 'Legacy')]
+    [string]$PromptAssembly = 'Inherit'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -118,6 +123,34 @@ $RepoRootForEnv = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $RepoRootForEnv 'scripts\Import-RepoDotenv.ps1')
 Import-RepoDotenv -RepoRoot $RepoRootForEnv
 . (Join-Path $RepoRootForEnv 'scripts\Set-UnrealAiHeadedToolPackDefaults.ps1')
+
+# Prompt assembly: after Import-RepoDotenv, clear UNREAL_AI_PROMPT_ASSEMBLY unless user explicitly chose FromEnv or Legacy.
+# Default (Inherit) = project settings only — matches "run the script with no -PromptAssembly" expectation.
+switch ($PromptAssembly) {
+    'Inherit' {
+        Remove-Item -Path 'Env:UNREAL_AI_PROMPT_ASSEMBLY' -ErrorAction SilentlyContinue
+    }
+    'Default' {
+        Remove-Item -Path 'Env:UNREAL_AI_PROMPT_ASSEMBLY' -ErrorAction SilentlyContinue
+    }
+    'FromEnv' {
+        # Leave $env:UNREAL_AI_PROMPT_ASSEMBLY as set by .env or parent shell (opt-in).
+    }
+    'Legacy' {
+        $env:UNREAL_AI_PROMPT_ASSEMBLY = 'legacy'
+    }
+}
+$promptAssemblyEnvDisplay = if ($null -ne (Get-Item -Path 'Env:UNREAL_AI_PROMPT_ASSEMBLY' -ErrorAction SilentlyContinue)) {
+    [string]$env:UNREAL_AI_PROMPT_ASSEMBLY
+} else {
+    '<unset>'
+}
+Write-Host ("Prompt assembly mode: -PromptAssembly {0} | UNREAL_AI_PROMPT_ASSEMBLY={1}" -f $PromptAssembly, $promptAssemblyEnvDisplay) -ForegroundColor DarkCyan
+
+# Full outbound LLM payloads for forensics (see FAgentRunFileSink / UNREAL_AI_LOG_LLM_REQUESTS). Default on for headed batches; set UNREAL_AI_LOG_LLM_REQUESTS=0 to skip.
+if ($null -eq (Get-Item -Path 'Env:UNREAL_AI_LOG_LLM_REQUESTS' -ErrorAction SilentlyContinue)) {
+    $env:UNREAL_AI_LOG_LLM_REQUESTS = '1'
+}
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = $RepoRootForEnv
@@ -794,7 +827,9 @@ if ($MaxSuites -ne 0) {
 
 # One folder per batch: tests/long-running-tests/runs/run-<index>-<local timestamp> (index monotonic across all scenarios).
 $batchStartedLocal = Get-Date
-$batchStampCore = $batchStartedLocal.ToString('yyyyMMdd-HHmmss_fff')
+$batchStampCulture = [System.Globalization.CultureInfo]::GetCultureInfo('en-US')
+# Readable local stamp: date + 12h time with dashes between hour/minute/second + AM/PM (no ms; safe for folder names).
+$batchStampCore = $batchStartedLocal.ToString('yyyyMMdd-hh-mm-ss-tt', $batchStampCulture)
 $runsParent = Join-Path $PSScriptRoot 'runs'
 if (-not (Test-Path -LiteralPath $runsParent)) {
     New-Item -ItemType Directory -Force -Path $runsParent | Out-Null
@@ -1204,6 +1239,8 @@ finally {
 }
 
 $suiteSummary = [ordered]@{
+    prompt_assembly = $PromptAssembly
+    unreal_ai_prompt_assembly_env = if ($null -ne (Get-Item -Path 'Env:UNREAL_AI_PROMPT_ASSEMBLY' -ErrorAction SilentlyContinue)) { [string]$env:UNREAL_AI_PROMPT_ASSEMBLY } else { $null }
     scenario_folder = $scenarioAbs
     suite_file_name = $filter
     suite_file_count = $suiteFiles.Count
