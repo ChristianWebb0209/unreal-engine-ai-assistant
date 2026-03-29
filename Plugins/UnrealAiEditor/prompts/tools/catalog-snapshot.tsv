@@ -57,7 +57,6 @@ shader_compile_wait|build_packaging|Wait for shader compile completion.|exec|fut
 source_search_symbol|project_files_search|Fuzzy grep project text files under Source/, Config/, and Plugins/*/Source/ (Cursor-style): typo-tolerant; ranks paths and filenames even when the user misspells or only partially remembers a name. Returns path_matches plus optional line_matches inside files. For Content assets under /Game, use asset_index_fuzzy_search (Asset Registry index).|read|implemented|ask=True|agent=True
 scene_fuzzy_search|world_actors|Fuzzy-search actors in the current editor level (like Cursor quick-search): matches actor labels, actor names, class names, object paths, and actor tags even when the query is approximate or slightly wrong. Use to find walls, lights, meshes, etc. without exact names.|read|implemented|ask=True|agent=True
 asset_index_fuzzy_search|assets_content|Fuzzy-search the Unreal Asset Registry index (engine-maintained indexed view of content packages). Uses the same asset data the Content Browser uses; supply path_prefix (e.g. /Game or /Game/Textures) to scope. Ranks asset names, object paths, and class paths even when spelling is approximate. Prefer this over source_search_symbol for textures, materials, meshes, and other UAssets.|read|implemented|ask=True|agent=True
-subagent_spawn|orchestration_meta|Spawn child agent with isolated tool pack.|exec|future|ask=False|agent=True
 tool_audit_append|diagnostics_logs|Append line to tool audit log file.|write|designed|ask=False|agent=True
 viewport_camera_dolly|viewport_camera|Dolly or zoom the editor view.|write|research|ask=False|agent=True
 viewport_camera_get_transform|viewport_camera|Read active level editor camera transform and FOV.|read|research|ask=True|agent=True
@@ -70,4 +69,3 @@ viewport_capture_png|capture_vision|Capture active editor viewport to PNG on dis
 viewport_frame_actors|selection_framing|Frame actors by path using bounds and FOV fit.|write|research|ask=False|agent=True
 viewport_frame_selection|selection_framing|Frame current selection in the viewport.|write|research|ask=False|agent=True
 viewport_set_view_mode|viewport_camera|Switch editor viewport rendering mode (Lit, Wireframe, ...).|write|research|ask=False|agent=True
-worker_merge_results|orchestration_meta|Merge structured worker outputs.|write|future|ask=False|agent=True

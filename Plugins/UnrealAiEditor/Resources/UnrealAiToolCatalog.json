@@ -16,7 +16,6 @@
       "editor_ui_navigation",
       "landscape_foliage_pcg",
       "materials_rendering",
-      "orchestration_meta",
       "physics_collision",
       "pie_play",
       "project_files_search",
@@ -27,7 +26,7 @@
       "filesystem",
       "exec"
     ],
-    "tool_count": 81,
+    "tool_count": 79,
     "tool_surface": {
       "description": "Optional per-tool overrides under tools[].tool_surface — domain_tags, centrality, worst_case_cost, requires_strict_args (tools-expansion.md). Tiered eligibility, usage prior, JSONL logging, and repair nudges are toggled in source: Plugins/UnrealAiEditor/.../Misc/UnrealAiRuntimeDefaults.h (not environment variables).",
       "runtime_defaults_header": "Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h"
@@ -2530,7 +2529,7 @@
     },
     {
       "tool_id": "project_file_read_text",
-      "summary": "Read a text file anywhere under the project directory (path relative to project root; Saved/, Intermediate/, etc. allowed). Large or binary files may be truncated or unsuitable—use max_bytes.",
+      "summary": "Read a text file anywhere under the project directory (path relative to project root; Saved/, Intermediate/, etc. allowed). For engine/plugin lines, read this project’s `.uproject` manifest using the **actual** basename (see system context “Project workspace” when present—not a placeholder name). Large or binary files may be truncated or unsuitable—use max_bytes.",
       "category": "project_files_search",
       "tags": [
         "filesystem",
@@ -2919,7 +2918,7 @@
     },
     {
       "tool_id": "asset_index_fuzzy_search",
-      "summary": "Fuzzy-search the Asset Registry under path_prefix (default /Game). On vague but domain-scoped user asks (e.g. something in project assets, blueprint-ish, material-like), prefer one bounded call with a topical query plus narrow path_prefix over asking the user for a keyword first; ask only if results are empty and the user text has no usable token. If query is missing or empty, you must pass a narrow path_prefix (e.g. /Game/Blueprints)—otherwise the tool errors instead of scanning the whole project. Enumeration stops after max_assets_to_scan or max_wall_ms (default 12s, max 120s)—see truncated, timed_out, assets_visited. Prefer explicit query + path_prefix for performance.",
+      "summary": "Fuzzy-search the Asset Registry under path_prefix (default /Game). On vague but domain-scoped user asks (e.g. something in project assets, blueprint-ish, material-like), prefer one bounded call with a topical query plus narrow path_prefix over asking the user for a keyword first; ask only if results are empty and the user text has no usable token. If query is missing or empty, you must pass a narrow path_prefix (e.g. /Game/Blueprints)—otherwise the tool errors instead of scanning the whole project. Enumeration stops after max_assets_to_scan or max_wall_ms (default 12s, max 120s)—see truncated, timed_out, assets_visited. Prefer explicit query + path_prefix for performance. When multiple matches return, downstream tools must use object_path values from this result (or a follow-up narrowed search)—do not invent paths.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -2996,54 +2995,6 @@
       ],
       "doc_links": [],
       "status": "implemented"
-    },
-    {
-      "tool_id": "subagent_spawn",
-      "summary": "Spawn child agent with isolated tool pack.",
-      "category": "orchestration_meta",
-      "tags": [
-        "agent",
-        "orchestration"
-      ],
-      "tier": "future",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 30,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "goal": {
-            "type": "string"
-          },
-          "allowed_tools": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "max_steps": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "goal"
-        ]
-      },
-      "side_effects": "orchestration",
-      "permission": "exec",
-      "ue_entry_points": "Plugin harness",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "future"
     },
     {
       "tool_id": "tool_audit_append",
@@ -3636,7 +3587,7 @@
     {
       "tool_id": "agent_emit_todo_plan",
       "summary": "Agent-mode: emit and persist unreal_ai.todo_plan via tool call (not the Plan-mode unreal_ai.plan_dag assistant JSON).",
-      "category": "orchestration_meta",
+      "category": "exec",
       "tags": [
         "planning",
         "todo"
@@ -3970,7 +3921,7 @@
     },
     {
       "tool_id": "blueprint_export_ir",
-      "summary": "Read-only: export Blueprint graph IR for an existing Blueprint asset path (usually discovered via asset_index_fuzzy_search/asset_registry_query). Use before blueprint_apply_ir when patching logic.",
+      "summary": "Read-only: export Blueprint graph IR for an existing Blueprint asset path (discovered via asset_index_fuzzy_search/asset_registry_query—blueprint_path must match a returned object_path; do not guess names when multiple assets exist). Use before blueprint_apply_ir when patching logic.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -4016,79 +3967,6 @@
       "failure_modes": [],
       "doc_links": [],
       "status": "implemented"
-    },
-    {
-      "tool_id": "worker_merge_results",
-      "summary": "Merge structured worker outputs.",
-      "category": "orchestration_meta",
-      "tags": [
-        "agent",
-        "orchestration"
-      ],
-      "tier": "future",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 28,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "parent_run_id": {
-            "type": "string"
-          },
-          "worker_results": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "status": {
-                  "type": "string"
-                },
-                "summary": {
-                  "type": "string"
-                },
-                "errors": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "artifacts": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "follow_up_questions": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "required": [
-          "parent_run_id",
-          "worker_results"
-        ]
-      },
-      "side_effects": "none",
-      "permission": "write",
-      "ue_entry_points": "Plugin merge logic",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "future"
     }
   ]
 }

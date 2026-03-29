@@ -108,12 +108,11 @@ Derived from `UnrealAiToolCatalog.json`. Table cells list **ask** and **agent**;
 | `material_instance_set_scalar_parameter` | Set scalar on material instance. | write | research | ask=False agent=True |
 | `material_instance_set_vector_parameter` | Set vector parameter on material instance. | write | research | ask=False agent=True |
 
-## `orchestration_meta`
+## `exec`
 
 | tool_id | Summary | permission | status | modes |
 |---------|---------|------------|--------|-------|
-| `subagent_spawn` | Spawn child agent with isolated tool pack. | exec | future | ask=False agent=True |
-| `worker_merge_results` | Merge structured worker outputs. | write | future | ask=False agent=True |
+| `agent_emit_todo_plan` | Emit and persist `unreal_ai.todo_plan` (Agent mode; not Plan-mode DAG JSON). | write | implemented | ask=False agent=True |
 
 ## `physics_collision`
 

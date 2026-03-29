@@ -1,4 +1,4 @@
-﻿# Tool reference for prompt authors
+# Tool reference for prompt authors
 
 - **Canonical catalog (this plugin):** [`../../Resources/UnrealAiToolCatalog.json`](../../Resources/UnrealAiToolCatalog.json) â€” full parameters, `modes`, `permission`, `status`, `failure_modes`.
 - **Human narrative (repo docs):** [`tool-registry.md`](../../../../docs/tooling/tool-registry.md).
@@ -10,6 +10,6 @@
 
 | `tool_id` | Purpose |
 |-----------|---------|
-| `agent_emit_todo_plan` | **Agent-mode** structured todo plan (`unreal_ai.todo_plan` via tool call). Distinct from **Plan mode** chat/harness DAG (`unreal_ai.plan_dag` assistant JSON + `FUnrealAiPlanExecutor`). See [`planning.md`](../../../../docs/planning.md). |
+| `agent_emit_todo_plan` | **Agent-mode** structured todo plan (`unreal_ai.todo_plan` via tool call). Distinct from **Plan mode** chat DAG (`unreal_ai.plan_dag` assistant JSON + `Private/Planning/FUnrealAiPlanExecutor`). See [`planning.md`](../../../../docs/planning.md). |
 
 See [`context-management.md`](../../../../docs/context/context-management.md) for persistence and Â§8 where applicable.
