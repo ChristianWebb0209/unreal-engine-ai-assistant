@@ -7,6 +7,7 @@
 #include "Harness/FUnrealAiConversationStore.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Harness/IAgentRunSink.h"
+#include "Harness/FUnrealAiPlanExecutor.h"
 #include "Harness/ILlmTransport.h"
 #include "Harness/UnrealAiTurnLlmRequestBuilder.h"
 #include "Harness/IToolExecutionHost.h"
@@ -464,6 +465,8 @@ namespace UnrealAiAgentHarnessPriv
 		void EmitEnforcementEvent(const FString& EventType, const FString& Detail);
 		void EmitEnforcementSummary();
 
+		bool ShouldSuppressIdleAbort() const;
+
 		static constexpr int32 CharPerTokenApprox = 4;
 	};
 
@@ -874,6 +877,44 @@ namespace UnrealAiAgentHarnessPriv
 		return !Tc.Name.TrimStartAndEnd().IsEmpty() && TryParseArgumentsJsonComplete(Tc.ArgumentsJson);
 	}
 
+	bool FAgentTurnRunner::ShouldSuppressIdleAbort() const
+	{
+		if (bTerminal.load(std::memory_order_relaxed) || bCancelled.load(std::memory_order_relaxed))
+		{
+			return false;
+		}
+		if (bToolExecutionInProgress)
+		{
+			return true;
+		}
+		// Plan-mode planner uses ToolsJson []; do not let spurious incomplete streamed tool slots block idle abort.
+		if (Request.Mode == EUnrealAiAgentMode::Plan)
+		{
+			return CompletedToolCallQueue.Num() > 0;
+		}
+		if (CompletedToolCallQueue.Num() > 0)
+		{
+			return true;
+		}
+		for (int32 I = 0; I < PendingToolCalls.Num(); ++I)
+		{
+			const FUnrealAiToolCallSpec& Tc = PendingToolCalls[I];
+			if (UnrealAiAgentHarnessPriv::IsPlaceholderPendingToolSlot(Tc))
+			{
+				continue;
+			}
+			if (!Tc.Id.IsEmpty() && ExecutedToolCallIds.Contains(Tc.Id))
+			{
+				continue;
+			}
+			if (!IsToolCallReadyForExecution(Tc))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void FAgentTurnRunner::EnqueueNewlyCompleteCalls()
 	{
 		for (int32 I = 0; I < PendingToolCalls.Num(); ++I)
@@ -993,6 +1034,28 @@ namespace UnrealAiAgentHarnessPriv
 			{
 				Fail(TEXT("Model requested tools but sent no tool_calls"));
 				break;
+			}
+			// Planner pass: ToolsJson is []; streamed tool_calls are non-actionable — always assistant-only terminal.
+			if (Request.Mode == EUnrealAiAgentMode::Plan)
+			{
+				if (PendingToolCalls.Num() > 0 || Ev.FinishReason == TEXT("tool_calls"))
+				{
+					EmitEnforcementEvent(
+						TEXT("plan_finish_ignore_streamed_tool_calls"),
+						FString::Printf(TEXT("finish_reason=%s pending_slots=%d"), *Ev.FinishReason, PendingToolCalls.Num()));
+				}
+				PendingToolCalls.Reset();
+				UE_LOG(
+					LogTemp,
+					Verbose,
+					TEXT("UnrealAi harness: Plan Finish finish_reason=%s -> CompleteAssistantOnly (DAG-only)"),
+					*Ev.FinishReason);
+				CompleteAssistantOnly();
+				break;
+			}
+			if (Ev.FinishReason != TEXT("tool_calls"))
+			{
+				PendingToolCalls.Reset();
 			}
 			EnqueueNewlyCompleteCalls();
 			StartOrContinueStreamedToolExecution();
@@ -1624,6 +1687,36 @@ bool FUnrealAiAgentHarness::IsTurnInProgress() const
 	}
 	return !ActiveRunner->bTerminal.load(std::memory_order_relaxed)
 		&& !ActiveRunner->bCancelled.load(std::memory_order_relaxed);
+}
+
+bool FUnrealAiAgentHarness::HasActiveLlmTransportRequest() const
+{
+	return Transport.IsValid() && Transport->HasActiveRequest();
+}
+
+bool FUnrealAiAgentHarness::ShouldSuppressIdleAbort() const
+{
+	if (!ActiveRunner.IsValid())
+	{
+		return false;
+	}
+	return ActiveRunner->ShouldSuppressIdleAbort();
+}
+
+void FUnrealAiAgentHarness::NotifyPlanExecutorStarted(TSharedPtr<FUnrealAiPlanExecutor> Exec)
+{
+	WeakActivePlanExecutor = Exec;
+}
+
+void FUnrealAiAgentHarness::NotifyPlanExecutorEnded()
+{
+	WeakActivePlanExecutor.Reset();
+}
+
+bool FUnrealAiAgentHarness::IsPlanPipelineActive() const
+{
+	const TSharedPtr<FUnrealAiPlanExecutor> P = WeakActivePlanExecutor.Pin();
+	return P.IsValid() && P->IsRunning();
 }
 
 void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TSharedPtr<IAgentRunSink> Sink)

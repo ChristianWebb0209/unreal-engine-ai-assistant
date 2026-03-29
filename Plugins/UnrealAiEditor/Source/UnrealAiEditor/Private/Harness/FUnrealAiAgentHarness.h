@@ -17,6 +17,8 @@ namespace UnrealAiAgentHarnessPriv
 	struct FAgentTurnRunner;
 }
 
+class FUnrealAiPlanExecutor;
+
 /** Plans context, conversation store, tool catalog, transport, and tool host. */
 class FUnrealAiAgentHarness final : public IUnrealAiAgentHarness
 {
@@ -35,6 +37,11 @@ public:
 	virtual void RunTurn(const FUnrealAiAgentTurnRequest& Request, TSharedPtr<IAgentRunSink> Sink) override;
 	virtual void CancelTurn() override;
 	virtual bool IsTurnInProgress() const override;
+	virtual bool HasActiveLlmTransportRequest() const override;
+	virtual bool ShouldSuppressIdleAbort() const override;
+	virtual void NotifyPlanExecutorStarted(TSharedPtr<FUnrealAiPlanExecutor> Exec) override;
+	virtual void NotifyPlanExecutorEnded() override;
+	virtual bool IsPlanPipelineActive() const override;
 
 private:
 	IUnrealAiPersistence* Persistence = nullptr;
@@ -47,4 +54,5 @@ private:
 	IUnrealAiMemoryService* MemoryService = nullptr;
 
 	TSharedPtr<UnrealAiAgentHarnessPriv::FAgentTurnRunner> ActiveRunner;
+	TWeakPtr<FUnrealAiPlanExecutor> WeakActivePlanExecutor;
 };

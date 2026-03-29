@@ -109,6 +109,7 @@ TSharedRef<FUnrealAiPlanExecutor> FUnrealAiPlanExecutor::Start(
 	Exec->ParentRequest = InParentRequest;
 	Exec->ParentSink = MoveTemp(InParentSink);
 	Exec->bPauseAfterPlannerForBuild = Options.bPauseAfterPlannerForBuild;
+	Exec->bHarnessPlannerOnlyNoExecute = Options.bHarnessPlannerOnlyNoExecute;
 	Exec->bRunning = true;
 	Exec->PlanExecutionPhase = 0;
 	Exec->ParentIds.RunId = FGuid::NewGuid();
@@ -124,6 +125,10 @@ TSharedRef<FUnrealAiPlanExecutor> FUnrealAiPlanExecutor::Start(
 		Exec->ParentSink->OnRunStarted(Exec->ParentIds);
 	}
 	Exec->BeginPlannerTurn();
+	if (InHarness)
+	{
+		InHarness->NotifyPlanExecutorStarted(Exec.ToSharedPtr());
+	}
 	return Exec;
 }
 
@@ -173,6 +178,10 @@ TSharedRef<FUnrealAiPlanExecutor> FUnrealAiPlanExecutor::ResumeExecutionFromDag(
 		Exec->ParentSink->OnRunStarted(Exec->ParentIds);
 		const int32 TotalPhases = 1 + Exec->Dag.Nodes.Num();
 		Exec->ParentSink->OnRunContinuation(0, TotalPhases);
+	}
+	if (InHarness)
+	{
+		InHarness->NotifyPlanExecutorStarted(Exec.ToSharedPtr());
 	}
 	Exec->BeginNextReadyNode();
 	return Exec;
@@ -278,11 +287,6 @@ void FUnrealAiPlanExecutor::BeginPlannerTurn()
 		}
 	};
 	Harness->RunTurn(PlannerReq, Sink);
-	// Round 1 has no OnRunContinuation; reset headed-harness sync window as soon as the planner turn is scheduled.
-	if (ParentSink.IsValid())
-	{
-		ParentSink->OnPlanHarnessSubTurnComplete();
-	}
 }
 
 void FUnrealAiPlanExecutor::OnPlannerFinished(bool bSuccess, const FString& ErrorText, const FString& PlannerText)
@@ -331,6 +335,20 @@ void FUnrealAiPlanExecutor::OnPlannerFinished(bool bSuccess, const FString& Erro
 	{
 		ContextService->LoadOrCreate(ParentRequest.ProjectId, ParentRequest.ThreadId);
 		ContextService->SetActivePlanDag(PlannerText);
+	}
+	if (bHarnessPlannerOnlyNoExecute)
+	{
+		if (ParentSink.IsValid())
+		{
+			ParentSink->OnAssistantDelta(FString::Printf(
+				TEXT("Plan ready (harness planner-only): %d nodes (nodes not executed).\n"),
+				Dag.Nodes.Num()));
+			const int32 TotalPhases = 1 + Dag.Nodes.Num();
+			ParentSink->OnRunContinuation(0, TotalPhases);
+			ParentSink->OnPlanHarnessSubTurnComplete();
+		}
+		Finish(true, FString());
+		return;
 	}
 	if (bPauseAfterPlannerForBuild)
 	{
@@ -467,6 +485,10 @@ void FUnrealAiPlanExecutor::Finish(bool bSuccess, const FString& ErrorText)
 		return;
 	}
 	bRunning = false;
+	if (Harness)
+	{
+		Harness->NotifyPlanExecutorEnded();
+	}
 	if (ParentSink.IsValid())
 	{
 		ParentSink->OnRunFinished(bSuccess, ErrorText);

@@ -146,6 +146,60 @@ namespace UnrealAiConversationJson
 		return true;
 	}
 
+	/** OpenAI 400 if role=tool is not immediately preceded by assistant tool_calls containing that tool_call_id (after skipping prior tool rows). */
+	static void RemoveOrphanToolMessages(TArray<FUnrealAiConversationMessage>& Ms)
+	{
+		bool bChanged = true;
+		while (bChanged)
+		{
+			bChanged = false;
+			for (int32 i = 0; i < Ms.Num(); ++i)
+			{
+				if (Ms[i].Role != TEXT("tool"))
+				{
+					continue;
+				}
+				int32 Prev = i - 1;
+				while (Prev >= 0 && Ms[Prev].Role == TEXT("tool"))
+				{
+					--Prev;
+				}
+				if (Prev < 0)
+				{
+					Ms.RemoveAt(i);
+					bChanged = true;
+					break;
+				}
+				if (Ms[Prev].Role != TEXT("assistant"))
+				{
+					Ms.RemoveAt(i);
+					bChanged = true;
+					break;
+				}
+				const FUnrealAiConversationMessage& Asst = Ms[Prev];
+				bool bOk = false;
+				for (const FUnrealAiToolCallSpec& Tc : Asst.ToolCalls)
+				{
+					if (Tc.Name.TrimStartAndEnd().IsEmpty())
+					{
+						continue;
+					}
+					if (Tc.Id == Ms[i].ToolCallId)
+					{
+						bOk = true;
+						break;
+					}
+				}
+				if (!bOk)
+				{
+					Ms.RemoveAt(i);
+					bChanged = true;
+					break;
+				}
+			}
+		}
+	}
+
 	bool MessagesToChatCompletionsJsonArray(const TArray<FUnrealAiConversationMessage>& Messages, FString& OutJsonArray)
 	{
 		TArray<FUnrealAiConversationMessage> Sanitized = Messages;
@@ -156,6 +210,7 @@ namespace UnrealAiConversationJson
 				Sanitized.RemoveAt(1);
 			}
 		}
+		RemoveOrphanToolMessages(Sanitized);
 		TArray<TSharedPtr<FJsonValue>> Arr;
 		for (const FUnrealAiConversationMessage& M : Sanitized)
 		{

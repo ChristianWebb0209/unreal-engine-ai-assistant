@@ -7,6 +7,7 @@
 #include "Context/UnrealAiContextMentionParser.h"
 #include "Context/UnrealAiProjectId.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "Harness/FAgentRunFileSink.h"
@@ -26,6 +27,63 @@
 
 namespace UnrealAiHarnessScenarioRunnerPriv
 {
+	/** Early exit when HTTP is done, stream telemetry is idle, and harness is not doing tool work. */
+	static bool TryHarnessIdleAbort(IUnrealAiAgentHarness* Harness)
+	{
+		const uint32 IdleMs = UnrealAiWaitTime::HarnessSyncIdleAbortMs;
+		if (IdleMs == 0 || !Harness)
+		{
+			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(IdleMs == 0 ? TEXT("idle_abort_disabled") : TEXT("no_harness"));
+			return false;
+		}
+		if (!Harness->IsTurnInProgress() && !Harness->IsPlanPipelineActive())
+		{
+			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("turn_not_in_progress"));
+			return false;
+		}
+		if (Harness->HasActiveLlmTransportRequest())
+		{
+			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("active_llm_transport"));
+			return false;
+		}
+		if (Harness->ShouldSuppressIdleAbort())
+		{
+			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("suppress_idle_abort"));
+			return false;
+		}
+		double AsstIdle = -1.0;
+		double HttpIdle = -1.0;
+		double LlmIdle = -1.0;
+		UnrealAiHarnessProgressTelemetry::GetStreamIdleSeconds(AsstIdle, HttpIdle, LlmIdle);
+		const double ThreshSec = static_cast<double>(IdleMs) / 1000.0;
+		const bool bHttpTelemetryValid = (HttpIdle >= 0.0);
+		if (bHttpTelemetryValid)
+		{
+			if (HttpIdle < ThreshSec)
+			{
+				UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("http_not_idle_enough"));
+				return false;
+			}
+		}
+		else
+		{
+			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("http_idle_unset_assistant_only"));
+		}
+		const bool bAssistantStale = (AsstIdle >= ThreshSec) || (AsstIdle < 0.0);
+		if (!bAssistantStale)
+		{
+			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("assistant_not_idle_enough"));
+			return false;
+		}
+		if (LlmIdle >= 0.0 && LlmIdle < ThreshSec)
+		{
+			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("llm_submit_recent"));
+			return false;
+		}
+		UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT(""));
+		return true;
+	}
+
 	static FString AgentModeToLabel(const EUnrealAiAgentMode Mode)
 	{
 		switch (Mode)
@@ -45,11 +103,19 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 	 * Cannot use a blocking DoneEvent->Wait on the game thread: UE HTTP and harness stream handlers
 	 * dispatch completion work to the game thread — while waiting, nothing pumps the queue → apparent hang.
 	 */
-	static bool WaitForHarnessEventWhilePumpingGameThread(FEvent* Event, uint32 WaitMs)
+	static bool WaitForHarnessEventWhilePumpingGameThread(
+		FEvent* Event,
+		uint32 WaitMs,
+		IUnrealAiAgentHarness* HarnessForIdle = nullptr,
+		bool* bOutIdleAbort = nullptr)
 	{
 		if (!Event)
 		{
 			return false;
+		}
+		if (bOutIdleAbort)
+		{
+			*bOutIdleAbort = false;
 		}
 		const double DeadlineSec = FPlatformTime::Seconds() + static_cast<double>(WaitMs) / 1000.0;
 		while (FPlatformTime::Seconds() < DeadlineSec)
@@ -57,6 +123,11 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 			if (Event->Wait(0u))
 			{
 				return true;
+			}
+			if (HarnessForIdle && bOutIdleAbort && TryHarnessIdleAbort(HarnessForIdle))
+			{
+				*bOutIdleAbort = true;
+				return false;
 			}
 			FHttpModule::Get().GetHttpManager().Tick(0.f);
 			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
@@ -69,15 +140,22 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 	{
 		Done,
 		SubTurn,
-		Timeout
+		Timeout,
+		IdleAbort
 	};
 
 	/** Prefer Done over SubTurn when both could be set in the same pump. */
 	static EPlanHarnessSyncSegment WaitForDoneOrPlanSubTurnWhilePumpingGameThread(
 		FEvent* DoneEvent,
 		FEvent* SubTurnEvent,
-		uint32 WaitMs)
+		uint32 WaitMs,
+		IUnrealAiAgentHarness* HarnessForIdle,
+		bool* bOutIdleAbort)
 	{
+		if (bOutIdleAbort)
+		{
+			*bOutIdleAbort = false;
+		}
 		const double DeadlineSec = FPlatformTime::Seconds() + static_cast<double>(WaitMs) / 1000.0;
 		while (FPlatformTime::Seconds() < DeadlineSec)
 		{
@@ -88,6 +166,11 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 			if (SubTurnEvent && SubTurnEvent->Wait(0u))
 			{
 				return EPlanHarnessSyncSegment::SubTurn;
+			}
+			if (HarnessForIdle && bOutIdleAbort && TryHarnessIdleAbort(HarnessForIdle))
+			{
+				*bOutIdleAbort = true;
+				return EPlanHarnessSyncSegment::IdleAbort;
 			}
 			FHttpModule::Get().GetHttpManager().Tick(0.f);
 			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
@@ -100,6 +183,11 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		if (SubTurnEvent && SubTurnEvent->Wait(0u))
 		{
 			return EPlanHarnessSyncSegment::SubTurn;
+		}
+		if (HarnessForIdle && bOutIdleAbort && TryHarnessIdleAbort(HarnessForIdle))
+		{
+			*bOutIdleAbort = true;
+			return EPlanHarnessSyncSegment::IdleAbort;
 		}
 		return EPlanHarnessSyncSegment::Timeout;
 	}
@@ -191,7 +279,12 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		if (Mode == EUnrealAiAgentMode::Plan)
 		{
 			// Same pipeline as SChatComposer Plan mode: planner DAG pass + per-node Agent runs.
-			const TSharedRef<FUnrealAiPlanExecutor> PlanRun = FUnrealAiPlanExecutor::Start(Harness, Ctx, Req, Sink);
+			FUnrealAiPlanExecutorStartOptions PlanOpts;
+			if (FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HEADED_PLAN_HARNESS_PLANNER_ONLY")).TrimStartAndEnd() == TEXT("1"))
+			{
+				PlanOpts.bHarnessPlannerOnlyNoExecute = true;
+			}
+			const TSharedRef<FUnrealAiPlanExecutor> PlanRun = FUnrealAiPlanExecutor::Start(Harness, Ctx, Req, Sink, PlanOpts);
 			(void)PlanRun;
 		}
 		else
@@ -200,19 +293,25 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		}
 
 		bool bSignaled = false;
+		bool bIdleAbort = false;
 		int32 PlanSubTurnCompletionsBeforeTimeout = 0;
+		// Plan: fresh HarnessSyncWaitMs per segment; PlanSubTurnEvent resets when FUnrealAiPlanExecutor calls OnPlanHarnessSubTurnComplete (after planner parse and each node).
 		if (Mode == EUnrealAiAgentMode::Plan && PlanSubTurnEvent)
 		{
 			for (;;)
 			{
-				const EPlanHarnessSyncSegment Seg =
-					WaitForDoneOrPlanSubTurnWhilePumpingGameThread(DoneEvent, PlanSubTurnEvent, WaitMs);
+				const EPlanHarnessSyncSegment Seg = WaitForDoneOrPlanSubTurnWhilePumpingGameThread(
+					DoneEvent,
+					PlanSubTurnEvent,
+					WaitMs,
+					Harness,
+					&bIdleAbort);
 				if (Seg == EPlanHarnessSyncSegment::Done)
 				{
 					bSignaled = true;
 					break;
 				}
-				if (Seg == EPlanHarnessSyncSegment::Timeout)
+				if (Seg == EPlanHarnessSyncSegment::Timeout || Seg == EPlanHarnessSyncSegment::IdleAbort)
 				{
 					break;
 				}
@@ -227,30 +326,59 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		}
 		else
 		{
-			bSignaled = WaitForHarnessEventWhilePumpingGameThread(DoneEvent, WaitMs);
+			bSignaled = WaitForHarnessEventWhilePumpingGameThread(DoneEvent, WaitMs, Harness, &bIdleAbort);
 		}
 
 		if (!bSignaled)
 		{
 			const FString ModeLabel = AgentModeToLabel(Mode);
-			const TSharedPtr<FJsonObject> TimeoutDiag = UnrealAiHarnessProgressTelemetry::BuildHarnessSyncTimeoutDiagnosticJson(
-				ModeLabel,
-				WaitMs,
-				Mode == EUnrealAiAgentMode::Plan ? PlanSubTurnCompletionsBeforeTimeout : 0,
-				Mode == EUnrealAiAgentMode::Plan);
-			UE_LOG(
-				LogTemp,
-				Warning,
-				TEXT("UnrealAi harness: sync_wait_timeout after %u ms; issuing CancelTurn(). %s"),
-				WaitMs,
-				*UnrealAiHarnessProgressTelemetry::FormatHarnessSyncTimeoutLogLine(
+			if (bIdleAbort)
+			{
+				const uint32 IdleAbortMs = UnrealAiWaitTime::HarnessSyncIdleAbortMs;
+				const TSharedPtr<FJsonObject> IdleDiag = UnrealAiHarnessProgressTelemetry::BuildHarnessSyncIdleAbortDiagnosticJson(
+					ModeLabel,
+					IdleAbortMs,
+					Mode == EUnrealAiAgentMode::Plan,
+					Harness->HasActiveLlmTransportRequest(),
+					Harness->ShouldSuppressIdleAbort());
+				UE_LOG(
+					LogTemp,
+					Warning,
+					TEXT("UnrealAi harness: sync_idle_abort (idle_abort_ms=%u); issuing CancelTurn(). %s"),
+					IdleAbortMs,
+					*UnrealAiHarnessProgressTelemetry::FormatHarnessSyncIdleAbortLogLine(
+						ModeLabel,
+						IdleAbortMs,
+						Mode == EUnrealAiAgentMode::Plan,
+						Harness->HasActiveLlmTransportRequest(),
+						Harness->ShouldSuppressIdleAbort()));
+				if (Sink.IsValid() && IdleDiag.IsValid())
+				{
+					Sink->AppendHarnessDiagnosticJson(IdleDiag);
+				}
+			}
+			else
+			{
+				const TSharedPtr<FJsonObject> TimeoutDiag = UnrealAiHarnessProgressTelemetry::BuildHarnessSyncTimeoutDiagnosticJson(
 					ModeLabel,
 					WaitMs,
 					Mode == EUnrealAiAgentMode::Plan ? PlanSubTurnCompletionsBeforeTimeout : 0,
-					Mode == EUnrealAiAgentMode::Plan));
-			if (Sink.IsValid() && TimeoutDiag.IsValid())
-			{
-				Sink->AppendHarnessDiagnosticJson(TimeoutDiag);
+					Mode == EUnrealAiAgentMode::Plan,
+					UnrealAiHarnessProgressTelemetry::GetIdleAbortSkipReason());
+				UE_LOG(
+					LogTemp,
+					Warning,
+					TEXT("UnrealAi harness: sync_wait_timeout after %u ms; issuing CancelTurn(). %s"),
+					WaitMs,
+					*UnrealAiHarnessProgressTelemetry::FormatHarnessSyncTimeoutLogLine(
+						ModeLabel,
+						WaitMs,
+						Mode == EUnrealAiAgentMode::Plan ? PlanSubTurnCompletionsBeforeTimeout : 0,
+						Mode == EUnrealAiAgentMode::Plan));
+				if (Sink.IsValid() && TimeoutDiag.IsValid())
+				{
+					Sink->AppendHarnessDiagnosticJson(TimeoutDiag);
+				}
 			}
 			Harness->CancelTurn();
 			const uint32 CancelDrainWaitMs = UnrealAiWaitTime::HarnessCancelDrainWaitMs;
@@ -276,7 +404,8 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 				Sink->OnRunFinished(false, ForcedErr);
 				UE_LOG(LogTemp, Warning, TEXT("UnrealAi harness: forced terminal failure emitted from runner timeout path."));
 			}
-			OutError = TEXT("Harness run timed out waiting for completion");
+			OutError = bIdleAbort ? TEXT("Harness run aborted: sync idle stall (post-stream)")
+								  : TEXT("Harness run timed out waiting for completion");
 			bOutSuccess = false;
 			FPlatformProcess::ReturnSynchEventToPool(DoneEvent);
 			if (PlanSubTurnEvent)

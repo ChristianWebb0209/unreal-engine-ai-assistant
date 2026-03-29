@@ -12,6 +12,8 @@ struct FUnrealAiPlanExecutorStartOptions
 {
 	/** When true (editor Plan chat), stop after planner parse until ResumeNodeExecution / ResumeExecutionFromDag. */
 	bool bPauseAfterPlannerForBuild = false;
+	/** Headed harness / smoke: after valid DAG parse, finish successfully without running agent node turns. */
+	bool bHarnessPlannerOnlyNoExecute = false;
 };
 
 class FUnrealAiPlanExecutor : public TSharedFromThis<FUnrealAiPlanExecutor>
@@ -60,6 +62,7 @@ private:
 	bool bCancelled = false;
 	bool bAwaitingBuild = false;
 	bool bPauseAfterPlannerForBuild = false;
+	bool bHarnessPlannerOnlyNoExecute = false;
 	/** 0 = planner phase complete; 1..N = node execution phase index (for sink continuation). */
 	int32 PlanExecutionPhase = 0;
 	TArray<FString> ReadyNodeIds;

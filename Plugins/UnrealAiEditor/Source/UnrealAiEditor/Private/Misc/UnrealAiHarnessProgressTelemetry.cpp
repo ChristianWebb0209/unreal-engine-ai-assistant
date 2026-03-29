@@ -17,6 +17,7 @@ namespace UnrealAiHarnessProgressTelemetry
 		double GLastLlmSubmitSec = 0.0;
 		double GLastHttpResponseCompleteSec = 0.0;
 		int32 GPlanSubTurnCompleteCount = 0;
+		FString GIdleAbortSkipReason;
 
 		static double AgeSec(const double LastSec, const double NowSec)
 		{
@@ -52,6 +53,7 @@ namespace UnrealAiHarnessProgressTelemetry
 		GLastLlmSubmitSec = 0.0;
 		GLastHttpResponseCompleteSec = 0.0;
 		GPlanSubTurnCompleteCount = 0;
+		GIdleAbortSkipReason.Reset();
 	}
 
 	void NotifyAssistantDelta()
@@ -85,17 +87,111 @@ namespace UnrealAiHarnessProgressTelemetry
 		GLastHttpResponseCompleteSec = FPlatformTime::Seconds();
 	}
 
+	void NotifyHttpStreamParseComplete()
+	{
+		// Refresh after full SSE parse so "HTTP idle" measures from end of token delivery, not first response bytes.
+		FScopeLock Lock(&Mutex);
+		GLastHttpResponseCompleteSec = FPlatformTime::Seconds();
+	}
+
 	void NotifyPlanSubTurnComplete()
 	{
 		FScopeLock Lock(&Mutex);
 		++GPlanSubTurnCompleteCount;
 	}
 
+	void GetStreamIdleSeconds(double& OutAssistantIdleSec, double& OutHttpIdleSec, double& OutLlmSubmitIdleSec)
+	{
+		FScopeLock Lock(&Mutex);
+		const double NowSec = FPlatformTime::Seconds();
+		OutAssistantIdleSec = AgeSec(GLastAssistantDeltaSec, NowSec);
+		OutHttpIdleSec = AgeSec(GLastHttpResponseCompleteSec, NowSec);
+		OutLlmSubmitIdleSec = AgeSec(GLastLlmSubmitSec, NowSec);
+	}
+
+	void SetIdleAbortSkipReason(const TCHAR* Reason)
+	{
+		FScopeLock Lock(&Mutex);
+		GIdleAbortSkipReason = Reason ? FString(Reason) : FString();
+	}
+
+	FString GetIdleAbortSkipReason()
+	{
+		FScopeLock Lock(&Mutex);
+		return GIdleAbortSkipReason;
+	}
+
+	TSharedPtr<FJsonObject> BuildHarnessSyncIdleAbortDiagnosticJson(
+		const FString& AgentModeLabel,
+		const uint32 IdleAbortMs,
+		const bool bPlanMode,
+		const bool bHasActiveLlmTransport,
+		const bool bSuppressIdleAbort)
+	{
+		double NowSec = 0.0;
+		double RunStartSec = 0.0;
+		double LastAssistant = 0.0;
+		double LastHttp = 0.0;
+		double LastLlm = 0.0;
+		int32 PlanSubTurnCount = 0;
+		{
+			FScopeLock Lock(&Mutex);
+			NowSec = FPlatformTime::Seconds();
+			RunStartSec = GRunStartSec;
+			LastAssistant = GLastAssistantDeltaSec;
+			LastHttp = GLastHttpResponseCompleteSec;
+			LastLlm = GLastLlmSubmitSec;
+			PlanSubTurnCount = GPlanSubTurnCompleteCount;
+		}
+
+		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+		O->SetStringField(TEXT("type"), TEXT("harness_sync_idle_abort_diagnostic"));
+		O->SetStringField(TEXT("agent_mode"), AgentModeLabel);
+		O->SetBoolField(TEXT("plan_mode"), bPlanMode);
+		O->SetNumberField(TEXT("idle_abort_ms"), static_cast<double>(IdleAbortMs));
+		O->SetBoolField(TEXT("has_active_llm_transport"), bHasActiveLlmTransport);
+		O->SetBoolField(TEXT("should_suppress_idle_abort"), bSuppressIdleAbort);
+		O->SetNumberField(TEXT("plan_sub_turn_signals_total"), static_cast<double>(PlanSubTurnCount));
+		O->SetNumberField(TEXT("wall_now_sec"), NowSec);
+		O->SetNumberField(TEXT("run_start_sec"), RunStartSec);
+		SetNumberOrNegOne(O, TEXT("seconds_since_run_start"), RunStartSec > 0.0 ? (NowSec - RunStartSec) : -1.0);
+		SetNumberOrNegOne(O, TEXT("seconds_since_last_assistant_delta"), AgeSec(LastAssistant, NowSec));
+		SetNumberOrNegOne(O, TEXT("seconds_since_last_http_response_complete"), AgeSec(LastHttp, NowSec));
+		SetNumberOrNegOne(O, TEXT("seconds_since_last_llm_submit"), AgeSec(LastLlm, NowSec));
+		O->SetStringField(
+			TEXT("interpretation_notes"),
+			TEXT("Idle abort: turn still non-terminal, transport request finished, harness not suppressing, and stream telemetry idle exceeded idle_abort_ms."));
+		return O;
+	}
+
+	FString FormatHarnessSyncIdleAbortLogLine(
+		const FString& AgentModeLabel,
+		const uint32 IdleAbortMs,
+		const bool bPlanMode,
+		const bool bHasActiveLlmTransport,
+		const bool bSuppressIdleAbort)
+	{
+		double Asst = -1.0, Http = -1.0, Llm = -1.0;
+		GetStreamIdleSeconds(Asst, Http, Llm);
+		return FString::Printf(
+			TEXT("UnrealAi harness: sync_idle_abort diagnostic mode=%s plan=%s idle_abort_ms=%u "
+				 "age_sec(assistant=%.2f http=%.2f llm_submit=%.2f) active_http=%s suppress=%s"),
+			*AgentModeLabel,
+			bPlanMode ? TEXT("yes") : TEXT("no"),
+			IdleAbortMs,
+			Asst,
+			Http,
+			Llm,
+			bHasActiveLlmTransport ? TEXT("yes") : TEXT("no"),
+			bSuppressIdleAbort ? TEXT("yes") : TEXT("no"));
+	}
+
 	TSharedPtr<FJsonObject> BuildHarnessSyncTimeoutDiagnosticJson(
 		const FString& AgentModeLabel,
 		const uint32 SyncWaitMs,
 		const int32 PlanSubTurnCompletionsBeforeTimeout,
-		const bool bPlanMode)
+		const bool bPlanMode,
+		const FString& IdleAbortSkipReason)
 	{
 		double NowSec = 0.0;
 		double RunStartSec = 0.0;
@@ -153,10 +249,14 @@ namespace UnrealAiHarnessProgressTelemetry
 			StallHint = TEXT("possible_stall_after_tool_before_new_model_tokens");
 		}
 		O->SetStringField(TEXT("stall_hint"), StallHint);
+		if (!IdleAbortSkipReason.IsEmpty())
+		{
+			O->SetStringField(TEXT("idle_abort_skip_reason"), IdleAbortSkipReason);
+		}
 		O->SetStringField(
 			TEXT("interpretation_notes"),
 			TEXT("OpenAI transport delivers the full SSE body on one completion callback; seconds_since_last_http_response_complete "
-				 "updates when that fires. Long gaps with recent llm_submit suggest blocked HTTP; gaps after tool_finish suggest tools/editor."));
+				 "updates when that fires (refreshed after SSE parse). Long gaps with recent llm_submit suggest blocked HTTP; gaps after tool_finish suggest tools/editor."));
 		return O;
 	}
 
@@ -170,7 +270,8 @@ namespace UnrealAiHarnessProgressTelemetry
 			AgentModeLabel,
 			SyncWaitMs,
 			PlanSubTurnCompletionsBeforeTimeout,
-			bPlanMode);
+			bPlanMode,
+			GetIdleAbortSkipReason());
 		if (!J.IsValid())
 		{
 			return TEXT("UnrealAi harness: sync timeout (telemetry unavailable)");
