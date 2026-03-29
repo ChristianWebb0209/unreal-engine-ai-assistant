@@ -25,6 +25,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Misc/UnrealAiRecentUiTracker.h"
+#include "Planning/UnrealAiPlanDag.h"
 
 namespace UnrealAiCtxPlanChildPriv
 {
@@ -255,11 +256,77 @@ void FUnrealAiContextService::SetActivePlanDag(const FString& DagJson)
 	{
 		return;
 	}
-	FAgentContextState* S = FindOrAddState(ActiveProjectId, ActiveThreadId);
+	SetActivePlanDagForThread(ActiveProjectId, ActiveThreadId, DagJson);
+}
+
+void FUnrealAiContextService::SetActivePlanDagForThread(const FString& ProjectId, const FString& ThreadId, const FString& DagJson)
+{
+	if (ProjectId.IsEmpty() || ThreadId.IsEmpty())
+	{
+		return;
+	}
+	FAgentContextState* S = FindOrAddState(ProjectId, ThreadId);
 	S->ActivePlanDagJson = DagJson;
 	S->PlanNodeStatusById.Reset();
 	S->PlanNodeSummaryById.Reset();
-	ScheduleSave(ActiveProjectId, ActiveThreadId);
+	ScheduleSave(ProjectId, ThreadId);
+}
+
+void FUnrealAiContextService::ReplaceActivePlanDagWithFreshNodeReset(const FString& DagJson, const TSet<FString>& FreshNodeIds)
+{
+	if (ActiveProjectId.IsEmpty() || ActiveThreadId.IsEmpty())
+	{
+		return;
+	}
+	ReplaceActivePlanDagWithFreshNodeResetForThread(ActiveProjectId, ActiveThreadId, DagJson, FreshNodeIds);
+}
+
+void FUnrealAiContextService::ReplaceActivePlanDagWithFreshNodeResetForThread(
+	const FString& ProjectId,
+	const FString& ThreadId,
+	const FString& DagJson,
+	const TSet<FString>& FreshNodeIds)
+{
+	if (ProjectId.IsEmpty() || ThreadId.IsEmpty())
+	{
+		return;
+	}
+	FUnrealAiPlanDag Parsed;
+	FString Err;
+	if (!UnrealAiPlanDag::ParseDagJson(DagJson, Parsed, Err))
+	{
+		return;
+	}
+	TSet<FString> AllIds;
+	for (const FUnrealAiDagNode& N : Parsed.Nodes)
+	{
+		AllIds.Add(N.Id);
+	}
+	FAgentContextState* S = FindOrAddState(ProjectId, ThreadId);
+	S->ActivePlanDagJson = DagJson;
+	for (auto It = S->PlanNodeStatusById.CreateIterator(); It; ++It)
+	{
+		if (!AllIds.Contains(It.Key()))
+		{
+			It.RemoveCurrent();
+		}
+	}
+	for (auto It = S->PlanNodeSummaryById.CreateIterator(); It; ++It)
+	{
+		if (!AllIds.Contains(It.Key()))
+		{
+			It.RemoveCurrent();
+		}
+	}
+	for (const FString& Id : FreshNodeIds)
+	{
+		if (AllIds.Contains(Id))
+		{
+			S->PlanNodeStatusById.Remove(Id);
+			S->PlanNodeSummaryById.Remove(Id);
+		}
+	}
+	ScheduleSave(ProjectId, ThreadId);
 }
 
 void FUnrealAiContextService::SetPlanNodeStatus(const FString& NodeId, const FString& Status, const FString& Summary)
@@ -268,13 +335,27 @@ void FUnrealAiContextService::SetPlanNodeStatus(const FString& NodeId, const FSt
 	{
 		return;
 	}
-	FAgentContextState* S = FindOrAddState(ActiveProjectId, ActiveThreadId);
+	SetPlanNodeStatusForThread(ActiveProjectId, ActiveThreadId, NodeId, Status, Summary);
+}
+
+void FUnrealAiContextService::SetPlanNodeStatusForThread(
+	const FString& ProjectId,
+	const FString& ThreadId,
+	const FString& NodeId,
+	const FString& Status,
+	const FString& Summary)
+{
+	if (ProjectId.IsEmpty() || ThreadId.IsEmpty() || NodeId.IsEmpty())
+	{
+		return;
+	}
+	FAgentContextState* S = FindOrAddState(ProjectId, ThreadId);
 	S->PlanNodeStatusById.Add(NodeId, Status);
 	if (!Summary.IsEmpty())
 	{
 		S->PlanNodeSummaryById.Add(NodeId, Summary);
 	}
-	ScheduleSave(ActiveProjectId, ActiveThreadId);
+	ScheduleSave(ProjectId, ThreadId);
 }
 
 void FUnrealAiContextService::ClearPlanStaleRunningMarkers(const FString& ProjectId, const FString& ThreadId)

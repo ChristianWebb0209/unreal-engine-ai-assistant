@@ -91,6 +91,56 @@ namespace UnrealAiAgentHarnessPriv
 		OutSerialized = SerializeSuggestedCorrectCallForNudge(*Suggested);
 	}
 
+	/** asset_apply_properties failures often differ only in property keys; normalize so repeat-failure stop triggers. */
+	static FString NormalizeToolFailureSignatureForRepeatCount(const FString& InvokeName, const FString& InvokeArgs)
+	{
+		if (InvokeName.Equals(TEXT("asset_apply_properties"), ESearchCase::IgnoreCase))
+		{
+			TSharedPtr<FJsonObject> O;
+			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(InvokeArgs);
+			if (FJsonSerializer::Deserialize(Reader, O) && O.IsValid())
+			{
+				FString P;
+				if (O->TryGetStringField(TEXT("object_path"), P) || O->TryGetStringField(TEXT("path"), P))
+				{
+					P.TrimStartAndEndInline();
+					if (!P.IsEmpty())
+					{
+						return (InvokeName + TEXT("|") + P).ToLower();
+					}
+				}
+			}
+		}
+		return (InvokeName + TEXT("|") + InvokeArgs.Left(220)).ToLower();
+	}
+
+	static bool LooksLikeIncompleteAskAnswer(const FString& Trim)
+	{
+		if (Trim.IsEmpty())
+		{
+			return true;
+		}
+		if (Trim.Equals(TEXT("Yes."), ESearchCase::IgnoreCase) || Trim.Equals(TEXT("No."), ESearchCase::IgnoreCase)
+			|| Trim.Equals(TEXT("OK."), ESearchCase::IgnoreCase))
+		{
+			return false;
+		}
+		if (Trim.Len() >= 40)
+		{
+			return false;
+		}
+		const TCHAR Last = Trim[Trim.Len() - 1];
+		if (Last == TEXT('.') || Last == TEXT('?') || Last == TEXT('!'))
+		{
+			return false;
+		}
+		if (Trim.Len() < 20)
+		{
+			return true;
+		}
+		return !Trim.Contains(TEXT(" "));
+	}
+
 	static FString BuildToolSelectorRanksJson(const FUnrealAiToolSurfaceTelemetry& Tel)
 	{
 		TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
@@ -406,6 +456,57 @@ namespace UnrealAiAgentHarnessPriv
 		return Tc.Name.IsEmpty() && Tc.Id.IsEmpty() && Tc.ArgumentsJson.IsEmpty();
 	}
 
+	static bool ToolArgumentsJsonOversizedForDeserialize(const FString& S)
+	{
+		return S.Len() > UnrealAiWaitTime::MaxToolArgumentsJsonDeserializeChars;
+	}
+
+	/**
+	 * Malformed streamed tool `arguments` (e.g. truncated "\\u", stray "\\" at EOS) can trip a check() inside
+	 * UE's TJsonReader (BufferReader ReaderPos + Num <= ReaderSize). Conservative scan: return true if we should
+	 * skip Deserialize until more chunks arrive or the slot times out.
+	 */
+	static bool ToolArgumentsJsonLikelyUnsafeForEngineJsonReader(const FString& S)
+	{
+		const int32 N = S.Len();
+		for (int32 i = 0; i < N; ++i)
+		{
+			if (S[i] != TEXT('\\'))
+			{
+				continue;
+			}
+			if (i + 1 >= N)
+			{
+				return true;
+			}
+			const TCHAR C = S[i + 1];
+			if (C == TEXT('u') || C == TEXT('U'))
+			{
+				if (i + 6 > N)
+				{
+					return true;
+				}
+				for (int32 h = 2; h < 6; ++h)
+				{
+					if (!FChar::IsHexDigit(S[i + h]))
+					{
+						return true;
+					}
+				}
+				i += 5;
+				continue;
+			}
+			if (C == TEXT('"') || C == TEXT('\\') || C == TEXT('/') || C == TEXT('b') || C == TEXT('f')
+				|| C == TEXT('n') || C == TEXT('r') || C == TEXT('t'))
+			{
+				++i;
+				continue;
+			}
+			return true;
+		}
+		return false;
+	}
+
 	struct FAgentTurnRunner : public TSharedFromThis<FAgentTurnRunner>
 	{
 		FUnrealAiAgentTurnRequest Request;
@@ -432,8 +533,8 @@ namespace UnrealAiAgentHarnessPriv
 		int32 EffectiveMaxTurnTokensHint = 0;
 		/** Retries transient HTTP-level cancellations without consuming a round. */
 		int32 TransientTransportRetryCountThisRound = 0;
-		// Keep retries minimal so headed live runs fail fast instead of stalling for many minutes.
-		static constexpr int32 MaxTransientTransportRetriesPerRound = 0;
+		/** Plan-node agent only: retries HTTP complete-without-Finish (truncated SSE) without consuming a round. */
+		int32 StreamNoFinishRetryCountThisRound = 0;
 
 		FString AssistantBuffer;
 		TArray<FUnrealAiToolCallSpec> PendingToolCalls;
@@ -455,6 +556,15 @@ namespace UnrealAiAgentHarnessPriv
 		FString LastConsecutiveIdenticalOkSignature;
 		int32 ConsecutiveIdenticalOkCount = 0;
 		bool bPendingFailRepeatedIdenticalOk = false;
+		/** Plan node (`*_plan_*`) only: same inner tool name exceeded per-node limit; CompleteToolPath calls Fail. */
+		bool bPendingFailPlanNodeSameToolBudget = false;
+		FString PlanNodeSameToolBudgetName;
+		int32 PlanNodeSameToolBudgetCount = 0;
+		int32 PlanNodeSameToolBudgetLimit = 0;
+		/** Headed scenario runner only: editor_state_snapshot_read budget; CompleteToolPath fails if exceeded. */
+		bool bPendingFailHarnessSnapshotReadSpam = false;
+		bool bHeadedScenarioStrictToolBudgets = false;
+		int32 EditorSnapshotReadInvokeCount = 0;
 		int32 ReplanCount = 0;
 		int32 QueueStepsPending = 0;
 		bool bFinishSeen = false;
@@ -484,6 +594,8 @@ namespace UnrealAiAgentHarnessPriv
 		FString UsageQueryHash;
 		int32 UnwrapFailuresThisRound = 0;
 		int32 ToolRepairNudgesThisRun = 0;
+		/** Ask mode: one repair nudge for empty or truncated assistant text before accepting success. */
+		int32 AskAnswerRepairNudgeCount = 0;
 
 		void HandleEvent(const FUnrealAiLlmStreamEvent& Ev);
 		void DispatchLlm(bool bRetrySameRound = false);
@@ -504,6 +616,10 @@ namespace UnrealAiAgentHarnessPriv
 
 		bool ShouldSuppressIdleAbort() const;
 		void MaybeFailIfHttpCompleteWithoutFinish();
+		bool IsPlanNodeAgentThread() const;
+		int32 GetMaxTransientTransportRetriesPerRound() const;
+		int32 GetMaxStreamNoFinishRetriesPerRound() const;
+		uint32 GetEffectiveStreamNoFinishGraceMs() const;
 
 		static constexpr int32 CharPerTokenApprox = 4;
 	};
@@ -758,6 +874,7 @@ namespace UnrealAiAgentHarnessPriv
 			}
 			++LlmRound;
 			TransientTransportRetryCountThisRound = 0;
+			StreamNoFinishRetryCountThisRound = 0;
 			if (LlmRound > 1 && Sink.IsValid())
 			{
 				Sink->OnRunContinuation(LlmRound - 1, EffectiveMaxLlmRounds);
@@ -906,18 +1023,28 @@ namespace UnrealAiAgentHarnessPriv
 
 	bool FAgentTurnRunner::TryParseArgumentsJsonComplete(const FString& ArgsJson) const
 	{
-		if (ArgsJson.TrimStartAndEnd().IsEmpty())
+		FString Trimmed = ArgsJson;
+		Trimmed.TrimStartAndEndInline();
+		if (Trimmed.IsEmpty())
+		{
+			return false;
+		}
+		if (ToolArgumentsJsonOversizedForDeserialize(Trimmed))
+		{
+			return false;
+		}
+		if (ToolArgumentsJsonLikelyUnsafeForEngineJsonReader(Trimmed))
 		{
 			return false;
 		}
 		TSharedPtr<FJsonObject> Obj;
-		TSharedRef<TJsonReader<>> ReaderObj = TJsonReaderFactory<>::Create(ArgsJson);
+		const TSharedRef<TJsonReader<>> ReaderObj = TJsonReaderFactory<>::Create(Trimmed);
 		if (FJsonSerializer::Deserialize(ReaderObj, Obj) && Obj.IsValid())
 		{
 			return true;
 		}
 		TArray<TSharedPtr<FJsonValue>> Arr;
-		TSharedRef<TJsonReader<>> ReaderArr = TJsonReaderFactory<>::Create(ArgsJson);
+		const TSharedRef<TJsonReader<>> ReaderArr = TJsonReaderFactory<>::Create(Trimmed);
 		return FJsonSerializer::Deserialize(ReaderArr, Arr);
 	}
 
@@ -1029,6 +1156,30 @@ namespace UnrealAiAgentHarnessPriv
 		return false;
 	}
 
+	bool FAgentTurnRunner::IsPlanNodeAgentThread() const
+	{
+		return Request.Mode == EUnrealAiAgentMode::Agent && Request.ThreadId.Contains(TEXT("_plan_"));
+	}
+
+	int32 FAgentTurnRunner::GetMaxTransientTransportRetriesPerRound() const
+	{
+		return IsPlanNodeAgentThread() ? FMath::Max(0, UnrealAiWaitTime::PlanNodeTransientHttpMaxRetries) : 0;
+	}
+
+	int32 FAgentTurnRunner::GetMaxStreamNoFinishRetriesPerRound() const
+	{
+		return IsPlanNodeAgentThread() ? FMath::Max(0, UnrealAiWaitTime::PlanNodeStreamNoFinishMaxRetries) : 0;
+	}
+
+	uint32 FAgentTurnRunner::GetEffectiveStreamNoFinishGraceMs() const
+	{
+		if (IsPlanNodeAgentThread() && UnrealAiWaitTime::PlanNodeStreamNoFinishGraceMs > 0)
+		{
+			return UnrealAiWaitTime::PlanNodeStreamNoFinishGraceMs;
+		}
+		return UnrealAiWaitTime::HarnessStreamNoFinishGraceMs;
+	}
+
 	void FAgentTurnRunner::MaybeFailIfHttpCompleteWithoutFinish()
 	{
 		if (bCancelled.load(std::memory_order_relaxed) || bTerminal.load(std::memory_order_relaxed) || bFinishReceived)
@@ -1039,7 +1190,7 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
-		const uint32 GraceMs = UnrealAiWaitTime::HarnessStreamNoFinishGraceMs;
+		const uint32 GraceMs = GetEffectiveStreamNoFinishGraceMs();
 		if (GraceMs == 0)
 		{
 			return;
@@ -1057,6 +1208,37 @@ namespace UnrealAiAgentHarnessPriv
 		if (AsstIdle < ThreshSec || HttpIdle < ThreshSec)
 		{
 			return;
+		}
+		const int32 MaxNoFinishRetries = GetMaxStreamNoFinishRetriesPerRound();
+		if (MaxNoFinishRetries > 0 && !bToolExecutionInProgress)
+		{
+			bool bIncompleteToolStream = false;
+			for (int32 Idx = 0; Idx < PendingToolCalls.Num(); ++Idx)
+			{
+				const FUnrealAiToolCallSpec& Slot = PendingToolCalls[Idx];
+				if (UnrealAiAgentHarnessPriv::IsPlaceholderPendingToolSlot(Slot))
+				{
+					continue;
+				}
+				if (!IsToolCallReadyForExecution(Slot))
+				{
+					bIncompleteToolStream = true;
+					break;
+				}
+			}
+			if (!bIncompleteToolStream && StreamNoFinishRetryCountThisRound < MaxNoFinishRetries)
+			{
+				++StreamNoFinishRetryCountThisRound;
+				EmitEnforcementEvent(
+					TEXT("harness_stream_no_finish_retry"),
+					FString::Printf(
+						TEXT("attempt=%d max=%d grace_ms=%u"),
+						StreamNoFinishRetryCountThisRound,
+						MaxNoFinishRetries,
+						GraceMs));
+				DispatchLlm(true);
+				return;
+			}
 		}
 		Fail(TEXT("HTTP response completed without a terminal stream Finish event (incomplete SSE or provider error)."));
 	}
@@ -1158,7 +1340,7 @@ namespace UnrealAiAgentHarnessPriv
 			const FString ErrorMsg = Ev.ErrorMessage.IsEmpty() ? TEXT("LLM error") : Ev.ErrorMessage;
 			if (!bCancelled.load(std::memory_order_relaxed)
 				&& ShouldRetryTransientTransportError(ErrorMsg)
-				&& TransientTransportRetryCountThisRound < MaxTransientTransportRetriesPerRound)
+				&& TransientTransportRetryCountThisRound < GetMaxTransientTransportRetriesPerRound())
 			{
 				++TransientTransportRetryCountThisRound;
 				DispatchLlm(true);
@@ -1250,6 +1432,109 @@ namespace UnrealAiAgentHarnessPriv
 		if (Sink.IsValid())
 		{
 			Sink->OnToolCallStarted(InvokeName, Tc.Id, InvokeArgs);
+		}
+		if (bHeadedScenarioStrictToolBudgets && InvokeName == TEXT("editor_state_snapshot_read"))
+		{
+			++EditorSnapshotReadInvokeCount;
+			if (EditorSnapshotReadInvokeCount > UnrealAiWaitTime::HarnessScenarioMaxReadSnapshotToolsPerTurn)
+			{
+				const FString InvokeSignatureBlocked = (InvokeName + TEXT("|") + InvokeArgs.Left(220)).ToLower();
+				const int32 SigCountBlocked = ToolInvokeCountBySignature.FindOrAdd(InvokeSignatureBlocked) + 1;
+				ToolInvokeCountBySignature.FindOrAdd(InvokeSignatureBlocked) = SigCountBlocked;
+				const int32 PrevNameCountSnap = ToolInvokeCountByName.FindRef(InvokeName);
+				ToolInvokeCountByName.FindOrAdd(InvokeName) = PrevNameCountSnap + 1;
+				const FString BlockMsg = FString::Printf(
+					TEXT("[Harness][reason=harness_read_tool_spam] Blocked: editor_state_snapshot_read exceeded headed scenario limit (%d per turn)."),
+					UnrealAiWaitTime::HarnessScenarioMaxReadSnapshotToolsPerTurn);
+				if (Sink.IsValid())
+				{
+					Sink->OnToolCallFinished(InvokeName, Tc.Id, false, UnrealAiTruncateForUi(BlockMsg), nullptr);
+				}
+				if (Conv.IsValid())
+				{
+					FUnrealAiConversationMessage Tm;
+					Tm.Role = TEXT("tool");
+					Tm.ToolCallId = Tc.Id;
+					Tm.Content = BlockMsg;
+					Conv->GetMessagesMutable().Add(Tm);
+				}
+				++CurrentRoundToolFailCount;
+				CurrentRoundExecutedToolNames.Add(InvokeName);
+				if (!Tc.Id.IsEmpty())
+				{
+					ExecutedToolCallIds.Add(Tc.Id);
+				}
+				bPendingFailHarnessSnapshotReadSpam = true;
+				bCurrentRoundRepeatedToolLoop = true;
+				EmitEnforcementEvent(TEXT("stream_tool_exec_done"), FString::Printf(TEXT("id=%s ok=0 blocked=snapshot_read_budget"), *Tc.Id));
+				EmitEnforcementEvent(
+					TEXT("harness_snapshot_read_blocked"),
+					FString::Printf(TEXT("invocation=%d"), EditorSnapshotReadInvokeCount));
+				if (UnrealAiRuntimeDefaults::ToolUsageLogEnabled)
+				{
+					UnrealAiToolUsageEventLogger::AppendOperationalEvent(UsageQueryHash, InvokeName, false, Request.ThreadId);
+				}
+				UnrealAiToolUsagePrior::NoteSessionOutcome(InvokeName, false);
+				LastConsecutiveIdenticalOkSignature.Reset();
+				ConsecutiveIdenticalOkCount = 0;
+				LastToolFailureSignature = InvokeSignatureBlocked;
+				RepeatedToolFailureCount = FMath::Max(RepeatedToolFailureCount, 1);
+				return;
+			}
+		}
+		const int32 PrevNameCount = ToolInvokeCountByName.FindRef(InvokeName);
+		const int32 PlanSameToolLimit = IsLikelyReadOnlyToolName(InvokeName)
+			? UnrealAiWaitTime::PlanNodeMaxInvocationsSameToolReadOnly
+			: UnrealAiWaitTime::PlanNodeMaxInvocationsSameTool;
+		if (Request.ThreadId.Contains(TEXT("_plan_")) && Request.Mode == EUnrealAiAgentMode::Agent
+			&& InvokeName != TEXT("agent_emit_todo_plan")
+			&& PrevNameCount >= PlanSameToolLimit)
+		{
+			const FString InvokeSignatureBlocked = (InvokeName + TEXT("|") + InvokeArgs.Left(220)).ToLower();
+			const int32 SigCountBlocked = ToolInvokeCountBySignature.FindOrAdd(InvokeSignatureBlocked) + 1;
+			ToolInvokeCountBySignature.FindOrAdd(InvokeSignatureBlocked) = SigCountBlocked;
+			ToolInvokeCountByName.FindOrAdd(InvokeName) = PrevNameCount + 1;
+			const FString BlockMsg = FString::Printf(
+				TEXT("[Harness][reason=plan_node_repeated_tool] Blocked: tool \"%s\" exceeded per-plan-node limit (%d invocations per tool name)."),
+				*InvokeName,
+				PlanSameToolLimit);
+			if (Sink.IsValid())
+			{
+				Sink->OnToolCallFinished(InvokeName, Tc.Id, false, UnrealAiTruncateForUi(BlockMsg), nullptr);
+			}
+			if (Conv.IsValid())
+			{
+				FUnrealAiConversationMessage Tm;
+				Tm.Role = TEXT("tool");
+				Tm.ToolCallId = Tc.Id;
+				Tm.Content = BlockMsg;
+				Conv->GetMessagesMutable().Add(Tm);
+			}
+			++CurrentRoundToolFailCount;
+			CurrentRoundExecutedToolNames.Add(InvokeName);
+			if (!Tc.Id.IsEmpty())
+			{
+				ExecutedToolCallIds.Add(Tc.Id);
+			}
+			bPendingFailPlanNodeSameToolBudget = true;
+			PlanNodeSameToolBudgetName = InvokeName;
+			PlanNodeSameToolBudgetCount = PrevNameCount + 1;
+			PlanNodeSameToolBudgetLimit = PlanSameToolLimit;
+			bCurrentRoundRepeatedToolLoop = true;
+			EmitEnforcementEvent(TEXT("stream_tool_exec_done"), FString::Printf(TEXT("id=%s ok=0 blocked=same_tool_budget"), *Tc.Id));
+			EmitEnforcementEvent(
+				TEXT("plan_node_same_tool_blocked"),
+				FString::Printf(TEXT("%s invocation=%d"), *InvokeName, PlanNodeSameToolBudgetCount));
+			if (UnrealAiRuntimeDefaults::ToolUsageLogEnabled)
+			{
+				UnrealAiToolUsageEventLogger::AppendOperationalEvent(UsageQueryHash, InvokeName, false, Request.ThreadId);
+			}
+			UnrealAiToolUsagePrior::NoteSessionOutcome(InvokeName, false);
+			LastConsecutiveIdenticalOkSignature.Reset();
+			ConsecutiveIdenticalOkCount = 0;
+			LastToolFailureSignature = InvokeSignatureBlocked;
+			RepeatedToolFailureCount = FMath::Max(RepeatedToolFailureCount, 1);
+			return;
 		}
 		const FString InvokeSignature = (InvokeName + TEXT("|") + InvokeArgs.Left(220)).ToLower();
 		const int32 NameCount = ToolInvokeCountByName.FindOrAdd(InvokeName) + 1;
@@ -1363,7 +1648,7 @@ namespace UnrealAiAgentHarnessPriv
 					LastSuggestedCorrectCallSerialized = MoveTemp(Captured);
 				}
 			}
-			const FString FailureSig = InvokeSignature;
+			const FString FailureSig = UnrealAiAgentHarnessPriv::NormalizeToolFailureSignatureForRepeatCount(InvokeName, InvokeArgs);
 			if (!FailureSig.IsEmpty() && FailureSig == LastToolFailureSignature)
 			{
 				++RepeatedToolFailureCount;
@@ -1529,6 +1814,34 @@ namespace UnrealAiAgentHarnessPriv
 			TriggerReasons.Add(TEXT("act_now"));
 		}
 		EmitPlanningDecision(bTodoPlanOnly ? TEXT("explicit") : TEXT("implicit"), TriggerReasons);
+		if (bPendingFailHarnessSnapshotReadSpam)
+		{
+			AccumulateRoundUsage();
+			EmitEnforcementEvent(
+				TEXT("harness_snapshot_read_budget_abort"),
+				FString::Printf(TEXT("count=%d"), EditorSnapshotReadInvokeCount));
+			Fail(FString::Printf(
+				TEXT("[Harness][reason=harness_read_tool_spam] Stopped: editor_state_snapshot_read exceeded headed scenario limit (%d per turn)."),
+				UnrealAiWaitTime::HarnessScenarioMaxReadSnapshotToolsPerTurn));
+			return;
+		}
+		if (bPendingFailPlanNodeSameToolBudget)
+		{
+			AccumulateRoundUsage();
+			EmitEnforcementEvent(
+				TEXT("plan_node_same_tool_budget_abort"),
+				FString::Printf(
+					TEXT("%s x%d"),
+					PlanNodeSameToolBudgetName.IsEmpty() ? TEXT("?") : *PlanNodeSameToolBudgetName,
+					PlanNodeSameToolBudgetCount));
+			Fail(FString::Printf(
+				TEXT("[Harness][reason=plan_node_repeated_tool] Plan node stopped: tool \"%s\" exceeded the per-node repeat limit (%d invocations per tool name; blocked further calls). ")
+				TEXT("This node is treated as failed so the plan executor can skip dependents and continue."),
+				PlanNodeSameToolBudgetName.IsEmpty() ? TEXT("(unknown)") : *PlanNodeSameToolBudgetName,
+				PlanNodeSameToolBudgetLimit > 0 ? PlanNodeSameToolBudgetLimit
+												: UnrealAiWaitTime::PlanNodeMaxInvocationsSameTool));
+			return;
+		}
 		if (bPendingFailRepeatedIdenticalOk)
 		{
 			AccumulateRoundUsage();
@@ -1537,6 +1850,21 @@ namespace UnrealAiAgentHarnessPriv
 				TEXT("Stopped after %d consecutive identical successful tool calls with no progress (%s). Use a different tool, change arguments based on new information, state a concise blocker, end with remaining work, or use Plan chat mode for structured multi-step follow-up."),
 				GHarnessRepeatedFailureStopCount,
 				LastConsecutiveIdenticalOkSignature.IsEmpty() ? TEXT("unknown signature") : *LastConsecutiveIdenticalOkSignature));
+			return;
+		}
+		const bool bPlanNodeValidationFailFast = IsPlanNodeAgentThread()
+			&& RepeatedToolFailureCount >= UnrealAiWaitTime::PlanNodeRepeatedValidationFailFastThreshold;
+		if (bPlanNodeValidationFailFast)
+		{
+			AccumulateRoundUsage();
+			EmitEnforcementEvent(
+				TEXT("plan_node_repeated_validation_failfast"),
+				LastToolFailureSignature.Left(240));
+			Fail(FString::Printf(
+				TEXT("[Harness][reason=plan_node_repeated_validation] Plan node stopped after repeated identical validation failures (%d): %s. ")
+				TEXT("Use suggested_correct_call exactly once or return a concise blocker."),
+				RepeatedToolFailureCount,
+				LastToolFailureSignature.IsEmpty() ? TEXT("unknown signature") : *LastToolFailureSignature));
 			return;
 		}
 		const bool bRepeatedValidationLoop = RepeatedToolFailureCount >= 3;
@@ -1700,16 +2028,27 @@ namespace UnrealAiAgentHarnessPriv
 				}
 			}
 		}
+		// Interactive Agent mode retries empty assistant deltas with a harness nudge. Plan DAG node threads
+		// (`*_plan_*`) run in series; burning multiple LLM rounds here blocks the plan executor and looks
+		// like a hang. Finish the node so the parent plan can advance.
 		if (bAgentModeWantsToolExecution && AssistantBuffer.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
 		{
-			FUnrealAiConversationMessage Nudge;
-			Nudge.Role = TEXT("user");
-			Nudge.Content = TEXT(
-				"[Harness][reason=empty_assistant] The model returned an empty assistant message. Continue the user's task: call the ")
-				TEXT("next tool(s) now, or briefly explain what blocks you. Do not reply with an empty message.");
-			Conv->GetMessagesMutable().Add(Nudge);
-			AssistantBuffer.Reset();
-			DispatchLlm();
+			if (!Request.ThreadId.Contains(TEXT("_plan_")))
+			{
+				FUnrealAiConversationMessage Nudge;
+				Nudge.Role = TEXT("user");
+				Nudge.Content = TEXT(
+					"[Harness][reason=empty_assistant] The model returned an empty assistant message. Continue the user's task: call the ")
+					TEXT("next tool(s) now, or briefly explain what blocks you. Do not reply with an empty message.");
+				Conv->GetMessagesMutable().Add(Nudge);
+				AssistantBuffer.Reset();
+				DispatchLlm();
+				return;
+			}
+			EmitEnforcementEvent(
+				TEXT("plan_node_empty_assistant_finish"),
+				TEXT("plan node ended with empty assistant; failing node so plan can replan or skip dependents"));
+			Fail(TEXT("Plan node finished with empty assistant output (no text and no tools)."));
 			return;
 		}
 		if (bPlanPlannerPass && AssistantBuffer.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
@@ -1721,6 +2060,32 @@ namespace UnrealAiAgentHarnessPriv
 			AssistantBuffer.Reset();
 			DispatchLlm();
 			return;
+		}
+		// Ask mode: retry once when the assistant text is empty or looks truncated mid-thought.
+		if (Request.Mode == EUnrealAiAgentMode::Ask && !bPlanPlannerPass && !Request.ThreadId.Contains(TEXT("_plan_"))
+			&& LlmRound < EffectiveMaxLlmRounds)
+		{
+			const FString TrimAsk = AssistantBuffer.TrimStartAndEnd();
+			if (UnrealAiAgentHarnessPriv::LooksLikeIncompleteAskAnswer(TrimAsk) && AskAnswerRepairNudgeCount < 1)
+			{
+				++AskAnswerRepairNudgeCount;
+				EmitEnforcementEvent(
+					TEXT("ask_answer_repair_nudge"),
+					TrimAsk.IsEmpty() ? TEXT("empty") : TEXT("incomplete_or_truncated"));
+				FUnrealAiConversationMessage Nudge;
+				Nudge.Role = TEXT("user");
+				Nudge.Content = TEXT(
+					"[Harness][reason=ask_answer_incomplete] Your previous assistant message was empty or looks truncated. ")
+					TEXT("Reply with complete sentence(s) that fully answer the user's question; do not stop mid-phrase.");
+				Conv->GetMessagesMutable().Add(Nudge);
+				AssistantBuffer.Reset();
+				DispatchLlm();
+				return;
+			}
+			if (UnrealAiAgentHarnessPriv::LooksLikeIncompleteAskAnswer(TrimAsk) && AskAnswerRepairNudgeCount >= 1)
+			{
+				EmitEnforcementEvent(TEXT("ask_answer_repair_gave_up"), TEXT("still_incomplete_after_nudge"));
+			}
 		}
 		// Lax policy: do not require tool_calls on every agent round. Text-only wrap-ups after work (or when no tool
 		// applies) are allowed; qualitative review judges task success. Still emit a note when the user prompt looked
@@ -1828,6 +2193,11 @@ bool FUnrealAiAgentHarness::IsPlanPipelineActive() const
 	return P.IsValid() && P->IsRunning();
 }
 
+void FUnrealAiAgentHarness::SetHeadedScenarioStrictToolBudgets(bool bEnable)
+{
+	bHeadedScenarioStrictToolBudgets = bEnable;
+}
+
 void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TSharedPtr<IAgentRunSink> Sink)
 {
 	CancelTurn();
@@ -1854,6 +2224,7 @@ void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TS
 	Runner->Tools = ToolHost;
 	Runner->UsageTracker = UsageTracker;
 	Runner->MemoryService = MemoryService;
+	Runner->bHeadedScenarioStrictToolBudgets = bHeadedScenarioStrictToolBudgets;
 	Runner->AccumulatedUsage = FUnrealAiTokenUsage();
 	Runner->Conv = MakeUnique<FUnrealAiConversationStore>(Persistence);
 	Runner->Conv->LoadOrCreate(Request.ProjectId, Request.ThreadId);

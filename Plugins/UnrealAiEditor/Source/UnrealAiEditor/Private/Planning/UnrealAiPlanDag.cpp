@@ -4,6 +4,7 @@
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 namespace UnrealAiPlanDag
 {
@@ -328,5 +329,180 @@ namespace UnrealAiPlanDag
 				}
 			}
 		}
+	}
+
+	void ComputeParallelWaves(const FUnrealAiPlanDag& Dag, TArray<TArray<FString>>& OutWaves)
+	{
+		OutWaves.Reset();
+		if (Dag.Nodes.Num() == 0)
+		{
+			return;
+		}
+		TSet<FString> Assigned;
+		Assigned.Reserve(Dag.Nodes.Num());
+		while (Assigned.Num() < Dag.Nodes.Num())
+		{
+			TArray<FString> Wave;
+			for (const FUnrealAiDagNode& N : Dag.Nodes)
+			{
+				if (Assigned.Contains(N.Id))
+				{
+					continue;
+				}
+				bool bAllDepsPlaced = true;
+				for (const FString& Dep : N.DependsOn)
+				{
+					if (!Assigned.Contains(Dep))
+					{
+						bAllDepsPlaced = false;
+						break;
+					}
+				}
+				if (bAllDepsPlaced)
+				{
+					Wave.Add(N.Id);
+				}
+			}
+			if (Wave.Num() == 0)
+			{
+				break;
+			}
+			for (const FString& Id : Wave)
+			{
+				Assigned.Add(Id);
+			}
+			OutWaves.Add(MoveTemp(Wave));
+		}
+	}
+
+	bool SerializeDagJson(const FUnrealAiPlanDag& Dag, FString& OutJson, FString& OutError)
+	{
+		OutJson.Empty();
+		OutError.Empty();
+		if (Dag.Nodes.Num() == 0)
+		{
+			OutError = TEXT("DAG has no nodes to serialize.");
+			return false;
+		}
+		const TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+		Root->SetStringField(TEXT("schema"), TEXT("unreal_ai.plan_dag"));
+		if (!Dag.Title.IsEmpty())
+		{
+			Root->SetStringField(TEXT("title"), Dag.Title);
+		}
+		TArray<TSharedPtr<FJsonValue>> NodesArr;
+		NodesArr.Reserve(Dag.Nodes.Num());
+		for (const FUnrealAiDagNode& N : Dag.Nodes)
+		{
+			const TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+			O->SetStringField(TEXT("id"), N.Id);
+			if (!N.Title.IsEmpty())
+			{
+				O->SetStringField(TEXT("title"), N.Title);
+			}
+			if (!N.Hint.IsEmpty())
+			{
+				O->SetStringField(TEXT("hint"), N.Hint);
+			}
+			if (N.DependsOn.Num() > 0)
+			{
+				TArray<TSharedPtr<FJsonValue>> Deps;
+				Deps.Reserve(N.DependsOn.Num());
+				for (const FString& D : N.DependsOn)
+				{
+					Deps.Add(MakeShared<FJsonValueString>(D));
+				}
+				O->SetArrayField(TEXT("dependsOn"), Deps);
+			}
+			NodesArr.Add(MakeShared<FJsonValueObject>(O.ToSharedRef()));
+		}
+		Root->SetArrayField(TEXT("nodes"), NodesArr);
+		const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
+		if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
+		{
+			OutError = TEXT("JSON serialization failed.");
+			return false;
+		}
+		return true;
+	}
+
+	bool MergeReplanNewNodesOntoSuccesses(
+		const FUnrealAiPlanDag& OldDag,
+		const TMap<FString, FString>& NodeStatusById,
+		const FUnrealAiPlanDag& NewDagFromPlanner,
+		FUnrealAiPlanDag& OutMerged,
+		TSet<FString>& OutFreshNodeIds,
+		FString& OutError)
+	{
+		OutMerged = FUnrealAiPlanDag();
+		OutFreshNodeIds.Reset();
+		OutError.Empty();
+
+		if (NewDagFromPlanner.Nodes.Num() == 0)
+		{
+			OutError = TEXT("Replan DAG must include at least one new node.");
+			return false;
+		}
+
+		TSet<FString> SuccessIds;
+		for (const TPair<FString, FString>& Pair : NodeStatusById)
+		{
+			if (Pair.Value.Equals(TEXT("success"), ESearchCase::IgnoreCase))
+			{
+				SuccessIds.Add(Pair.Key);
+			}
+		}
+
+		TSet<FString> NewIds;
+		for (const FUnrealAiDagNode& N : NewDagFromPlanner.Nodes)
+		{
+			NewIds.Add(N.Id);
+		}
+
+		for (const FUnrealAiDagNode& N : NewDagFromPlanner.Nodes)
+		{
+			if (SuccessIds.Contains(N.Id))
+			{
+				OutError = FString::Printf(
+					TEXT("Replan node id '%s' collides with an already-completed node id; use new ids for new work."),
+					*N.Id);
+				return false;
+			}
+			for (const FString& Dep : N.DependsOn)
+			{
+				if (!SuccessIds.Contains(Dep) && !NewIds.Contains(Dep))
+				{
+					OutError = FString::Printf(
+						TEXT("Replan node '%s' depends on '%s', which is not completed (success) and not in the replan node set."),
+						*N.Id,
+						*Dep);
+					return false;
+				}
+			}
+		}
+
+		OutMerged.Title = !NewDagFromPlanner.Title.IsEmpty() ? NewDagFromPlanner.Title : OldDag.Title;
+		OutMerged.Nodes.Reserve(SuccessIds.Num() + NewDagFromPlanner.Nodes.Num());
+
+		for (const FUnrealAiDagNode& ON : OldDag.Nodes)
+		{
+			if (SuccessIds.Contains(ON.Id))
+			{
+				OutMerged.Nodes.Add(ON);
+			}
+		}
+		for (const FUnrealAiDagNode& NN : NewDagFromPlanner.Nodes)
+		{
+			OutMerged.Nodes.Add(NN);
+			OutFreshNodeIds.Add(NN.Id);
+		}
+
+		if (!ValidateDag(OutMerged, 64, OutError))
+		{
+			OutMerged = FUnrealAiPlanDag();
+			OutFreshNodeIds.Reset();
+			return false;
+		}
+		return true;
 	}
 }

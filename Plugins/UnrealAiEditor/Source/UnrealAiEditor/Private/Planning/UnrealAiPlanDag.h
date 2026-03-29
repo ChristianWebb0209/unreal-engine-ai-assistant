@@ -36,4 +36,27 @@ namespace UnrealAiPlanDag
 	 * Does not include FailedNodeId. Order is BFS order (not semantically significant).
 	 */
 	void CollectTransitiveDependents(const FUnrealAiPlanDag& Dag, const FString& FailedNodeId, TArray<FString>& OutDependents);
+
+	/** Serialize DAG for planner context or persistence (canonical `nodes[]`, schema unreal_ai.plan_dag). */
+	bool SerializeDagJson(const FUnrealAiPlanDag& Dag, FString& OutJson, FString& OutError);
+
+	/**
+	 * After a node failure, merge the model's **new** outstanding-work DAG onto successfully completed nodes.
+	 * Success nodes are copied in declaration order from OldDag; NewDagFromPlanner nodes are appended (new ids only).
+	 * OutFreshNodeIds lists every id from NewDagFromPlanner (caller resets context progress for those ids).
+	 */
+	bool MergeReplanNewNodesOntoSuccesses(
+		const FUnrealAiPlanDag& OldDag,
+		const TMap<FString, FString>& NodeStatusById,
+		const FUnrealAiPlanDag& NewDagFromPlanner,
+		FUnrealAiPlanDag& OutMerged,
+		TSet<FString>& OutFreshNodeIds,
+		FString& OutError);
+
+	/**
+	 * Static execution waves: wave 0 has no dependencies; each next wave contains nodes whose
+	 * dependencies all appear in earlier waves. Preserves declaration order within each wave.
+	 * Preconditions: Dag must be acyclic with valid ids (call ValidateDag first); if violated, OutWaves may be partial.
+	 */
+	void ComputeParallelWaves(const FUnrealAiPlanDag& Dag, TArray<TArray<FString>>& OutWaves);
 }

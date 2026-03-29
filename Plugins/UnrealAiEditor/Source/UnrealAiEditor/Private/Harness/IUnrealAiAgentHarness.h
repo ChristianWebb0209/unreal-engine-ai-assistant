@@ -32,4 +32,10 @@ public:
 	virtual void NotifyPlanExecutorStarted(TSharedPtr<FUnrealAiPlanExecutor> Exec) { (void)Exec; }
 	virtual void NotifyPlanExecutorEnded() {}
 	virtual bool IsPlanPipelineActive() const { return false; }
+
+	/**
+	 * Headed `UnrealAiHarnessScenarioRunner` only: enable stricter per-turn tool caps (e.g. snapshot read spam).
+	 * No-op for default; UI/chat leaves this off.
+	 */
+	virtual void SetHeadedScenarioStrictToolBudgets(bool bEnable) { (void)bEnable; }
 };

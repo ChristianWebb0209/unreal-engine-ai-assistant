@@ -69,4 +69,10 @@ public:
 		int32 EffectiveMaxLlmRounds,
 		const FUnrealAiLlmRequest& LlmRequest) {}
 	virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) = 0;
+
+	/**
+	 * Human-readable line for harness debugging (headed smoke tests). FAgentRunFileSink writes
+	 * harness_progress.log next to run.jsonl so runs that hang still leave a trace on disk.
+	 */
+	virtual void OnHarnessProgressLog(const FString& Line) {}
 };

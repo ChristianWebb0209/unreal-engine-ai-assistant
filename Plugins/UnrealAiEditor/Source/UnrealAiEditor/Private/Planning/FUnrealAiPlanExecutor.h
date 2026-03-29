@@ -14,6 +14,8 @@ struct FUnrealAiPlanExecutorStartOptions
 	bool bPauseAfterPlannerForBuild = false;
 	/** Headed harness / smoke: after valid DAG parse, finish successfully without running agent node turns. */
 	bool bHarnessPlannerOnlyNoExecute = false;
+	/** When true, ignore editor `bPlanAutoReplan` for this run. */
+	bool bDisableAutoReplan = false;
 };
 
 class FUnrealAiPlanExecutor : public TSharedFromThis<FUnrealAiPlanExecutor>
@@ -44,12 +46,28 @@ public:
 	/** Continue after user clicks Build (in-memory session). */
 	void ResumeNodeExecution();
 
+	/**
+	 * Headed scenario only: if the plan pipeline hits the scenario wall while **idle** between sub-turns, run one
+	 * compact Plan-mode replan and merge the DAG; extends the wall deadline from now. Returns false if skipped
+	 * (disabled, budget exhausted, turn in progress, or parse/merge failed).
+	 */
+	bool TryScenarioWallCompactReplanForHeadedHarness(
+		const TSharedPtr<IAgentRunSink>& HarnessSink,
+		double& InOutWallDeadlineSec,
+		uint32 ScenarioWallMs);
+
 private:
 	void BeginPlannerTurn();
 	void OnPlannerFinished(bool bSuccess, const FString& ErrorText, const FString& PlannerText);
 	void BeginNextReadyNode();
 	void OnNodeFinished(const FString& NodeId, bool bSuccess, const FString& ErrorText, const FString& AssistantText);
 	void Finish(bool bSuccess, const FString& ErrorText);
+
+	void BeginNodeFailureReplanTurn(const FString& FailedNodeId, const FString& ErrorText);
+	void OnNodeFailureReplanPlannerFinished(bool bSuccess, const FString& ErrorText, const FString& PlannerText);
+	bool TryApplyReplanPlannerAssistantText(const FString& PlannerText, FString& OutError);
+	void RecomputeAnyPlanNodeFailedFromContext();
+	static void PumpGameThreadForHarnessWait(uint32 MaxWaitMs);
 
 	/** After a node fails, mark transitive dependents skipped so the DAG cannot deadlock on failed deps. */
 	void CascadeSkipDependentsAfterFailure(const FString& FailedNodeId, const FString& ErrorText);
@@ -91,4 +109,15 @@ private:
 
 	/** True if any plan node harness turn ended with bSuccess==false (covers missing context service). */
 	bool bAnyPlanNodeFailedThisRun = false;
+
+	bool bPlanAutoReplan = false;
+	int32 PlanAutoReplanMaxAttempts = 0;
+	int32 PlanAutoReplanAttemptsUsed = 0;
+	bool bUseSubagentsPolicy = false;
+	int32 MaxParallelWaveNodesPolicy = 1;
+	bool bScenarioWallReplanConsumed = false;
+	bool bNodeFailureReplanRepairConsumed = false;
+	FString PendingNodeFailureReplanBaseUserText;
+	FString PendingNodeFailureReplanFailedNodeId;
+	FString PendingNodeFailureReplanErrorText;
 };

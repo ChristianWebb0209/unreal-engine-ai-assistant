@@ -27,7 +27,20 @@ public:
 	virtual void SetActiveTodoPlan(const FString& PlanJson) override;
 	virtual void SetTodoStepDone(int32 StepIndex, bool bDone) override;
 	virtual void SetActivePlanDag(const FString& DagJson) override;
+	virtual void SetActivePlanDagForThread(const FString& ProjectId, const FString& ThreadId, const FString& DagJson) override;
+	virtual void ReplaceActivePlanDagWithFreshNodeReset(const FString& DagJson, const TSet<FString>& FreshNodeIds) override;
+	virtual void ReplaceActivePlanDagWithFreshNodeResetForThread(
+		const FString& ProjectId,
+		const FString& ThreadId,
+		const FString& DagJson,
+		const TSet<FString>& FreshNodeIds) override;
 	virtual void SetPlanNodeStatus(const FString& NodeId, const FString& Status, const FString& Summary = FString()) override;
+	virtual void SetPlanNodeStatusForThread(
+		const FString& ProjectId,
+		const FString& ThreadId,
+		const FString& NodeId,
+		const FString& Status,
+		const FString& Summary = FString()) override;
 	virtual void ClearPlanStaleRunningMarkers(const FString& ProjectId, const FString& ThreadId) override;
 	virtual void ClearActivePlanDag() override;
 

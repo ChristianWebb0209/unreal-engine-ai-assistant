@@ -27,6 +27,45 @@
 
 namespace UnrealAiHarnessScenarioRunnerPriv
 {
+	static uint32 GetEffectiveHarnessScenarioMaxWallMs()
+	{
+		const FString Env = FPlatformMisc::GetEnvironmentVariable(TEXT("UNREAL_AI_HARNESS_SCENARIO_MAX_WALL_MS")).TrimStartAndEnd();
+		if (!Env.IsEmpty())
+		{
+			const int32 Atoi = FCString::Atoi(*Env);
+			if (Atoi == 0)
+			{
+				return 0;
+			}
+			if (Atoi > 0)
+			{
+				return static_cast<uint32>(Atoi);
+			}
+		}
+		return UnrealAiWaitTime::HarnessScenarioMaxWallMs;
+	}
+
+	/** RAII: headed harness scenario strict tool budgets (snapshot spam cap); UI/chat does not use this runner. */
+	struct FScopedHeadedScenarioStrictToolBudgets
+	{
+		IUnrealAiAgentHarness* Harness;
+		explicit FScopedHeadedScenarioStrictToolBudgets(IUnrealAiAgentHarness* InHarness)
+			: Harness(InHarness)
+		{
+			if (Harness)
+			{
+				Harness->SetHeadedScenarioStrictToolBudgets(true);
+			}
+		}
+		~FScopedHeadedScenarioStrictToolBudgets()
+		{
+			if (Harness)
+			{
+				Harness->SetHeadedScenarioStrictToolBudgets(false);
+			}
+		}
+	};
+
 	static uint32 GetEffectiveHarnessSyncIdleAbortMs(IUnrealAiAgentHarness* Harness, const bool bScenarioSyncWait)
 	{
 		uint32 IdleMs = UnrealAiWaitTime::HarnessSyncIdleAbortMs;
@@ -141,7 +180,9 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		FEvent* Event,
 		uint32 WaitMs,
 		IUnrealAiAgentHarness* HarnessForIdle = nullptr,
-		bool* bOutIdleAbort = nullptr)
+		bool* bOutIdleAbort = nullptr,
+		double ScenarioWallDeadlineSec = 0.0,
+		bool* bOutScenarioWallExceeded = nullptr)
 	{
 		if (!Event)
 		{
@@ -151,9 +192,21 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		{
 			*bOutIdleAbort = false;
 		}
+		if (bOutScenarioWallExceeded)
+		{
+			*bOutScenarioWallExceeded = false;
+		}
 		const double DeadlineSec = FPlatformTime::Seconds() + static_cast<double>(WaitMs) / 1000.0;
 		while (FPlatformTime::Seconds() < DeadlineSec)
 		{
+			if (ScenarioWallDeadlineSec > 0.0 && FPlatformTime::Seconds() >= ScenarioWallDeadlineSec)
+			{
+				if (bOutScenarioWallExceeded)
+				{
+					*bOutScenarioWallExceeded = true;
+				}
+				return false;
+			}
 			if (Event->Wait(0u))
 			{
 				return true;
@@ -167,6 +220,14 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
 			FPlatformProcess::SleepNoStats(0.001f);
 		}
+		if (ScenarioWallDeadlineSec > 0.0 && FPlatformTime::Seconds() >= ScenarioWallDeadlineSec)
+		{
+			if (bOutScenarioWallExceeded)
+			{
+				*bOutScenarioWallExceeded = true;
+			}
+			return false;
+		}
 		return Event->Wait(0u);
 	}
 
@@ -175,7 +236,8 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		Done,
 		SubTurn,
 		Timeout,
-		IdleAbort
+		IdleAbort,
+		ScenarioWall
 	};
 
 	/** Prefer Done over SubTurn when both could be set in the same pump. */
@@ -184,15 +246,29 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		FEvent* SubTurnEvent,
 		uint32 WaitMs,
 		IUnrealAiAgentHarness* HarnessForIdle,
-		bool* bOutIdleAbort)
+		bool* bOutIdleAbort,
+		double ScenarioWallDeadlineSec = 0.0,
+		bool* bOutScenarioWallExceeded = nullptr)
 	{
 		if (bOutIdleAbort)
 		{
 			*bOutIdleAbort = false;
 		}
+		if (bOutScenarioWallExceeded)
+		{
+			*bOutScenarioWallExceeded = false;
+		}
 		const double DeadlineSec = FPlatformTime::Seconds() + static_cast<double>(WaitMs) / 1000.0;
 		while (FPlatformTime::Seconds() < DeadlineSec)
 		{
+			if (ScenarioWallDeadlineSec > 0.0 && FPlatformTime::Seconds() >= ScenarioWallDeadlineSec)
+			{
+				if (bOutScenarioWallExceeded)
+				{
+					*bOutScenarioWallExceeded = true;
+				}
+				return EPlanHarnessSyncSegment::ScenarioWall;
+			}
 			if (DoneEvent && DoneEvent->Wait(0u))
 			{
 				return EPlanHarnessSyncSegment::Done;
@@ -209,6 +285,14 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 			FHttpModule::Get().GetHttpManager().Tick(0.f);
 			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
 			FPlatformProcess::SleepNoStats(0.001f);
+		}
+		if (ScenarioWallDeadlineSec > 0.0 && FPlatformTime::Seconds() >= ScenarioWallDeadlineSec)
+		{
+			if (bOutScenarioWallExceeded)
+			{
+				*bOutScenarioWallExceeded = true;
+			}
+			return EPlanHarnessSyncSegment::ScenarioWall;
 		}
 		if (DoneEvent && DoneEvent->Wait(0u))
 		{
@@ -251,6 +335,8 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 			OutError = TEXT("Harness or context not available");
 			return false;
 		}
+
+		const FScopedHeadedScenarioStrictToolBudgets ScopedStrictToolBudgets(Harness);
 
 		const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
 		FString RunDir = OutputRootDir;
@@ -301,14 +387,32 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 			PlanSubTurnEvent);
 
 		// Bounded wait; must exceed typical HTTP streaming latency plus at least one tool round.
-		// Plan mode: optional total wall in FUnrealAiPlanExecutor (UnrealAiWaitTime::HarnessPlanMaxWallMs) — separate from per-segment sync.
+		// Plan mode: total wall in FUnrealAiPlanExecutor (HarnessPlanMaxWallMs) plus scenario-wide deadline below.
 		const uint32 WaitMs = UnrealAiWaitTime::HarnessSyncWaitMs;
+		const uint32 EffectiveScenarioWallMs = GetEffectiveHarnessScenarioMaxWallMs();
+		const double ScenarioWallStartSec = FPlatformTime::Seconds();
+		double ScenarioWallDeadlineSec =
+			EffectiveScenarioWallMs > 0 ? ScenarioWallStartSec + static_cast<double>(EffectiveScenarioWallMs) / 1000.0 : 0.0;
+		bool bScenarioWallExceeded = false;
+		bool bSegmentCapExceeded = false;
 		UE_LOG(LogTemp, Display,
 			TEXT("UnrealAi harness: starting agent turn (game thread wait pumps HTTP + GT queue; viewport may look idle). "
 				 "Tail jsonl or use Output Log: %s | sync wait up to %u s per segment%s."),
 			*OutJsonlPath,
 			WaitMs / 1000,
 			Mode == EUnrealAiAgentMode::Plan ? TEXT(" (Plan mode: per planner + per node)") : TEXT(""));
+		if (Sink.IsValid())
+		{
+			Sink->OnHarnessProgressLog(FString::Printf(
+				TEXT("RunAgentTurnSync: mode=%s thread=%s scenario_wall_ms=%u segment_wait_ms=%u jsonl=%s"),
+				*AgentModeToLabel(Mode),
+				*ThreadIdDigitsWithHyphens,
+				EffectiveScenarioWallMs,
+				WaitMs,
+				*OutJsonlPath));
+			Sink->OnHarnessProgressLog(
+				TEXT("Also watch harness_progress.log beside run.jsonl (plain text; written even if JSONL stalls)."));
+		}
 
 		// Must outlive the entire sync wait: FCollectingSink calls WeakExec.Pin() -> OnPlannerFinished -> Finish() ->
 		// FAgentRunFileSink::OnRunFinished (DoneEvent). If the executor is destroyed when the Plan { } block ends, Pin()
@@ -323,6 +427,10 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 				PlanOpts.bHarnessPlannerOnlyNoExecute = true;
 			}
 			PlanExecutorLifetime = FUnrealAiPlanExecutor::Start(Harness, Ctx, Req, Sink, PlanOpts);
+			if (Sink.IsValid())
+			{
+				Sink->OnHarnessProgressLog(TEXT("RunAgentTurnSync: FUnrealAiPlanExecutor::Start returned; entering plan sync wait loop"));
+			}
 		}
 		else
 		{
@@ -351,6 +459,8 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 				return TEXT("idle_abort");
 			case EPlanHarnessSyncSegment::Timeout:
 				return TEXT("timeout");
+			case EPlanHarnessSyncSegment::ScenarioWall:
+				return TEXT("scenario_wall");
 			default:
 				return TEXT("unknown");
 			}
@@ -366,12 +476,57 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 				Cfg->SetNumberField(TEXT("idle_abort_ms_effective"), static_cast<double>(IdleMs));
 				Cfg->SetNumberField(TEXT("idle_abort_ms_base"), static_cast<double>(UnrealAiWaitTime::HarnessSyncIdleAbortMs));
 				Cfg->SetNumberField(TEXT("plan_pipeline_idle_abort_ms"), static_cast<double>(UnrealAiWaitTime::HarnessPlanPipelineSyncIdleAbortMs));
+				Cfg->SetNumberField(TEXT("scenario_max_wall_ms_effective"), static_cast<double>(EffectiveScenarioWallMs));
+				Cfg->SetNumberField(TEXT("max_plan_sync_segments"), static_cast<double>(UnrealAiWaitTime::HarnessPlanMaxSyncSegments));
 				Cfg->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
 				AppendSyncDiag(Cfg);
 			}
 			int32 SyncSegmentIndex = 0;
 			for (;;)
 			{
+				if (SyncSegmentIndex >= UnrealAiWaitTime::HarnessPlanMaxSyncSegments)
+				{
+					bSegmentCapExceeded = true;
+					{
+						TSharedPtr<FJsonObject> Cap = MakeShared<FJsonObject>();
+						Cap->SetStringField(TEXT("type"), TEXT("harness_scenario_segment_cap"));
+						Cap->SetNumberField(TEXT("segment_index"), static_cast<double>(SyncSegmentIndex));
+						Cap->SetNumberField(TEXT("max_plan_sync_segments"), static_cast<double>(UnrealAiWaitTime::HarnessPlanMaxSyncSegments));
+						Cap->SetStringField(TEXT("note"), TEXT("Too many plan sync segments without run_finished; treating as stall."));
+						Cap->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
+						AppendSyncDiag(Cap);
+					}
+					break;
+				}
+				if (ScenarioWallDeadlineSec > 0.0 && FPlatformTime::Seconds() >= ScenarioWallDeadlineSec)
+				{
+					if (PlanExecutorLifetime.IsValid() && Harness && !Harness->IsTurnInProgress()
+						&& PlanExecutorLifetime->TryScenarioWallCompactReplanForHeadedHarness(
+							Sink,
+							ScenarioWallDeadlineSec,
+							EffectiveScenarioWallMs))
+					{
+						TSharedPtr<FJsonObject> Rep = MakeShared<FJsonObject>();
+						Rep->SetStringField(TEXT("type"), TEXT("harness_scenario_wall_replan_extended"));
+						Rep->SetNumberField(TEXT("scenario_max_wall_ms_effective"), static_cast<double>(EffectiveScenarioWallMs));
+						Rep->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
+						AppendSyncDiag(Rep);
+						if (Sink.IsValid())
+						{
+							Sink->OnHarnessProgressLog(TEXT("plan sync: proactive wall — compact replan merged; deadline extended"));
+						}
+						continue;
+					}
+					bScenarioWallExceeded = true;
+					{
+						TSharedPtr<FJsonObject> Wall = MakeShared<FJsonObject>();
+						Wall->SetStringField(TEXT("type"), TEXT("harness_scenario_wall_exceeded"));
+						Wall->SetNumberField(TEXT("scenario_max_wall_ms_effective"), static_cast<double>(EffectiveScenarioWallMs));
+						Wall->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
+						AppendSyncDiag(Wall);
+					}
+					break;
+				}
 				{
 					TSharedPtr<FJsonObject> W = MakeShared<FJsonObject>();
 					W->SetStringField(TEXT("type"), TEXT("harness_sync_segment_wait_start"));
@@ -380,12 +535,54 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 					W->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
 					AppendSyncDiag(W);
 				}
+				if (Sink.IsValid())
+				{
+					Sink->OnHarnessProgressLog(FString::Printf(
+						TEXT("plan sync: segment_index=%d entering WaitForDoneOrPlanSubTurn (max_wait_ms=%u)"),
+						SyncSegmentIndex,
+						WaitMs));
+				}
+				bool bWallThisWait = false;
 				const EPlanHarnessSyncSegment Seg = WaitForDoneOrPlanSubTurnWhilePumpingGameThread(
 					DoneEvent,
 					PlanSubTurnEvent,
 					WaitMs,
 					Harness,
-					&bIdleAbort);
+					&bIdleAbort,
+					ScenarioWallDeadlineSec,
+					&bWallThisWait);
+				const bool bWallStall = (Seg == EPlanHarnessSyncSegment::ScenarioWall || bWallThisWait);
+				bool bWallRecoveredViaReplan = false;
+				if (bWallStall)
+				{
+					if (PlanExecutorLifetime.IsValid() && Harness && !Harness->IsTurnInProgress()
+						&& PlanExecutorLifetime->TryScenarioWallCompactReplanForHeadedHarness(
+							Sink,
+							ScenarioWallDeadlineSec,
+							EffectiveScenarioWallMs))
+					{
+						bWallRecoveredViaReplan = true;
+						TSharedPtr<FJsonObject> Rep = MakeShared<FJsonObject>();
+						Rep->SetStringField(TEXT("type"), TEXT("harness_scenario_wall_replan_extended"));
+						Rep->SetNumberField(TEXT("scenario_max_wall_ms_effective"), static_cast<double>(EffectiveScenarioWallMs));
+						Rep->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
+						AppendSyncDiag(Rep);
+						if (Sink.IsValid())
+						{
+							Sink->OnHarnessProgressLog(
+								TEXT("plan sync: wall during wait — compact replan merged; deadline extended"));
+						}
+					}
+					else
+					{
+						bScenarioWallExceeded = true;
+						TSharedPtr<FJsonObject> Wall = MakeShared<FJsonObject>();
+						Wall->SetStringField(TEXT("type"), TEXT("harness_scenario_wall_exceeded"));
+						Wall->SetNumberField(TEXT("scenario_max_wall_ms_effective"), static_cast<double>(EffectiveScenarioWallMs));
+						Wall->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
+						AppendSyncDiag(Wall);
+					}
+				}
 				{
 					TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
 					R->SetStringField(TEXT("type"), TEXT("harness_sync_segment_result"));
@@ -395,10 +592,22 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 					R->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
 					AppendSyncDiag(R);
 				}
+				if (Sink.IsValid())
+				{
+					Sink->OnHarnessProgressLog(FString::Printf(
+						TEXT("plan sync: segment_index=%d result=%s idle_abort=%s"),
+						SyncSegmentIndex,
+						*SegmentResultString(Seg),
+						bIdleAbort ? TEXT("yes") : TEXT("no")));
+				}
 				++SyncSegmentIndex;
 				if (Seg == EPlanHarnessSyncSegment::Done)
 				{
 					bSignaled = true;
+					break;
+				}
+				if (bWallStall && !bWallRecoveredViaReplan)
+				{
 					break;
 				}
 				if (Seg == EPlanHarnessSyncSegment::Timeout || Seg == EPlanHarnessSyncSegment::IdleAbort)
@@ -423,15 +632,35 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 				W->SetStringField(TEXT("mode"), TEXT("single_turn"));
 				W->SetNumberField(TEXT("wait_ms"), static_cast<double>(WaitMs));
 				W->SetNumberField(TEXT("idle_abort_ms_effective"), static_cast<double>(IdleMs));
+				W->SetNumberField(TEXT("scenario_max_wall_ms_effective"), static_cast<double>(EffectiveScenarioWallMs));
 				W->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
 				AppendSyncDiag(W);
 			}
-			bSignaled = WaitForHarnessEventWhilePumpingGameThread(DoneEvent, WaitMs, Harness, &bIdleAbort);
+			bool bWallSingle = false;
+			bSignaled = WaitForHarnessEventWhilePumpingGameThread(
+				DoneEvent,
+				WaitMs,
+				Harness,
+				&bIdleAbort,
+				ScenarioWallDeadlineSec,
+				&bWallSingle);
+			if (bWallSingle)
+			{
+				bScenarioWallExceeded = true;
+				{
+					TSharedPtr<FJsonObject> Wall = MakeShared<FJsonObject>();
+					Wall->SetStringField(TEXT("type"), TEXT("harness_scenario_wall_exceeded"));
+					Wall->SetNumberField(TEXT("scenario_max_wall_ms_effective"), static_cast<double>(EffectiveScenarioWallMs));
+					Wall->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
+					AppendSyncDiag(Wall);
+				}
+			}
 			{
 				TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
 				R->SetStringField(TEXT("type"), TEXT("harness_sync_wait_finished"));
 				R->SetBoolField(TEXT("signaled"), bSignaled);
 				R->SetBoolField(TEXT("idle_abort"), bIdleAbort);
+				R->SetBoolField(TEXT("scenario_wall"), bScenarioWallExceeded);
 				R->SetStringField(TEXT("utc_iso8601"), FDateTime::UtcNow().ToIso8601());
 				AppendSyncDiag(R);
 			}
@@ -439,8 +668,28 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 
 		if (!bSignaled)
 		{
+			if (PlanExecutorLifetime.IsValid() && (bScenarioWallExceeded || bSegmentCapExceeded))
+			{
+				PlanExecutorLifetime->Cancel();
+			}
 			const FString ModeLabel = AgentModeToLabel(Mode);
-			if (bIdleAbort)
+			if (bScenarioWallExceeded)
+			{
+				UE_LOG(
+					LogTemp,
+					Warning,
+					TEXT("UnrealAi harness: scenario_wall_exceeded (effective_ms=%u); issuing CancelTurn()."),
+					EffectiveScenarioWallMs);
+			}
+			else if (bSegmentCapExceeded)
+			{
+				UE_LOG(
+					LogTemp,
+					Warning,
+					TEXT("UnrealAi harness: plan_sync_segment_cap (max=%d); issuing CancelTurn()."),
+					UnrealAiWaitTime::HarnessPlanMaxSyncSegments);
+			}
+			else if (bIdleAbort)
 			{
 				const uint32 IdleAbortMs = UnrealAiHarnessScenarioRunnerPriv::GetEffectiveHarnessSyncIdleAbortMs(Harness, true);
 				const TSharedPtr<FJsonObject> IdleDiag = UnrealAiHarnessProgressTelemetry::BuildHarnessSyncIdleAbortDiagnosticJson(
@@ -491,7 +740,8 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 			}
 			Harness->CancelTurn();
 			const uint32 CancelDrainWaitMs = UnrealAiWaitTime::HarnessCancelDrainWaitMs;
-			const bool bSignaledAfterCancel = WaitForHarnessEventWhilePumpingGameThread(DoneEvent, CancelDrainWaitMs);
+			const bool bSignaledAfterCancel =
+				WaitForHarnessEventWhilePumpingGameThread(DoneEvent, CancelDrainWaitMs, Harness, nullptr, 0.0, nullptr);
 			UE_LOG(
 				LogTemp,
 				Display,
@@ -513,8 +763,23 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 				Sink->OnRunFinished(false, ForcedErr);
 				UE_LOG(LogTemp, Warning, TEXT("UnrealAi harness: forced terminal failure emitted from runner timeout path."));
 			}
-			OutError = bIdleAbort ? TEXT("Harness run aborted: sync idle stall (post-stream)")
-								  : TEXT("Harness run timed out waiting for completion");
+			if (bScenarioWallExceeded)
+			{
+				OutError = FString::Printf(
+					TEXT("Harness run exceeded scenario wall time (%u ms). Set UNREAL_AI_HARNESS_SCENARIO_MAX_WALL_MS=0 to disable."),
+					EffectiveScenarioWallMs);
+			}
+			else if (bSegmentCapExceeded)
+			{
+				OutError = FString::Printf(
+					TEXT("Harness run exceeded max plan sync segments (%d) without completion."),
+					UnrealAiWaitTime::HarnessPlanMaxSyncSegments);
+			}
+			else
+			{
+				OutError = bIdleAbort ? TEXT("Harness run aborted: sync idle stall (post-stream)")
+									  : TEXT("Harness run timed out waiting for completion");
+			}
 			bOutSuccess = false;
 			FPlatformProcess::ReturnSynchEventToPool(DoneEvent);
 			if (PlanSubTurnEvent)

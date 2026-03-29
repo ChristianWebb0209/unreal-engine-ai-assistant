@@ -21,8 +21,26 @@ public:
 	virtual void SetTodoStepDone(int32 StepIndex, bool bDone) = 0;
 	/** Persist plan DAG JSON and reset node status maps. */
 	virtual void SetActivePlanDag(const FString& DagJson) = 0;
+	/** Persist plan DAG on an explicit parent session (project/thread), independent of active child thread. */
+	virtual void SetActivePlanDagForThread(const FString& ProjectId, const FString& ThreadId, const FString& DagJson) = 0;
+	/**
+	 * Replace plan DAG JSON and scrub status/summary entries: drop keys not in the new graph, then clear any id in
+	 * FreshNodeIds so replanned nodes start pending (preserves completed successes for kept ids).
+	 */
+	virtual void ReplaceActivePlanDagWithFreshNodeReset(const FString& DagJson, const TSet<FString>& FreshNodeIds) = 0;
+	virtual void ReplaceActivePlanDagWithFreshNodeResetForThread(
+		const FString& ProjectId,
+		const FString& ThreadId,
+		const FString& DagJson,
+		const TSet<FString>& FreshNodeIds) = 0;
 	/** Update per-node plan status and optional summary. */
 	virtual void SetPlanNodeStatus(const FString& NodeId, const FString& Status, const FString& Summary = FString()) = 0;
+	virtual void SetPlanNodeStatusForThread(
+		const FString& ProjectId,
+		const FString& ThreadId,
+		const FString& NodeId,
+		const FString& Status,
+		const FString& Summary = FString()) = 0;
 	/** Removes in-flight "running" markers so execution can resume after a crash or lost harness callback. */
 	virtual void ClearPlanStaleRunningMarkers(const FString& ProjectId, const FString& ThreadId) = 0;
 	/** Clear active plan DAG and any node execution status. */
@@ -36,6 +54,7 @@ public:
 	virtual void StartRetrievalPrefetch(const FString& TurnKey, const FString& UserMessageForComplexity) = 0;
 	virtual void CancelRetrievalPrefetchForThread(const FString& ProjectId, const FString& ThreadId) = 0;
 
+	/** Assembles ranked context for the LLM. Must run on the game thread (editor snapshot, attachment resolution, retrieval hooks). */
 	virtual FAgentContextBuildResult BuildContextWindow(const FAgentContextBuildOptions& Options) = 0;
 
 	virtual void SaveNow(const FString& ProjectId, const FString& ThreadId) = 0;
