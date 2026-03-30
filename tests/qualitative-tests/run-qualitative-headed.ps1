@@ -1,10 +1,11 @@
 #requires -Version 5.1
 <#
-  Long-running headed harness runner for bulk conversational suites.
+  Qualitative headed harness runner for bulk conversational suites.
 
   Purpose
   - Run many multi-turn conversations in headed Unreal Editor using UnrealAi.RunAgentTurn.
-  - Recursively finds suite JSON files (default name: suite.json) under -ScenarioFolder.
+  - Loads suite JSON files from the suites folder (or an explicit ScenarioFolder).
+  - Supports -Suite name resolution (optionally without .json) like strict runner.
   - Runs exactly ONE editor process for the whole batch: all suites execute in one ExecCmds chain (sequential).
   - Each suite gets a fresh thread id; before the next suite, UnrealAi.ForgetThread removes the previous thread.
   - The batch fails (nonzero exit) if the editor exits nonzero OR any turn does not reach run_finished in run.jsonl.
@@ -15,10 +16,10 @@
     (same strict per-suite completion checks). Use -ForceSingleSession to error instead of falling back.
 
   Usage (from repo root):
-    .\tests\long-running-tests\run-long-running-headed.ps1 -ScenarioFolder tests\long-running-tests
-    .\tests\long-running-tests\run-long-running-headed.ps1 -ScenarioFolder fine-tune-01-tool-definitions
-    .\tests\long-running-tests\run-long-running-headed.ps1 -ScenarioFolder my-suite -DryRun
-  Bandwidth: -MaxSuites N runs only the first N suite files (recursive sort order). Use 0 for all (default).
+    .\tests\qualitative-tests\run-qualitative-headed.ps1 -Suite path-focus-mini
+    .\tests\qualitative-tests\run-qualitative-headed.ps1 -Suite path-focus-mini.json
+    .\tests\qualitative-tests\run-qualitative-headed.ps1 -DryRun
+  Bandwidth: -MaxSuites N runs only the first N suite files (sorted by name). Use 0 for all (default).
     N may be negative (e.g. -MaxSuites -1 = first suite only, -2 = first two). Same as positive |N|.
   Budget (harness): primary stop = 4 consecutive identical tool failures OR per-turn token cap (model profile / default 500k);
     round cap is a 512 backstop. -MaxLlmRounds / -MaxTurnTokens are recorded in summary.json only; tune limits in the model profile JSON (env overrides removed).
@@ -45,8 +46,7 @@
   - "type" values allowed: ask, agent, plan.
   - "plan" is mapped to harness mode "plan".
   - Output layout (each script invocation gets one new folder under the central runs directory; older batches are kept):
-      tests\long-running-tests\runs\run-<index>-<localMachineTimestamp>\
-        Index is a monotonic integer across all scenarios. Timestamp uses local machine time, 12-hour clock, hh-mm-ss-tt segments (no milliseconds).
+      tests\qualitative-tests\runs\run-<month>-<day>-<hour>-<minute>-<suite_name>\
         - last-suite-summary.json  (batch metadata; only under this run folder)
         - editor_console_saved.log  (single-session mode: full Unreal Saved/Logs copy for the whole batch)
         <path-slug>\
@@ -91,10 +91,11 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$ScenarioFolder,
+    [string]$ScenarioFolder = '',
+    [string]$Suite = '',
     [string]$EngineRoot = '',
     [string]$ProjectRoot = '',
+    [string]$RunsRoot = '',
     [string]$SuiteFileName = 'suite.json',
     [int]$MaxLlmRounds = 0,
     [int]$MaxTurnTokens = 0,
@@ -121,7 +122,7 @@ $Script:StreamProjectLogToHost = $false
 if ($LiveProjectLog) { $Script:StreamProjectLogToHost = $true }
 if ($NoLiveProjectLog) { $Script:StreamProjectLogToHost = $false }
 if ($MirrorEditorProcessStreamsToHost) {
-    Write-Warning 'run-long-running-headed: -MirrorEditorProcessStreamsToHost is ignored. The headed editor is never launched with redirected stdout/stderr so the Unreal -log window works; logs are mirrored from Saved/Logs into the run folder instead.'
+    Write-Warning 'run-qualitative-headed: -MirrorEditorProcessStreamsToHost is ignored. The headed editor is never launched with redirected stdout/stderr so the Unreal -log window works; logs are mirrored from Saved/Logs into the run folder instead.'
 }
 $Script:SpawnedEditorPids = @()
 $Script:RunStartUtc = (Get-Date).ToUniversalTime()
@@ -164,7 +165,7 @@ function Resolve-ScenarioFolder {
     if ([System.IO.Path]::IsPathRooted($PathLike)) {
         return (Resolve-Path -LiteralPath $PathLike).Path
     }
-    $base = Join-Path $ProjectRoot 'tests\long-running-tests'
+    $base = Join-Path $ProjectRoot 'tests\qualitative-tests'
     $candidate = Join-Path $base $PathLike
     if (Test-Path -LiteralPath $candidate) {
         return (Resolve-Path -LiteralPath $candidate).Path
@@ -581,6 +582,7 @@ function Invoke-HeadedEditorDynamic {
     param(
         [string]$ExecCmds,
         [string[]]$ExpectedRunJsonls,
+        [string[]]$ExpectedStrictAssertionResults = @(),
         [int]$TurnCount,
         [string]$SessionLogDir = '',
         [string]$SessionLogFileSuffix = '',
@@ -722,6 +724,7 @@ UE_LOG: use the Unreal log window and see editor_unreal_project_log_live*.log + 
         $harnessTimerStatusLine = $false
         $allFinished = $false
         $totalExpectedTurns = $ExpectedRunJsonls.Count
+        $totalExpectedStrict = @($ExpectedStrictAssertionResults).Count
         # Long suites / noisy modes: occasional full lines so ETA is visible even when -LiveProjectLog fills the console.
         $harnessProgressFullLineSec = if ($LiveProjectLogToHost) { 25 } elseif ($totalExpectedTurns -ge 12) { 55 } else { 0 }
         while ($true) {
@@ -740,6 +743,12 @@ UE_LOG: use the Unreal log window and see editor_unreal_project_log_live*.log + 
             $done = 0
             foreach ($j in $ExpectedRunJsonls) {
                 if (Test-RunJsonlFinished -RunJsonlPath $j) { $done++ }
+            }
+            $strictDone = 0
+            if ($totalExpectedStrict -gt 0) {
+                foreach ($s in $ExpectedStrictAssertionResults) {
+                    if (Test-Path -LiteralPath $s) { $strictDone++ }
+                }
             }
             $etaSuffix = ''
             if ($totalExpectedTurns -gt 0 -and $done -gt 0 -and $done -lt $totalExpectedTurns) {
@@ -765,7 +774,8 @@ UE_LOG: use the Unreal log window and see editor_unreal_project_log_live*.log + 
                 $showInlineTimer = (-not $LiveProjectLogToHost)
                 if ($showInlineTimer) {
                     if ($totalExpectedTurns -gt 0) {
-                        Write-Host "`rHarness turns $done/$totalExpectedTurns | $elapsedStr$etaSuffix  " -NoNewline -ForegroundColor DarkGray
+                        $strictSuffix = if ($totalExpectedStrict -gt 0) { " | strict $strictDone/$totalExpectedStrict" } else { '' }
+                        Write-Host "`rHarness turns $done/$totalExpectedTurns$strictSuffix | $elapsedStr$etaSuffix  " -NoNewline -ForegroundColor DarkGray
                     }
                     else {
                         Write-Host "`rHarness elapsed $elapsedStr  " -NoNewline -ForegroundColor DarkGray
@@ -783,7 +793,9 @@ UE_LOG: use the Unreal log window and see editor_unreal_project_log_live*.log + 
             try { $p.Refresh() } catch {}
             if ($p.HasExited) { break }
             $now = (Get-Date).ToUniversalTime()
-            if ($totalExpectedTurns -gt 0 -and $done -ge $totalExpectedTurns) {
+            $jsonlsDone = ($totalExpectedTurns -gt 0 -and $done -ge $totalExpectedTurns)
+            $strictFilesDone = ($totalExpectedStrict -eq 0 -or $strictDone -ge $totalExpectedStrict)
+            if ($jsonlsDone -and $strictFilesDone) {
                 $allFinished = $true
                 break
             }
@@ -852,18 +864,43 @@ UE_LOG: use the Unreal log window and see editor_unreal_project_log_live*.log + 
     }
 }
 
-$scenarioAbs = Resolve-ScenarioFolder $ScenarioFolder
-$filter = [System.IO.Path]::GetFileName($SuiteFileName)
-if ([string]::IsNullOrWhiteSpace($filter)) {
-    $filter = 'suite.json'
+$qualitativeRoot = Join-Path $ProjectRoot 'tests\qualitative-tests'
+$defaultSuitesRoot = Join-Path $qualitativeRoot 'suites'
+$scenarioAbs = if ([string]::IsNullOrWhiteSpace($ScenarioFolder)) {
+    if (-not (Test-Path -LiteralPath $defaultSuitesRoot)) {
+        Write-Error "Default suites folder not found: $defaultSuitesRoot"
+    }
+    (Resolve-Path -LiteralPath $defaultSuitesRoot).Path
+}
+else {
+    Resolve-ScenarioFolder $ScenarioFolder
 }
 
-$suiteFiles = @(
-    Get-ChildItem -LiteralPath $scenarioAbs -Recurse -File -Filter $filter -ErrorAction Stop |
-        Sort-Object FullName
-)
-if ($suiteFiles.Count -eq 0) {
-    Write-Error "No '$filter' files found under: $scenarioAbs"
+$requestedSuiteName = [string]$Suite
+if ([string]::IsNullOrWhiteSpace($requestedSuiteName)) {
+    $requestedSuiteName = [string]$SuiteFileName
+}
+
+if (-not [string]::IsNullOrWhiteSpace($requestedSuiteName)) {
+    if (-not $requestedSuiteName.ToLowerInvariant().EndsWith('.json')) {
+        $requestedSuiteName = $requestedSuiteName + '.json'
+    }
+    $suitePath = Join-Path $scenarioAbs $requestedSuiteName
+    if (-not (Test-Path -LiteralPath $suitePath)) {
+        Write-Error "Suite not found: $suitePath"
+    }
+    $suiteFiles = @((Get-Item -LiteralPath $suitePath -ErrorAction Stop))
+    $filter = [System.IO.Path]::GetFileName($suitePath)
+}
+else {
+    $filter = '*.json'
+    $suiteFiles = @(
+        Get-ChildItem -LiteralPath $scenarioAbs -File -Filter $filter -ErrorAction Stop |
+            Sort-Object FullName
+    )
+    if ($suiteFiles.Count -eq 0) {
+        Write-Error "No suite files found under: $scenarioAbs"
+    }
 }
 $suitesDiscoveredCount = $suiteFiles.Count
 if ($MaxSuites -ne 0) {
@@ -875,34 +912,32 @@ if ($MaxSuites -ne 0) {
     Write-Host ("MaxSuites={0}: running {1} of {2} suite file(s) (sorted by path)." -f $MaxSuites, $suiteFiles.Count, $suitesDiscoveredCount) -ForegroundColor Yellow
 }
 
-# One folder per batch: tests/long-running-tests/runs/run-<index>-<local timestamp> (index monotonic across all scenarios).
+# One folder per batch: tests/qualitative-tests/runs/run-<month>-<day>-<hour>-<minute>-<suite_name>.
 $batchStartedLocal = Get-Date
 $batchStampCulture = [System.Globalization.CultureInfo]::GetCultureInfo('en-US')
-# Readable local stamp: date + 12h time with dashes between hour/minute/second + AM/PM (no ms; safe for folder names).
-$batchStampCore = $batchStartedLocal.ToString('yyyyMMdd-hh-mm-ss-tt', $batchStampCulture)
-$runsParent = Join-Path $PSScriptRoot 'runs'
+$batchStampCore = $batchStartedLocal.ToString('MM-dd-HH-mm', $batchStampCulture)
+$runsParent = if (-not [string]::IsNullOrWhiteSpace($RunsRoot)) { $RunsRoot } else { Join-Path $PSScriptRoot 'runs' }
 if (-not (Test-Path -LiteralPath $runsParent)) {
     New-Item -ItemType Directory -Force -Path $runsParent | Out-Null
 }
-$maxRunIndex = 0
-Get-ChildItem -LiteralPath $runsParent -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-    if ($_.Name -match '^run-(\d+)-') {
-        $n = [int]$Matches[1]
-        if ($n -gt $maxRunIndex) {
-            $maxRunIndex = $n
-        }
-    }
+$batchSuiteSlug = if ($suiteFiles.Count -eq 1) {
+    [System.IO.Path]::GetFileNameWithoutExtension($suiteFiles[0].Name)
 }
-$batchRunIndex = $maxRunIndex + 1
-while ($true) {
-    $batchFolderBase = 'run-{0}-{1}' -f $batchRunIndex, $batchStampCore
-    $batchRunsRoot = Join-Path $runsParent $batchFolderBase
-    if (-not (Test-Path -LiteralPath $batchRunsRoot)) {
-        break
-    }
-    $batchRunIndex++
+else {
+    'multi_suite'
 }
-$batchRunIndexUsed = $batchRunIndex
+$batchSuiteSlug = ($batchSuiteSlug -replace '[^A-Za-z0-9_-]', '_').Trim('_')
+if ([string]::IsNullOrWhiteSpace($batchSuiteSlug)) {
+    $batchSuiteSlug = 'suite'
+}
+$batchFolderBase = 'run-{0}-{1}' -f $batchStampCore, $batchSuiteSlug
+$batchRunsRoot = Join-Path $runsParent $batchFolderBase
+$collision = 2
+while (Test-Path -LiteralPath $batchRunsRoot) {
+    $batchRunsRoot = Join-Path $runsParent ('{0}-{1}' -f $batchFolderBase, $collision)
+    $collision++
+}
+$batchRunIndexUsed = 0
 New-Item -ItemType Directory -Force -Path $batchRunsRoot | Out-Null
 $batchStamp = [System.IO.Path]::GetFileName($batchRunsRoot)
 $batchStartedLocalIso = $batchStartedLocal.ToString('o')
@@ -924,6 +959,7 @@ foreach ($jf in $suiteFiles) {
 
     $suiteExecParts = [System.Collections.Generic.List[string]]::new()
     $suiteExpectedRunJsonls = [System.Collections.Generic.List[string]]::new()
+    $suiteExpectedStrictResults = [System.Collections.Generic.List[string]]::new()
     if ($null -ne $previousThreadId) {
         $suiteExecParts.Add(('UnrealAi.ForgetThread "{0}"' -f $previousThreadId))
     }
@@ -959,6 +995,26 @@ foreach ($jf in $suiteFiles) {
         $dumpArg = if ($ReduceContextNoise) { 'nodump' } else { 'dumpcontext' }
         $suiteExecParts.Add(('UnrealAi.RunAgentTurn "{0}" "{1}" "{2}" "{3}" {4}' -f $msgForCmd, $threadId, $mode, $stepForCmd, $dumpArg))
         $suiteExpectedRunJsonls.Add((Join-Path $stepDir 'run.jsonl'))
+
+        $assertionsFilePath = $null
+        $hasAssertions = $null -ne $t.assertions -and @($t.assertions).Count -gt 0
+        if ($hasAssertions) {
+            $assertionsFilePath = Join-Path $stepDir 'assertions.json'
+            $innerJson = ($t.assertions | ConvertTo-Json -Depth 25)
+            $innerTrim = ($innerJson | Out-String).Trim()
+            # ConvertTo-Json sometimes collapses a single-element "array" into a JSON object; strict assertions expect JSON array.
+            if ($innerTrim.StartsWith('{')) {
+                $innerJson = ('[' + $innerJson + ']')
+            }
+            [System.IO.File]::WriteAllText(
+                $assertionsFilePath,
+                ($innerJson + "`n"),
+                (New-Object System.Text.UTF8Encoding($false))
+            )
+            $suiteExecParts.Add(('UnrealAi.RunStrictAssertions "{0}" "{1}"' -f (ConvertTo-ShortWinPath $assertionsFilePath), $stepForCmd))
+            $suiteExpectedStrictResults.Add((Join-Path $stepDir 'strict_assertions_result.json'))
+        }
+
         $turnStatus += [ordered]@{
             turn_index = $i
             type = if ($t.type) { [string]$t.type } else { $defaultType }
@@ -966,6 +1022,8 @@ foreach ($jf in $suiteFiles) {
             request = $req
             message_file = $msgPath
             step_dir = $stepDir
+            assertions_present = [bool]$hasAssertions
+            assertions_file = $assertionsFilePath
         }
     }
 
@@ -988,6 +1046,7 @@ foreach ($jf in $suiteFiles) {
         batch_started_utc = $batchStartedUtcIso
         exec_parts = @($suiteExecParts)
         expected_run_jsonls = @($suiteExpectedRunJsonls)
+        expected_strict_assertion_results = @($suiteExpectedStrictResults)
         turns = $turnStatus
     }
     if ($doc.PSObject.Properties.Name -contains 'domain_scenario_refs') {
@@ -1055,12 +1114,16 @@ try {
 
         $allExecParts = [System.Collections.Generic.List[string]]::new()
         $allExpectedRunJsonls = [System.Collections.Generic.List[string]]::new()
+        $allExpectedStrictResults = [System.Collections.Generic.List[string]]::new()
         foreach ($suiteSummary in $allStatuses) {
             foreach ($part in @($suiteSummary.exec_parts)) {
                 $allExecParts.Add([string]$part)
             }
             foreach ($rj in @($suiteSummary.expected_run_jsonls)) {
                 $allExpectedRunJsonls.Add([string]$rj)
+            }
+            foreach ($sj in @($suiteSummary.expected_strict_assertion_results)) {
+                $allExpectedStrictResults.Add([string]$sj)
             }
         }
         $allExecParts.Add('Quit')
@@ -1118,7 +1181,8 @@ try {
                     $suiteCmds = ($suiteExec -join ',')
                     Write-Host ("Running headed editor (per-suite) {0} chunk {1}/{2}" -f $suiteSummary.path_slug, $chunkIndex, $chunks.Count) -ForegroundColor Cyan
                     $chunkSuffix = if ($chunks.Count -gt 1) { ('_chunk{0:D2}' -f $chunkIndex) } else { '' }
-                    $runResult = Invoke-HeadedEditorDynamic -ExecCmds $suiteCmds -ExpectedRunJsonls $suiteExpected -TurnCount $suiteExpected.Count -SessionLogDir $suiteSummary.run_root -SessionLogFileSuffix $chunkSuffix -LiveProjectLogToHost:$Script:StreamProjectLogToHost -BringEditorToForeground:$BringEditorToForeground
+                    $suiteExpectedStrict = @($suiteSummary.expected_strict_assertion_results)
+                    $runResult = Invoke-HeadedEditorDynamic -ExecCmds $suiteCmds -ExpectedRunJsonls $suiteExpected -ExpectedStrictAssertionResults $suiteExpectedStrict -TurnCount $suiteExpected.Count -SessionLogDir $suiteSummary.run_root -SessionLogFileSuffix $chunkSuffix -LiveProjectLogToHost:$Script:StreamProjectLogToHost -BringEditorToForeground:$BringEditorToForeground
                     $chunkExit = [int]$runResult.exit_code
                     if ($ex -eq 0 -and $chunkExit -ne 0) {
                         $ex = $chunkExit
@@ -1136,7 +1200,7 @@ try {
         }
         else {
             Write-Host ("ExecCmds length={0} (limit {1}) - single editor session" -f $execCmdLen, $MaxExecCmdChars) -ForegroundColor DarkGray
-            $runResult = Invoke-HeadedEditorDynamic -ExecCmds $execCmds -ExpectedRunJsonls @($allExpectedRunJsonls) -TurnCount $allExpectedRunJsonls.Count -SessionLogDir $batchRunsRoot -LiveProjectLogToHost:$Script:StreamProjectLogToHost -BringEditorToForeground:$BringEditorToForeground
+            $runResult = Invoke-HeadedEditorDynamic -ExecCmds $execCmds -ExpectedRunJsonls @($allExpectedRunJsonls) -ExpectedStrictAssertionResults @($allExpectedStrictResults) -TurnCount $allExpectedRunJsonls.Count -SessionLogDir $batchRunsRoot -LiveProjectLogToHost:$Script:StreamProjectLogToHost -BringEditorToForeground:$BringEditorToForeground
             $batchExitCode = [int]$runResult.exit_code
             $batchAllJsonlsFinished = [bool]$runResult.all_finished
             $Script:PerSuiteExitBySlug = @{}
@@ -1205,6 +1269,34 @@ try {
                 $suiteDone = $false
             }
 
+            # Strict assertions: if a turn has assertions.json, we require strict_assertions_result.json and pass==true.
+            $suiteStrictAny = $false
+            $suiteStrictFailed = 0
+            foreach ($ts in $suiteSummary.turns) {
+                $assertionsJsonPath = Join-Path $ts.step_dir 'assertions.json'
+                if (Test-Path -LiteralPath $assertionsJsonPath) {
+                    $suiteStrictAny = $true
+                    $strictResPath = Join-Path $ts.step_dir 'strict_assertions_result.json'
+                    if (-not (Test-Path -LiteralPath $strictResPath)) {
+                        $suiteDone = $false
+                        $suiteStrictFailed++
+                        continue
+                    }
+                    try {
+                        $strictResRaw = Get-Content -LiteralPath $strictResPath -Raw -Encoding UTF8
+                        $strictRes = $strictResRaw | ConvertFrom-Json
+                        if (-not $strictRes.pass) {
+                            $suiteDone = $false
+                            $suiteStrictFailed++
+                        }
+                    }
+                    catch {
+                        $suiteDone = $false
+                        $suiteStrictFailed++
+                    }
+                }
+            }
+
             if ($batchSessionMode -eq 'per_suite' -and $Script:PerSuiteExitBySlug.ContainsKey([string]$suiteSummary.path_slug)) {
                 $suiteSummary.editor_exit_code = $Script:PerSuiteExitBySlug[[string]$suiteSummary.path_slug]
             }
@@ -1218,6 +1310,8 @@ try {
             $suiteSummary.tool_finish_event_count = $suiteToolFinishEvents
             $suiteSummary.tool_fail_event_count = $suiteToolFailEvents
             $suiteSummary.blocker_hint_count = $suiteBlockerHints
+            $suiteSummary.strict_assertions_any_turns = $suiteStrictAny
+            $suiteSummary.strict_assertions_fail_count = $suiteStrictFailed
             $suiteSummary.finished_utc = (Get-Date).ToUniversalTime().ToString('o')
             ($suiteSummary | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath (Join-Path $suiteSummary.run_root 'summary.json') -Encoding UTF8
 
@@ -1306,7 +1400,7 @@ $suiteSummary = [ordered]@{
     batch_session_mode = $Script:BatchSessionMode
     exec_cmds_length_chars = $Script:ExecCmdsLengthChars
     max_exec_cmd_chars = $MaxExecCmdChars
-    recursive_suite_discovery = $true
+    recursive_suite_discovery = $false
     started_utc = $(if ($Script:RunStartUtc) { $Script:RunStartUtc.ToString('o') } else { (Get-Date).ToUniversalTime().ToString('o') })
     files_processed = $allStatuses.Count
     runs = $allStatuses

@@ -1500,7 +1500,7 @@
     },
     {
       "tool_id": "blueprint_get_graph_summary",
-      "summary": "Read-only: bounded summary of Blueprint graph(s) for an existing asset. blueprint_path must be a /Game Blueprint object path (use asset_index_fuzzy_search if unsure). Optional graph_name narrows to one graph; omit to summarize ubergraph + functions + macros.",
+      "summary": "Read-only: bounded summary of Blueprint graph(s) for an existing asset. `blueprint_path` is required and must be a concrete /Game Blueprint object_path (prefer reuse from asset_index_fuzzy_search/asset_registry_query results; do not guess names). Optional graph_name narrows to one graph; omit to summarize ubergraph + functions + macros.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -2673,7 +2673,7 @@
     },
     {
       "tool_id": "project_file_read_text",
-      "summary": "Read a text file anywhere under the project directory (path relative to project root; Saved/, Intermediate/, etc. allowed). For engine/plugin lines, read this project’s `.uproject` manifest using the **actual** basename (see system context “Project workspace” when present—not a placeholder name). Large or binary files may be truncated or unsuitable—use max_bytes.",
+      "summary": "Read a text file anywhere under the project directory (path relative to project root; Saved/, Intermediate/, etc. allowed). `relative_path` is required (`file_path` alias). Do not call with `{}` repeatedly: pass a concrete project-relative file path or use suggested_correct_call. For engine/plugin lines, read this project’s `.uproject` manifest using the actual basename (see system context “Project workspace” when present—not a placeholder name). Large or binary files may be truncated or unsuitable—use max_bytes.",
       "category": "project_files_search",
       "tags": [
         "filesystem",
@@ -3912,7 +3912,7 @@
     },
     {
       "tool_id": "asset_create",
-      "summary": "Create a new asset under /Game via IAssetTools (asset_class path + optional factory_class). Use for Blueprint assets/materials/sounds/etc. `{}` is invalid: package_path, asset_name, and asset_class are required. For Character/Pawn gameplay, create a Blueprint asset (/Script/Engine.Blueprint) then set parent_class via blueprint_apply_ir create_if_missing flow.",
+      "summary": "Create a new asset under /Game via IAssetTools (asset_class path + optional factory_class). Use for Blueprint assets/materials/sounds/etc. `{}` is invalid: `package_path`, `asset_name`, and `asset_class` are required on first attempt. Keep package_path under /Game. For Character/Pawn gameplay, create a Blueprint asset (/Script/Engine.Blueprint) then set parent_class via blueprint_apply_ir create_if_missing flow.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -4196,7 +4196,7 @@
     },
     {
       "tool_id": "blueprint_export_ir",
-      "summary": "Read-only: export Blueprint graph IR for an existing Blueprint asset path (discovered via asset_index_fuzzy_search/asset_registry_query—blueprint_path must match a returned object_path; do not guess names when multiple assets exist). Use before blueprint_apply_ir when patching logic.",
+      "summary": "Read-only: export Blueprint graph IR for an existing Blueprint asset path. `blueprint_path` is required and should come from prior discovery output (asset_index_fuzzy_search / asset_registry_query object_path), not a guessed name. Use before blueprint_apply_ir when patching logic.",
       "category": "blueprints",
       "tags": [
         "blueprint",

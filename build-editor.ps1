@@ -15,7 +15,7 @@
     .\build-editor.ps1 -AutomationTests -Headless
     .\build-editor.ps1 -GenerateProjectFiles
     Set UE_ENGINE_ROOT in repo .env (see .env.example) or: $env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\build-editor.ps1
-    # Batch headed suites + full logging: tests\long-running-tests\run-long-running-headed.ps1 — docs\tooling\AGENT_HARNESS_HANDOFF.md
+    # Batch headed suites + full logging: tests\qualitative-tests\run-qualitative-headed.ps1 — docs\tooling\AGENT_HARNESS_HANDOFF.md
     # Full harness + iteration context for agents: docs\tooling\AGENT_HARNESS_HANDOFF.md
 
   If execution is blocked:

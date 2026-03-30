@@ -72,6 +72,8 @@ private:
 	IUnrealAiMemoryService* MemoryService = nullptr;
 	IUnrealAiRetrievalService* RetrievalService = nullptr;
 	TMap<FString, FAgentContextState> Sessions;
+	/** Project-scoped dynamic tree cache shared across threads. */
+	TMap<FString, FProjectTreeSummary> ProjectTreeByProjectId;
 	FString ActiveProjectId;
 	FString ActiveThreadId;
 	TSet<FString> PendingSaveKeys;

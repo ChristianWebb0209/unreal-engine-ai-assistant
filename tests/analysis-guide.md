@@ -8,7 +8,7 @@ This document is for **future agents and humans** who need to **find the latest 
 
 Unless someone names something else, **“testing”** in this repo often means:
 
-- **Primary:** [`tests/long-running-tests/`](.) — headed Unreal batches driven by [`run-long-running-headed.ps1`](run-long-running-headed.ps1), suite JSON under subfolders (e.g. `realistic-user-agent-basket`, `plan-mode-smoke`, `mixed-salad-complex`), outputs under [`runs/`](runs/).
+- **Primary:** [`tests/qualitative-tests/`](.) — headed Unreal batches driven by [`run-qualitative-headed.ps1`](run-qualitative-headed.ps1), suite JSON under subfolders (e.g. `realistic-user-agent-basket`, `plan-mode-smoke`, `mixed-salad-complex`), outputs under [`runs/`](runs/).
 
 **Not** the default meaning: plugin `Automation` tests only, or ad-hoc Python scripts, unless explicitly requested.
 
@@ -17,7 +17,7 @@ Unless someone names something else, **“testing”** in this repo often means:
 ## Where runs live
 
 - **Implementation note:** Plan-mode DAG parsing, execution, and shared plan/todo summaries live under `Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Planning/` (not under `Harness/`).
-- **Root for all batches:** [`tests/long-running-tests/runs/`](runs/)
+- **Root for all batches:** [`tests/qualitative-tests/runs/`](runs/)
 - Each invocation creates a folder:
 
   `runs/run-<monotonic-index>-<local-date-time>/`
@@ -43,7 +43,7 @@ The **authoritative** “newest batch” is the directory under `runs/` with the
 **Practical steps (Windows / PowerShell from repo root):**
 
 ```powershell
-Get-ChildItem -LiteralPath "tests\long-running-tests\runs" -Directory |
+Get-ChildItem -LiteralPath "tests\qualitative-tests\runs" -Directory |
   Where-Object { $_.Name -match '^run-(\d+)-' } |
   Sort-Object { [int]$Matches[1] } -Descending |
   Select-Object -First 5 Name, LastWriteTime
@@ -54,7 +54,7 @@ Pick the **top** `Name` — that is the latest batch unless the user renamed fol
 **Caveats:**
 
 - A **`DryRun`** also creates a batch folder (smaller, no editor); check `last-suite-summary.json` for `"dry_run": true` if you need a real headed run only.
-- [`tests/long-running-tests/last-suite-summary.json`](../last-suite-summary.json) (if present at repo root) may **lag** or point at an older batch; **always confirm** against the `runs/` folder with the highest index.
+- [`tests/qualitative-tests/last-suite-summary.json`](../last-suite-summary.json) (if present at repo root) may **lag** or point at an older batch; **always confirm** against the `runs/` folder with the highest index.
 - Multiple suites in one batch share one `run-<N>-…` folder; each suite has its own subfolder under that batch.
 
 ---
@@ -77,13 +77,13 @@ Pick the **top** `Name` — that is the latest batch unless the user renamed fol
 4. **Optional aggregate classification** (requires Python 3):
 
    ```text
-   python tests/classify_harness_run_jsonl.py --batch-root tests/long-running-tests/runs/run_<N>-<timestamp>
+   python tests/classify_harness_run_jsonl.py --batch-root tests/qualitative-tests/runs/run_<N>-<timestamp>
    ```
 
    Or from a batch’s `last-suite-summary.json`:
 
    ```text
-   python tests/classify_harness_run_jsonl.py --from-summary tests/long-running-tests/runs/run_<N>-<timestamp>/last-suite-summary.json
+   python tests/classify_harness_run_jsonl.py --from-summary tests/qualitative-tests/runs/run_<N>-<timestamp>/last-suite-summary.json
    ```
 
    Buckets include `run_finished_ok`, `tool_finish_false`, `http_timeout`, `harness_policy`, `rate_limit`, `invalid_request`, etc. (see [`tests/classify_harness_run_jsonl.py`](../../tests/classify_harness_run_jsonl.py)).
@@ -162,7 +162,7 @@ These show up in `run.jsonl` often but are usually **root-caused** under one of 
 
 | Purpose | Location |
 |--------|----------|
-| Batch runner | [`run-long-running-headed.ps1`](run-long-running-headed.ps1) |
+| Batch runner | [`run-qualitative-headed.ps1`](run-qualitative-headed.ps1) |
 | JSONL classifier | [`tests/classify_harness_run_jsonl.py`](../../tests/classify_harness_run_jsonl.py) |
 | Wait / sync / HTTP policy | [`UnrealAiWaitTimePolicy.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiWaitTimePolicy.h) |
 | Ship log | [`tool-iteration-log.md`](tool-iteration-log.md) |

@@ -150,7 +150,8 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne(
 	}
 
 	const double StartSeconds = FPlatformTime::Seconds();
-	const uint32 WaitMs = static_cast<uint32>(FMath::Max(1000.0f, (TimeoutSec * 1000.0f) + 250.0f));
+	// Keep wait margin small so timeout paths return quickly to lexical fallback.
+	const uint32 WaitMs = static_cast<uint32>(FMath::Max(1000.0f, (TimeoutSec * 1000.0f) + 100.0f));
 	const bool bSignaled = WaitForEventWhilePumpingHttpAndGameThread(DoneEvent, WaitMs);
 	const double ElapsedMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
 	UE_LOG(

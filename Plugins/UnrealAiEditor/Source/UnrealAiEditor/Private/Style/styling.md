@@ -15,7 +15,7 @@ All plugin-specific colors and typography must come from:
 
 - `Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Style/UnrealAiEditorStyle.h/.cpp` (`FUnrealAiEditorStyle`)
 
-Do **not** hardcode `FLinearColor(...)`, custom font sizes, or bespoke brushes inside `Tabs/` (including `SUnrealAiEditorSettingsTab` and `SUnrealAiEditorDebugTab`).
+Do **not** hardcode `FLinearColor(...)`, custom font sizes, or bespoke brushes inside `Tabs/` (including `SUnrealAiEditorSettingsTab`).
 
 If a new color/token is needed:
 

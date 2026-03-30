@@ -55,6 +55,14 @@ namespace UnrealAiToolDispatchArgRepair
 		}
 		if (Path.IsEmpty())
 		{
+			Args->TryGetStringField(TEXT("path"), Path);
+		}
+		if (Path.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("blueprint"), Path);
+		}
+		if (Path.IsEmpty())
+		{
 			return;
 		}
 		NormalizeAssetLikeObjectPath(Path);

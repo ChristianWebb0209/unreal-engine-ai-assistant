@@ -52,7 +52,7 @@ Default output:
 
 ## Harness testing & agent handoff
 
-**Single doc for prompts, catalog, dispatch, scripts, and escalation:** [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](../../docs/tooling/AGENT_HARNESS_HANDOFF.md). Use it when onboarding a new agent or a fresh iteration thread. **Primary qualitative batches:** `.\tests\long-running-tests\run-long-running-headed.ps1` from repo root.
+**Single doc for prompts, catalog, dispatch, scripts, and escalation:** [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](../../docs/tooling/AGENT_HARNESS_HANDOFF.md). Use it when onboarding a new agent or a fresh iteration thread. **Primary qualitative batches:** `.\tests\qualitative-tests\run-qualitative-headed.ps1` from repo root.
 
 ## Automation tests (Editor, dev builds)
 
@@ -72,7 +72,7 @@ When `WITH_DEV_AUTOMATION_TESTS` is enabled (default for **Development** Editor 
 .\build-editor.ps1 -AutomationTests -Headless
 ```
 
-Artifacts: `Saved/UnrealAiEditor/Automation/tool_matrix_last.json`, editor logs under `Saved/Logs/`. Primary qualitative batches: [`tests/long-running-tests/run-long-running-headed.ps1`](../tests/long-running-tests/run-long-running-headed.ps1). Maintainer entry point: [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](../docs/tooling/AGENT_HARNESS_HANDOFF.md).
+Artifacts: `Saved/UnrealAiEditor/Automation/tool_matrix_last.json`, editor logs under `Saved/Logs/`. Primary qualitative batches: [`tests/qualitative-tests/run-qualitative-headed.ps1`](../tests/qualitative-tests/run-qualitative-headed.ps1). Maintainer entry point: [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](../docs/tooling/AGENT_HARNESS_HANDOFF.md).
 
 **Run in editor:** **Tools â†’ Session Frontend** (or **Test Automation** in some UE versions) â†’ search `UnrealAiEditor`, or console `UnrealAi.RunCatalogMatrix [filter]`.
 

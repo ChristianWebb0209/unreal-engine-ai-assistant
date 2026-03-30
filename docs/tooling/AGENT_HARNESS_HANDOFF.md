@@ -20,7 +20,7 @@ Index of all `docs/` files: [docs/README.md](../README.md)
 1. Prompts (when the model skips tools, wrong-order tools, or ignores merge/layout contracts)
 2. Catalog text + schema (when routing or parameter validation fails)
 3. Dispatch validation + threading (when behavior differs from the catalog)
-4. Long-running headed batches (`tests/long-running-tests/run-long-running-headed.ps1`) for structured suites, full logging, and qualitative review under `tests/long-running-tests/runs/`
+4. Long-running headed batches (`tests/qualitative-tests/run-qualitative-headed.ps1`) for structured suites, full logging, and qualitative review under `tests/qualitative-tests/runs/`
 
 ---
 ## Harness tiers
@@ -33,14 +33,15 @@ Index of all `docs/` files: [docs/README.md](../README.md)
 
 Use real API credentials from Unreal AI Editor settings.
 
-- **Primary:** `.\tests\long-running-tests\run-long-running-headed.ps1` (suite JSON under `tests/long-running-tests/`; outputs under `tests/long-running-tests/runs/`)
+- **Primary:** `.\tests\qualitative-tests\run-qualitative-headed.ps1` (suite JSON under `tests/qualitative-tests/`; outputs under `tests/qualitative-tests/runs/`)
 - **Ad hoc:** `UnrealAi.RunAgentTurn <MessageFilePath> [ThreadGuid] [agent|ask|plan] [OutputDir]` — optional **`dumpcontext`** as the 5th argument for context window dumps next to `run.jsonl`
 
-Artifacts: `Saved/UnrealAiEditor/HarnessRuns/<timestamp>/run.jsonl` (batch runs also mirror under `tests/long-running-tests/runs/` per suite).
+Artifacts: `Saved/UnrealAiEditor/HarnessRuns/<timestamp>/run.jsonl` (batch runs also mirror under `tests/qualitative-tests/runs/` per suite).
 
 Key enforcement telemetry now emitted in `run.jsonl`:
 - `enforcement_event` (action/mutation policy nudges/outcomes)
 - `enforcement_summary` (aggregate counts for action intent, tool-backed action, explicit blockers, and mutation read-only nudges)
+- `enforcement_event` with `event_type=background_op` for background workflows (retrieval prefetch, memory dispatch, and related ops)
 - Stream-first tool execution lifecycle event types:
   - `stream_tool_ready`
   - `stream_tool_exec_start`
@@ -49,6 +50,23 @@ Key enforcement telemetry now emitted in `run.jsonl`:
 
 Snapshot without running the model:
 `UnrealAi.DumpContextWindow <ThreadGuid> [reason_slug]`
+
+### Background operation observability
+
+Background operations should emit both machine logs and user-visible context hints:
+
+- `run.jsonl`: `enforcement_event` (`event_type=background_op`) and `context_user_messages`.
+- context footer: one-line latest sampler status/timestamp indicator.
+
+```mermaid
+flowchart TD
+  bgStart[BackgroundOpStart] --> sink[IAgentRunSinkOnEnforcementEvent]
+  sink --> runJsonl[runJsonlEnforcementEvent]
+  bgEnd[BackgroundOpEnd] --> sink
+  sampler[ProjectTreeSamplerRefresh] --> contextMsg[ContextUserMessages]
+  contextMsg --> runJsonlContext[runJsonlContextUserMessages]
+  sampler --> footer[ContextFooterIndicator]
+```
 
 ---
 ## Console commands
@@ -75,7 +93,7 @@ From Output Log:
 - Headless CI:
   - `.\build-editor.ps1 -AutomationTests -Headless`
 - Long-running headed batches (suites + full logging):
-  - `.\tests\long-running-tests\run-long-running-headed.ps1`
+  - `.\tests\qualitative-tests\run-qualitative-headed.ps1`
 - Assert last/specific JSONL:
   - `python tests\assert_harness_run.py Saved\UnrealAiEditor\HarnessRuns\<ts>\run.jsonl --expect-tool <id> --require-success`
 
@@ -87,7 +105,7 @@ From Output Log:
 | System prompt chunks | `Plugins/UnrealAiEditor/prompts/chunks/` |
 | Tool definitions | `Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json` |
 | Tool implementation | `Plugins/UnrealAiEditor/Source/.../Tools/UnrealAiToolDispatch*.cpp` |
-| Long-running headed suites | `tests/long-running-tests/` (`run-long-running-headed.ps1`, suite JSON, `runs/` outputs) |
+| Long-running headed suites | `tests/qualitative-tests/` (`run-qualitative-headed.ps1`, suite JSON, `runs/` outputs) |
 | Domain coverage matrix | `tests/domain_coverage_matrix.md` |
 | Qualitative turn template | `tests/qualitative_turn_review_template.md` |
 

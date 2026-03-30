@@ -401,16 +401,20 @@ void SChatMessageList::RebuildTranscript()
 			{
 				const TSharedRef<SWidget> UserBubble = B.bHarnessSystemUser
 					? StaticCastSharedRef<SWidget>(
-						  SNew(SBox)
-							  .Padding(FMargin(12.f, 2.f, 12.f, 8.f))
-							  .HAlign(HAlign_Fill)
+						  SNew(SBorder)
+							  .BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.UserBubble")))
+							  .Padding(FMargin(10.f, 9.f))
 							  [
-								  SNew(STextBlock)
-									  .AutoWrapText(true)
-									  .WrapTextAt(800.f)
-									  .Text(FText::FromString(B.UserText))
-									  .Font(FUnrealAiEditorStyle::FontBodyRegular11())
-									  .ColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted())
+								  SNew(SBox)
+									  .HAlign(HAlign_Fill)
+									  [
+										  SNew(STextBlock)
+											  .AutoWrapText(true)
+											  .WrapTextAt(800.f)
+											  .Text(FText::FromString(B.UserText))
+											  .Font(FUnrealAiEditorStyle::FontBodyRegular11())
+											  .ColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted())
+									  ]
 							  ])
 					: StaticCastSharedRef<SWidget>(
 						  SNew(SBorder)
@@ -633,7 +637,7 @@ void SChatMessageList::RebuildTranscript()
 				MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 					[
 						SNew(SBorder)
-							.BorderBackgroundColor(FLinearColor(0.2f, 0.2f, 0.25f, 0.6f))
+							.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.ChatRunProgress")))
 							.Padding(FMargin(8.f))
 							[
 								SNew(SVerticalBox)
@@ -679,11 +683,12 @@ void SChatMessageList::RebuildTranscript()
 			MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 				[
 					SNew(SBorder)
-						.BorderBackgroundColor(B.bRunCancelled
-							? FLinearColor(0.25f, 0.22f, 0.12f, 0.9f)
-							: (B.bNoticeError
-								  ? FLinearColor(0.28f, 0.12f, 0.12f, 0.9f)
-								  : FLinearColor(0.14f, 0.16f, 0.22f, 0.92f)))
+						.BorderImage(
+							B.bRunCancelled
+								? FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.ChatNoticeCancelled"))
+								: (B.bNoticeError
+									  ? FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.ChatNoticeError"))
+									  : FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.ChatNoticeInfo"))))
 						.Padding(FMargin(8.f))
 						[
 							SNew(SMultiLineEditableText)

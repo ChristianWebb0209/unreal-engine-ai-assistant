@@ -151,7 +151,7 @@ Use this section when continuing design threads so you do not re-derive behavior
 
 - **`context_decision_logs/**`** under harness `turns/step_*/`: **context ranker** (snapshots, tabs, tool-result memory, memory snippets). **Not** LLM `tools[]` / dispatch roster decisions.
 - **`run.jsonl` `enforcement_event`**: `tool_surface_metrics` (mode, `eligible`, `roster_chars`, `k`, `qshape`, `qhash`, `expanded=` first **`ToolExpandedCount`** ids) and, when enabled, **`tool_selector_ranks`** (full JSON **scores + guardrail flags + selection_reason**). Verbose flag: `UnrealAiRuntimeDefaults::ToolSelectorVerboseLogEnabled`.
-- **Latest long-running batches:** `tests/long-running-tests/runs/run_*` and `tests/long-running-tests/last-suite-summary.json` (path rules in `.cursor/rules/testing-long-running-harness.mdc`).
+- **Latest long-running batches:** `tests/qualitative-tests/runs/run_*` and `tests/qualitative-tests/last-suite-summary.json` (path rules in `.cursor/rules/testing-long-running-harness.mdc`).
 
 **Code map (high signal)**
 

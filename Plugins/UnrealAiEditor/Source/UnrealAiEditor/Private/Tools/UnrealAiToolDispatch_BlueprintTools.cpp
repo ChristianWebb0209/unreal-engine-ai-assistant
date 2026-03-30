@@ -2177,7 +2177,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportIr(const TSharedPt
 	FString Path;
 	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("blueprint_path is required"));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("blueprint_path is required. Discover Blueprints with asset_index_fuzzy_search (query + path_prefix) or asset_registry_query with path_filter/class_name."),
+			TEXT("blueprint_export_ir"),
+			SuggestedArgs);
 	}
 	FString GraphName;
 	Args->TryGetStringField(TEXT("graph_name"), GraphName);

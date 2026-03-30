@@ -79,6 +79,8 @@ Thumbs.db
 # Re-ignore paths that became visible because parent dirs were un-ignored for traversal
 /tests/out/
 /tests/long-running-tests/runs/
+/tests/qualitative-tests/runs/
+/tests/strict-tests/runs/
 /tests/**/*.json
 /tests/**/*.jsonl
 

@@ -3,7 +3,7 @@
 ## Repo & build
 - **UE 5.7** syntax; plugin: `Plugins/UnrealAiEditor/`.
 - Build: `.\build-editor.ps1 -Headless` (use `-Restart` if plugin DLL is locked).
-- **“Testing”** in this repo (unless user says otherwise) usually means **headed harness**: `tests/long-running-tests/run-long-running-headed.ps1`, suites under `tests/long-running-tests/`, outputs in `tests/long-running-tests/runs/run_*`. See `tests/long-running-tests/last-suite-summary.json` for latest batch pointer.
+- **“Testing”** in this repo (unless user says otherwise) usually means **headed harness**: `tests/qualitative-tests/run-qualitative-headed.ps1`, suites under `tests/qualitative-tests/`, outputs in `tests/qualitative-tests/runs/run_*`. See `tests/qualitative-tests/last-suite-summary.json` for latest batch pointer.
 
 ## Central runtime defaults (single source of truth)
 - **`Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h`**
@@ -27,7 +27,7 @@
 4. **Viewport**  
    - `viewport_frame_actors` rejects **`PersistentLevel` / `WorldSettings` alone** + clearer errors; catalog + `prompts/chunks/04-tool-calling-contract.md` updated.
 
-## Headed harness script (`tests/long-running-tests/run-long-running-headed.ps1`)
+## Headed harness script (`tests/qualitative-tests/run-qualitative-headed.ps1`)
 - **No** `-HttpTimeoutSec` / `-SyncWaitMs` — limits come from C++ only.
 - **Editor focus:** default **does not** bring Unreal to foreground; **`-BringEditorToForeground`** opt-in.
 - Still uses `Import-RepoDotenv` for **`UE_ENGINE_ROOT`** and **`OPENAI_*`** (see `.env.example`); provider JSON sync via `scripts/sync-unreal-ai-from-dotenv.ps1`.
@@ -45,7 +45,7 @@
 | Catalog | `Resources/UnrealAiToolCatalog.json` |
 
 ## Operational changelog
-- **`tests/long-running-tests/tool-iteration-log.md`** — numbered entries (`Entry 1` … `Entry N`, newest first) for harness/tool/prompt changes; prepend **`## Entry M — …`** when logging (see file header).
+- **`tests/tool-iteration-log.md`** — numbered entries (`Entry 1` … `Entry N`, newest first) for harness/tool/prompt changes; prepend **`## Entry M — …`** when logging (see file header).
 - **`docs/api/timeout-handling.md`** — inventory of HTTP / harness / tool timeouts and sync behavior.
 
 ## Before a new harness batch
@@ -55,4 +55,4 @@
 
 ## Intentional constraints (from user)
 - Prefer **minimal, focused** diffs; match existing style.  
-- Don’t expand markdown/docs unless asked (exception: operational logs like `tests/long-running-tests/tool-iteration-log.md` when recording changes).
+- Don’t expand markdown/docs unless asked (exception: operational logs like `tests/tool-iteration-log.md` when recording changes).

@@ -1,5 +1,7 @@
 #include "Tools/UnrealAiToolDispatch_GenericAssets.h"
 
+#include "Context/UnrealAiProjectId.h"
+#include "Context/UnrealAiProjectTreeSampler.h"
 #include "Tools/UnrealAiToolJson.h"
 #include "Tools/UnrealAiToolDispatch_ArgRepair.h"
 #include "Tools/UnrealAiAssetFactoryResolver.h"
@@ -400,6 +402,19 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetCreate(const TSharedPtr<FJso
 		TEXT("asset_class"),
 		ClassAliases,
 		ClassPath);
+	if ((PackagePath.IsEmpty() || !bHasPackagePath) && !ClassPath.IsEmpty() && ClassPath.Contains(TEXT("Blueprint"), ESearchCase::IgnoreCase))
+	{
+		const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+		const FString Preferred = UnrealAiProjectTreeSampler::GetPreferredPackagePathForProject(
+			ProjectId,
+			TEXT("blueprint"),
+			TEXT("/Game/Blueprints"));
+		if (!Preferred.IsEmpty())
+		{
+			PackagePath = Preferred;
+			Args->SetStringField(TEXT("package_path"), PackagePath);
+		}
+	}
 	if (!bHasPackagePath || PackagePath.IsEmpty()
 		|| !bHasAssetName || AssetName.IsEmpty()
 		|| !bHasAssetClass || ClassPath.IsEmpty())

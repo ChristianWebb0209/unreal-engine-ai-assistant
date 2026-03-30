@@ -87,6 +87,14 @@ The compactor runs as a hidden background workflow with strict gates:
 
 The extractor is allowed to produce no output for a run.
 
+### 5.1 Background-op logging contract
+
+Memory background work (dispatch/skip outcomes) should emit a unified background-op event so harness logs and context observability stay aligned:
+
+- run artifact signal: `enforcement_event` with `event_type=background_op`
+- op payload: includes project/thread ids and compact memory dispatch metrics (`accepted`, `pruned`, triggers)
+- UI/context signal: footer indicator remains separate and lightweight
+
 ## 6. Retention and pruning
 
 - Periodic pruning removes or archives:

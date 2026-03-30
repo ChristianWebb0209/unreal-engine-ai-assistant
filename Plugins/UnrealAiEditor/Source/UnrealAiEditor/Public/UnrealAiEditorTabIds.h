@@ -8,5 +8,4 @@ namespace UnrealAiEditorTabIds
 	inline const FName SettingsTab("UnrealAiEditor_SettingsTab");
 	inline const FName QuickStartTab("UnrealAiEditor_QuickStartTab");
 	inline const FName HelpTab("UnrealAiEditor_HelpTab");
-	inline const FName DebugTab("UnrealAiEditor_DebugTab");
 }

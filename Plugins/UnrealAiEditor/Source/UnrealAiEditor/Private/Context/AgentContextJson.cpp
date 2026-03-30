@@ -146,6 +146,34 @@ namespace UnrealAiAgentContextJson
 		return true;
 	}
 
+	static TSharedPtr<FJsonObject> ProjectTreePrefToJson(const FProjectTreePathPreference& P)
+	{
+		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+		O->SetStringField(TEXT("assetFamily"), P.AssetFamily);
+		O->SetStringField(TEXT("packagePath"), P.PackagePath);
+		O->SetNumberField(TEXT("confidence"), P.Confidence);
+		O->SetNumberField(TEXT("observedCount"), P.ObservedCount);
+		return O;
+	}
+
+	static void JsonToProjectTreePref(const TSharedPtr<FJsonObject>& O, FProjectTreePathPreference& Out)
+	{
+		if (!O.IsValid())
+		{
+			return;
+		}
+		O->TryGetStringField(TEXT("assetFamily"), Out.AssetFamily);
+		O->TryGetStringField(TEXT("packagePath"), Out.PackagePath);
+		if (O->HasField(TEXT("confidence")))
+		{
+			Out.Confidence = O->GetNumberField(TEXT("confidence"));
+		}
+		if (O->HasField(TEXT("observedCount")))
+		{
+			Out.ObservedCount = static_cast<int32>(O->GetNumberField(TEXT("observedCount")));
+		}
+	}
+
 	bool StateToJson(const FAgentContextState& State, FString& OutJson)
 	{
 		TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
@@ -242,6 +270,38 @@ namespace UnrealAiAgentContextJson
 			ThreadUiArr.Add(MakeShared<FJsonValueObject>(RecentUiEntryToJson(R).ToSharedRef()));
 		}
 		Root->SetArrayField(TEXT("threadRecentUiOverlay"), ThreadUiArr);
+		{
+			const FProjectTreeSummary& T = State.ProjectTreeSummary;
+			TSharedPtr<FJsonObject> PT = MakeShared<FJsonObject>();
+			PT->SetStringField(TEXT("samplerVersion"), T.SamplerVersion);
+			if (T.UpdatedUtc != FDateTime::MinValue())
+			{
+				PT->SetStringField(TEXT("updatedUtc"), T.UpdatedUtc.ToIso8601());
+			}
+			if (T.LastQueryStartUtc != FDateTime::MinValue())
+			{
+				PT->SetStringField(TEXT("lastQueryStartUtc"), T.LastQueryStartUtc.ToIso8601());
+			}
+			if (T.LastQueryEndUtc != FDateTime::MinValue())
+			{
+				PT->SetStringField(TEXT("lastQueryEndUtc"), T.LastQueryEndUtc.ToIso8601());
+			}
+			PT->SetStringField(TEXT("lastQueryStatus"), T.LastQueryStatus);
+			PT->SetNumberField(TEXT("lastQueryDurationMs"), T.LastQueryDurationMs);
+			TArray<TSharedPtr<FJsonValue>> Folders;
+			for (const FString& Folder : T.TopLevelFolders)
+			{
+				Folders.Add(MakeShared<FJsonValueString>(Folder));
+			}
+			PT->SetArrayField(TEXT("topLevelFolders"), Folders);
+			TArray<TSharedPtr<FJsonValue>> Prefs;
+			for (const FProjectTreePathPreference& P : T.PreferredCreatePaths)
+			{
+				Prefs.Add(MakeShared<FJsonValueObject>(ProjectTreePrefToJson(P).ToSharedRef()));
+			}
+			PT->SetArrayField(TEXT("preferredCreatePaths"), Prefs);
+			Root->SetObjectField(TEXT("projectTreeSummary"), PT);
+		}
 
 		FString Out;
 		const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
@@ -438,6 +498,60 @@ namespace UnrealAiAgentContextJson
 				if (JsonToRecentUiEntry(*ObjPtr, Entry))
 				{
 					OutState.ThreadRecentUiOverlay.Add(MoveTemp(Entry));
+				}
+			}
+		}
+		if (const TSharedPtr<FJsonObject>* ProjectTreeObj = nullptr;
+			Root->TryGetObjectField(TEXT("projectTreeSummary"), ProjectTreeObj) && ProjectTreeObj && ProjectTreeObj->IsValid())
+		{
+			const TSharedPtr<FJsonObject>& PT = *ProjectTreeObj;
+			PT->TryGetStringField(TEXT("samplerVersion"), OutState.ProjectTreeSummary.SamplerVersion);
+			FString Ts;
+			if (PT->TryGetStringField(TEXT("updatedUtc"), Ts))
+			{
+				FDateTime::ParseIso8601(*Ts, OutState.ProjectTreeSummary.UpdatedUtc);
+			}
+			if (PT->TryGetStringField(TEXT("lastQueryStartUtc"), Ts))
+			{
+				FDateTime::ParseIso8601(*Ts, OutState.ProjectTreeSummary.LastQueryStartUtc);
+			}
+			if (PT->TryGetStringField(TEXT("lastQueryEndUtc"), Ts))
+			{
+				FDateTime::ParseIso8601(*Ts, OutState.ProjectTreeSummary.LastQueryEndUtc);
+			}
+			PT->TryGetStringField(TEXT("lastQueryStatus"), OutState.ProjectTreeSummary.LastQueryStatus);
+			if (PT->HasField(TEXT("lastQueryDurationMs")))
+			{
+				OutState.ProjectTreeSummary.LastQueryDurationMs = PT->GetNumberField(TEXT("lastQueryDurationMs"));
+			}
+			if (const TArray<TSharedPtr<FJsonValue>>* Folders = nullptr;
+				PT->TryGetArrayField(TEXT("topLevelFolders"), Folders) && Folders)
+			{
+				for (const TSharedPtr<FJsonValue>& V : *Folders)
+				{
+					FString Folder;
+					if (V.IsValid() && V->TryGetString(Folder) && !Folder.IsEmpty())
+					{
+						OutState.ProjectTreeSummary.TopLevelFolders.Add(Folder);
+					}
+				}
+			}
+			if (const TArray<TSharedPtr<FJsonValue>>* Prefs = nullptr;
+				PT->TryGetArrayField(TEXT("preferredCreatePaths"), Prefs) && Prefs)
+			{
+				for (const TSharedPtr<FJsonValue>& V : *Prefs)
+				{
+					const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+					if (!V.IsValid() || !V->TryGetObject(ObjPtr) || !ObjPtr || !ObjPtr->IsValid())
+					{
+						continue;
+					}
+					FProjectTreePathPreference P;
+					JsonToProjectTreePref(*ObjPtr, P);
+					if (!P.AssetFamily.IsEmpty() && !P.PackagePath.IsEmpty())
+					{
+						OutState.ProjectTreeSummary.PreferredCreatePaths.Add(MoveTemp(P));
+					}
 				}
 			}
 		}

@@ -232,7 +232,7 @@ chats/<project_id>/threads/<thread_id>/context.json
 
 ## 4. `context.json` schema (authoritative)
 
-`schemaVersion` is written from **`FAgentContextState::SchemaVersionField`**. The C++ constant **`FAgentContextState::SchemaVersion`** defines the expected on-disk version (currently **5** in [`AgentContextTypes.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextTypes.h)). Older files still load **best-effort** with a warning.
+`schemaVersion` is written from **`FAgentContextState::SchemaVersionField`**. The C++ constant **`FAgentContextState::SchemaVersion`** defines the expected on-disk version (currently **6** in [`AgentContextTypes.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Context/AgentContextTypes.h)). Older files still load **best-effort** with a warning.
 
 | Field | Type | Notes |
 |-------|------|--------|
@@ -246,6 +246,7 @@ chats/<project_id>/threads/<thread_id>/context.json
 | `todoStepsDone` | bool[] | Parallel to `steps` in the plan JSON |
 | `activePlanDag` | string? | Canonical **`unreal_ai.plan_dag`** JSON (Plan mode); parse/validate helpers in `Private/Planning/UnrealAiPlanDag` |
 | `planNodeStatus` | array | `{ nodeId, status, summary? }` for DAG execution |
+| `projectTreeSummary` | object | Dynamic project-tree cache: top folders, preferred create paths, and last background query status/timing |
 
 ### 4.1 `editorSnapshot`
 
@@ -269,6 +270,37 @@ Maps to `EContextAttachmentType`: `asset`, `file`, `text`, `bp_node`, `actor`, `
 ---
 
 ## 5. Build pipeline
+
+### 5.6 Dynamic project-tree context blurb
+
+`BuildContextWindow` appends a compact dynamic block that grounds path selection for underspecified create requests:
+
+- observed top-level `/Game` folders (loose tree),
+- preferred create package paths by asset family (for example `blueprint`),
+- canonical examples (`package_path` vs `object_path`),
+- footer indicator with last update/status.
+
+The summary is inferred by `UnrealAiProjectTreeSampler` from bounded Asset Registry samples and cached per project, then mirrored into thread context state for persistence.
+
+```mermaid
+flowchart TD
+  buildContext[BuildContextWindow] --> maybeSample[ProjectTreeSamplerMaybeRefresh]
+  maybeSample --> cacheSummary[ProjectTreeSummaryCache]
+  cacheSummary --> appendBlurb[AppendDynamicProjectPathsBlurb]
+  appendBlurb --> contextOut[ContextBlockOutput]
+  contextOut --> llm[LLMRequestBuilder]
+  llm --> toolCall[asset_createToolCall]
+  toolCall --> argRepair[ArgRepairDefaultPackagePath]
+```
+
+### 5.7 Background-op indicators and troubleshooting
+
+- Context footer now includes a one-line indicator like `Background ops: ProjectTree updated=... age_min=... status=...`.
+- When a sampler refresh runs during context build, a user-visible message is emitted and run artifacts include it via `context_user_messages`.
+- If the indicator becomes stale:
+  - check Asset Registry availability and project load state,
+  - verify refresh cadence (sampler skips when cache is fresh),
+  - force context rebuild via `UnrealAi.DumpContextWindow <ThreadGuid>`.
 
 ### 5.0 Unified candidate ranker (single-source tuning)
 

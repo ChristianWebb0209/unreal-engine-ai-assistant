@@ -40,6 +40,7 @@
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
+#include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/SUnrealAiLocalJsonInspectorPanel.h"
@@ -604,66 +605,131 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
 					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+						SNew(SScrollBox)
+						.Orientation(Orient_Horizontal)
+						+ SScrollBox::Slot()
 						[
-							SNew(SButton)
-								.Text(LOCTEXT("SettingsSegConfig", "Configuration"))
-								.OnClicked_Lambda([this]()
-								{
-									return OnSettingsSegmentClicked(0);
-								})
-						]
-						+ SHorizontalBox::Slot().AutoWidth()
-						[
-							SNew(SButton)
-								.Text(LOCTEXT("SettingsChatHistory", "Chat history"))
-								.OnClicked_Lambda([this]()
-								{
-									return OnSettingsSegmentClicked(1);
-								})
-						]
-						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(8.f, 0.f, 0.f, 0.f))
-						[
-							SNew(SButton)
-								.Text(LOCTEXT("SettingsMemories", "Memories"))
-								.OnClicked_Lambda([this]()
-								{
-									return OnSettingsSegmentClicked(2);
-								})
-						]
-						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(8.f, 0.f, 0.f, 0.f))
-						[
-							SNew(SButton)
-								.Text(LOCTEXT("SettingsVectorDb", "Vector DB"))
-								.OnClicked_Lambda([this]()
-								{
-									return OnSettingsSegmentClicked(3);
-								})
-						]
-						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(8.f, 0.f, 0.f, 0.f))
-						[
-							SNew(SButton)
-								.Text(LOCTEXT("SettingsContext", "Context"))
-								.ToolTipText(LOCTEXT(
-									"SettingsContextTip",
-									"Inspect per-chat context.json / conversation.json and related local thread artifacts."))
-								.OnClicked_Lambda([this]()
-								{
-									return OnSettingsSegmentClicked(4);
-								})
-						]
-						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(8.f, 0.f, 0.f, 0.f))
-						[
-							SNew(SButton)
-								.Text(LOCTEXT("SettingsProjectIndex", "Project index"))
-								.ToolTipText(LOCTEXT(
-									"SettingsProjectIndexTip",
-									"Inspect threads_index.json and drill into per-thread context artifacts."))
-								.OnClicked_Lambda([this]()
-								{
-									return OnSettingsSegmentClicked(5);
-								})
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 6.f, 0.f))
+							[
+								SNew(SCheckBox).Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+									.IsChecked_Lambda([this]()
+									{
+										return ActiveSettingsSegmentIndex == 0 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+									})
+									.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+									{
+										if (S == ECheckBoxState::Checked)
+										{
+											OnSettingsSegmentClicked(0);
+										}
+									})
+									.Content()
+									[
+										SNew(STextBlock).Text(LOCTEXT("SettingsSegConfig", "Configuration"))
+									]
+							]
+							+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 6.f, 0.f))
+							[
+								SNew(SCheckBox).Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+									.IsChecked_Lambda([this]()
+									{
+										return ActiveSettingsSegmentIndex == 1 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+									})
+									.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+									{
+										if (S == ECheckBoxState::Checked)
+										{
+											OnSettingsSegmentClicked(1);
+										}
+									})
+									.Content()
+									[
+										SNew(STextBlock).Text(LOCTEXT("SettingsChatHistory", "Chat history"))
+									]
+							]
+							+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 6.f, 0.f))
+							[
+								SNew(SCheckBox).Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+									.IsChecked_Lambda([this]()
+									{
+										return ActiveSettingsSegmentIndex == 2 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+									})
+									.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+									{
+										if (S == ECheckBoxState::Checked)
+										{
+											OnSettingsSegmentClicked(2);
+										}
+									})
+									.Content()
+									[
+										SNew(STextBlock).Text(LOCTEXT("SettingsMemories", "Memories"))
+									]
+							]
+							+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 6.f, 0.f))
+							[
+								SNew(SCheckBox).Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+									.IsChecked_Lambda([this]()
+									{
+										return ActiveSettingsSegmentIndex == 3 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+									})
+									.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+									{
+										if (S == ECheckBoxState::Checked)
+										{
+											OnSettingsSegmentClicked(3);
+										}
+									})
+									.Content()
+									[
+										SNew(STextBlock).Text(LOCTEXT("SettingsVectorDb", "Vector DB"))
+									]
+							]
+							+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 6.f, 0.f))
+							[
+								SNew(SCheckBox).Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+									.IsChecked_Lambda([this]()
+									{
+										return ActiveSettingsSegmentIndex == 4 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+									})
+									.ToolTipText(LOCTEXT(
+										"SettingsContextTip",
+										"Inspect per-chat context.json / conversation.json and related local thread artifacts."))
+									.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+									{
+										if (S == ECheckBoxState::Checked)
+										{
+											OnSettingsSegmentClicked(4);
+										}
+									})
+									.Content()
+									[
+										SNew(STextBlock).Text(LOCTEXT("SettingsContext", "Context"))
+									]
+							]
+							+ SHorizontalBox::Slot().AutoWidth()
+							[
+								SNew(SCheckBox).Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+									.IsChecked_Lambda([this]()
+									{
+										return ActiveSettingsSegmentIndex == 5 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+									})
+									.ToolTipText(LOCTEXT(
+										"SettingsProjectIndexTip",
+										"Inspect threads_index.json and drill into per-thread context artifacts."))
+									.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+									{
+										if (S == ECheckBoxState::Checked)
+										{
+											OnSettingsSegmentClicked(5);
+										}
+									})
+									.Content()
+									[
+										SNew(STextBlock).Text(LOCTEXT("SettingsProjectIndex", "Project index"))
+									]
+							]
 						]
 					]
 					+ SVerticalBox::Slot().FillHeight(1.f).Padding(FMargin(0.f, 4.f))
@@ -694,13 +760,18 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 											SNew(SVerticalBox)
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
 											[
-												SNew(STextBlock)
-													.Font(FUnrealAiEditorStyle::FontSectionHeading())
-													.Text(LOCTEXT("SecGlobal", "Global API defaults"))
-											]
-											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
-											[
-												SNew(SGridPanel).FillColumn(1, 1.f)
+												SNew(SExpandableArea)
+													.InitiallyCollapsed(true)
+													.AreaTitle(LOCTEXT("SecGlobal", "Global API defaults"))
+													.HeaderContent()
+													[
+														SNew(STextBlock)
+															.Font(FUnrealAiEditorStyle::FontSectionHeading())
+															.Text(LOCTEXT("SecGlobal", "Global API defaults"))
+													]
+													.BodyContent()
+													[
+														SNew(SGridPanel).FillColumn(1, 1.f)
 												+ SGridPanel::Slot(0, 0).Padding(4.f)
 												[
 													SNew(STextBlock).Text(LOCTEXT("BaseUrl", "Base URL"))
@@ -766,6 +837,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 															]
 													]
 												]
+													]
 											]
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
 											[
@@ -888,15 +960,23 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 															"Editor focus: when on, the agent may follow along in the editor (Content Browser sync, viewport framing, post-tool navigation). When off, optional UI is skipped; tools that must open an editor still open."))
 												]
 											]
-											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
-											[
-												SNew(STextBlock)
-													.Font(FUnrealAiEditorStyle::FontSectionHeading())
-													.Text(LOCTEXT("SecRetrieval", "Retrieval (local vector index)"))
-											]
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
 											[
-												SNew(SGridPanel).FillColumn(1, 1.f)
+												SNew(SExpandableArea)
+													.InitiallyCollapsed(true)
+													.AreaTitle(LOCTEXT("SecRetrieval", "Retrieval (local vector index)"))
+													.HeaderContent()
+													[
+														SNew(STextBlock)
+															.Font(FUnrealAiEditorStyle::FontSectionHeading())
+															.Text(LOCTEXT("SecRetrieval", "Retrieval (local vector index)"))
+													]
+													.BodyContent()
+													[
+														SNew(SVerticalBox)
+														+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
+														[
+															SNew(SGridPanel).FillColumn(1, 1.f)
 												+ SGridPanel::Slot(0, 0).Padding(4.f)
 												[
 													SNew(STextBlock).Text(LOCTEXT("RetrievalEnabledLbl", "Enabled"))
@@ -1209,32 +1289,40 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 															OnAnySettingsChanged(T);
 														})
 												]
+														]
+														+ SVerticalBox::Slot().AutoHeight()
+														[
+															SNew(SButton)
+																.Text(LOCTEXT("RetrievalRebuildNowBtn", "Rebuild retrieval index now"))
+																.OnClicked(this, &SUnrealAiEditorSettingsTab::OnRetrievalRebuildNowClicked)
+														]
+													]
 											]
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
 											[
-												SNew(SButton)
-													.Text(LOCTEXT("RetrievalRebuildNowBtn", "Rebuild retrieval index now"))
-													.OnClicked(this, &SUnrealAiEditorSettingsTab::OnRetrievalRebuildNowClicked)
-											]
-											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
-											[
-												SNew(SHorizontalBox)
-												+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
-												[
-													SNew(STextBlock)
-														.Font(FUnrealAiEditorStyle::FontSectionHeading())
-														.Text(LOCTEXT("SecSections", "API key sections"))
-												]
-												+ SHorizontalBox::Slot().AutoWidth()
-												[
-													SNew(SButton)
-														.Text(LOCTEXT("AddSection", "Add section"))
-														.OnClicked(this, &SUnrealAiEditorSettingsTab::OnAddSectionClicked)
-												]
-											]
-											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
-											[
-												SAssignNew(SectionsVBox, SVerticalBox)
+												SNew(SExpandableArea)
+													.InitiallyCollapsed(true)
+													.AreaTitle(LOCTEXT("SecSections", "API key sections"))
+													.HeaderContent()
+													[
+														SNew(STextBlock)
+															.Font(FUnrealAiEditorStyle::FontSectionHeading())
+															.Text(LOCTEXT("SecSections", "API key sections"))
+													]
+													.BodyContent()
+													[
+														SNew(SVerticalBox)
+														+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+														[
+															SNew(SButton)
+																.Text(LOCTEXT("AddSection", "Add section"))
+																.OnClicked(this, &SUnrealAiEditorSettingsTab::OnAddSectionClicked)
+														]
+														+ SVerticalBox::Slot().AutoHeight()
+														[
+															SAssignNew(SectionsVBox, SVerticalBox)
+														]
+													]
 											]
 										]
 									]
@@ -3851,73 +3939,40 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 									]
 									+ SGridPanel::Slot(1, 5).Padding(4.f)
 									[
-										SNew(SComboButton)
-											.ButtonContent()
-											[
-												SNew(STextBlock)
-													.Font(FUnrealAiEditorStyle::FontCaption())
-													.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
-													.Text_Lambda([this, SectionIdx, ModelIdx]()
-													{
-														if (!BackendRegistry.IsValid())
-														{
-															return FText::GetEmpty();
-														}
-														if (!SectionRows.IsValidIndex(SectionIdx))
-														{
-															return FText::GetEmpty();
-														}
-														const FDynSectionRow& SR = SectionRows[SectionIdx];
-														if (!SR.Models.IsValidIndex(ModelIdx))
-														{
-															return FText::GetEmpty();
-														}
-														const SUnrealAiEditorSettingsTab::FDynModelRow& MR = SR.Models[ModelIdx];
-														const FString Pk = MR.ProfileKeyBox.IsValid()
-															? MR.ProfileKeyBox->GetText().ToString()
-															: MR.ProfileKey;
-														FString Line;
-														bool bHasPrice = false;
-														if (FUnrealAiUsageTracker* U = BackendRegistry->GetUsageTracker())
-														{
-															U->PerModelSummary(
-																Pk,
-																*BackendRegistry->GetModelProfileRegistry(),
-																Line,
-																bHasPrice);
-														}
-														return FText::FromString(Line);
-													})
-											]
-											.OnGetMenuContent_Lambda([this, SectionIdx, ModelIdx]()
+										SNew(STextBlock)
+											.Font(FUnrealAiEditorStyle::FontCaption())
+											.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+											.AutoWrapText(true)
+											.Text_Lambda([this, SectionIdx, ModelIdx]()
 											{
-												SyncDynamicRowsFromWidgets();
+												if (!BackendRegistry.IsValid())
+												{
+													return FText::GetEmpty();
+												}
+												if (!SectionRows.IsValidIndex(SectionIdx))
+												{
+													return FText::GetEmpty();
+												}
+												const FDynSectionRow& SR = SectionRows[SectionIdx];
+												if (!SR.Models.IsValidIndex(ModelIdx))
+												{
+													return FText::GetEmpty();
+												}
+												const SUnrealAiEditorSettingsTab::FDynModelRow& MR = SR.Models[ModelIdx];
+												const FString Pk = MR.ProfileKeyBox.IsValid()
+													? MR.ProfileKeyBox->GetText().ToString()
+													: MR.ProfileKey;
 												FString Line;
 												bool bHasPrice = false;
-												if (BackendRegistry.IsValid())
+												if (FUnrealAiUsageTracker* U = BackendRegistry->GetUsageTracker())
 												{
-													if (FUnrealAiUsageTracker* U = BackendRegistry->GetUsageTracker())
-													{
-														if (SectionRows.IsValidIndex(SectionIdx)
-															&& SectionRows[SectionIdx].Models.IsValidIndex(ModelIdx))
-														{
-															const FString Pk = SectionRows[SectionIdx].Models[ModelIdx].ProfileKey;
-															U->PerModelSummary(
-																Pk,
-																*BackendRegistry->GetModelProfileRegistry(),
-																Line,
-																bHasPrice);
-														}
-													}
+													U->PerModelSummary(
+														Pk,
+														*BackendRegistry->GetModelProfileRegistry(),
+														Line,
+														bHasPrice);
 												}
-												return SNew(SBorder)
-													.Padding(FMargin(10.f))
-													[
-														SNew(STextBlock)
-															.Font(FUnrealAiEditorStyle::FontBodySmall())
-															.WrapTextAt(280.f)
-															.Text(FText::FromString(Line.IsEmpty() ? TEXT("No usage recorded yet for this profile key.") : Line))
-													];
+												return FText::FromString(Line.IsEmpty() ? TEXT("No usage recorded yet for this profile key.") : Line);
 											})
 									]
 								]

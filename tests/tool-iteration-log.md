@@ -4,6 +4,53 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 ---
 
+## Entry 39 — Expanded strict assertions + tool-catalog coverage suite
+
+- **Plugin strict assertions (`UnrealAi.RunStrictAssertions`):** Added broad deterministic assertion support beyond `asset_exists` / `tool_invoke_ok` / `blueprint_export_ir_node_count_min`.
+  - New tool assertion types: `tool_invoke_fail`, `tool_result_path_exists`, `tool_result_path_equals_string`, `tool_result_path_contains`, `tool_result_array_min_length`, `tool_result_number_gte`, `tool_result_number_lte`, `tool_result_bool_equals`, `tool_result_string_nonempty`.
+  - New non-tool assertions: `asset_not_exists`, `project_file_exists`, `project_dir_exists`.
+  - Added shared helper paths for invoking tools from assertions and resolving dot-path values inside tool JSON results.
+- **Headed harness (`run-qualitative-headed.ps1`):**
+  - Added strict-artifact tracking (`expected_strict_assertion_results`) per suite.
+  - `Invoke-HeadedEditorDynamic` now waits for both `run.jsonl` terminal lines and strict assertion output files before considering a run complete.
+  - Progress line now shows strict artifact completion (`strict X/Y`) during live headed runs.
+- **Strict suite (`tests/strict-tests/suites/strict_tool_catalog_coverage_v1.json`):**
+  - Added a multi-turn deterministic catalog-coverage suite that validates a broad set of safe/read-path tools and argument-validation failures for mutation-heavy tools.
+  - Final suite passes with deterministic strict assertions in headed mode.
+- **Verification:** `tests\strict-tests\run-strict-headed.ps1 -Suite strict_tool_catalog_coverage_v1 -MaxSuites 1` (run-21) passed (`failed_suite_count=0`, `strict_assertions_fail_count=0`).
+
+---
+
+## Entry 38 — Strict deterministic assertions: editor-side checks + blueprint smoke
+
+- **Plugin (editor-side):** Added `UnrealAi.RunStrictAssertions` console command in `UnrealAiEditorModule.cpp` to execute deterministic assertion checks by invoking editor-side tools/state and writing `strict_assertions_result.json`.
+- **Harness (`run-qualitative-headed.ps1`):**
+  - Added `-RunsRoot` to redirect headed batch output to a caller-provided runs directory (used by strict tests).
+  - Extended the suite turn loop to support per-turn `assertions[]`:
+    - writes `assertions.json` into each `step_XX` folder
+    - appends `UnrealAi.RunStrictAssertions` to `ExecCmds` immediately after each `UnrealAi.RunAgentTurn`
+    - marks the suite failed when any strict assertion result has `pass=false`
+  - Fixed `assertions.json` serialization so the file is always a JSON array (even for single-assertion turns).
+- **Strict tests (`tests/strict-tests`):**
+  - Replaced `suite.json` to use the requested strict schema (`type`, `request`, then `assertions`).
+  - Updated `run-strict-headed.ps1` to be a thin wrapper that reuses `run-qualitative-headed.ps1` with `-RunsRoot tests\strict-tests\runs`.
+- **Verification:** Ran `tests\strict-tests\run-strict-headed.ps1 -ScenarioFolder tests\strict-tests -MaxSuites 1` and confirmed the strict suite passed (strict assertion failures and `failed_suite_count` were both 0).
+- **Turn migration:** Removed the easily-passed read-only ask turn from `tests/strict-tests/suite.json` and added it to `tests/qualitative-tests/passed-tests/suite.json`.
+
+---
+
+## Entry 37 — Run-89 hardening: pre-dispatch path fill, empty-args guardrail, prompts/suite pruning
+
+- **Harness (`FUnrealAiAgentHarness.cpp`):** Added pre-dispatch argument autofill for read tools that stalled in run-89: `blueprint_get_graph_summary` / `blueprint_export_ir` now inherit `blueprint_path` from aliases (`object_path`/`asset_path`/`path`/`blueprint`) or latest blueprint discovery results in context (`asset_index_fuzzy_search` / `asset_registry_query` / prior blueprint tool results). `project_file_read_text` now auto-fills `relative_path` to the current project manifest relative path (fallback `Config/DefaultEngine.ini`) when missing.
+- **Harness guardrail:** Added `required_args_empty_repeat_abort` enforcement event + early stop when a required-arg tool is invoked with `{}` repeatedly (`asset_create`, `asset_rename`, `blueprint_*`, `project_file_*`) to prevent expensive loops like repeated `asset_create {}`.
+- **Mutation intent heuristic:** `UserLikelyRequestsMutation` now uses whole-word matching for mutation tokens, avoiding substring false-positives (`compile` inside `compilers`/`compiling`) while keeping `mutation_read_only_note` logging behavior.
+- **Tool dispatch fallback paths:** `blueprint_export_ir` now returns `ErrorWithSuggestedCall` when `blueprint_path` is missing; arg repair accepts additional blueprint path key aliases (`path`, `blueprint`) in `RepairBlueprintAssetPathArgs`.
+- **Embedding stall mitigation:** Reduced embedding timeout budget (`EmbeddingHttpTimeoutSec` 15s → 8s) and tightened embedding wait padding in `FOpenAiCompatibleEmbeddingProvider` so retrieval fails faster to lexical fallback instead of holding the turn.
+- **Prompt/catalog/suite updates:** Tightened required-arg/path language in `02-operating-modes.md`, `04-tool-calling-contract.md`, `10-mvp-gameplay-and-tooling.md`, and key `UnrealAiToolCatalog.json` summaries (`asset_create`, `project_file_read_text`, `blueprint_get_graph_summary`, `blueprint_export_ir`). Pruned `pre-release-natural-gaps/suite.json` to failure-focused turns only (prop attach mutation, controls wiring, messy BP tidy, scratch-duplicate rename) with clearer mutation/read-only intent.
+- **Build verification:** `./build-editor.ps1 -Headless` initially hit LNK1104 DLL lock; rerun with `./build-editor.ps1 -Restart -Headless` succeeded.
+
+---
+
 ## Entry 36 — Code-type preference, `cpp_project_compile`, `project_file_move`, compile context
 
 - **`plugin_settings.json` → `agent`:** `codeTypePreference` (`auto` | `blueprint_first` | `cpp_first` | `blueprint_only` | `cpp_only`), `autoConfirmDestructive` (default true). AI Settings tab UI + `FUnrealAiEditorModule` hydration mirror `useSubagents`.
@@ -38,7 +85,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 - **`FAgentRunFileSink::OnRunFinished`:** After **`compare_exchange`** claims the terminal slot, if **`AppendRunFinishedLineWithRetry`** returns false, **`bFinished`** is **cleared** so **`~FAgentRunFileSink`** can call **`OnRunFinished`** again and retry the line (avoids a state where the disk never gets `run_finished` but `bFinished` blocks the destructor path). **`DoneEvent` / completion pointers** still run so the headed runner does not deadlock. Warning log: `run_finished append failed; released finish slot for destructor retry`.
 - **Destructor comment** updated to describe append-failure vs successful single terminal.
 - **Build:** `./build-editor.ps1 -Headless` (or `-Restart` if LNK1104) applied after this change.
-- **Headed verification (operator):** Re-run **`tests/long-running-tests/plan-mode-smoke/`**; confirm `step_01/run.jsonl` contains `"type":"run_finished"` (see `Test-RunJsonlFinished` in `run-long-running-headed.ps1`). Inspect **`success`** / **`error_message`** as needed. Optional: confirm `llm_requests.jsonl` still shows **`## Original request (from user)`** on `*_plan_*` threads (plan-node work, **Entry 31**).
+- **Headed verification (operator):** Re-run **`tests/qualitative-tests/plan-mode-smoke/`**; confirm `step_01/run.jsonl` contains `"type":"run_finished"` (see `Test-RunJsonlFinished` in `run-qualitative-headed.ps1`). Inspect **`success`** / **`error_message`** as needed. Optional: confirm `llm_requests.jsonl` still shows **`## Original request (from user)`** on `*_plan_*` threads (plan-node work, **Entry 31**).
 
 ---
 
@@ -72,7 +119,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 ## Entry 29 — Run-29 follow-up doc + basket `coverage_notes`
 
-- **[`tests/long-running-tests/run-29-basket-followup.md`](run-29-basket-followup.md):** Expanded with baseline table (run-29 per-step classification), root-cause notes (apply_ir discovery, referencers terminal), run-29 vs **current 6-step** mapping, rerun commands (`run-long-running-headed.ps1`, `classify_harness_run_jsonl.py`), success criteria, glossary (IR), and pointers to Entries 22/24/28.
+- **[`tests/qualitative-tests/run-29-basket-followup.md`](run-29-basket-followup.md):** Expanded with baseline table (run-29 per-step classification), root-cause notes (apply_ir discovery, referencers terminal), run-29 vs **current 6-step** mapping, rerun commands (`run-qualitative-headed.ps1`, `classify_harness_run_jsonl.py`), success criteria, glossary (IR), and pointers to Entries 22/24/28.
 - **`realistic-user-agent-basket-rerun/suite.json`:** `coverage_notes` now point at the follow-up doc and summarize the 6 agent turns without plan-mode wording.
 - **Ready to re-run:** No plugin code change required for a **progress check**—rebuild if prompts/catalog were edited since last compile; then headed batch on `realistic-user-agent-basket-rerun` and classify. Compare to [`runs/run-29-20260328-212119_364/harness-classification.json`](runs/run-29-20260328-212119_364/harness-classification.json) (target: 6/6 `run_finished`, 0 failed suite, minimal `tool_finish_false`).
 
@@ -95,8 +142,8 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 ## Entry 26 — `passed-tests` vs `regression-watchlist`, three `new-test-basket-*` suites
 
-- **`tests/long-running-tests/passed-tests/suite.json`:** Trimmed to **11 high-confidence** turns (manifest, level sequence honest skip, handoff, ask grounding, multi-step viewport, `DefaultEngine.ini` peek, source symbol search, ask reflection, shader compile wait, run-13 coffee + forward trace with clean spelling). **Removed** chain-dependent, write-heavy, typo-resolution, and thin-content risks to the watchlist suite.
-- **`tests/long-running-tests/regression-watchlist/suite.json`:** New suite (**not** named “shaky tests”) for **13** turns that are still useful regressions but **project-sensitive** or historically uneven (actor move, MI open, viewport typo framing, duplicate, fuzzy typo, PlayerStart search, blueprint peek, explicit physics trace, run-13 character-BP chain, deps/overview, visibility, AnimBP skim).
+- **`tests/qualitative-tests/passed-tests/suite.json`:** Trimmed to **11 high-confidence** turns (manifest, level sequence honest skip, handoff, ask grounding, multi-step viewport, `DefaultEngine.ini` peek, source symbol search, ask reflection, shader compile wait, run-13 coffee + forward trace with clean spelling). **Removed** chain-dependent, write-heavy, typo-resolution, and thin-content risks to the watchlist suite.
+- **`tests/qualitative-tests/regression-watchlist/suite.json`:** New suite (**not** named “shaky tests”) for **13** turns that are still useful regressions but **project-sensitive** or historically uneven (actor move, MI open, viewport typo framing, duplicate, fuzzy typo, PlayerStart search, blueprint peek, explicit physics trace, run-13 character-BP chain, deps/overview, visibility, AnimBP skim).
 - **Superseded by Entry 27:** Former **`new-test-basket-1` … `new-test-basket-3`** held migrated content from **`gap-tools-coverage`**, **`gap-tools-extended`**, **`fine-tune-05-gap-tools`**; now use **`new-test-basket-01` … `06`** (see Entry 27).
 - **Docs:** `coverage_notes` in each JSON describe scope; Entry 24 still references older `passed-tests` size—superseded by this split.
 
@@ -114,7 +161,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 ## Entry 24 — Run-29 basket postmortem, `passed-tests` suite, basket steps 5–6
 
 - **Run-29** ([`runs/run-29-20260328-212119_364`](runs/run-29-20260328-212119_364)): **Not a full success** — `failed_suite_count` 1, `batch_all_expected_run_jsonls_finished` false, **3/5** `run.jsonl` with `run_finished`. **step_03:** `asset_find_referencers` succeeded; stream ended **without** `run_finished` (truncated log). **step_05:** Planner emitted JSON + 3 nodes; executor then ran **tools** on plan nodes (`editor_state_snapshot_read`, `scene_fuzzy_search`)—`run.jsonl` incomplete vs “prose checklist only” ask; likely timeout/editor exit before terminal. **step_01:** `blueprint_apply_ir` `tool_finish_false` then recovery (same class as earlier scratch-float runs).
-- **`tests/long-running-tests/passed-tests/suite.json`:** Expanded to **~23 turns** from archived `workflow-input.json` across **run-22** (Entry 20 basket drops), **run-20** (Entry 17 duplicate + typo drops), **full mixed-salad** vs lean (ask + long viewport + scene + blueprint peek + ini + source + reflection), **run-13** basket turns 1–5 (passed per run-20 focus), plus **fine-tune-05** lines (shader compile wait, visibility, anim BP read). See file `coverage_notes` for paths.
+- **`tests/qualitative-tests/passed-tests/suite.json`:** Expanded to **~23 turns** from archived `workflow-input.json` across **run-22** (Entry 20 basket drops), **run-20** (Entry 17 duplicate + typo drops), **full mixed-salad** vs lean (ask + long viewport + scene + blueprint peek + ini + source + reflection), **run-13** basket turns 1–5 (passed per run-20 focus), plus **fine-tune-05** lines (shader compile wait, visibility, anim BP read). See file `coverage_notes` for paths.
 - **`realistic-user-agent-basket-rerun/suite.json`:** Inserted **step_5** `.uproject` read, **step_6** viewport forward trace; plan turn now **step_7**; `coverage_notes` summarize run-29 and next steps.
 
 ---
@@ -134,12 +181,12 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 ## Entry 22 — Basket suite hardening: multi-match prompts + expanded realistic-user-agent turns
 
-- **Problem (run-25):** `asset_index_fuzzy_search` returned multiple Blueprints; model called **`blueprint_export_ir`** with a path not in the result set (`SimpleBlueprint`), then recovered—**`tool_finish_false`** still counted 1 on [`tests/long-running-tests/runs/run-25-20260328-210131_814`](tests/long-running-tests/runs/run-25-20260328-210131_814) / [`harness-classification.json`](tests/long-running-tests/runs/run-25-20260328-210131_814/harness-classification.json) (`tool_finish_false`: 1, `run_finished_true`: 1 for the single `step_01` `run.jsonl`).
+- **Problem (run-25):** `asset_index_fuzzy_search` returned multiple Blueprints; model called **`blueprint_export_ir`** with a path not in the result set (`SimpleBlueprint`), then recovered—**`tool_finish_false`** still counted 1 on [`tests/qualitative-tests/runs/run-25-20260328-210131_814`](tests/qualitative-tests/runs/run-25-20260328-210131_814) / [`harness-classification.json`](tests/qualitative-tests/runs/run-25-20260328-210131_814/harness-classification.json) (`tool_finish_false`: 1, `run_finished_true`: 1 for the single `step_01` `run.jsonl`).
 - **`10-mvp-gameplay-and-tooling.md`:** New bullet **Multiple fuzzy/registry matches**—only use **`object_path`** values from the discovery result; pick from the list or narrow the query; no invented `/Game/...`; no **`blueprint_export_ir` / `blueprint_get_graph_summary` / `blueprint_compile`** on guessed names.
 - **`04-tool-calling-contract.md`:** New bullet **Multiple asset hits** under discovery.
 - **`UnrealAiToolCatalog.json`:** **`asset_index_fuzzy_search`** and **`blueprint_export_ir`** summaries extended with the same constraint (downstream paths must come from results).
-- **`tests/long-running-tests/realistic-user-agent-basket-rerun/suite.json`:** Expanded from one turn to **five**: (1) scratch-float “that blueprint” regression; (2) gameplay BP disambiguation + scratch bool; (3) referencer count after discovery; (4) Material Instance roughness tweak with honest skip if no MI; (5) **plan** turn—small orientation checklist DAG aligned with **`02-operating-modes.md`**. Did **not** restore old run-22 steps 2–7 (Entry 20 easy passes). `coverage_notes` updated for what to measure (`tool_finish_false`, discovery order, plan node count).
-- **Validation:** `run-long-running-headed.ps1 -ScenarioFolder tests\long-running-tests\realistic-user-agent-basket-rerun -DryRun` succeeds (**5** turns). Re-run **headed** (no `-DryRun`) locally to produce `runs/run-*` with per-step `run.jsonl`, then `python tests/classify_harness_run_jsonl.py --batch-root <that folder>` and compare per-step **`tool_finish_false`** to the run-25 baseline above.
+- **`tests/qualitative-tests/realistic-user-agent-basket-rerun/suite.json`:** Expanded from one turn to **five**: (1) scratch-float “that blueprint” regression; (2) gameplay BP disambiguation + scratch bool; (3) referencer count after discovery; (4) Material Instance roughness tweak with honest skip if no MI; (5) **plan** turn—small orientation checklist DAG aligned with **`02-operating-modes.md`**. Did **not** restore old run-22 steps 2–7 (Entry 20 easy passes). `coverage_notes` updated for what to measure (`tool_finish_false`, discovery order, plan node count).
+- **Validation:** `run-qualitative-headed.ps1 -ScenarioFolder tests\qualitative-tests\realistic-user-agent-basket-rerun -DryRun` succeeds (**5** turns). Re-run **headed** (no `-DryRun`) locally to produce `runs/run-*` with per-step `run.jsonl`, then `python tests/classify_harness_run_jsonl.py --batch-root <that folder>` and compare per-step **`tool_finish_false`** to the run-25 baseline above.
 - **Build:** JSON + markdown only for this entry; no C++ changes in this change set.
 
 ---
@@ -147,15 +194,15 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 ## Entry 21 — Log format: numbered entries (replace date headings)
 
 - Replaced **`## YYYY-MM-DD — …`** section titles with **`## Entry N — …`** (`Entry 1` = oldest, `Entry 21` = this change; file order remains newest first).
-- **`docs/README.md`**, **`context.md`**, **`docs/tooling/tool-catalog-audit-guide.md`:** Point to [`tests/long-running-tests/tool-iteration-log.md`](tool-iteration-log.md) and describe numbering + prepend rule.
+- **`docs/README.md`**, **`context.md`**, **`docs/tooling/tool-catalog-audit-guide.md`:** Point to [`tests/tool-iteration-log.md`](tool-iteration-log.md) and describe numbering + prepend rule.
 
 ---
 
 ## Entry 20 — Run-22 follow-up: suite minimal trim, “that blueprint” prompt, editor exit policy
 
-- **`tests/long-running-tests/realistic-user-agent-basket-rerun/suite.json`:** Single turn only—scratch-float Blueprint request (run-22 step_01 with tool_fail events). Dropped steps 2–7 (run-22 had zero `tool_finish_false` there). `coverage_notes` updated for run-22–minimal.
+- **`tests/qualitative-tests/realistic-user-agent-basket-rerun/suite.json`:** Single turn only—scratch-float Blueprint request (run-22 step_01 with tool_fail events). Dropped steps 2–7 (run-22 had zero `tool_finish_false` there). `coverage_notes` updated for run-22–minimal.
 - **`10-mvp-gameplay-and-tooling.md`:** Bullet **“That blueprint” with no path:** use **`editor_get_selection`** / **`asset_index_fuzzy_search`** and returned **`object_path`** before **`blueprint_get_graph_summary`** / **`blueprint_apply_ir`** / **`blueprint_compile`**—no assumed tutorial names.
-- **`run-long-running-headed.ps1`:** Documented that **`batch_editor_exit_code`** from Unreal often ≠ harness failure when all `run_finished` succeeded. Optional **`UNREAL_AI_HEADED_BATCH_IGNORE_EDITOR_NONZERO_EXIT=1`** sets batch pass if all expected `run.jsonl` finished and **`failed_suite_count`** is 0, even when editor process exits nonzero.
+- **`run-qualitative-headed.ps1`:** Documented that **`batch_editor_exit_code`** from Unreal often ≠ harness failure when all `run_finished` succeeded. Optional **`UNREAL_AI_HEADED_BATCH_IGNORE_EDITOR_NONZERO_EXIT=1`** sets batch pass if all expected `run.jsonl` finished and **`failed_suite_count`** is 0, even when editor process exits nonzero.
 - **Build:** Prompt/suite/PS1 only—no plugin compile required for this change set.
 
 ---
@@ -189,7 +236,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 ## Entry 17 — run-20 follow-up: suite trim, anti-example-leak, TTFT idle skip, SSE tool event cap
 
-- **`tests/long-running-tests/realistic-user-agent-basket-rerun/suite.json`:** Dropped run-20 easy-pass turns (duplicate under `/Game`, typo asset resolution); `coverage_notes` now describe the run-20–focused subset (7 turns).
+- **`tests/qualitative-tests/realistic-user-agent-basket-rerun/suite.json`:** Dropped run-20 easy-pass turns (duplicate under `/Game`, typo asset resolution); `coverage_notes` now describe the run-20–focused subset (7 turns).
 - **`04-tool-calling-contract.md` / `UnrealAiToolCatalog.json`:** Minimal JSON examples framed as **shape-only**; `project_file_read_text` line uses `<actual_basename>.uproject` + rule text (no literal `MyProject.uproject` / `MyGame.uproject` in catalog summary).
 - **`UnrealAiTurnLlmRequestBuilder.cpp`:** System prompt gains factual **Project workspace** line: manifest **basename** from `FPaths::GetCleanFilename(GetProjectFilePath())` so the model can ground `relative_path` without copying doc placeholders.
 - **`UnrealAiHarnessScenarioRunner.cpp` — `TryHarnessIdleAbort`:** Headed scenario skips idle abort while **`HasActiveLlmTransportRequest()`** and **no assistant delta yet** (`awaiting_first_assistant_delta`); avoids false abort when time-to-first-token exceeds **`HarnessSyncIdleAbortMs`** (3s).
@@ -269,7 +316,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 - **`UnrealAiRuntimeDefaults.h`:** `HttpRequestTimeoutSec` 1200s; `HarnessSyncWaitMs` ~25 min/segment; `StreamToolIncompleteMaxMs` 180000 (source-only, not `.env`).
 - **`FOpenAiCompatibleHttpTransport.cpp`:** Chat timeout from `HttpRequestTimeoutSec` only.
 - **`UnrealAiHarnessScenarioRunner.cpp`:** Sync uses `HarnessSyncWaitMs` only.
-- **`run-long-running-headed.ps1`:** No timeout env; editor focus off by default (`-BringEditorToForeground` opt-in).
+- **`run-qualitative-headed.ps1`:** No timeout env; editor focus off by default (`-BringEditorToForeground` opt-in).
 
 ---
 
@@ -283,7 +330,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 ## Entry 7 — streamed tool timeout key + script label
 
 - **`FUnrealAiAgentHarness.cpp`:** `Slot.StreamMergeIndex` set in merge; timeout maps use same key as first-seen (fixes `age_ms` stuck at 0).
-- **`run-long-running-headed.ps1`:** Batch banner label `tool_finish_events` (was misleading `tool_calls`).
+- **`run-qualitative-headed.ps1`:** Batch banner label `tool_finish_events` (was misleading `tool_calls`).
 
 ---
 
@@ -314,7 +361,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 **Goal:** Fewer invalid tool calls (empty `{}`, missing required fields) and fewer retry loops.
 
-**Testing:** Headed long-running harness under `tests/long-running-tests/runs/`; `harness-classification.json` is coarse; `run.jsonl` is precise for arguments.
+**Testing:** Headed long-running harness under `tests/qualitative-tests/runs/`; `harness-classification.json` is coarse; `run.jsonl` is precise for arguments.
 
 - **`UnrealAiToolCatalog.json`:** `content_browser_sync_asset` — resolvable object path, not “folder string”; viewport frame tools — `actor_paths` required vs selection variant.
 - **`UnrealAiToolDispatch_Context.cpp` — `content_browser_sync_asset`:** Empty args → `suggested_correct_call` → `asset_index_fuzzy_search`.
@@ -341,7 +388,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 ## Entry 1 — harness lax policy, runner logs, HTTP 429
 
 - **`FUnrealAiAgentHarness.cpp`:** Lax policy — no hard fail on text-only after tools; telemetry events instead of synthetic nudges; mutation read-only notes telemetry-only.
-- **`run-long-running-headed.ps1`:** `editor_console_saved.log` / batch log copies; `-MaxSuites`.
+- **`run-qualitative-headed.ps1`:** `editor_console_saved.log` / batch log copies; `-MaxSuites`.
 - **`FOpenAiCompatibleHttpTransport.cpp`:** 429 retries honor `Retry-After` / HTTP-date / JSON hints without arbitrary 120s cap when hint present.
 
 ---

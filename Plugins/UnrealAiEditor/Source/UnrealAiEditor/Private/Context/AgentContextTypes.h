@@ -102,9 +102,40 @@ struct FEditorContextSnapshot
 	bool bValid = false;
 };
 
+struct FProjectTreePathPreference
+{
+	/** Asset family key (for example: blueprint, material_instance). */
+	FString AssetFamily;
+	/** Preferred package path for new assets in this family (for example: /Game/Blueprints). */
+	FString PackagePath;
+	/** Relative confidence [0,1]. */
+	double Confidence = 0.0;
+	/** Number of observed assets supporting this preference. */
+	int32 ObservedCount = 0;
+};
+
+struct FProjectTreeSummary
+{
+	/** Sampler version marker for diagnostics / migration. */
+	FString SamplerVersion;
+	/** Last successful refresh time (UTC). */
+	FDateTime UpdatedUtc = FDateTime::MinValue();
+	/** Last refresh attempt start/end for observability. */
+	FDateTime LastQueryStartUtc = FDateTime::MinValue();
+	FDateTime LastQueryEndUtc = FDateTime::MinValue();
+	/** Last query status string (ok, skipped_fresh, no_registry, error_...). */
+	FString LastQueryStatus;
+	/** Last query wall time in milliseconds. */
+	double LastQueryDurationMs = 0.0;
+	/** Loose top-level /Game tree hints (for example /Game/Blueprints, /Game/Materials). */
+	TArray<FString> TopLevelFolders;
+	/** Per-family package path recommendations used by underspecified create requests. */
+	TArray<FProjectTreePathPreference> PreferredCreatePaths;
+};
+
 struct FAgentContextState
 {
-	static const int32 SchemaVersion = 5;
+	static const int32 SchemaVersion = 6;
 
 	int32 SchemaVersionField = SchemaVersion;
 	TArray<FContextAttachment> Attachments;
@@ -124,6 +155,8 @@ struct FAgentContextState
 	TMap<FString, FString> PlanNodeSummaryById;
 	/** Thread-local recent UI overlay (bounded, persisted per thread). */
 	TArray<FRecentUiEntry> ThreadRecentUiOverlay;
+	/** Cached project tree inference used for path grounding in context. */
+	FProjectTreeSummary ProjectTreeSummary;
 };
 
 struct FContextRecordPolicy

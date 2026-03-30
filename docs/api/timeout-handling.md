@@ -41,7 +41,7 @@ This document lists **every distinct mechanism** in Unreal AI Editor that uses t
 
 ## 3. Latest batch analyzed: `run-4-20260328-165912_266`
 
-**Source:** `tests/long-running-tests/last-suite-summary.json` → `batch_output_folder` = `tests/long-running-tests/runs/run-4-20260328-165912_266`.
+**Source:** `tests/qualitative-tests/last-suite-summary.json` → `batch_output_folder` = `tests/qualitative-tests/runs/run-4-20260328-165912_266`.
 
 **Suite:** `mixed-salad-complex` — 11 steps (ask + agent + **plan** + agent + ask).
 
@@ -93,7 +93,7 @@ This document lists **every distinct mechanism** in Unreal AI Editor that uses t
    If the goal is faster suites, **0** removes artificial delay; if the goal is fewer 429s, keep delay — document the trade-off in harness README.
 
 7. **Re-run classification after each batch**  
-   `python tests/classify_harness_run_jsonl.py --from-summary tests/long-running-tests/last-suite-summary.json` and archive `harness-classification.json` — separates **harness_policy** (sync cancel, loops) from **invalid_request** from **http_timeout**.
+   `python tests/classify_harness_run_jsonl.py --from-summary tests/qualitative-tests/last-suite-summary.json` and archive `harness-classification.json` — separates **harness_policy** (sync cancel, loops) from **invalid_request** from **http_timeout**.
 
 ---
 

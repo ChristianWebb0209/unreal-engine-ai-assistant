@@ -7,9 +7,12 @@
 ## Required arguments (schema-first)
 
 - **If `required` appears in the tool schema, `{}` is invalid** for that tool.
+- **No empty-object retries on required-arg tools:** if a required-arg tool fails once with missing fields, do not call the same `tool_id` with `{}` again. Use `suggested_correct_call` or resolve the missing fields first.
 - **Discovery before targeted calls:** if you do not yet know a path or id the tool needs, call `editor_get_selection`, `scene_fuzzy_search`, `asset_index_fuzzy_search`, `asset_registry_query`, or `editor_state_snapshot_read` first—**do not** “probe” write/UI tools with empty arguments.
 - **Multiple asset hits:** when `asset_index_fuzzy_search` or `asset_registry_query` returns **more than one** candidate, **Blueprint and asset tools must use a path from that result set only**—pick among returned `object_path` values (or refine the search). **Do not** fabricate a plausible `/Game/...` string that was not in the discovery output. This applies in particular to **`blueprint_apply_ir`**, **`blueprint_export_ir`**, **`asset_open_editor`**, **`asset_find_referencers`**, and **`asset_get_dependencies`**—pass **`object_path` / `blueprint_path`** only from discovery output or prior tool results.
 - **`asset_index_fuzzy_search`:** pass a **non-empty `query`** or, if the query is unknown, a **narrow `path_prefix`** (e.g. `/Game/Blueprints`)—calling with `{}` is invalid. **`asset_registry_query`** must include **`path_filter` or `class_name`** (bounded listing only).
+- **`asset_create`:** `{}` is invalid. Always include `package_path`, `asset_name`, and `asset_class` (or `class_path` alias), and keep `package_path` under `/Game`.
+- **`blueprint_get_graph_summary` / `blueprint_export_ir`:** always pass `blueprint_path`. If it is missing, first reuse a concrete path from prior discovery output (`asset_index_fuzzy_search.matches[].object_path` or `asset_registry_query.assets[].object_path`) or run discovery now.
 - **Retries:** an empty `{}` or the same missing-field shape counts as the **same invalid attempt**; change strategy or use `suggested_correct_call` instead of repeating it (see below).
 
 - **Selection vs scene:** `editor_get_selection` answers **what is selected in the editor right now** (may be empty). `scene_fuzzy_search` searches **all actors in the loaded level** by label/name/class/path/tags—use it when the user asks to *find* actors by topic, not only what is selected.
@@ -64,6 +67,7 @@
   - `asset_apply_properties`: `{"object_path":"/Game/Blueprints/DoorBP.DoorBP","properties":{"bHiddenInGame":false}}` (`{}` is invalid)
 - If a tool error includes `suggested_correct_call`, use that shape on the next retry instead of repeating the same args.
 - If a call fails validation, apply `suggested_correct_call` immediately; never retry the same invalid shape twice—including **empty `{}`** when required fields exist.
+- For required-path tools, path strings must come from prior context/tool results in the same run (or explicit user-provided `/Game/...` paths). Do not invent plausible names.
 - Search/retrieval loop cap: after 2 near-identical calls without new progress, change strategy/tool family or **stop with a concise handoff** (remaining work, blockers); suggest **Plan mode** for large structured follow-up if appropriate (**03**).
 - Discovery loop policy examples:
   - If `scene_fuzzy_search` returns `count:0` twice for near-identical queries, switch approach (selection snapshot, broader query, or explicit blocker) instead of a third near-duplicate call.

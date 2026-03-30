@@ -20,7 +20,6 @@
 #include "Tabs/SUnrealAiEditorHelpTab.h"
 #include "Tabs/SUnrealAiEditorQuickStartTab.h"
 #include "Tabs/SUnrealAiEditorSettingsTab.h"
-#include "Tabs/SUnrealAiEditorDebugTab.h"
 #include "UnrealAiEditorSettings.h"
 #include "UnrealAiEditorTabIds.h"
 #include "Widgets/UnrealAiChatUiSession.h"
@@ -67,12 +66,15 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
+#include "Harness/IToolExecutionHost.h"
+
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
 static FUnrealAiEditorModule* GUnrealAiModule = nullptr;
 
 static IConsoleObject* GUnrealAiCatalogMatrixConsole = nullptr;
 static IConsoleObject* GUnrealAiRunAgentTurnConsole = nullptr;
+static IConsoleObject* GUnrealAiRunStrictAssertionsConsole = nullptr;
 static IConsoleObject* GUnrealAiForgetThreadConsole = nullptr;
 static IConsoleObject* GUnrealAiDumpContextWindowConsole = nullptr;
 static IConsoleObject* GUnrealAiDumpRecentUiConsole = nullptr;
@@ -260,6 +262,799 @@ void FUnrealAiEditorModule::StartupModule()
 				*RunDir,
 				*Jsonl,
 				*Err);
+		}),
+		ECVF_Default);
+
+	GUnrealAiRunStrictAssertionsConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.RunStrictAssertions"),
+		TEXT("Run deterministic strict assertions using editor-side tools/state. Args: <AssertionsJsonPath> <OutputDirStepOrFolder>. Writes <OutputDir>/strict_assertions_result.json."),
+		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		{
+			if (Args.Num() < 2 || Args[0].IsEmpty() || Args[1].IsEmpty())
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.RunStrictAssertions: expected args <AssertionsJsonPath> <OutputDir>"));
+				return;
+			}
+			const FString AssertionsPath = Args[0];
+			const FString OutDir = Args[1];
+
+			const TSharedPtr<FUnrealAiBackendRegistry> Reg = FUnrealAiEditorModule::GetBackendRegistry();
+			if (!Reg.IsValid())
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.RunStrictAssertions: backend registry unavailable"));
+				return;
+			}
+
+			IAgentContextService* Context = Reg->GetContextService();
+			// Tools do not require context for read-only queries, but if assertion needs context-backed tools
+			// it will still be safe to invoke since tool implementations typically only use editor state.
+			(void)Context;
+
+			IToolExecutionHost* Tools = Reg->GetToolExecutionHost();
+			if (!Tools)
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.RunStrictAssertions: tool execution host unavailable"));
+				return;
+			}
+
+			FString JsonText;
+			if (!FFileHelper::LoadFileToString(JsonText, *AssertionsPath))
+			{
+				UE_LOG(LogTemp, Error, TEXT("UnrealAi.RunStrictAssertions: could not read assertions json %s"), *AssertionsPath);
+				return;
+			}
+
+			bool bAllPass = true;
+			TArray<TSharedPtr<FJsonValue>> AssertionResults;
+
+			auto FailOne = [&](const FString& Type, const FString& Msg) -> TSharedPtr<FJsonObject>
+			{
+				TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
+				R->SetStringField(TEXT("type"), Type);
+				R->SetBoolField(TEXT("pass"), false);
+				R->SetStringField(TEXT("message"), Msg);
+				bAllPass = false;
+				return R;
+			};
+
+			auto OkOne = [&](const FString& Type, const FString& Msg) -> TSharedPtr<FJsonObject>
+			{
+				TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
+				R->SetStringField(TEXT("type"), Type);
+				R->SetBoolField(TEXT("pass"), true);
+				R->SetStringField(TEXT("message"), Msg);
+				return R;
+			};
+
+			auto InvokeToolFromAssertion = [&](const TSharedPtr<FJsonObject>& Obj, FString& OutToolName, FUnrealAiToolInvocationResult& OutInv, FString& OutErr) -> bool
+			{
+				OutErr.Reset();
+				OutToolName.Reset();
+				if (!Obj.IsValid())
+				{
+					OutErr = TEXT("assertion object invalid");
+					return false;
+				}
+				if (!Obj->TryGetStringField(TEXT("tool"), OutToolName) || OutToolName.TrimStartAndEnd().IsEmpty())
+				{
+					OutErr = TEXT("requires tool");
+					return false;
+				}
+				const TSharedPtr<FJsonObject>* ArgsObjPtr = nullptr;
+				if (!Obj->TryGetObjectField(TEXT("arguments"), ArgsObjPtr) || !ArgsObjPtr || !ArgsObjPtr->IsValid())
+				{
+					OutErr = TEXT("requires arguments (JSON object)");
+					return false;
+				}
+				FString ArgsJson;
+				{
+					const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ArgsJson);
+					if (!FJsonSerializer::Serialize((*ArgsObjPtr).ToSharedRef(), Writer))
+					{
+						OutErr = TEXT("failed to serialize arguments JSON");
+						return false;
+					}
+				}
+				OutInv = Tools->InvokeTool(OutToolName, ArgsJson, FString());
+				return true;
+			};
+
+			auto ParseToolContentJson = [&](const FUnrealAiToolInvocationResult& Inv, TSharedPtr<FJsonObject>& OutObj) -> bool
+			{
+				OutObj.Reset();
+				if (!Inv.bOk || Inv.ContentForModel.IsEmpty())
+				{
+					return false;
+				}
+				const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Inv.ContentForModel);
+				return FJsonSerializer::Deserialize(Reader, OutObj) && OutObj.IsValid();
+			};
+
+			auto ResolvePathValue = [&](const TSharedPtr<FJsonObject>& Root, const FString& Path, TSharedPtr<FJsonValue>& OutVal) -> bool
+			{
+				OutVal.Reset();
+				if (!Root.IsValid() || Path.TrimStartAndEnd().IsEmpty())
+				{
+					return false;
+				}
+				TArray<FString> Segments;
+				Path.ParseIntoArray(Segments, TEXT("."), true);
+				if (Segments.Num() == 0)
+				{
+					return false;
+				}
+
+				TSharedPtr<FJsonValue> Cur = MakeShared<FJsonValueObject>(Root);
+				for (const FString& RawSeg : Segments)
+				{
+					FString Seg = RawSeg;
+					Seg.TrimStartAndEndInline();
+					if (!Cur.IsValid())
+					{
+						return false;
+					}
+					const TSharedPtr<FJsonObject>* CurObj = nullptr;
+					if (Cur->TryGetObject(CurObj) && CurObj && (*CurObj).IsValid())
+					{
+						const TSharedPtr<FJsonValue>* Next = (*CurObj)->Values.Find(Seg);
+						if (!Next || !(*Next).IsValid())
+						{
+							return false;
+						}
+						Cur = *Next;
+						continue;
+					}
+					const TArray<TSharedPtr<FJsonValue>>* CurArr = nullptr;
+					if (Cur->TryGetArray(CurArr) && CurArr)
+					{
+						if (!Seg.IsNumeric())
+						{
+							return false;
+						}
+						const int32 Idx = FCString::Atoi(*Seg);
+						if (Idx < 0 || Idx >= CurArr->Num() || !(*CurArr)[Idx].IsValid())
+						{
+							return false;
+						}
+						Cur = (*CurArr)[Idx];
+						continue;
+					}
+					return false;
+				}
+
+				OutVal = Cur;
+				return OutVal.IsValid();
+			};
+
+			// Parse assertions as either JSON array or { "assertions": [...] } object.
+			TArray<TSharedPtr<FJsonValue>> AssertionsArr;
+			{
+				const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonText);
+				if (!FJsonSerializer::Deserialize(Reader, AssertionsArr))
+				{
+					// Try wrapper object shape.
+					TSharedPtr<FJsonObject> WrapObj;
+					const TSharedRef<TJsonReader<>> Reader2 = TJsonReaderFactory<>::Create(JsonText);
+					if (!FJsonSerializer::Deserialize(Reader2, WrapObj) || !WrapObj.IsValid())
+					{
+						TSharedPtr<FJsonObject> R = FailOne(TEXT("parse_error"), TEXT("assertions.json must be a JSON array or an object with assertions[]"));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						goto WriteOut;
+					}
+					const TArray<TSharedPtr<FJsonValue>>* Inner = nullptr;
+					if (!WrapObj->TryGetArrayField(TEXT("assertions"), Inner) || !Inner)
+					{
+						TSharedPtr<FJsonObject> R = FailOne(TEXT("parse_error"), TEXT("assertions wrapper object missing assertions[]"));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						goto WriteOut;
+					}
+					AssertionsArr = *Inner;
+				}
+			}
+
+			for (int32 i = 0; i < AssertionsArr.Num(); ++i)
+			{
+				const TSharedPtr<FJsonValue>& V = AssertionsArr[i];
+				const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+				if (!V.IsValid() || !V->TryGetObject(ObjPtr) || !ObjPtr || !(*ObjPtr).IsValid())
+				{
+					TSharedPtr<FJsonObject> R = FailOne(TEXT("invalid_entry"), TEXT("assertion entry must be a JSON object"));
+					AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+					continue;
+				}
+				TSharedPtr<FJsonObject> Obj = *ObjPtr;
+				FString Type;
+				if (!Obj->TryGetStringField(TEXT("type"), Type))
+				{
+					TSharedPtr<FJsonObject> R = FailOne(TEXT("missing_type"), TEXT("assertion.type is required"));
+					AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+					continue;
+				}
+				Type.TrimStartAndEndInline();
+				if (Type.IsEmpty())
+				{
+					TSharedPtr<FJsonObject> R = FailOne(TEXT("missing_type"), TEXT("assertion.type is required"));
+					AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: asset_exists ----
+				if (Type == TEXT("asset_exists"))
+				{
+					FString ObjectPath;
+					if (!Obj->TryGetStringField(TEXT("object_path"), ObjectPath) || ObjectPath.TrimStartAndEnd().IsEmpty())
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("asset_exists requires object_path"));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					ObjectPath.TrimStartAndEndInline();
+					UObject* Loaded = StaticLoadObject(UObject::StaticClass(), nullptr, *ObjectPath);
+					const bool bExists = Loaded != nullptr;
+					if (!bExists)
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("asset does not exist: %s"), *ObjectPath));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("asset exists: %s"), *ObjectPath)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: asset_not_exists ----
+				if (Type == TEXT("asset_not_exists"))
+				{
+					FString ObjectPath;
+					if (!Obj->TryGetStringField(TEXT("object_path"), ObjectPath) || ObjectPath.TrimStartAndEnd().IsEmpty())
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("asset_not_exists requires object_path"));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					ObjectPath.TrimStartAndEndInline();
+					UObject* Loaded = StaticLoadObject(UObject::StaticClass(), nullptr, *ObjectPath);
+					if (Loaded != nullptr)
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("asset unexpectedly exists: %s"), *ObjectPath));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("asset not present: %s"), *ObjectPath)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: project_file_exists ----
+				if (Type == TEXT("project_file_exists"))
+				{
+					FString RelativePath;
+					if (!Obj->TryGetStringField(TEXT("relative_path"), RelativePath) || RelativePath.TrimStartAndEnd().IsEmpty())
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("project_file_exists requires relative_path"));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					const FString Abs = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir(), RelativePath);
+					if (!IFileManager::Get().FileExists(*Abs))
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("file missing: %s"), *RelativePath));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("file exists: %s"), *RelativePath)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: project_dir_exists ----
+				if (Type == TEXT("project_dir_exists"))
+				{
+					FString RelativePath;
+					if (!Obj->TryGetStringField(TEXT("relative_path"), RelativePath) || RelativePath.TrimStartAndEnd().IsEmpty())
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("project_dir_exists requires relative_path"));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					const FString Abs = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir(), RelativePath);
+					if (!IFileManager::Get().DirectoryExists(*Abs))
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("dir missing: %s"), *RelativePath));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("dir exists: %s"), *RelativePath)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: tool_invoke_ok ----
+				if (Type == TEXT("tool_invoke_ok"))
+				{
+					FString ToolName;
+					FUnrealAiToolInvocationResult Inv;
+					FString InvErr;
+					if (!InvokeToolFromAssertion(Obj, ToolName, Inv, InvErr))
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("tool_invoke_ok %s"), *InvErr));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					if (!Inv.bOk)
+					{
+						const FString Msg = FString::Printf(TEXT("tool invocation failed: %s (error_len=%d)"), *ToolName, Inv.ErrorMessage.Len());
+						TSharedPtr<FJsonObject> R = FailOne(Type, Msg);
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("tool ok: %s"), *ToolName)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: tool_invoke_fail ----
+				if (Type == TEXT("tool_invoke_fail"))
+				{
+					FString ToolName;
+					FUnrealAiToolInvocationResult Inv;
+					FString InvErr;
+					if (!InvokeToolFromAssertion(Obj, ToolName, Inv, InvErr))
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("tool_invoke_fail %s"), *InvErr));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					if (Inv.bOk)
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("expected tool failure but succeeded: %s"), *ToolName));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("tool failed as expected: %s"), *ToolName)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: tool_result_path_exists ----
+				if (Type == TEXT("tool_result_path_exists"))
+				{
+					FString ToolName;
+					FUnrealAiToolInvocationResult Inv;
+					FString InvErr;
+					if (!InvokeToolFromAssertion(Obj, ToolName, Inv, InvErr))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("tool_result_path_exists %s"), *InvErr)).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonObject> Root;
+					if (!ParseToolContentJson(Inv, Root))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("tool result is not parseable JSON")).ToSharedRef()));
+						continue;
+					}
+					FString Path;
+					if (!Obj->TryGetStringField(TEXT("path"), Path) || Path.TrimStartAndEnd().IsEmpty())
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("requires path")).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonValue> VPath;
+					const bool bFound = ResolvePathValue(Root, Path, VPath);
+					if (!bFound)
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("path missing: %s"), *Path)).ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("path exists: %s"), *Path)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: tool_result_path_equals_string ----
+				if (Type == TEXT("tool_result_path_equals_string"))
+				{
+					FString ToolName;
+					FUnrealAiToolInvocationResult Inv;
+					FString InvErr;
+					if (!InvokeToolFromAssertion(Obj, ToolName, Inv, InvErr))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("tool_result_path_equals_string %s"), *InvErr)).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonObject> Root;
+					if (!ParseToolContentJson(Inv, Root))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("tool result is not parseable JSON")).ToSharedRef()));
+						continue;
+					}
+					FString Path;
+					FString Expected;
+					if (!Obj->TryGetStringField(TEXT("path"), Path) || !Obj->TryGetStringField(TEXT("equals"), Expected))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("requires path and equals")).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonValue> VPath;
+					if (!ResolvePathValue(Root, Path, VPath))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("path missing: %s"), *Path)).ToSharedRef()));
+						continue;
+					}
+					const FString Actual = VPath->AsString();
+					if (!Actual.Equals(Expected, ESearchCase::CaseSensitive))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("string mismatch path=%s expected=%s actual=%s"), *Path, *Expected, *Actual)).ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("string equals at path=%s"), *Path)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: tool_result_path_contains ----
+				if (Type == TEXT("tool_result_path_contains"))
+				{
+					FString ToolName;
+					FUnrealAiToolInvocationResult Inv;
+					FString InvErr;
+					if (!InvokeToolFromAssertion(Obj, ToolName, Inv, InvErr))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("tool_result_path_contains %s"), *InvErr)).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonObject> Root;
+					if (!ParseToolContentJson(Inv, Root))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("tool result is not parseable JSON")).ToSharedRef()));
+						continue;
+					}
+					FString Path;
+					FString Needle;
+					if (!Obj->TryGetStringField(TEXT("path"), Path) || !Obj->TryGetStringField(TEXT("contains"), Needle))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("requires path and contains")).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonValue> VPath;
+					if (!ResolvePathValue(Root, Path, VPath))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("path missing: %s"), *Path)).ToSharedRef()));
+						continue;
+					}
+					const FString Actual = VPath->AsString();
+					if (!Actual.Contains(Needle))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("string does not contain needle path=%s needle=%s"), *Path, *Needle)).ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("string contains at path=%s"), *Path)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: tool_result_array_min_length ----
+				if (Type == TEXT("tool_result_array_min_length"))
+				{
+					FString ToolName;
+					FUnrealAiToolInvocationResult Inv;
+					FString InvErr;
+					if (!InvokeToolFromAssertion(Obj, ToolName, Inv, InvErr))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("tool_result_array_min_length %s"), *InvErr)).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonObject> Root;
+					if (!ParseToolContentJson(Inv, Root))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("tool result is not parseable JSON")).ToSharedRef()));
+						continue;
+					}
+					FString Path;
+					double MinD = 1.0;
+					if (!Obj->TryGetStringField(TEXT("path"), Path) || !Obj->TryGetNumberField(TEXT("min"), MinD))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("requires path and min")).ToSharedRef()));
+						continue;
+					}
+					const int32 MinLen = FMath::Max(0, static_cast<int32>(MinD));
+					TSharedPtr<FJsonValue> VPath;
+					if (!ResolvePathValue(Root, Path, VPath))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("path missing: %s"), *Path)).ToSharedRef()));
+						continue;
+					}
+					const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+					if (!VPath->TryGetArray(Arr) || !Arr)
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("path is not array: %s"), *Path)).ToSharedRef()));
+						continue;
+					}
+					if (Arr->Num() < MinLen)
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("array too short path=%s min=%d actual=%d"), *Path, MinLen, Arr->Num())).ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("array min length satisfied path=%s"), *Path)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: tool_result_number_gte ----
+				if (Type == TEXT("tool_result_number_gte"))
+				{
+					FString ToolName;
+					FUnrealAiToolInvocationResult Inv;
+					FString InvErr;
+					if (!InvokeToolFromAssertion(Obj, ToolName, Inv, InvErr))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("tool_result_number_gte %s"), *InvErr)).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonObject> Root;
+					if (!ParseToolContentJson(Inv, Root))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("tool result is not parseable JSON")).ToSharedRef()));
+						continue;
+					}
+					FString Path;
+					double MinV = 0.0;
+					if (!Obj->TryGetStringField(TEXT("path"), Path) || !Obj->TryGetNumberField(TEXT("min"), MinV))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("requires path and min")).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonValue> VPath;
+					if (!ResolvePathValue(Root, Path, VPath))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("path missing: %s"), *Path)).ToSharedRef()));
+						continue;
+					}
+					const double Actual = VPath->AsNumber();
+					if (Actual < MinV)
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("number too small path=%s min=%g actual=%g"), *Path, MinV, Actual)).ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("number gte satisfied path=%s"), *Path)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: tool_result_number_lte ----
+				if (Type == TEXT("tool_result_number_lte"))
+				{
+					FString ToolName;
+					FUnrealAiToolInvocationResult Inv;
+					FString InvErr;
+					if (!InvokeToolFromAssertion(Obj, ToolName, Inv, InvErr))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("tool_result_number_lte %s"), *InvErr)).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonObject> Root;
+					if (!ParseToolContentJson(Inv, Root))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("tool result is not parseable JSON")).ToSharedRef()));
+						continue;
+					}
+					FString Path;
+					double MaxV = 0.0;
+					if (!Obj->TryGetStringField(TEXT("path"), Path) || !Obj->TryGetNumberField(TEXT("max"), MaxV))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("requires path and max")).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonValue> VPath;
+					if (!ResolvePathValue(Root, Path, VPath))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("path missing: %s"), *Path)).ToSharedRef()));
+						continue;
+					}
+					const double Actual = VPath->AsNumber();
+					if (Actual > MaxV)
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("number too large path=%s max=%g actual=%g"), *Path, MaxV, Actual)).ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("number lte satisfied path=%s"), *Path)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: tool_result_bool_equals ----
+				if (Type == TEXT("tool_result_bool_equals"))
+				{
+					FString ToolName;
+					FUnrealAiToolInvocationResult Inv;
+					FString InvErr;
+					if (!InvokeToolFromAssertion(Obj, ToolName, Inv, InvErr))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("tool_result_bool_equals %s"), *InvErr)).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonObject> Root;
+					if (!ParseToolContentJson(Inv, Root))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("tool result is not parseable JSON")).ToSharedRef()));
+						continue;
+					}
+					FString Path;
+					bool Expected = false;
+					if (!Obj->TryGetStringField(TEXT("path"), Path) || !Obj->TryGetBoolField(TEXT("equals"), Expected))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("requires path and equals(bool)")).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonValue> VPath;
+					if (!ResolvePathValue(Root, Path, VPath))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("path missing: %s"), *Path)).ToSharedRef()));
+						continue;
+					}
+					const bool Actual = VPath->AsBool();
+					if (Actual != Expected)
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("bool mismatch path=%s expected=%s actual=%s"), *Path, Expected ? TEXT("true") : TEXT("false"), Actual ? TEXT("true") : TEXT("false"))).ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("bool equals satisfied path=%s"), *Path)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: tool_result_string_nonempty ----
+				if (Type == TEXT("tool_result_string_nonempty"))
+				{
+					FString ToolName;
+					FUnrealAiToolInvocationResult Inv;
+					FString InvErr;
+					if (!InvokeToolFromAssertion(Obj, ToolName, Inv, InvErr))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("tool_result_string_nonempty %s"), *InvErr)).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonObject> Root;
+					if (!ParseToolContentJson(Inv, Root))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("tool result is not parseable JSON")).ToSharedRef()));
+						continue;
+					}
+					FString Path;
+					if (!Obj->TryGetStringField(TEXT("path"), Path))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, TEXT("requires path")).ToSharedRef()));
+						continue;
+					}
+					TSharedPtr<FJsonValue> VPath;
+					if (!ResolvePathValue(Root, Path, VPath))
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("path missing: %s"), *Path)).ToSharedRef()));
+						continue;
+					}
+					FString Actual = VPath->AsString();
+					Actual.TrimStartAndEndInline();
+					if (Actual.IsEmpty())
+					{
+						AssertionResults.Add(MakeShared<FJsonValueObject>(FailOne(Type, FString::Printf(TEXT("string empty at path=%s"), *Path)).ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("string non-empty path=%s"), *Path)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: blueprint_export_ir_node_count_min ----
+				if (Type == TEXT("blueprint_export_ir_node_count_min"))
+				{
+					FString BlueprintPath;
+					if (!Obj->TryGetStringField(TEXT("blueprint_path"), BlueprintPath) || BlueprintPath.TrimStartAndEnd().IsEmpty())
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("blueprint_export_ir_node_count_min requires blueprint_path"));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					FString GraphName;
+					Obj->TryGetStringField(TEXT("graph_name"), GraphName);
+					int32 MinNodes = 1;
+					double MinNodesD = static_cast<double>(MinNodes);
+					if (Obj->TryGetNumberField(TEXT("min_nodes"), MinNodesD))
+					{
+						MinNodes = FMath::Max(0, static_cast<int32>(MinNodesD));
+					}
+
+					// Prepare args for blueprint_export_ir.
+					TSharedPtr<FJsonObject> ArgsObj = MakeShared<FJsonObject>();
+					ArgsObj->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+					if (!GraphName.TrimStartAndEnd().IsEmpty())
+					{
+						ArgsObj->SetStringField(TEXT("graph_name"), GraphName);
+					}
+					FString ArgsJson;
+					{
+						const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ArgsJson);
+						if (!FJsonSerializer::Serialize(ArgsObj.ToSharedRef(), Writer))
+						{
+							TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("failed to serialize tool args for blueprint_export_ir"));
+							AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+							continue;
+						}
+					}
+
+					const FUnrealAiToolInvocationResult Inv = Tools->InvokeTool(TEXT("blueprint_export_ir"), ArgsJson, FString());
+					if (!Inv.bOk)
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("blueprint_export_ir failed: %s"), *Inv.ErrorMessage));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+
+					TSharedPtr<FJsonObject> Root;
+					{
+						const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Inv.ContentForModel);
+						if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+						{
+							TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("failed to parse blueprint_export_ir JSON output"));
+							AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+							continue;
+						}
+					}
+
+					const TArray<TSharedPtr<FJsonValue>>* NodesArr = nullptr;
+					bool bFoundNodes = false;
+					if (Root->TryGetArrayField(TEXT("nodes"), NodesArr) && NodesArr)
+					{
+						bFoundNodes = true;
+					}
+					else
+					{
+						// Some tools return { "ok": true, "ir": { ... "nodes": [...] } }
+						const TSharedPtr<FJsonObject>* IrObj = nullptr;
+						if (Root->TryGetObjectField(TEXT("ir"), IrObj) && IrObj && (*IrObj).IsValid())
+						{
+							if ((*IrObj)->TryGetArrayField(TEXT("nodes"), NodesArr) && NodesArr)
+							{
+								bFoundNodes = true;
+							}
+						}
+					}
+					if (!bFoundNodes)
+					{
+						const FString Prefix = Inv.ContentForModel.Left(600);
+						TSharedPtr<FJsonObject> R = FailOne(
+							Type,
+							FString::Printf(TEXT("blueprint_export_ir JSON missing nodes[] (searched root and ir.nodes); content_prefix=%s"), *Prefix));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+
+					const int32 NodeCount = NodesArr->Num();
+					const bool bOk = NodeCount >= MinNodes;
+					if (!bOk)
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("node_count too small: %d < %d"), NodeCount, MinNodes));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("node_count ok: %d >= %d"), NodeCount, MinNodes)).ToSharedRef()));
+					continue;
+				}
+
+				// Unknown assertion type.
+				{
+					TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("unknown assertion type"));
+					AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+				}
+			}
+
+		WriteOut:
+			{
+				TSharedPtr<FJsonObject> OutObj = MakeShared<FJsonObject>();
+				OutObj->SetBoolField(TEXT("pass"), bAllPass);
+				OutObj->SetStringField(TEXT("assertions_path"), AssertionsPath);
+				OutObj->SetStringField(TEXT("output_dir"), OutDir);
+				TArray<TSharedPtr<FJsonValue>> ResArr;
+				for (const TSharedPtr<FJsonValue>& V2 : AssertionResults)
+				{
+					ResArr.Add(V2);
+				}
+				OutObj->SetArrayField(TEXT("assertions"), ResArr);
+				FString OutJson;
+				{
+					const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
+					FJsonSerializer::Serialize(OutObj.ToSharedRef(), Writer);
+				}
+				const FString OutPath = FPaths::Combine(OutDir, TEXT("strict_assertions_result.json"));
+				IFileManager::Get().MakeDirectory(*OutDir, true);
+				FFileHelper::SaveStringToFile(OutJson + TEXT("\n"), *OutPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+				UE_LOG(LogTemp, Display, TEXT("UnrealAi.RunStrictAssertions: pass=%s wrote %s"), bAllPass ? TEXT("yes") : TEXT("no"), *OutPath);
+			}
 		}),
 		ECVF_Default);
 
@@ -623,6 +1418,11 @@ void FUnrealAiEditorModule::ShutdownModule()
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiRunAgentTurnConsole);
 		GUnrealAiRunAgentTurnConsole = nullptr;
+	}
+	if (GUnrealAiRunStrictAssertionsConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiRunStrictAssertionsConsole);
+		GUnrealAiRunStrictAssertionsConsole = nullptr;
 	}
 	if (GUnrealAiForgetThreadConsole)
 	{
@@ -1349,16 +2149,6 @@ void FUnrealAiEditorModule::RegisterTabs(const TSharedPtr<FUnrealAiBackendRegist
 			];
 	};
 
-	const auto SpawnDebug = [Reg](const FSpawnTabArgs& Args)
-	{
-		return SNew(SDockTab)
-			.TabRole(ETabRole::NomadTab)
-			.Label(LOCTEXT("DebugTabLabel", "Debug"))
-			[
-				SNew(SUnrealAiEditorDebugTab).BackendRegistry(Reg)
-			];
-	};
-
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 							 UnrealAiEditorTabIds::ChatTab,
 							 FOnSpawnTab::CreateLambda(SpawnChat))
@@ -1385,12 +2175,6 @@ void FUnrealAiEditorModule::RegisterTabs(const TSharedPtr<FUnrealAiBackendRegist
 		.SetDisplayName(LOCTEXT("HelpTab", "Help"))
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 
-	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-							 UnrealAiEditorTabIds::DebugTab,
-							 FOnSpawnTab::CreateLambda(SpawnDebug))
-		.SetDisplayName(LOCTEXT("DebugTab", "AI Debug"))
-		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Search")))
-		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 }
 
 void FUnrealAiEditorModule::UnregisterTabs()
@@ -1399,7 +2183,6 @@ void FUnrealAiEditorModule::UnregisterTabs()
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::SettingsTab);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::QuickStartTab);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::HelpTab);
-	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::DebugTab);
 }
 
 void FUnrealAiEditorModule::RegisterMenus()
@@ -1412,6 +2195,39 @@ void FUnrealAiEditorModule::RegisterMenus()
 		{
 			// Bind commands before toolbar/menu entries that reference the command list.
 			RegisterUnrealAiEditorKeyBindings();
+
+			// Top-level Unreal AI menu in the main menu bar (next to built-in menus like Help).
+			if (UToolMenu* MainMenuBar = UToolMenus::Get()->ExtendMenu("LevelEditor.MainMenu"))
+			{
+				FToolMenuSection& MenuBarSection = MainMenuBar->FindOrAddSection("MainMenuBar");
+				MenuBarSection.AddSubMenu(
+					"UnrealAiTopLevel",
+					LOCTEXT("UnrealAiTopLevel", "Unreal AI"),
+					LOCTEXT("UnrealAiTopLevelTip", "Unreal AI Editor windows"),
+					FNewToolMenuDelegate::CreateLambda(
+						[](UToolMenu* SubMenu)
+						{
+							FToolMenuSection& S = SubMenu->AddSection("UnrealAiTopItems");
+							S.AddMenuEntry(
+								"UnrealAiTopChat",
+								LOCTEXT("MenuTopChat", "Agent Chat"),
+								LOCTEXT("MenuTopChatTip", "Open Agent Chat"),
+								FSlateIcon(FUnrealAiEditorStyle::GetStyleSetName(), FUnrealAiEditorStyle::AgentChatTabIconName()),
+								FUIAction(FExecuteAction::CreateLambda([]()
+								{
+									FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::ChatTab);
+								})));
+							S.AddMenuEntry(
+								"UnrealAiTopSettings",
+								LOCTEXT("MenuTopSettings", "AI Settings"),
+								LOCTEXT("MenuTopSettingsTip", "Open AI Settings"),
+								FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Settings")),
+								FUIAction(FExecuteAction::CreateLambda([]()
+								{
+									FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::SettingsTab);
+								})));
+						}));
+			}
 
 			UToolMenu* WindowMenu = UToolMenus::Get()->ExtendMenu("LevelEditor.MainMenu.Window");
 			FToolMenuSection& Section = WindowMenu->FindOrAddSection("WindowGlobal");
@@ -1458,15 +2274,6 @@ void FUnrealAiEditorModule::RegisterMenus()
 							FUIAction(FExecuteAction::CreateLambda([]()
 							{
 								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::HelpTab);
-							})));
-						S.AddMenuEntry(
-							"UnrealAiDebug",
-							LOCTEXT("MenuDebug", "AI Debug"),
-							LOCTEXT("MenuDebugTip", "Inspect Unreal AI local persistence and chat threads."),
-							FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Search")),
-							FUIAction(FExecuteAction::CreateLambda([]()
-							{
-								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::DebugTab);
 							})));
 					}));
 
@@ -1515,15 +2322,6 @@ void FUnrealAiEditorModule::RegisterMenus()
 							FUIAction(FExecuteAction::CreateLambda([]()
 							{
 								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::HelpTab);
-							})));
-						S.AddMenuEntry(
-							"UnrealAiDebugT",
-							LOCTEXT("MenuDebugT", "AI Debug"),
-							LOCTEXT("MenuDebugTipT", "Inspect Unreal AI local persistence and chat threads."),
-							FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Search")),
-							FUIAction(FExecuteAction::CreateLambda([]()
-							{
-								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::DebugTab);
 							})));
 					}));
 

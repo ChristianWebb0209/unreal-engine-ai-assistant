@@ -27,9 +27,11 @@
 #include "Misc/UnrealAiHarnessProgressTelemetry.h"
 #include "Misc/UnrealAiRuntimeDefaults.h"
 #include "Misc/UnrealAiWaitTimePolicy.h"
+#include "Observability/UnrealAiBackgroundOpsLog.h"
 #include "Widgets/UnrealAiToolUi.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -256,6 +258,31 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return false;
 		}
+		auto ContainsWholeWord = [&](const FString& Needle) -> bool
+		{
+			if (Needle.IsEmpty())
+			{
+				return false;
+			}
+			int32 SearchFrom = 0;
+			while (SearchFrom < T.Len())
+			{
+				const int32 Hit = T.Find(Needle, ESearchCase::CaseSensitive, ESearchDir::FromStart, SearchFrom);
+				if (Hit == INDEX_NONE)
+				{
+					return false;
+				}
+				const int32 End = Hit + Needle.Len();
+				const bool bLeftOk = Hit == 0 || !FChar::IsAlnum(T[Hit - 1]);
+				const bool bRightOk = End >= T.Len() || !FChar::IsAlnum(T[End]);
+				if (bLeftOk && bRightOk)
+				{
+					return true;
+				}
+				SearchFrom = Hit + 1;
+			}
+			return false;
+		};
 		static const TCHAR* Tokens[] = {
 			TEXT("fix"), TEXT("apply"), TEXT("change"), TEXT("adjust"), TEXT("tune"),
 			TEXT("reduce"), TEXT("increase"), TEXT("set "), TEXT("compile"), TEXT("save"),
@@ -263,7 +290,8 @@ namespace UnrealAiAgentHarnessPriv
 		};
 		for (const TCHAR* K : Tokens)
 		{
-			if (T.Contains(K))
+			const FString Tok = FString(K).TrimStartAndEnd();
+			if (!Tok.IsEmpty() && ContainsWholeWord(Tok))
 			{
 				return true;
 			}
@@ -316,6 +344,198 @@ namespace UnrealAiAgentHarnessPriv
 			|| T.Contains(TEXT("snapshot"))
 			|| T.Contains(TEXT("_status"))
 			|| T == TEXT("blueprint_export_ir");
+	}
+
+	static bool IsLikelyRequiredArgsTool(const FString& ToolName)
+	{
+		return ToolName == TEXT("asset_create")
+			|| ToolName == TEXT("asset_rename")
+			|| ToolName == TEXT("blueprint_get_graph_summary")
+			|| ToolName == TEXT("blueprint_export_ir")
+			|| ToolName == TEXT("blueprint_apply_ir")
+			|| ToolName == TEXT("project_file_read_text")
+			|| ToolName == TEXT("project_file_write_text")
+			|| ToolName == TEXT("project_file_move");
+	}
+
+	static FString DefaultProjectReadRelativePath()
+	{
+		const FString ProjectFileAbs = FPaths::GetProjectFilePath();
+		if (!ProjectFileAbs.IsEmpty())
+		{
+			FString RelToProject = ProjectFileAbs;
+			if (FPaths::MakePathRelativeTo(RelToProject, *FPaths::ProjectDir()))
+			{
+				RelToProject.ReplaceInline(TEXT("\\"), TEXT("/"));
+				return RelToProject;
+			}
+		}
+		return TEXT("Config/DefaultEngine.ini");
+	}
+
+	static void TryExtractBlueprintPathFromToolResult(const FString& ToolName, const FString& ToolContent, FString& OutPath)
+	{
+		TSharedPtr<FJsonObject> Root;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ToolContent);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			return;
+		}
+		auto AcceptPath = [&](const FString& P) -> bool
+		{
+			if (P.IsEmpty() || !P.StartsWith(TEXT("/Game/")))
+			{
+				return false;
+			}
+			OutPath = P;
+			return true;
+		};
+		if (ToolName == TEXT("asset_index_fuzzy_search"))
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Matches = nullptr;
+			if (Root->TryGetArrayField(TEXT("matches"), Matches) && Matches)
+			{
+				for (const TSharedPtr<FJsonValue>& V : *Matches)
+				{
+					const TSharedPtr<FJsonObject>* O = nullptr;
+					if (!V.IsValid() || !V->TryGetObject(O) || !O || !(*O).IsValid())
+					{
+						continue;
+					}
+					FString ClassPath;
+					(*O)->TryGetStringField(TEXT("class_path"), ClassPath);
+					FString ObjPath;
+					(*O)->TryGetStringField(TEXT("object_path"), ObjPath);
+					if (ClassPath.Contains(TEXT("Blueprint")) && AcceptPath(ObjPath))
+					{
+						return;
+					}
+				}
+			}
+			return;
+		}
+		if (ToolName == TEXT("asset_registry_query"))
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Assets = nullptr;
+			if (Root->TryGetArrayField(TEXT("assets"), Assets) && Assets)
+			{
+				for (const TSharedPtr<FJsonValue>& V : *Assets)
+				{
+					const TSharedPtr<FJsonObject>* O = nullptr;
+					if (!V.IsValid() || !V->TryGetObject(O) || !O || !(*O).IsValid())
+					{
+						continue;
+					}
+					FString ClassName;
+					(*O)->TryGetStringField(TEXT("class"), ClassName);
+					FString ObjPath;
+					(*O)->TryGetStringField(TEXT("object_path"), ObjPath);
+					if (ClassName.Contains(TEXT("Blueprint")) && AcceptPath(ObjPath))
+					{
+						return;
+					}
+				}
+			}
+			return;
+		}
+		FString ExistingPath;
+		if ((Root->TryGetStringField(TEXT("blueprint_path"), ExistingPath) || Root->TryGetStringField(TEXT("object_path"), ExistingPath))
+			&& AcceptPath(ExistingPath))
+		{
+			return;
+		}
+	}
+
+	static FString FindRecentBlueprintPathFromContextState(const FAgentContextState* State)
+	{
+		if (!State)
+		{
+			return FString();
+		}
+		for (int32 i = State->ToolResults.Num() - 1; i >= 0; --i)
+		{
+			const FToolContextEntry& E = State->ToolResults[i];
+			FString Path;
+			TryExtractBlueprintPathFromToolResult(E.ToolName, E.TruncatedResult, Path);
+			if (!Path.IsEmpty())
+			{
+				return Path;
+			}
+		}
+		return FString();
+	}
+
+	static void TryAutoFillDispatchArgsFromContext(
+		const FString& InvokeName,
+		FString& InOutInvokeArgs,
+		IAgentContextService* ContextService,
+		const FString& ProjectId,
+		const FString& ThreadId)
+	{
+		if (!ContextService)
+		{
+			return;
+		}
+		if (InvokeName != TEXT("blueprint_get_graph_summary") && InvokeName != TEXT("blueprint_export_ir")
+			&& InvokeName != TEXT("project_file_read_text"))
+		{
+			return;
+		}
+		TSharedPtr<FJsonObject> ArgsObj;
+		const TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(InOutInvokeArgs);
+		if (!FJsonSerializer::Deserialize(R, ArgsObj) || !ArgsObj.IsValid())
+		{
+			return;
+		}
+		if (InvokeName == TEXT("project_file_read_text"))
+		{
+			FString RelPath;
+			if ((!ArgsObj->TryGetStringField(TEXT("relative_path"), RelPath) || RelPath.TrimStartAndEnd().IsEmpty())
+				&& (!ArgsObj->TryGetStringField(TEXT("file_path"), RelPath) || RelPath.TrimStartAndEnd().IsEmpty()))
+			{
+				ArgsObj->SetStringField(TEXT("relative_path"), DefaultProjectReadRelativePath());
+			}
+		}
+		if (InvokeName == TEXT("blueprint_get_graph_summary") || InvokeName == TEXT("blueprint_export_ir"))
+		{
+			FString BpPath;
+			const bool bHasBpPath = ArgsObj->TryGetStringField(TEXT("blueprint_path"), BpPath) && !BpPath.TrimStartAndEnd().IsEmpty();
+			if (!bHasBpPath)
+			{
+				FString AliasPath;
+				if (ArgsObj->TryGetStringField(TEXT("object_path"), AliasPath) && !AliasPath.TrimStartAndEnd().IsEmpty())
+				{
+					ArgsObj->SetStringField(TEXT("blueprint_path"), AliasPath);
+				}
+				else if (ArgsObj->TryGetStringField(TEXT("asset_path"), AliasPath) && !AliasPath.TrimStartAndEnd().IsEmpty())
+				{
+					ArgsObj->SetStringField(TEXT("blueprint_path"), AliasPath);
+				}
+				else if (ArgsObj->TryGetStringField(TEXT("path"), AliasPath) && !AliasPath.TrimStartAndEnd().IsEmpty())
+				{
+					ArgsObj->SetStringField(TEXT("blueprint_path"), AliasPath);
+				}
+				else if (ArgsObj->TryGetStringField(TEXT("blueprint"), AliasPath) && !AliasPath.TrimStartAndEnd().IsEmpty())
+				{
+					ArgsObj->SetStringField(TEXT("blueprint_path"), AliasPath);
+				}
+				else
+				{
+					const FAgentContextState* State = ContextService->GetState(ProjectId, ThreadId);
+					const FString Resolved = FindRecentBlueprintPathFromContextState(State);
+					if (!Resolved.IsEmpty())
+					{
+						ArgsObj->SetStringField(TEXT("blueprint_path"), Resolved);
+					}
+				}
+			}
+		}
+		FString Out;
+		const TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
+		if (FJsonSerializer::Serialize(ArgsObj.ToSharedRef(), W))
+		{
+			InOutInvokeArgs = Out;
+		}
 	}
 
 	static int32 CountConversationUserTurnsForMemory(const TArray<FUnrealAiConversationMessage>& Messages)
@@ -772,6 +992,25 @@ namespace UnrealAiAgentHarnessPriv
 					AccumulatedUsage.TotalTokens,
 					Cmp.Accepted,
 					Pruned);
+				if (Sink.IsValid())
+				{
+					const FString Detail = UnrealAiBackgroundOpsLog::BuildDetailJson(
+						TEXT("memory_dispatch"),
+						TEXT("ran"),
+						Request.ProjectId,
+						Request.ThreadId,
+						0.0,
+						[&](const TSharedPtr<FJsonObject>& O)
+						{
+							O->SetNumberField(TEXT("accepted"), Cmp.Accepted);
+							O->SetNumberField(TEXT("pruned"), Pruned);
+							O->SetNumberField(TEXT("user_turns"), UserTurns);
+							O->SetBoolField(TEXT("trigger_by_turns"), bByTurns);
+							O->SetBoolField(TEXT("trigger_by_tokens"), bByTokens);
+							O->SetBoolField(TEXT("trigger_by_prompt_chars"), bByPromptChars);
+						});
+					Sink->OnEnforcementEvent(TEXT("background_op"), Detail);
+				}
 			}
 			else
 			{
@@ -784,6 +1023,22 @@ namespace UnrealAiAgentHarnessPriv
 					TurnInterval,
 					TokenThreshold,
 					PromptThreshold);
+				if (Sink.IsValid())
+				{
+					const FString Detail = UnrealAiBackgroundOpsLog::BuildDetailJson(
+						TEXT("memory_dispatch"),
+						TEXT("skipped"),
+						Request.ProjectId,
+						Request.ThreadId,
+						0.0,
+						[&](const TSharedPtr<FJsonObject>& O)
+						{
+							O->SetNumberField(TEXT("user_turns"), UserTurns);
+							O->SetNumberField(TEXT("total_tokens"), AccumulatedUsage.TotalTokens);
+							O->SetNumberField(TEXT("threshold_turn_interval"), TurnInterval);
+						});
+					Sink->OnEnforcementEvent(TEXT("background_op"), Detail);
+				}
 			}
 		}
 		FUnrealAiEditorModalMonitor::NotifyAgentTurnEndedForSink(Sink);
@@ -917,6 +1172,20 @@ namespace UnrealAiAgentHarnessPriv
 			LlmRound);
 		const FString& ComplexityQuery = Request.ContextComplexityUserText.IsEmpty() ? Request.UserText : Request.ContextComplexityUserText;
 		ContextService->StartRetrievalPrefetch(RetrievalTurnKey, ComplexityQuery);
+		if (Sink.IsValid())
+		{
+			const FString Detail = UnrealAiBackgroundOpsLog::BuildDetailJson(
+				TEXT("retrieval_prefetch"),
+				TEXT("started"),
+				Request.ProjectId,
+				Request.ThreadId,
+				0.0,
+				[&RetrievalTurnKey](const TSharedPtr<FJsonObject>& O)
+				{
+					O->SetStringField(TEXT("turn_key"), RetrievalTurnKey);
+				});
+			Sink->OnEnforcementEvent(TEXT("background_op"), Detail);
+		}
 		FUnrealAiToolSurfaceTelemetry ToolSurfaceTel;
 		if (!UnrealAiTurnLlmRequestBuilder::Build(
 				Request,
@@ -1433,6 +1702,29 @@ namespace UnrealAiAgentHarnessPriv
 			LastConsecutiveIdenticalOkSignature.Reset();
 			ConsecutiveIdenticalOkCount = 0;
 			return;
+		}
+		UnrealAiAgentHarnessPriv::TryAutoFillDispatchArgsFromContext(
+			InvokeName,
+			InvokeArgs,
+			ContextService,
+			Request.ProjectId,
+			Request.ThreadId);
+		{
+			FString TrimArgs = InvokeArgs;
+			TrimArgs.TrimStartAndEndInline();
+			if (TrimArgs == TEXT("{}") && UnrealAiAgentHarnessPriv::IsLikelyRequiredArgsTool(InvokeName))
+			{
+				const FString EmptySig = (InvokeName + TEXT("|{}")).ToLower();
+				const int32 Prior = ToolInvokeCountBySignature.FindRef(EmptySig);
+				if (Prior >= 1)
+				{
+					EmitEnforcementEvent(TEXT("required_args_empty_repeat_abort"), EmptySig.Left(240));
+					Fail(FString::Printf(
+						TEXT("Stopped repeated empty-args invocation for required-arg tool (%s). Provide required fields or use suggested_correct_call."),
+						*InvokeName));
+					return;
+				}
+			}
 		}
 		if (Sink.IsValid())
 		{

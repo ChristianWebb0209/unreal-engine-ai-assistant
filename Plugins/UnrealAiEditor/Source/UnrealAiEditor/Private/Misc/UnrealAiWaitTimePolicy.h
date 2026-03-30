@@ -137,5 +137,6 @@ namespace UnrealAiWaitTime
 	inline constexpr int32 Http429MaxAttempts = 6;
 
 	// --- Embeddings HTTP (retrieval path) ---
-	inline constexpr float EmbeddingHttpTimeoutSec = 15.0f;
+	// Keep embeddings fail-fast so retrieval falls back to lexical quickly instead of stalling a harness turn.
+	inline constexpr float EmbeddingHttpTimeoutSec = 8.0f;
 }
