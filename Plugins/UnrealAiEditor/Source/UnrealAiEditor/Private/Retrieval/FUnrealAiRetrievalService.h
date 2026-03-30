@@ -25,6 +25,12 @@ public:
 		const FString& ProjectId,
 		FUnrealAiRetrievalVectorDbOverview& OutOverview,
 		FString& OutError) const override;
+	virtual bool GetVectorDbTopGraphData(
+		const FString& ProjectId,
+		int32 TopN,
+		int32 SamplePerSource,
+		TArray<FUnrealAiVectorDbTopSourceRow>& OutSources,
+		FString& OutError) const override;
 	virtual void RequestRebuild(const FString& ProjectId) override;
 
 private:

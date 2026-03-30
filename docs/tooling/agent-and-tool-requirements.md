@@ -78,6 +78,19 @@ Ask and Agent modes give predictable behavior, cost, and risk profiles.
 
 **Rationale:** One conversation + tool surface keeps behavior predictable inside the editor.
 
+### 2.3 Code-type preference, filesystem tools, and compile iteration
+
+| Setting (`plugin_settings.json` → `agent`) | Purpose |
+|--------------------------------------------|---------|
+| **`codeTypePreference`** | `auto` (default), `blueprint_first`, `cpp_first`, `blueprint_only`, `cpp_only`. Injected into the assembled system/developer prompt as `{{CODE_TYPE_PREFERENCE}}` (see `UnrealAiPromptChunkUtils`). |
+| **`autoConfirmDestructive`** | Default **true**. When true (and compile-time default stays on), destructive tools that require `confirm` are auto-normalized in `UnrealAiToolDispatch` so the model is less likely to waste a round trip on a missing flag. |
+
+**Tool surface:** Tiered dispatch eligibility (`UnrealAiToolSurfacePipeline`) omits **`blueprint_apply_ir`** when preference is **`cpp_only`**, and omits **`cpp_project_compile`** when preference is **`blueprint_only`** (first LLM round only; later rounds keep the cached roster).
+
+**Project files:** **`project_file_move`** performs fast on-disk moves under the project root (not a substitute for **`asset_rename`** on `/Game` assets). **`cpp_project_compile`** (Windows: `Build.bat`) returns structured **`messages`**, counts, and **`raw_log_tail`** for fix-up loops; builds can be slow. Failed **`blueprint_compile`** / **`cpp_project_compile`** results are persisted into context (with a larger per-result char cap) so diagnostics survive for the next model round.
+
+**Harness:** Do **not** add `cpp_project_compile` to always-on regression suites unless you accept full UBT duration; treat it as manual or project-specific QA.
+
 ---
 
 ## 3. Planning surfaces (implemented)

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 
@@ -113,4 +113,23 @@ struct FUnrealAiRetrievalVectorDbOverview
 	bool bIntegrityOk = true;
 	FString IntegrityError;
 	TArray<TPair<FString, int32>> TopSourcesByChunkCount;
+};
+
+/** Single source node in the vector-db top-N visualization. */
+struct FUnrealAiVectorDbTopChunkRow
+{
+	FString ChunkId;
+	FString ChunkText;
+};
+
+struct FUnrealAiVectorDbTopSourceRow
+{
+	/** DB source_path (often includes tool/thread markers). */
+	FString SourcePath;
+	/** Total number of indexed chunks for this source_path. */
+	int32 ChunkCount = 0;
+	/** Optional marker parsed from source_path (text after `:thread:`), when present. */
+	FString ThreadIdHint;
+	/** Small sample of chunk rows to render in the drill-down pane. */
+	TArray<FUnrealAiVectorDbTopChunkRow> ChunkSamples;
 };

@@ -354,6 +354,11 @@ namespace UnrealAiAgentHarnessPriv
 		return true;
 	}
 
+	static bool ShouldPersistFailedCompileToolForContext(const FString& InvokeName)
+	{
+		return InvokeName == TEXT("blueprint_compile") || InvokeName == TEXT("cpp_project_compile");
+	}
+
 	static bool UnwrapDispatchToolCall(const FUnrealAiToolCallSpec& Tc, FString& OutInvokeName, FString& OutInvokeArgsJson, FString& OutError)
 	{
 		if (Tc.Name != GUnrealAiDispatchToolName)
@@ -1663,11 +1668,13 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			Sink->OnToolCallFinished(InvokeName, Tc.Id, Inv.bOk, UnrealAiTruncateForUi(ModelToolContent), Inv.EditorPresentation);
 		}
-		if (ContextService && Inv.bOk && InvokeName != TEXT("agent_emit_todo_plan")
-			&& ShouldPersistToolResultToContextState(InvokeName))
+		if (ContextService && InvokeName != TEXT("agent_emit_todo_plan")
+			&& ShouldPersistToolResultToContextState(InvokeName)
+			&& (Inv.bOk || ShouldPersistFailedCompileToolForContext(InvokeName)))
 		{
 			ContextService->LoadOrCreate(Request.ProjectId, Request.ThreadId);
 			FContextRecordPolicy Policy;
+			UnrealAiApplyToolSpecificRecordPolicy(Policy, FName(*InvokeName));
 			ContextService->RecordToolResult(FName(*InvokeName), ModelToolContent, Policy);
 		}
 		if (InvokeName == TEXT("agent_emit_todo_plan") && Sink.IsValid())

@@ -142,3 +142,110 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileWriteText(const TShare
 	O->SetStringField(TEXT("relative_path"), Rel);
 	return UnrealAiToolJson::Ok(O);
 }
+
+FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileMove(const TSharedPtr<FJsonObject>& Args)
+{
+	FString FromRel;
+	FString ToRel;
+	bool bConfirm = false;
+	bool bReplace = false;
+	{
+		const TArray<const TCHAR*> FromAliases = { TEXT("from_path"), TEXT("source_relative_path") };
+		if (!UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
+				Args,
+				TEXT("from_relative_path"),
+				FromAliases,
+				FromRel)
+			|| FromRel.IsEmpty())
+		{
+			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+			SuggestedArgs->SetStringField(TEXT("from_relative_path"), TEXT("Source/MyProject/Old.cpp"));
+			SuggestedArgs->SetStringField(TEXT("to_relative_path"), TEXT("Source/MyProject/New.cpp"));
+			SuggestedArgs->SetBoolField(TEXT("confirm"), true);
+			return UnrealAiToolJson::ErrorWithSuggestedCall(
+				TEXT("from_relative_path is required (aliases: from_path, source_relative_path)."),
+				TEXT("project_file_move"),
+				SuggestedArgs);
+		}
+	}
+	{
+		const TArray<const TCHAR*> ToAliases = { TEXT("to_path"), TEXT("dest_relative_path") };
+		if (!UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(
+				Args,
+				TEXT("to_relative_path"),
+				ToAliases,
+				ToRel)
+			|| ToRel.IsEmpty())
+		{
+			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+			SuggestedArgs->SetStringField(TEXT("from_relative_path"), FromRel);
+			SuggestedArgs->SetStringField(TEXT("to_relative_path"), TEXT("Source/MyProject/New.cpp"));
+			SuggestedArgs->SetBoolField(TEXT("confirm"), true);
+			return UnrealAiToolJson::ErrorWithSuggestedCall(
+				TEXT("to_relative_path is required (aliases: to_path, dest_relative_path)."),
+				TEXT("project_file_move"),
+				SuggestedArgs);
+		}
+	}
+	Args->TryGetBoolField(TEXT("confirm"), bConfirm);
+	if (!bConfirm)
+	{
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("from_relative_path"), FromRel);
+		SuggestedArgs->SetStringField(TEXT("to_relative_path"), ToRel);
+		SuggestedArgs->SetBoolField(TEXT("replace_existing"), false);
+		SuggestedArgs->SetBoolField(TEXT("confirm"), true);
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("confirm must be true for project_file_move."),
+			TEXT("project_file_move"),
+			SuggestedArgs);
+	}
+	Args->TryGetBoolField(TEXT("replace_existing"), bReplace);
+
+	FString FromAbs;
+	FString ToAbs;
+	FString Err;
+	if (!UnrealAiResolveProjectFilePath(FromRel, FromAbs, Err))
+	{
+		return UnrealAiToolJson::Error(Err);
+	}
+	if (!UnrealAiResolveProjectFilePath(ToRel, ToAbs, Err))
+	{
+		return UnrealAiToolJson::Error(Err);
+	}
+	if (FromAbs.Equals(ToAbs, ESearchCase::IgnoreCase))
+	{
+		return UnrealAiToolJson::Error(TEXT("from_relative_path and to_relative_path resolve to the same file"));
+	}
+	if (!FPaths::FileExists(FromAbs))
+	{
+		return UnrealAiToolJson::Error(TEXT("Source file does not exist"));
+	}
+	if (FPaths::FileExists(ToAbs) && !bReplace)
+	{
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("from_relative_path"), FromRel);
+		SuggestedArgs->SetStringField(TEXT("to_relative_path"), ToRel);
+		SuggestedArgs->SetBoolField(TEXT("replace_existing"), true);
+		SuggestedArgs->SetBoolField(TEXT("confirm"), true);
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("Destination file already exists. Pass replace_existing:true to overwrite."),
+			TEXT("project_file_move"),
+			SuggestedArgs);
+	}
+
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(ToAbs), true);
+	const bool bMoved = IFileManager::Get().Move(*ToAbs, *FromAbs, true, true, true, true);
+	if (!bMoved)
+	{
+		return UnrealAiToolJson::Error(
+			TEXT("Move failed (file may be locked, read-only, or on a volume that does not support atomic move)."));
+	}
+
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetBoolField(TEXT("ok"), true);
+	O->SetStringField(TEXT("from_relative_path"), FromRel);
+	O->SetStringField(TEXT("to_relative_path"), ToRel);
+	O->SetBoolField(TEXT("replace_existing"), bReplace);
+	return UnrealAiToolJson::Ok(O);
+}

@@ -4,6 +4,18 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 ---
 
+## Entry 36 — Code-type preference, `cpp_project_compile`, `project_file_move`, compile context
+
+- **`plugin_settings.json` → `agent`:** `codeTypePreference` (`auto` | `blueprint_first` | `cpp_first` | `blueprint_only` | `cpp_only`), `autoConfirmDestructive` (default true). AI Settings tab UI + `FUnrealAiEditorModule` hydration mirror `useSubagents`.
+- **Prompts:** `{{CODE_TYPE_PREFERENCE}}` in `UnrealAiPromptChunkUtils::ApplyTemplateTokens`; `10-mvp-gameplay-and-tooling.md` / `04-tool-calling-contract.md` updated for native compile + on-disk moves.
+- **Tools:** `project_file_move` (`UnrealAiToolDispatch_ProjectFiles`), `cpp_project_compile` (`UnrealAiToolDispatch_CppProjectCompile`, Windows `Build.bat`). Catalog + `ToolPackExtraCommaSeparated` extended.
+- **Harness / context:** Failed `blueprint_compile` and `cpp_project_compile` persist to context; `UnrealAiApplyToolSpecificRecordPolicy` raises `MaxStoredCharsPerResult`; ranking boosts compile tool results when `ok` is false in JSON.
+- **Tool surface:** `cpp_only` drops `blueprint_apply_ir` from tier-1 roster; `blueprint_only` drops `cpp_project_compile`.
+- **QA:** `cpp_project_compile` is intentionally **not** added to default headed baskets (full UBT cost). Manual: run from Agent chat on a Windows dev machine after a small C++ edit; expect multi-line `raw_log_tail` / `messages` in the tool result and in `run.jsonl` when persisted.
+- **Build:** `./build-editor.ps1 -Headless` (or `-Restart` on LNK1104).
+
+---
+
 ## Entry 35 — Plan DAG stuck on first node: write node status on parent thread
 
 - **Symptom:** After a valid planner DAG (e.g. 4 nodes `a`–`d`), `BeginNextReadyNode` kept dispatching **`node_id=a`** for dozens of LLM rounds until **`harness_scenario_wall_exceeded`** (~5 min) or huge `run.jsonl`. `harness_progress.log` showed repeated **`…_plan_a`** HTTP outbounds only; **`GetReadyNodeIds`** never saw **`success`** for `a` on the **parent** session.

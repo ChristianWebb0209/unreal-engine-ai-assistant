@@ -171,6 +171,15 @@ void UnrealAiApplyPostToolEditorFocus(
 		}
 		return;
 	}
+	if (ToolId == TEXT("project_file_move"))
+	{
+		FString Rel;
+		if (Args->TryGetStringField(TEXT("to_relative_path"), Rel) && !Rel.IsEmpty())
+		{
+			FocusProjectSourceFile(Rel);
+		}
+		return;
+	}
 
 	if (ToolId == TEXT("content_browser_sync_asset"))
 	{

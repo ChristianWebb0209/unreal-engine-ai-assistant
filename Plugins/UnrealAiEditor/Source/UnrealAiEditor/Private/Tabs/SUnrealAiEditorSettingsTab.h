@@ -12,6 +12,8 @@ class SMultiLineEditableTextBox;
 class SVerticalBox;
 class STextBlock;
 class SWidgetSwitcher;
+class SUnrealAiLocalJsonInspectorPanel;
+struct FUnrealAiVectorDbTopSourceRow;
 
 class SUnrealAiEditorSettingsTab final : public SCompoundWidget
 {
@@ -94,10 +96,31 @@ private:
 	void RefreshVectorDbOverviewUi();
 	FReply OnChatHistoryRefreshClicked();
 	void RebuildChatHistoryListUi();
+	void SelectChatHistoryThread(const FString& ThreadIdDigitsWithHyphens);
+	void LoadSelectedChatHistoryContextJson();
+	void LoadSelectedChatHistoryConversationJson();
 	FReply OnMemoriesRefreshClicked();
 	FReply OnRetrievalRebuildNowClicked();
 	void RebuildMemoryListUi();
 	void SelectMemoryById(const FString& MemoryId);
+
+	// --- Hidden settings segments: local persistence inspectors ---
+	FReply OnContextLoadClicked(const int32 Which);
+	void RebuildContextThreadListUi();
+	void RebuildContextLocalFilesUi();
+
+	void LoadSelectedContextJson();
+	void LoadSelectedConversationJson();
+	void LoadSelectedPlanDraftJson();
+	void SelectContextThread(const FString& ThreadIdDigitsWithHyphens);
+
+	FReply OnProjectIndexLoadClicked(const int32 Which);
+	void RebuildProjectIndexThreadListUi();
+	void LoadSelectedProjectIndexContextJson();
+	void LoadSelectedProjectIndexConversationJson();
+	void LoadSelectedProjectIndexPlanDraftJson();
+	void SelectProjectIndexThread(const FString& ThreadIdDigitsWithHyphens);
+	void LoadThreadsIndexJson();
 	bool LoadMemorySettingsFromRoot(const TSharedPtr<FJsonObject>& Root);
 	void WriteMemorySettingsToRoot(TSharedPtr<FJsonObject>& Root) const;
 	bool LoadRetrievalSettingsFromRoot(const TSharedPtr<FJsonObject>& Root);
@@ -124,6 +147,8 @@ private:
 	TSharedPtr<SVerticalBox> SectionsVBox;
 	TSharedPtr<SWidgetSwitcher> SettingsMainSwitcher;
 	TSharedPtr<SVerticalBox> ChatHistoryListVBox;
+	TSharedPtr<SUnrealAiLocalJsonInspectorPanel> ChatHistoryInspectorPanel;
+	FString SelectedChatHistoryThreadIdDigitsWithHyphens;
 	TSharedPtr<SVerticalBox> MemoryListVBox;
 	TSharedPtr<SEditableTextBox> MemorySearchBox;
 	TSharedPtr<SEditableTextBox> MemorySelectedTitleBox;
@@ -136,10 +161,35 @@ private:
 	TSharedPtr<STextBlock> UsageSummaryBlock;
 	TSharedPtr<STextBlock> VectorDbOverviewBlock;
 
+	// Segment 3: Vector DB top-N graph UI (nodes + drill-down)
+	TSharedPtr<SEditableTextBox> VectorDbGraphSearchBox;
+	TSharedPtr<SVerticalBox> VectorDbTopSourcesVBox;
+	TSharedPtr<SUnrealAiLocalJsonInspectorPanel> VectorDbSourceInspectorPanel;
+	TArray<FUnrealAiVectorDbTopSourceRow> VectorDbTopSources;
+	FString VectorDbSelectedSourcePath;
+	FString VectorDbLastGraphSearch;
+
+	void RefreshVectorDbTopGraphUi();
+	void UpdateVectorDbSourceInspectorPanel();
+	void RebuildVectorDbTopGraphNodesUi(const FString& SearchText);
+
+	// Segment 4: Context inspector (readable context.json + chat thread info)
+	TSharedPtr<SVerticalBox> ContextThreadListVBox;
+	TSharedPtr<SVerticalBox> ContextLocalFilesVBox;
+	TSharedPtr<SUnrealAiLocalJsonInspectorPanel> ContextInspectorPanel;
+	FString SelectedContextThreadIdDigitsWithHyphens;
+
+	// Segment 5: threads_index.json + per-thread drill-down
+	TSharedPtr<SVerticalBox> ProjectIndexThreadListVBox;
+	TSharedPtr<SUnrealAiLocalJsonInspectorPanel> ProjectIndexInspectorPanel;
+	FString SelectedProjectIndexThreadIdDigitsWithHyphens;
+
 	int32 ActiveSettingsSegmentIndex = 0;
 	double LastVectorDbOverviewPollSeconds = 0.0;
 
 	TArray<TSharedPtr<FString>> CompanyPresetOptions;
+	TArray<TSharedPtr<FString>> CodeTypePreferenceOptions;
+	TSharedPtr<SComboBox<TSharedPtr<FString>>> CodeTypePreferenceCombo;
 	TArray<TSharedPtr<FString>> ProviderIdOptions;
 	TArray<FDynSectionRow> SectionRows;
 	FString SelectedMemoryId;

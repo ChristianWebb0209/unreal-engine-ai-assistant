@@ -226,6 +226,14 @@ namespace UnrealAiContextCandidates
 				// Discovery outputs with no actionable target should decay faster under pressure.
 				E.Features.FreshnessReliability *= 0.5f;
 			}
+			if (T.ToolName == TEXT("blueprint_compile") || T.ToolName == TEXT("cpp_project_compile"))
+			{
+				E.Features.ActiveBonus = FMath::Max(E.Features.ActiveBonus, 0.85f);
+				if (T.TruncatedResult.Contains(TEXT("\"ok\": false")) || T.TruncatedResult.Contains(TEXT("\"ok\":false")))
+				{
+					E.Features.ActiveBonus = 1.f;
+				}
+			}
 			E.RenderedText = FString::Printf(TEXT("### Tool: %s\n%s"), *T.ToolName, *T.TruncatedResult);
 			E.TokenCostEstimate = EstimateTokens(E.RenderedText);
 			OutCandidates.Add(MoveTemp(E));

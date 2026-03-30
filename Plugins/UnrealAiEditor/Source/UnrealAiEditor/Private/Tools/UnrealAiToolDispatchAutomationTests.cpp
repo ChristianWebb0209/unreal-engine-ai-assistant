@@ -646,6 +646,17 @@ bool FUnrealAiGenericAssetToolsContractTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("blueprint_format_graph missing blueprint_path: bOk"), R.bOk);
 	}
 
+	{
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_format_selection"),
+			MakeShared<FJsonObject>(),
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_format_selection missing blueprint_path: bOk"), R.bOk);
+	}
+
 	return true;
 }
 

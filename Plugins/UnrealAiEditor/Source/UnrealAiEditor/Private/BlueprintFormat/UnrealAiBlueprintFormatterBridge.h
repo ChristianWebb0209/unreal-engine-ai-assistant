@@ -28,9 +28,21 @@ namespace UnrealAiBlueprintFormatterBridge
 		UEdGraph* Graph,
 		const TArray<UEdGraphNode*>& MaterializedNodes,
 		const TArray<FUnrealBlueprintIrNodeLayoutHint>& Hints,
-		bool bWanted);
+		bool bWanted,
+		const FUnrealBlueprintGraphFormatOptions& Options = FUnrealBlueprintGraphFormatOptions());
 
-	FUnrealBlueprintGraphFormatResult TryLayoutEntireGraph(UEdGraph* Graph, bool bWanted);
+	FUnrealBlueprintGraphFormatResult TryLayoutEntireGraph(
+		UEdGraph* Graph,
+		bool bWanted,
+		const FUnrealBlueprintGraphFormatOptions& Options = FUnrealBlueprintGraphFormatOptions());
 
-	int32 TryLayoutAllScriptGraphs(UBlueprint* BP);
+	FUnrealBlueprintGraphFormatResult TryLayoutSelectedNodes(
+		UEdGraph* Graph,
+		const TArray<UEdGraphNode*>& SelectedNodes,
+		bool bWanted,
+		const FUnrealBlueprintGraphFormatOptions& Options = FUnrealBlueprintGraphFormatOptions());
+
+	int32 TryLayoutAllScriptGraphs(
+		UBlueprint* BP,
+		const FUnrealBlueprintGraphFormatOptions& Options = FUnrealBlueprintGraphFormatOptions());
 }

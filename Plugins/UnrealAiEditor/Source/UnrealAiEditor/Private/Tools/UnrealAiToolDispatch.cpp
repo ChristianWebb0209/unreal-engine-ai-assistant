@@ -9,6 +9,7 @@
 #include "Tools/UnrealAiToolDispatch_Misc.h"
 #include "Tools/UnrealAiToolDispatch_Pie.h"
 #include "Tools/UnrealAiToolDispatch_ProjectFiles.h"
+#include "Tools/UnrealAiToolDispatch_CppProjectCompile.h"
 #include "Tools/UnrealAiToolDispatch_Search.h"
 #include "Tools/UnrealAiToolDispatch_Viewport.h"
 #include "Tools/UnrealAiToolDispatch_MoreAssets.h"
@@ -21,6 +22,7 @@
 
 #include "Backend/UnrealAiBackendRegistry.h"
 #include "Context/UnrealAiProjectId.h"
+#include "UnrealAiEditorModule.h"
 #include "Misc/CoreMisc.h"
 #include "Misc/UnrealAiRuntimeDefaults.h"
 
@@ -70,7 +72,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	}
 
 	const TSharedPtr<FJsonObject>& A = Args.IsValid() ? Args : MakeShared<FJsonObject>();
-	const bool bAutoRunDestructive = UnrealAiRuntimeDefaults::AutoRunDestructiveDefault;
+	const bool bAutoRunDestructive =
+		UnrealAiRuntimeDefaults::AutoRunDestructiveDefault && FUnrealAiEditorModule::IsAutoConfirmDestructiveEnabled();
 
 	const FString ProjectId = ResolveProjectId(SessionProjectId);
 	const FString ThreadId = ResolveThreadId(SessionThreadId);
@@ -207,6 +210,23 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 			}
 		}
 		return UnrealAiDispatch_ProjectFileWriteText(A);
+	}
+	if (ToolId == TEXT("project_file_move"))
+	{
+		if (bAutoRunDestructive)
+		{
+			bool bConfirm = false;
+			const bool bHasConfirm = A->TryGetBoolField(TEXT("confirm"), bConfirm);
+			if (!bHasConfirm || !bConfirm)
+			{
+				A->SetBoolField(TEXT("confirm"), true);
+			}
+		}
+		return UnrealAiDispatch_ProjectFileMove(A);
+	}
+	if (ToolId == TEXT("cpp_project_compile"))
+	{
+		return UnrealAiDispatch_CppProjectCompile(A);
 	}
 
 	if (ToolId == TEXT("cook_content_for_platform"))
@@ -394,6 +414,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	if (ToolId == TEXT("blueprint_format_graph"))
 	{
 		return UnrealAiDispatch_BlueprintFormatGraph(A);
+	}
+	if (ToolId == TEXT("blueprint_format_selection"))
+	{
+		return UnrealAiDispatch_BlueprintFormatSelection(A);
 	}
 	if (ToolId == TEXT("blueprint_get_graph_summary"))
 	{

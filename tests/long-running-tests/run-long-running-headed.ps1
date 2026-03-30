@@ -63,7 +63,11 @@
 
   Per-tool context dumps: default is full logging (5th arg dumpcontext). Use -ReduceContextNoise to pass nodump and skip context_window_after_tool_*.txt (continuation/plan_sub_turn/run_started dumps still occur). LLM payloads go to llm_requests.jsonl by default; sync segment lines go to run.jsonl.
 
-  Interactive viewing (headed runs): use the main Unreal Editor window (large viewport/tabs). The script does not steal focus (-BringEditorToForeground to opt in). -log opens a separate log console — that is not the level viewport.
+  Interactive viewing (headed runs): use the main Unreal Editor window (large viewport/tabs).
+    - The script launches the editor minimized by default (so you keep your current focus).
+    - It also does a best-effort Win32 restore so the window becomes clickable/restorable afterwards.
+    - Pass -BringEditorToForeground to steal focus and bring the editor forward.
+    - -log opens a separate log console — that is not the level viewport.
 
   Logging (always on; not optional)
   - The editor is launched **without** redirecting stdout/stderr. Redirecting pipes causes Unreal to suppress the separate
@@ -538,6 +542,41 @@ function Try-BringUnrealMainWindowToForeground {
     catch { }
 }
 
+function Try-RestoreUnrealMainWindowForClick {
+    param(
+        [System.Diagnostics.Process]$Proc,
+        [bool]$MinimizeAfterRestore = $true
+    )
+    if ($null -eq $Proc) { return }
+    try {
+        $h = [IntPtr]::Zero
+        for ($i = 0; $i -lt 20; $i++) {
+            try { $Proc.Refresh() } catch { }
+            if ($Proc.HasExited) { return }
+            $h = $Proc.MainWindowHandle
+            if ($h -ne [IntPtr]::Zero) { break }
+            Start-Sleep -Milliseconds 350
+        }
+        if ($h -eq [IntPtr]::Zero) { return }
+
+        if (-not ('UnrealAiHarness.NativeWin32' -as [type])) {
+            Add-Type -Namespace UnrealAiHarness -Name NativeWin32 -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);
+'@ -ErrorAction Stop
+        }
+
+        $SW_RESTORE = 9
+        $SW_SHOWMINIMIZED = 2
+        [void][UnrealAiHarness.NativeWin32]::ShowWindow($h, $SW_RESTORE)
+        Start-Sleep -Milliseconds 500
+        if ($MinimizeAfterRestore) {
+            [void][UnrealAiHarness.NativeWin32]::ShowWindow($h, $SW_SHOWMINIMIZED)
+        }
+    }
+    catch { }
+}
+
 function Invoke-HeadedEditorDynamic {
     param(
         [string]$ExecCmds,
@@ -600,7 +639,10 @@ UE_LOG: use the Unreal log window and see editor_unreal_project_log_live*.log + 
     }
 
     $harnessProgressStartedAt = Get-Date
-    $launcher = Start-Process -FilePath $EditorExe -ArgumentList @($editorCliArgs) -WorkingDirectory $ProjectRoot -PassThru
+    # Launch minimized by default for interactive headed runs, but restore once to ensure the window becomes restorable/clickable.
+    # (Windows focus/activation can otherwise leave the main window in a "stuck minimized" state.)
+    $windowStyle = if (-not $Unattended -and -not $BringEditorToForeground) { 'Minimized' } else { 'Normal' }
+    $launcher = Start-Process -FilePath $EditorExe -ArgumentList @($editorCliArgs) -WorkingDirectory $ProjectRoot -PassThru -WindowStyle $windowStyle
 
     Start-Sleep -Milliseconds 600
     try { $launcher.Refresh() } catch {}
@@ -624,6 +666,11 @@ UE_LOG: use the Unreal log window and see editor_unreal_project_log_live*.log + 
     }
     if ($Script:SpawnedEditorPids -notcontains $p.Id) {
         $Script:SpawnedEditorPids += $p.Id
+    }
+
+    if (-not $BringEditorToForeground -and -not $Unattended) {
+        # Best-effort: "restore once" without stealing focus; then minimize again so the initial state stays unobtrusive.
+        Try-RestoreUnrealMainWindowForClick -Proc $p -MinimizeAfterRestore $true
     }
 
     if ($BringEditorToForeground -and -not $Unattended) {

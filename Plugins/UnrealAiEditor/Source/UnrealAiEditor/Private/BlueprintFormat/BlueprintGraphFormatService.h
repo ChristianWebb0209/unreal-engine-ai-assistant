@@ -5,6 +5,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "BlueprintFormat/BlueprintGraphFormatOptions.h"
 
 class UEdGraph;
 class UEdGraphNode;
@@ -33,11 +34,17 @@ struct FUnrealBlueprintGraphFormatService
 	static FUnrealBlueprintGraphFormatResult LayoutAfterAiIrApply(
 		UEdGraph* Graph,
 		const TArray<UEdGraphNode*>& MaterializedNodes,
-		const TArray<FUnrealBlueprintIrNodeLayoutHint>& Hints);
+		const TArray<FUnrealBlueprintIrNodeLayoutHint>& Hints,
+		const FUnrealBlueprintGraphFormatOptions& Options = FUnrealBlueprintGraphFormatOptions());
 
-	/** Layout every node in the graph. */
-	static void LayoutEntireGraph(UEdGraph* Graph);
+	/** Layout every script node in the graph (comment boxes are not repositioned; optional knots + comment reflow). */
+	static FUnrealBlueprintGraphFormatResult LayoutEntireGraph(
+		UEdGraph* Graph,
+		const FUnrealBlueprintGraphFormatOptions& Options = FUnrealBlueprintGraphFormatOptions());
 
-	/** Layout only the provided nodes in the graph. */
-	static void LayoutSelectedNodes(UEdGraph* Graph, const TArray<UEdGraphNode*>& SelectedNodes);
+	/** Layout only the provided nodes (comments skipped for strip layout; optional knots + reflow on the graph). */
+	static FUnrealBlueprintGraphFormatResult LayoutSelectedNodes(
+		UEdGraph* Graph,
+		const TArray<UEdGraphNode*>& SelectedNodes,
+		const FUnrealBlueprintGraphFormatOptions& Options = FUnrealBlueprintGraphFormatOptions());
 };

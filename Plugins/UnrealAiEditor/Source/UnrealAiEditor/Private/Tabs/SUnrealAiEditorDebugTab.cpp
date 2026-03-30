@@ -22,7 +22,7 @@
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
-#include "Widgets/Text/SMultiLineEditableText.h"
+#include "Widgets/SUnrealAiLocalJsonInspectorPanel.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSplitter.h"
@@ -32,7 +32,6 @@
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
-static constexpr int32 GMaxDebugFileBytes = 512 * 1024;
 static constexpr int32 GMaxDirDepth = 8;
 static constexpr float GAutoRefreshSeconds = 3.f;
 
@@ -54,7 +53,6 @@ void SUnrealAiEditorDebugTab::Construct(const FArguments& InArgs)
 
 	const FString ProjId = UnrealAiProjectId::GetCurrentProjectId();
 	ProjectIdLabel = FText::Format(LOCTEXT("DbgProjectFmt", "project_id: {0}"), FText::FromString(ProjId));
-	InspectorContent = LOCTEXT("DbgPick", "Select a file from the list.");
 
 	RebuildFileList();
 	RefreshActiveSessionUi();
@@ -245,14 +243,7 @@ void SUnrealAiEditorDebugTab::Construct(const FArguments& InArgs)
 							]
 							+ SVerticalBox::Slot().FillHeight(1.f)
 							[
-								SNew(SScrollBox)
-								+ SScrollBox::Slot()
-								[
-									SAssignNew(InspectorText, SMultiLineEditableText)
-									.IsReadOnly(true)
-									.AutoWrapText(true)
-									.Font(FUnrealAiEditorStyle::FontMono9())
-								]
+								SAssignNew(InspectorPanel, SUnrealAiLocalJsonInspectorPanel)
 							]
 						]
 					]
@@ -260,9 +251,9 @@ void SUnrealAiEditorDebugTab::Construct(const FArguments& InArgs)
 			]
 		];
 
-	if (InspectorText.IsValid())
+	if (InspectorPanel.IsValid())
 	{
-		InspectorText->SetText(InspectorContent);
+		InspectorPanel->SetInspectorText(LOCTEXT("DbgPick", "Select a file from the list.").ToString());
 	}
 
 	if (bAutoRefresh)
@@ -534,32 +525,21 @@ void SUnrealAiEditorDebugTab::OnSelectionChanged(
 	SelectedEntry = Item;
 	if (!Item.IsValid() || Item->FullPath.IsEmpty() || Item->bIsDirectory)
 	{
-		InspectorContent = Item.IsValid() && Item->bIsDirectory && !Item->FullPath.IsEmpty()
-			? FText::Format(LOCTEXT("DbgDirSel", "Directory: {0}\n\nSelect a file to view contents."), FText::FromString(Item->FullPath))
+		const FText Msg = Item.IsValid() && Item->bIsDirectory && !Item->FullPath.IsEmpty()
+			? FText::Format(
+				LOCTEXT("DbgDirSel", "Directory: {0}\n\nSelect a file to view contents."),
+				FText::FromString(Item->FullPath))
 			: LOCTEXT("DbgPick", "Select a file from the list.");
-		if (InspectorText.IsValid())
+		if (InspectorPanel.IsValid())
 		{
-			InspectorText->SetText(InspectorContent);
+			InspectorPanel->SetInspectorText(Msg.ToString());
 		}
 		return;
 	}
 
-	bool bTrunc = false;
-	const FString Raw = LoadFileCapped(Item->FullPath, bTrunc);
-	FString Body = Raw;
-	const FString Low = Item->FullPath.ToLower();
-	if (Low.EndsWith(TEXT(".json")))
+	if (InspectorPanel.IsValid())
 	{
-		Body = PrettyOrRawJson(Raw);
-	}
-	if (bTrunc)
-	{
-		Body += TEXT("\n\n--- truncated (size cap) ---");
-	}
-	InspectorContent = FText::FromString(Body);
-	if (InspectorText.IsValid())
-	{
-		InspectorText->SetText(InspectorContent);
+		InspectorPanel->InspectFilePath(Item->FullPath);
 	}
 }
 
@@ -570,10 +550,9 @@ void SUnrealAiEditorDebugTab::OnLoadActiveContext()
 	const TSharedPtr<FUnrealAiChatUiSession> Sess = FUnrealAiEditorModule::GetActiveChatSession();
 	if (!Persist || !Sess.IsValid())
 	{
-		InspectorContent = LOCTEXT("DbgNoCtx", "Persistence or active session unavailable.");
-		if (InspectorText.IsValid())
+		if (InspectorPanel.IsValid())
 		{
-			InspectorText->SetText(InspectorContent);
+			InspectorPanel->SetInspectorText(LOCTEXT("DbgNoCtx", "Persistence or active session unavailable.").ToString());
 		}
 		return;
 	}
@@ -582,17 +561,15 @@ void SUnrealAiEditorDebugTab::OnLoadActiveContext()
 	FString Json;
 	if (!Persist->LoadThreadContextJson(Proj, Tid, Json))
 	{
-		InspectorContent = LOCTEXT("DbgCtxMissing", "No context.json on disk for this thread yet.");
-		if (InspectorText.IsValid())
+		if (InspectorPanel.IsValid())
 		{
-			InspectorText->SetText(InspectorContent);
+			InspectorPanel->SetInspectorText(LOCTEXT("DbgCtxMissing", "No context.json on disk for this thread yet.").ToString());
 		}
 		return;
 	}
-	InspectorContent = FText::FromString(PrettyOrRawJson(Json));
-	if (InspectorText.IsValid())
+	if (InspectorPanel.IsValid())
 	{
-		InspectorText->SetText(InspectorContent);
+		InspectorPanel->SetInspectorText(Json);
 	}
 }
 
@@ -603,10 +580,9 @@ void SUnrealAiEditorDebugTab::OnLoadActiveConversation()
 	const TSharedPtr<FUnrealAiChatUiSession> Sess = FUnrealAiEditorModule::GetActiveChatSession();
 	if (!Persist || !Sess.IsValid())
 	{
-		InspectorContent = LOCTEXT("DbgNoConv", "Persistence or active session unavailable.");
-		if (InspectorText.IsValid())
+		if (InspectorPanel.IsValid())
 		{
-			InspectorText->SetText(InspectorContent);
+			InspectorPanel->SetInspectorText(LOCTEXT("DbgNoConv", "Persistence or active session unavailable.").ToString());
 		}
 		return;
 	}
@@ -615,26 +591,23 @@ void SUnrealAiEditorDebugTab::OnLoadActiveConversation()
 	FString Json;
 	if (!Persist->LoadThreadConversationJson(Proj, Tid, Json))
 	{
-		InspectorContent = LOCTEXT("DbgConvMissing", "No conversation.json on disk for this thread yet.");
-		if (InspectorText.IsValid())
+		if (InspectorPanel.IsValid())
 		{
-			InspectorText->SetText(InspectorContent);
+			InspectorPanel->SetInspectorText(LOCTEXT("DbgConvMissing", "No conversation.json on disk for this thread yet.").ToString());
 		}
 		return;
 	}
-	InspectorContent = FText::FromString(PrettyOrRawJson(Json));
-	if (InspectorText.IsValid())
+	if (InspectorPanel.IsValid())
 	{
-		InspectorText->SetText(InspectorContent);
+		InspectorPanel->SetInspectorText(Json);
 	}
 }
 
 void SUnrealAiEditorDebugTab::OnCopyInspectorClicked()
 {
-	const FString S = InspectorContent.ToString();
-	if (!S.IsEmpty())
+	if (InspectorPanel.IsValid())
 	{
-		FPlatformApplicationMisc::ClipboardCopy(*S);
+		InspectorPanel->CopyCurrentToClipboard();
 	}
 }
 
@@ -674,70 +647,6 @@ FReply SUnrealAiEditorDebugTab::OnDeleteAllLocalChatDataClicked()
 	RefreshActiveSessionUi();
 	FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("DbgDelOk", "Local chat data deleted."));
 	return FReply::Handled();
-}
-
-FString SUnrealAiEditorDebugTab::PrettyOrRawJson(const FString& Raw) const
-{
-	TSharedPtr<FJsonObject> Obj;
-	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Raw);
-	if (FJsonSerializer::Deserialize(Reader, Obj) && Obj.IsValid())
-	{
-		FString Out;
-		const TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> W =
-			TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&Out, 2);
-		if (FJsonSerializer::Serialize(Obj.ToSharedRef(), W))
-		{
-			return Out;
-		}
-	}
-	TSharedPtr<FJsonValue> Val;
-	const TSharedRef<TJsonReader<>> Reader2 = TJsonReaderFactory<>::Create(Raw);
-	if (FJsonSerializer::Deserialize(Reader2, Val) && Val.IsValid())
-	{
-		FString Out;
-		const TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> W =
-			TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&Out, 2);
-		if (FJsonSerializer::Serialize(Val.ToSharedRef(), TEXT(""), W))
-		{
-			return Out;
-		}
-	}
-	return Raw;
-}
-
-FString SUnrealAiEditorDebugTab::LoadFileCapped(const FString& Path, bool& bOutTruncated) const
-{
-	bOutTruncated = false;
-	if (!FPaths::FileExists(Path))
-	{
-		return FString::Printf(TEXT("(file not found: %s)"), *Path);
-	}
-	const int64 Sz = IFileManager::Get().FileSize(*Path);
-	if (Sz < 0)
-	{
-		return TEXT("(could not read file size)");
-	}
-	if (Sz > GMaxDebugFileBytes)
-	{
-		bOutTruncated = true;
-		FArchive* Reader = IFileManager::Get().CreateFileReader(*Path);
-		if (!Reader)
-		{
-			return TEXT("(open failed)");
-		}
-		TArray<uint8> Buf;
-		Buf.SetNumUninitialized(GMaxDebugFileBytes);
-		Reader->Serialize(Buf.GetData(), GMaxDebugFileBytes);
-		delete Reader;
-		const FUTF8ToTCHAR Utf8(reinterpret_cast<const ANSICHAR*>(Buf.GetData()), Buf.Num());
-		return FString(Utf8.Length(), Utf8.Get());
-	}
-	FString S;
-	if (FFileHelper::LoadFileToString(S, *Path))
-	{
-		return S;
-	}
-	return TEXT("(read failed)");
 }
 
 #undef LOCTEXT_NAMESPACE

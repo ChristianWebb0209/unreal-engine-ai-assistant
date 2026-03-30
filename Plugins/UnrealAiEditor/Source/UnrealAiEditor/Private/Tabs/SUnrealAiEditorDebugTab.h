@@ -6,6 +6,7 @@
 #include "Widgets/SCompoundWidget.h"
 
 class FUnrealAiBackendRegistry;
+class SUnrealAiLocalJsonInspectorPanel;
 
 /** One row in the debug navigator (file or directory under a rooted tree). */
 struct FUnrealAiDebugListEntry
@@ -40,9 +41,6 @@ private:
 
 	void RebuildOpenChatHighlightCache();
 	bool IsPathHighlighted(const FString& FullPathNormalized) const;
-
-	FString PrettyOrRawJson(const FString& Raw) const;
-	FString LoadFileCapped(const FString& Path, bool& bOutTruncated) const;
 	void BuildTreeForRoot(const FString& RootPath, const FString& LabelForRoot, int32 MaxDepth);
 
 	TSharedRef<class ITableRow> OnGenerateRow(TSharedPtr<FUnrealAiDebugListEntry> Item, const TSharedRef<class STableViewBase>& OwnerTable);
@@ -53,8 +51,7 @@ private:
 	TSharedPtr<class SListView<TSharedPtr<FUnrealAiDebugListEntry>>> FileList;
 	TArray<TSharedPtr<FUnrealAiDebugListEntry>> FileEntries;
 	TSharedPtr<FUnrealAiDebugListEntry> SelectedEntry;
-	TSharedPtr<class SMultiLineEditableText> InspectorText;
-	FText InspectorContent;
+	TSharedPtr<class SUnrealAiLocalJsonInspectorPanel> InspectorPanel;
 	FText SummaryLine;
 	FText DataRootShort;
 	FText DataRootTooltip;

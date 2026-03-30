@@ -5,6 +5,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Prompt/UnrealAiPromptAssembleParams.h"
+#include "UnrealAiEditorModule.h"
 #include "UnrealAiEditorSettings.h"
 
 namespace UnrealAiPromptChunkUtilsPriv
@@ -49,6 +50,33 @@ namespace UnrealAiPromptChunkUtilsPriv
 			return TEXT(
 				"Minimal — Use brief section labels or sparse annotations only where they materially aid navigation; avoid long prose.");
 		}
+	}
+
+	static FString AgentCodeTypePreferenceParagraph()
+	{
+		const FString P = FUnrealAiEditorModule::GetAgentCodeTypePreference();
+		if (P == TEXT("blueprint_only"))
+		{
+			return TEXT(
+				"**Code-type preference: blueprint_only** — Prefer Blueprint graph work (`blueprint_export_ir` / `blueprint_apply_ir`) and gameplay assets. Avoid introducing or editing C++ under `Source/` unless the user explicitly requires native code. After graph edits, run `blueprint_compile` and fix all reported errors before finishing. Use `asset_rename` for `/Game` assets; use `project_file_move` for on-disk files outside Content if needed.");
+		}
+		if (P == TEXT("cpp_only"))
+		{
+			return TEXT(
+				"**Code-type preference: cpp_only** — Prefer C++ changes via `project_file_read_text` / `project_file_write_text` and related project file tools. Do not call `blueprint_apply_ir`. After native edits, run `cpp_project_compile` and iterate on compiler output until clean (or clearly blocked) before finishing.");
+		}
+		if (P == TEXT("blueprint_first"))
+		{
+			return TEXT(
+				"**Code-type preference: blueprint_first** — Default to Blueprint graphs and `/Game` assets when either approach could work; fall back to C++ when Blueprint or tools are insufficient. Always compile: `blueprint_compile` for Blueprints, `cpp_project_compile` after substantive C++ edits.");
+		}
+		if (P == TEXT("cpp_first"))
+		{
+			return TEXT(
+				"**Code-type preference: cpp_first** — Default to C++ in `Source/` when either approach could work; use Blueprints where clearly better (UMG layout, rapid iteration the user asked for in BP). After C++ edits, run `cpp_project_compile` and fix errors before finishing.");
+		}
+		return TEXT(
+			"**Code-type preference: auto** — Choose Blueprint vs C++ from task fit and project signals. After Blueprint graph edits run `blueprint_compile`. After meaningful C++ edits run `cpp_project_compile`. Prefer `project_file_move` for fast on-disk renames; use `asset_rename` for `/Game` object paths.");
 	}
 } // namespace UnrealAiPromptChunkUtilsPriv
 
@@ -143,6 +171,7 @@ void UnrealAiPromptChunkUtils::ApplyTemplateTokens(
 		P.ThreadId.IsEmpty() ? TEXT("(unknown)") : *P.ThreadId);
 	ReplaceAll(Doc, TEXT("{{PLAN_POINTER}}"), Pointer);
 	ReplaceAll(Doc, TEXT("((project version))"), UnrealAiAgentContextFormat::GetProjectEngineVersionLabel());
+	ReplaceAll(Doc, TEXT("{{CODE_TYPE_PREFERENCE}}"), UnrealAiPromptChunkUtilsPriv::AgentCodeTypePreferenceParagraph());
 	if (const UUnrealAiEditorSettings* EdSet = GetDefault<UUnrealAiEditorSettings>())
 	{
 		ReplaceAll(

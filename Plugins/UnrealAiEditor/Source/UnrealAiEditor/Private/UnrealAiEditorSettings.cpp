@@ -12,6 +12,8 @@ UUnrealAiEditorSettings::UUnrealAiEditorSettings(const FObjectInitializer& Objec
 	, bAutoContinuePlanSteps(true)
 	, bPlanAutoReplan(true)
 	, BlueprintCommentsMode(EUnrealAiBlueprintCommentsMode::Minimal)
+	, BlueprintDefaultLayoutStrategy(EUnrealAiBlueprintDefaultLayoutStrategy::SingleRow)
+	, BlueprintDefaultWireKnotMode(EUnrealAiBlueprintDefaultWireKnotMode::Off)
 	, PlanAutoReplanMaxAttemptsPerRun(2)
 	, bLogLlmRequestsToHarnessRunFile(true)
 {

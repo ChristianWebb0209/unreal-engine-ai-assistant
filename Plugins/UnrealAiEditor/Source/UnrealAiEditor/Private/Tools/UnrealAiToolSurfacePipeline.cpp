@@ -2,6 +2,7 @@
 
 #include "Context/AgentContextTypes.h"
 #include "Context/IAgentContextService.h"
+#include "UnrealAiEditorModule.h"
 #include "Misc/UnrealAiRuntimeDefaults.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Misc/SecureHash.h"
@@ -104,6 +105,21 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 		PackOptions,
 		[&](const FString& Tid, const TSharedPtr<FJsonObject>& Def)
 		{
+			const FString CodePref = FUnrealAiEditorModule::GetAgentCodeTypePreference();
+			if (CodePref == TEXT("cpp_only"))
+			{
+				if (Tid == TEXT("blueprint_apply_ir"))
+				{
+					return;
+				}
+			}
+			else if (CodePref == TEXT("blueprint_only"))
+			{
+				if (Tid == TEXT("cpp_project_compile"))
+				{
+					return;
+				}
+			}
 			UnrealAiToolSurfacePipelinePriv::FScored Row;
 			Row.ToolId = Tid;
 			const float Bm = RawScores.FindRef(Tid) / MaxS;

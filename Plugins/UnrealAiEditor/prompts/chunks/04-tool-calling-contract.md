@@ -27,7 +27,8 @@
 - **Empty filters:** for search tools, omit optional query fields or pass a non-empty string—avoid `""` when the tool needs a real filter.
 - **Character/Pawn creation gate:** when creating a playable character asset, do **not** pass `/Script/Engine.Character` or `/Script/Engine.Pawn` to `asset_create.asset_class`; create a Blueprint asset and set Character/Pawn as `parent_class` in `blueprint_apply_ir` with `create_if_missing:true`.
 - **Generic asset authoring (most `UObject` / DataAsset / config-like assets under `/Game`):** prefer **`asset_export_properties`** → **`asset_apply_properties`** before bespoke subsystem tools. Create with **`asset_create`** (`package_path`, `asset_name`, `asset_class`, optional `factory_class`). Dependencies: **`asset_get_dependencies`**, referencers: **`asset_find_referencers`**. Level Sequence shortcut: **`level_sequence_create_asset`**.
-- **Renames:** do **not** set `AssetName`/`ObjectName` in `asset_apply_properties`. Use **`asset_rename`** for renames/moves.
+- **Renames:** do **not** set `AssetName`/`ObjectName` in `asset_apply_properties`. Use **`asset_rename`** for `/Game` asset moves (reference fixup). Use **`project_file_move`** for fast on-disk moves under the project root (`Source/`, `Config/`, etc.) with `from_relative_path`, `to_relative_path`, `confirm:true`.
+- **Native compile check:** after substantive C++ edits (`project_file_write_text` / `project_file_move` affecting sources), call **`cpp_project_compile`** (Windows; may be slow) and iterate on **`messages`** / **`raw_log_tail`** until `ok` or a clear environment blocker—same discipline as `blueprint_compile` for Blueprints.
 - **One call, one purpose**; avoid redundant snapshots if the last result already answers.
 - **Action-turn execution (preferred):** In `agent`/`plan` mode, when the user asks you to *run/start/stop/compile/save/open/re-open/fix/apply/change/adjust/tune/create/delete*, prefer at least one concrete tool call for that action (or the immediate prerequisite resolver). The harness may allow text-only completion under relaxed policy; still avoid empty promises—either call tools or state a clear blocker.
 - **Mutation follow-through rule:** If the user asked for a change (for example "fix", "apply", "adjust", "reduce gloss", "compile warning"), do not stop after read-only inspection alone. After one discovery/read step, continue into the appropriate write/exec tool in the same ongoing run unless you are truly blocked.
@@ -111,11 +112,16 @@ Blueprint graph layout for **`blueprint_apply_ir`**, **`blueprint_format_graph`*
 - **`merge_policy`:** `create_new` always spawns new event nodes from IR. **`append_to_existing`** (default on **ubergraph** `EventGraph`) reuses the first matching **`ReceiveBeginPlay`** / **`ReceiveTick`** already in the graph, maps your IR `node_id` to that node, and wires new exec from the **exec tail** (follow `Then` / latent completion pins such as **`Completed`** on **`Delay`**). It warns when multiple matching events exist or when IR repeats the same builtin event op twice. On **function/macro** graphs the default is **`create_new`**.
 - Use **`event_tick`** and **`event_begin_play`** in IR so the merger can anchor correctly; do not invent duplicate top-level events for the same builtin when using **`append_to_existing`**.
 
-### Layout: `auto_layout`, `layout_scope`, `blueprint_format_graph`, `format_graphs`
+### Layout: `auto_layout`, `layout_scope`, `layout_mode`, `wire_knots`, `graph_comment`, `blueprint_format_graph`, `blueprint_format_selection`, `format_graphs`
 
 - **`auto_layout`** (default **`true`**): after wiring, runs layout when **every IR node has `x,y` at 0** (non-zero positions are left as author intent). **`formatter_available`** is normally **true** in editor builds; **`formatter_hint`** is reserved for future failure modes.
 - **`layout_scope`** (when **`auto_layout`** is on): **`ir_nodes`** (default) lays out only IR-touched nodes; **`full_graph`** calls **`LayoutEntireGraph`** on the whole target graph—use when the graph is messy outside your IR patch.
-- **`blueprint_format_graph`:** readability-only pass: **`LayoutEntireGraph`** on a chosen script graph (`blueprint_path`, optional `graph_name`). Use after manual edits or when you did not want **`layout_scope: full_graph`** on apply.
+- **`layout_mode`** (optional on apply and format tools): **`single_row`** vs **`multi_strand`** exec layout. Omit to use **Editor Preferences → Plugins → Unreal AI Editor** defaults.
+- **`wire_knots`** (optional): **`off`**, **`light`**, or **`aggressive`** for data-link reroute knots. Omit for the same project default.
+- **`graph_comment`** IR nodes: use **`"op":"graph_comment"`** with optional **`name`** (comment title), **`width`** / **`height`**, and **`member_node_ids`** (other nodes’ **`node_id`** strings) to refit the comment box around those nodes after layout. Round-trip via **`blueprint_export_ir`** includes comment geometry when comments exist.
+- **`custom_event`:** use **`name`** for the custom event’s display name; connect exec/data like other nodes.
+- **`blueprint_format_graph`:** in-process layout on a script graph: **`blueprint_path`**, optional **`graph_name`**, **`format_scope`** **`full_graph`** (default) or **`selection`**, plus optional **`layout_mode`**, **`wire_knots`**, **`focused`**. Use after manual edits or when you did not want **`layout_scope: full_graph`** on apply.
+- **`blueprint_format_selection`:** same pipeline as **`blueprint_format_graph`** but **always** formats the **current graph selection** (Blueprint graph editor must be open with nodes selected); still pass **`blueprint_path`** (and optional **`graph_name`**) so the tool can resolve the asset.
 - **`blueprint_compile`** accepts **`format_graphs: true`**: runs the formatter on **all** non-empty ubergraph, function, and macro graphs **before** compile—good after large multi-graph changes so you do not call **`blueprint_format_graph`** once per graph.
 
 ### Result fields to respect
@@ -126,7 +132,7 @@ Blueprint graph layout for **`blueprint_apply_ir`**, **`blueprint_format_graph`*
 ### IR shape
 
 - Node references must be stable **`node_id`**; links must be **string pin refs** in **`node_id.pin`** form (example: `{ "from":"beginplay.Then", "to":"delay.execute" }`).
-- Ops: `event_begin_play`, **`event_tick`**, `custom_event`, `branch`, `sequence`, `call_function`, `delay`, `get_variable`, `set_variable`, `dynamic_cast`.
+- Ops: `event_begin_play`, **`event_tick`**, **`event_actor_begin_overlap`**, `custom_event`, `branch`, `sequence`, `call_function`, `delay`, `get_variable`, `set_variable`, `dynamic_cast`, **`graph_comment`**.
 - For **`call_function`**, always provide **`class_path`** + **`function_name`**.
 - Do **not invent pseudo-ops** (for example `launch_character`, `play_sound`, `event_overlap`, `play_sound_at_location`, `add_component`). If the intent is gameplay behavior, express it as a supported op, usually **`call_function`**.
 - Use canonical overlap event op names from the list above (for overlap flows, use `event_actor_begin_overlap`).

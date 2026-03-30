@@ -50,6 +50,19 @@ void FUnrealAiEditorStyle::Initialize()
 	Style->Set("UnrealAiEditor.AssistantLane", new FSlateColorBrush(FLinearColor(0.14f, 0.16f, 0.2f, 0.55f)));
 	Style->Set("UnrealAiEditor.DebugNav", new FSlateColorBrush(FLinearColor(0.10f, 0.13f, 0.12f, 1.f)));
 	Style->Set("UnrealAiEditor.DebugInspect", new FSlateColorBrush(FLinearColor(0.09f, 0.11f, 0.14f, 1.f)));
+	// Chat renderer containers: rounded surfaces for notices and run progress (no inline colors in widgets).
+	Style->Set(
+		"UnrealAiEditor.ChatRunProgress",
+		new FSlateRoundedBoxBrush(FLinearColor(0.145f, 0.145f, 0.145f, 0.62f), 8.f));
+	Style->Set(
+		"UnrealAiEditor.ChatNoticeInfo",
+		new FSlateRoundedBoxBrush(FLinearColor(0.118f, 0.118f, 0.118f, 0.92f), 8.f));
+	Style->Set(
+		"UnrealAiEditor.ChatNoticeError",
+		new FSlateRoundedBoxBrush(FLinearColor(0.24f, 0.08f, 0.08f, 0.38f), 8.f));
+	Style->Set(
+		"UnrealAiEditor.ChatNoticeCancelled",
+		new FSlateRoundedBoxBrush(FLinearColor(0.23f, 0.18f, 0.0f, 0.34f), 8.f));
 	// Tool call cards: neutral shell + code wells (rounded; aligns with dark editor panels, not #000).
 	Style->Set(
 		"UnrealAiEditor.ToolCallCardOuter",

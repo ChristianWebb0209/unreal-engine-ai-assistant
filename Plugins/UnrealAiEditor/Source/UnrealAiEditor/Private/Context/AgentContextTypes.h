@@ -132,6 +132,16 @@ struct FContextRecordPolicy
 	int32 MaxStoredCharsPerResult = 4096;
 };
 
+/** Raise per-tool result caps (e.g. compile logs) so iterative fix-up keeps diagnostics in context. */
+inline void UnrealAiApplyToolSpecificRecordPolicy(FContextRecordPolicy& Policy, const FName& ToolName)
+{
+	const FString S = ToolName.ToString();
+	if (S == TEXT("blueprint_compile") || S == TEXT("cpp_project_compile"))
+	{
+		Policy.MaxStoredCharsPerResult = FMath::Max(Policy.MaxStoredCharsPerResult, 98304);
+	}
+}
+
 struct FAgentContextBuildOptions
 {
 	EUnrealAiAgentMode Mode = EUnrealAiAgentMode::Agent;

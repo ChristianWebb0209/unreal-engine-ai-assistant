@@ -58,6 +58,7 @@
 #include "Misc/Paths.h"
 #include "Tools/UnrealAiToolCatalogMatrixRunner.h"
 #include "Harness/UnrealAiHarnessScenarioRunner.h"
+#include "BlueprintFormat/UnrealAiBlueprintFormatEditorRegistration.h"
 #include "Retrieval/IUnrealAiRetrievalService.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
@@ -140,6 +141,8 @@ void FUnrealAiEditorModule::StartupModule()
 			{
 				FUnrealAiEditorModule::HydrateEditorFocusFromJsonRoot(Root);
 				FUnrealAiEditorModule::HydrateSubagentsFromJsonRoot(Root);
+				FUnrealAiEditorModule::HydrateAgentCodeTypePreferenceFromJsonRoot(Root);
+				FUnrealAiEditorModule::HydrateAutoConfirmDestructiveFromJsonRoot(Root);
 			}
 		}
 	}
@@ -152,6 +155,7 @@ void FUnrealAiEditorModule::StartupModule()
 
 	RegisterTabs(Reg);
 	RegisterMenus();
+	UnrealAiBlueprintFormatEditorRegistrationStartup();
 	RegisterSettings();
 	RegisterOpenChatOnStartup();
 	RegisterSaveOpenChatsOnExit();
@@ -651,6 +655,7 @@ void FUnrealAiEditorModule::ShutdownModule()
 	UnregisterOpenChatOnStartup();
 	UnregisterSaveOpenChatsOnExit();
 	SaveOpenAgentChatTabsNow();
+	UnrealAiBlueprintFormatEditorRegistrationShutdown();
 	UnregisterMenus();
 	UnregisterTabs();
 
@@ -822,6 +827,183 @@ void FUnrealAiEditorModule::HydrateSubagentsFromJsonRoot(const TSharedPtr<FJsonO
 		(*AgentObj)->TryGetBoolField(TEXT("useSubagents"), b);
 	}
 	GUnrealAiModule->bSubagentsEnabled = b;
+}
+
+namespace UnrealAiEditorModuleAgentPolicy
+{
+	static FString SanitizeCodeTypePreference(FString In)
+	{
+		In.TrimStartAndEndInline();
+		const FString L = In.ToLower();
+		if (L == TEXT("blueprint_first"))
+		{
+			return TEXT("blueprint_first");
+		}
+		if (L == TEXT("cpp_first"))
+		{
+			return TEXT("cpp_first");
+		}
+		if (L == TEXT("blueprint_only"))
+		{
+			return TEXT("blueprint_only");
+		}
+		if (L == TEXT("cpp_only"))
+		{
+			return TEXT("cpp_only");
+		}
+		return TEXT("auto");
+	}
+}
+
+FString FUnrealAiEditorModule::GetAgentCodeTypePreference()
+{
+	return GUnrealAiModule ? GUnrealAiModule->AgentCodeTypePreference : TEXT("auto");
+}
+
+void FUnrealAiEditorModule::HydrateAgentCodeTypePreferenceFromJsonRoot(const TSharedPtr<FJsonObject>& Root)
+{
+	if (!GUnrealAiModule || !Root.IsValid())
+	{
+		return;
+	}
+	FString Raw(TEXT("auto"));
+	const TSharedPtr<FJsonObject>* AgentObj = nullptr;
+	if (Root->TryGetObjectField(TEXT("agent"), AgentObj) && AgentObj && AgentObj->IsValid())
+	{
+		FString Tmp;
+		if ((*AgentObj)->TryGetStringField(TEXT("codeTypePreference"), Tmp) && !Tmp.IsEmpty())
+		{
+			Raw = Tmp;
+		}
+	}
+	GUnrealAiModule->AgentCodeTypePreference = UnrealAiEditorModuleAgentPolicy::SanitizeCodeTypePreference(Raw);
+}
+
+void FUnrealAiEditorModule::SetAgentCodeTypePreference(const FString& Preference)
+{
+	if (!GUnrealAiModule)
+	{
+		return;
+	}
+	const FString Canon = UnrealAiEditorModuleAgentPolicy::SanitizeCodeTypePreference(Preference);
+	if (GUnrealAiModule->AgentCodeTypePreference == Canon)
+	{
+		return;
+	}
+	GUnrealAiModule->AgentCodeTypePreference = Canon;
+
+	if (GUnrealAiModule->BackendRegistry.IsValid())
+	{
+		if (IUnrealAiPersistence* P = GUnrealAiModule->BackendRegistry->GetPersistence())
+		{
+			FString Json;
+			if (P->LoadSettingsJson(Json) && !Json.IsEmpty())
+			{
+				TSharedPtr<FJsonObject> Root;
+				const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+				if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
+				{
+					TSharedPtr<FJsonObject> AgentObj = MakeShared<FJsonObject>();
+					const TSharedPtr<FJsonObject>* ExistingAgent = nullptr;
+					if (Root->TryGetObjectField(TEXT("agent"), ExistingAgent) && ExistingAgent && ExistingAgent->IsValid())
+					{
+						AgentObj = UnrealAiEditorModulePriv::CloneJsonObjectShallow(*ExistingAgent);
+					}
+					AgentObj->SetStringField(TEXT("codeTypePreference"), Canon);
+					Root->SetObjectField(TEXT("agent"), AgentObj);
+					FString Out;
+					const TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
+					if (FJsonSerializer::Serialize(Root.ToSharedRef(), W))
+					{
+						P->SaveSettingsJson(Out);
+					}
+				}
+			}
+		}
+	}
+
+	OnAgentCodeTypePreferenceChanged().Broadcast();
+}
+
+FSimpleMulticastDelegate& FUnrealAiEditorModule::OnAgentCodeTypePreferenceChanged()
+{
+	static FSimpleMulticastDelegate Delegate;
+	return Delegate;
+}
+
+bool FUnrealAiEditorModule::IsAutoConfirmDestructiveEnabled()
+{
+	return GUnrealAiModule ? GUnrealAiModule->bAutoConfirmDestructive : true;
+}
+
+void FUnrealAiEditorModule::HydrateAutoConfirmDestructiveFromJsonRoot(const TSharedPtr<FJsonObject>& Root)
+{
+	if (!GUnrealAiModule || !Root.IsValid())
+	{
+		return;
+	}
+	bool b = true;
+	const TSharedPtr<FJsonObject>* AgentObj = nullptr;
+	if (Root->TryGetObjectField(TEXT("agent"), AgentObj) && AgentObj && AgentObj->IsValid())
+	{
+		bool Tmp = true;
+		if ((*AgentObj)->TryGetBoolField(TEXT("autoConfirmDestructive"), Tmp))
+		{
+			b = Tmp;
+		}
+	}
+	GUnrealAiModule->bAutoConfirmDestructive = b;
+}
+
+void FUnrealAiEditorModule::SetAutoConfirmDestructiveEnabled(bool bEnabled)
+{
+	if (!GUnrealAiModule)
+	{
+		return;
+	}
+	if (GUnrealAiModule->bAutoConfirmDestructive == bEnabled)
+	{
+		return;
+	}
+	GUnrealAiModule->bAutoConfirmDestructive = bEnabled;
+
+	if (GUnrealAiModule->BackendRegistry.IsValid())
+	{
+		if (IUnrealAiPersistence* P = GUnrealAiModule->BackendRegistry->GetPersistence())
+		{
+			FString Json;
+			if (P->LoadSettingsJson(Json) && !Json.IsEmpty())
+			{
+				TSharedPtr<FJsonObject> Root;
+				const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+				if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
+				{
+					TSharedPtr<FJsonObject> AgentObj = MakeShared<FJsonObject>();
+					const TSharedPtr<FJsonObject>* ExistingAgent = nullptr;
+					if (Root->TryGetObjectField(TEXT("agent"), ExistingAgent) && ExistingAgent && ExistingAgent->IsValid())
+					{
+						AgentObj = UnrealAiEditorModulePriv::CloneJsonObjectShallow(*ExistingAgent);
+					}
+					AgentObj->SetBoolField(TEXT("autoConfirmDestructive"), bEnabled);
+					Root->SetObjectField(TEXT("agent"), AgentObj);
+					FString Out;
+					const TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
+					if (FJsonSerializer::Serialize(Root.ToSharedRef(), W))
+					{
+						P->SaveSettingsJson(Out);
+					}
+				}
+			}
+		}
+	}
+
+	OnAutoConfirmDestructivePolicyChanged().Broadcast();
+}
+
+FSimpleMulticastDelegate& FUnrealAiEditorModule::OnAutoConfirmDestructivePolicyChanged()
+{
+	static FSimpleMulticastDelegate Delegate;
+	return Delegate;
 }
 
 void FUnrealAiEditorModule::SetSubagentsEnabled(bool bEnabled)
@@ -1357,6 +1539,8 @@ void FUnrealAiEditorModule::RegisterMenus()
 					NAME_None,
 					TOptional<FName>(FName(TEXT("UnrealAiToolbarChat")))));
 			}
+
+			UnrealAiBlueprintFormatEditorExtendBlueprintToolbar();
 
 #if WITH_EDITOR
 			UnrealAi_RegisterContextMenu_AddToChat(FName(TEXT("ContentBrowser.AssetContextMenu")));

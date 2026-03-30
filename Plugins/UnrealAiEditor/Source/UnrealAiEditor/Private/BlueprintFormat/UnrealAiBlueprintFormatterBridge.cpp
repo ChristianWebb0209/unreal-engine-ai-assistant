@@ -38,43 +38,52 @@ FUnrealBlueprintGraphFormatResult UnrealAiBlueprintFormatterBridge::TryLayoutAft
 	UEdGraph* Graph,
 	const TArray<UEdGraphNode*>& MaterializedNodes,
 	const TArray<FUnrealBlueprintIrNodeLayoutHint>& Hints,
-	bool bWanted)
+	bool bWanted,
+	const FUnrealBlueprintGraphFormatOptions& Options)
 {
 	FUnrealBlueprintGraphFormatResult R;
 	if (!bWanted || !Graph)
 	{
 		return R;
 	}
-	return FUnrealBlueprintGraphFormatService::LayoutAfterAiIrApply(Graph, MaterializedNodes, Hints);
+	return FUnrealBlueprintGraphFormatService::LayoutAfterAiIrApply(Graph, MaterializedNodes, Hints, Options);
 }
 
-FUnrealBlueprintGraphFormatResult UnrealAiBlueprintFormatterBridge::TryLayoutEntireGraph(UEdGraph* Graph, bool bWanted)
+FUnrealBlueprintGraphFormatResult UnrealAiBlueprintFormatterBridge::TryLayoutEntireGraph(
+	UEdGraph* Graph,
+	bool bWanted,
+	const FUnrealBlueprintGraphFormatOptions& Options)
 {
 	FUnrealBlueprintGraphFormatResult R;
 	if (!bWanted || !Graph)
 	{
 		return R;
 	}
-	FUnrealBlueprintGraphFormatService::LayoutEntireGraph(Graph);
-	R.NodesPositioned = 0;
-	for (UEdGraphNode* N : Graph->Nodes)
-	{
-		if (N)
-		{
-			++R.NodesPositioned;
-		}
-	}
-	return R;
+	return FUnrealBlueprintGraphFormatService::LayoutEntireGraph(Graph, Options);
 }
 
-int32 UnrealAiBlueprintFormatterBridge::TryLayoutAllScriptGraphs(UBlueprint* BP)
+FUnrealBlueprintGraphFormatResult UnrealAiBlueprintFormatterBridge::TryLayoutSelectedNodes(
+	UEdGraph* Graph,
+	const TArray<UEdGraphNode*>& SelectedNodes,
+	bool bWanted,
+	const FUnrealBlueprintGraphFormatOptions& Options)
+{
+	FUnrealBlueprintGraphFormatResult R;
+	if (!bWanted || !Graph)
+	{
+		return R;
+	}
+	return FUnrealBlueprintGraphFormatService::LayoutSelectedNodes(Graph, SelectedNodes, Options);
+}
+
+int32 UnrealAiBlueprintFormatterBridge::TryLayoutAllScriptGraphs(UBlueprint* BP, const FUnrealBlueprintGraphFormatOptions& Options)
 {
 	if (!BP)
 	{
 		return 0;
 	}
 	int32 Count = 0;
-	auto LayoutIfHasNodes = [&Count](UEdGraph* G)
+	auto LayoutIfHasNodes = [&Count, &Options](UEdGraph* G)
 	{
 		if (!G)
 		{
@@ -93,7 +102,7 @@ int32 UnrealAiBlueprintFormatterBridge::TryLayoutAllScriptGraphs(UBlueprint* BP)
 		{
 			return;
 		}
-		FUnrealBlueprintGraphFormatService::LayoutEntireGraph(G);
+		FUnrealBlueprintGraphFormatService::LayoutEntireGraph(G, Options);
 		++Count;
 	};
 	for (const TObjectPtr<UEdGraph>& G : BP->UbergraphPages)

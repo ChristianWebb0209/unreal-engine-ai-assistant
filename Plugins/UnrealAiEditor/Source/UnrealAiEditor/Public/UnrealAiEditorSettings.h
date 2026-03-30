@@ -13,6 +13,23 @@ enum class EUnrealAiBlueprintCommentsMode : uint8
 	Verbose UMETA(DisplayName = "Verbose")
 };
 
+/** Default graph layout when tools omit layout_mode (bundled formatter). */
+UENUM()
+enum class EUnrealAiBlueprintDefaultLayoutStrategy : uint8
+{
+	SingleRow UMETA(DisplayName = "Single row"),
+	MultiStrand UMETA(DisplayName = "Multi-strand (stacked lanes)")
+};
+
+/** Default data-wire reroute (knot) insertion when tools omit wire_knots. */
+UENUM()
+enum class EUnrealAiBlueprintDefaultWireKnotMode : uint8
+{
+	Off UMETA(DisplayName = "Off"),
+	Light UMETA(DisplayName = "Light"),
+	Aggressive UMETA(DisplayName = "Aggressive")
+};
+
 UCLASS(Config = Editor, defaultconfig, meta = (DisplayName = "Unreal AI Editor"))
 class UUnrealAiEditorSettings : public UDeveloperSettings
 {
@@ -71,6 +88,14 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Blueprint comments"))
 	EUnrealAiBlueprintCommentsMode BlueprintCommentsMode = EUnrealAiBlueprintCommentsMode::Minimal;
+
+	/** Used when blueprint_apply_ir / blueprint_format_graph omit layout_mode. */
+	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Blueprint layout: default strategy"))
+	EUnrealAiBlueprintDefaultLayoutStrategy BlueprintDefaultLayoutStrategy = EUnrealAiBlueprintDefaultLayoutStrategy::SingleRow;
+
+	/** Used when blueprint_apply_ir / blueprint_format_graph omit wire_knots. */
+	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Blueprint layout: data wire knots"))
+	EUnrealAiBlueprintDefaultWireKnotMode BlueprintDefaultWireKnotMode = EUnrealAiBlueprintDefaultWireKnotMode::Off;
 
 	/** Maximum supplemental planner (replan) HTTP turns per plan executor run; 0 disables replanning. */
 	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (ClampMin = "0", ClampMax = "8"))

@@ -629,6 +629,89 @@ bool FUnrealAiVectorIndexStore::GetTopSourcesByChunkCount(const int32 Limit, TAr
 	return true;
 }
 
+bool FUnrealAiVectorIndexStore::GetTopSourcesByChunkCountWithSamples(
+	const int32 Limit,
+	const int32 SamplePerSource,
+	TArray<FUnrealAiVectorDbTopSourceRow>& OutRows,
+	FString& OutError)
+{
+	OutRows.Reset();
+	if (!Initialize(OutError))
+	{
+		return false;
+	}
+
+	TArray<TPair<FString, int32>> Top;
+	if (!GetTopSourcesByChunkCount(Limit, Top, OutError))
+	{
+		return false;
+	}
+
+	const int32 KeepPerSource = FMath::Clamp(SamplePerSource, 0, 20);
+	const int32 MaxChunkCharsForUi = 2200;
+
+	FSQLitePreparedStatement SampleStmt;
+	if (!SampleStmt.Create(
+		*Db,
+		TEXT("SELECT chunk_id, chunk_text FROM chunks WHERE project_id=?1 AND source_path=?2 LIMIT ?3;"),
+		ESQLitePreparedStatementFlags::Persistent))
+	{
+		OutError = TEXT("Failed to create sample chunks statement.");
+		return false;
+	}
+
+	for (const TPair<FString, int32>& P : Top)
+	{
+		const FString& SourcePath = P.Key;
+		const int32 ChunkCount = P.Value;
+		if (SourcePath.IsEmpty())
+		{
+			continue;
+		}
+
+		FUnrealAiVectorDbTopSourceRow Row;
+		Row.SourcePath = SourcePath;
+		Row.ChunkCount = ChunkCount;
+
+		{
+			const FString Marker = TEXT(":thread:");
+			const int32 ThreadPos = SourcePath.Find(Marker, ESearchCase::CaseSensitive);
+			if (ThreadPos != INDEX_NONE)
+			{
+				Row.ThreadIdHint = SourcePath.Mid(ThreadPos + Marker.Len());
+			}
+		}
+
+		Row.ChunkSamples.Reset();
+		if (KeepPerSource > 0)
+		{
+			SampleStmt.Reset();
+			SampleStmt.SetBindingValueByIndex(1, ProjectId);
+			SampleStmt.SetBindingValueByIndex(2, SourcePath);
+			SampleStmt.SetBindingValueByIndex(3, KeepPerSource);
+
+			while (SampleStmt.Step() == ESQLitePreparedStatementStepResult::Row)
+			{
+				FUnrealAiVectorDbTopChunkRow C;
+				SampleStmt.GetColumnValueByIndex(0, C.ChunkId);
+				SampleStmt.GetColumnValueByIndex(1, C.ChunkText);
+				if (!C.ChunkText.IsEmpty() && C.ChunkText.Len() > MaxChunkCharsForUi)
+				{
+					C.ChunkText = C.ChunkText.Left(MaxChunkCharsForUi) + TEXT(" …");
+				}
+				if (!C.ChunkId.IsEmpty() || !C.ChunkText.IsEmpty())
+				{
+					Row.ChunkSamples.Add(MoveTemp(C));
+				}
+			}
+		}
+
+		OutRows.Add(MoveTemp(Row));
+	}
+
+	return true;
+}
+
 bool FUnrealAiVectorIndexStore::LoadManifest(FUnrealAiVectorManifest& OutManifest) const
 {
 	OutManifest = FUnrealAiVectorManifest();

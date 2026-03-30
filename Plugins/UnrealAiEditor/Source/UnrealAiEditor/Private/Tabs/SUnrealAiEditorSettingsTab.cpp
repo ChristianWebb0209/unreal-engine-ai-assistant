@@ -24,6 +24,7 @@
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -37,9 +38,11 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SGridPanel.h"
 #include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Widgets/SUnrealAiLocalJsonInspectorPanel.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
@@ -166,7 +169,9 @@ namespace UnrealAiSettingsTemplate
 		"\t\t\"blueprintMaxFeatureRecords\": 0\n"
 		"\t},\n"
 		"\t\"agent\": {\n"
-		"\t\t\"useSubagents\": true\n"
+		"\t\t\"useSubagents\": true,\n"
+		"\t\t\"codeTypePreference\": \"auto\",\n"
+		"\t\t\"autoConfirmDestructive\": true\n"
 		"\t},\n"
 		"\t\"ui\": {\n"
 		"\t\t\"editorFocus\": false\n"
@@ -572,6 +577,12 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 	RetrievalRootPresetOptions.Add(MakeShared<FString>(TEXT("standard")));
 	RetrievalRootPresetOptions.Add(MakeShared<FString>(TEXT("extended")));
 
+	CodeTypePreferenceOptions.Add(MakeShared<FString>(TEXT("auto")));
+	CodeTypePreferenceOptions.Add(MakeShared<FString>(TEXT("blueprint_first")));
+	CodeTypePreferenceOptions.Add(MakeShared<FString>(TEXT("cpp_first")));
+	CodeTypePreferenceOptions.Add(MakeShared<FString>(TEXT("blueprint_only")));
+	CodeTypePreferenceOptions.Add(MakeShared<FString>(TEXT("cpp_only")));
+
 	ChildSlot
 		[SNew(SBorder)
 				.Padding(FMargin(12.f))
@@ -628,6 +639,30 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 								.OnClicked_Lambda([this]()
 								{
 									return OnSettingsSegmentClicked(3);
+								})
+						]
+						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(8.f, 0.f, 0.f, 0.f))
+						[
+							SNew(SButton)
+								.Text(LOCTEXT("SettingsContext", "Context"))
+								.ToolTipText(LOCTEXT(
+									"SettingsContextTip",
+									"Inspect per-chat context.json / conversation.json and related local thread artifacts."))
+								.OnClicked_Lambda([this]()
+								{
+									return OnSettingsSegmentClicked(4);
+								})
+						]
+						+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(8.f, 0.f, 0.f, 0.f))
+						[
+							SNew(SButton)
+								.Text(LOCTEXT("SettingsProjectIndex", "Project index"))
+								.ToolTipText(LOCTEXT(
+									"SettingsProjectIndexTip",
+									"Inspect threads_index.json and drill into per-thread context artifacts."))
+								.OnClicked_Lambda([this]()
+								{
+									return OnSettingsSegmentClicked(5);
 								})
 						]
 					]
@@ -757,6 +792,67 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 														.Text(LOCTEXT(
 															"UseSubagentsHelp",
 															"Use subagents: when on, plan execution may schedule independent ready nodes as subagent waves (guarded policy). When off, plan nodes run serially."))
+												]
+											]
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
+											[
+												SNew(SHorizontalBox)
+												+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+												[
+													SNew(STextBlock)
+														.Text(LOCTEXT("CodeTypePrefLabel", "Code type preference"))
+												]
+												+ SHorizontalBox::Slot().FillWidth(1.f)
+												[
+													SAssignNew(CodeTypePreferenceCombo, SComboBox<TSharedPtr<FString>>)
+														.OptionsSource(&CodeTypePreferenceOptions)
+														.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+														{
+															return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : FString()));
+														})
+														.OnSelectionChanged_Lambda([this](TSharedPtr<FString> Sel, ESelectInfo::Type)
+														{
+															if (Sel.IsValid())
+															{
+																FUnrealAiEditorModule::SetAgentCodeTypePreference(*Sel);
+																OnAnySettingsChanged(FText::GetEmpty());
+															}
+														})
+														.Content()
+														[
+															SNew(STextBlock)
+																.Text_Lambda([]()
+																{
+																	return FText::FromString(FUnrealAiEditorModule::GetAgentCodeTypePreference());
+																})
+														]
+												]
+											]
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
+											[
+												SNew(SHorizontalBox)
+												+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+												[
+													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
+														.IsChecked_Lambda([]()
+														{
+															return FUnrealAiEditorModule::IsAutoConfirmDestructiveEnabled()
+																? ECheckBoxState::Checked
+																: ECheckBoxState::Unchecked;
+														})
+														.OnCheckStateChanged_Lambda([](ECheckBoxState S)
+														{
+															FUnrealAiEditorModule::SetAutoConfirmDestructiveEnabled(S == ECheckBoxState::Checked);
+														})
+												]
+												+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+												[
+													SNew(STextBlock)
+														.AutoWrapText(true)
+														.WrapTextAt(520.f)
+														.Text(LOCTEXT(
+															"AutoConfirmDestructiveHelp",
+															"When on, destructive tools that require confirm default to confirmed so the model is not slowed by a retry. Turn off only if you want strict manual confirmation in tool args."))
 												]
 											]
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
@@ -1185,10 +1281,55 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 							]
 							+ SVerticalBox::Slot().FillHeight(1.f)
 							[
-								SNew(SScrollBox)
-								+ SScrollBox::Slot()
+								SNew(SSplitter)
+								.Orientation(Orient_Horizontal)
+								+ SSplitter::Slot()
+								.Value(0.35f)
 								[
-									SAssignNew(ChatHistoryListVBox, SVerticalBox)
+									SNew(SScrollBox)
+									+ SScrollBox::Slot()
+									[
+										SAssignNew(ChatHistoryListVBox, SVerticalBox)
+									]
+								]
+								+ SSplitter::Slot()
+								.Value(0.65f)
+								[
+									SNew(SVerticalBox)
+									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+									[
+										SNew(STextBlock)
+											.Font(FUnrealAiEditorStyle::FontSectionHeading())
+											.Text(LOCTEXT("ChatHistoryInspectorLbl", "Selected thread details"))
+									]
+									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+									[
+										SNew(SHorizontalBox)
+										+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+										[
+											SNew(SButton)
+												.Text(LOCTEXT("ChatLoadCtxBtn", "Load context.json"))
+												.OnClicked_Lambda([this]()
+												{
+													LoadSelectedChatHistoryContextJson();
+													return FReply::Handled();
+												})
+										]
+										+ SHorizontalBox::Slot().AutoWidth()
+										[
+											SNew(SButton)
+												.Text(LOCTEXT("ChatLoadConvBtn", "Load conversation.json"))
+												.OnClicked_Lambda([this]()
+												{
+													LoadSelectedChatHistoryConversationJson();
+													return FReply::Handled();
+												})
+										]
+									]
+									+ SVerticalBox::Slot().FillHeight(1.f)
+									[
+										SAssignNew(ChatHistoryInspectorPanel, SUnrealAiLocalJsonInspectorPanel)
+									]
 								]
 							]
 						]
@@ -1355,16 +1496,220 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 							]
 							+ SVerticalBox::Slot().FillHeight(1.f)
 							[
-								SNew(SScrollBox)
-								+ SScrollBox::Slot()
+								SNew(SSplitter)
+								.Orientation(Orient_Horizontal)
+								+ SSplitter::Slot()
+								.Value(0.38f)
 								[
-									SAssignNew(VectorDbOverviewBlock, STextBlock)
-										.AutoWrapText(true)
-										.Font(FUnrealAiEditorStyle::FontBodySmall())
-										.Text(LOCTEXT("VectorDbOverviewPlaceholder", "Loading…"))
+									SNew(SVerticalBox)
+									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+									[
+										SAssignNew(VectorDbGraphSearchBox, SEditableTextBox)
+											.HintText(LOCTEXT("VectorDbGraphSearchHint", "Search source paths (top-N nodes)…"))
+											.Font(FUnrealAiEditorStyle::FontBodySmall())
+											.OnTextChanged_Lambda([this](const FText& T)
+											{
+												RebuildVectorDbTopGraphNodesUi(T.ToString());
+											})
+									]
+									+ SVerticalBox::Slot().FillHeight(1.f)
+									[
+										SNew(SScrollBox)
+										+ SScrollBox::Slot()
+										[
+											SAssignNew(VectorDbTopSourcesVBox, SVerticalBox)
+										]
+									]
+								]
+								+ SSplitter::Slot()
+								.Value(0.62f)
+								[
+									SNew(SVerticalBox)
+									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+									[
+										SNew(STextBlock)
+											.AutoWrapText(true)
+											.Font(FUnrealAiEditorStyle::FontSectionHeading())
+											.Text(LOCTEXT("VectorDbDrilldownLbl", "Selected source drill-down"))
+									]
+									+ SVerticalBox::Slot().FillHeight(1.f)
+									[
+										SAssignNew(VectorDbSourceInspectorPanel, SUnrealAiLocalJsonInspectorPanel)
+									]
 								]
 							]
 						]
+					+ SWidgetSwitcher::Slot()
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+						[
+							SNew(STextBlock)
+								.AutoWrapText(true)
+								.Text(LOCTEXT(
+									"ContextHelp",
+									"Inspect persisted per-chat context.json / conversation.json artifacts. Threads are listed from your local thread index; open chats are highlighted."))
+									.Font(FUnrealAiEditorStyle::FontBodySmall())
+									.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+						]
+						+ SVerticalBox::Slot().FillHeight(1.f)
+						[
+							SNew(SSplitter)
+							.Orientation(Orient_Horizontal)
+							+ SSplitter::Slot()
+							.Value(0.35f)
+							[
+								SNew(SVerticalBox)
+								+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 6.f))
+								[
+									SNew(STextBlock)
+										.Font(FUnrealAiEditorStyle::FontSectionHeading())
+										.Text(LOCTEXT("ContextThreadsLbl", "Threads in project"))
+								]
+								+ SVerticalBox::Slot().FillHeight(1.f)
+								[
+									SNew(SScrollBox)
+									+ SScrollBox::Slot()
+									[
+										SAssignNew(ContextThreadListVBox, SVerticalBox)
+									]
+								]
+							]
+							+ SSplitter::Slot()
+							.Value(0.65f)
+							[
+								SNew(SVerticalBox)
+								+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+								[
+									SNew(STextBlock)
+										.Font(FUnrealAiEditorStyle::FontSectionHeading())
+										.Text(LOCTEXT("ContextInspectorLbl", "Context inspector"))
+								]
+								+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+								[
+									SNew(SHorizontalBox)
+									+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+									[
+										SNew(SButton)
+											.Text(LOCTEXT("LoadCtxBtn", "Load context.json"))
+											.OnClicked_Lambda([this]() { return OnContextLoadClicked(0); })
+									]
+									+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+									[
+										SNew(SButton)
+											.Text(LOCTEXT("LoadConvBtn", "Load conversation.json"))
+											.OnClicked_Lambda([this]() { return OnContextLoadClicked(1); })
+									]
+									+ SHorizontalBox::Slot().AutoWidth()
+									[
+										SNew(SButton)
+											.Text(LOCTEXT("LoadPlanBtn", "Load plan draft"))
+											.OnClicked_Lambda([this]() { return OnContextLoadClicked(2); })
+									]
+								]
+								+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 6.f))
+								[
+								SNew(STextBlock)
+									.Text(LOCTEXT("ContextLocalFilesLbl", "Local thread files (for selected thread)"))
+									.Font(FUnrealAiEditorStyle::FontBodySmall())
+									.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+								]
+								+ SVerticalBox::Slot().AutoHeight()
+								[
+									SAssignNew(ContextLocalFilesVBox, SVerticalBox)
+								]
+								+ SVerticalBox::Slot().FillHeight(1.f).Padding(FMargin(0.f, 8.f, 0.f, 0.f))
+								[
+									SAssignNew(ContextInspectorPanel, SUnrealAiLocalJsonInspectorPanel)
+								]
+							]
+						]
+					]
+					+ SWidgetSwitcher::Slot()
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+						[
+							SNew(STextBlock)
+								.AutoWrapText(true)
+								.Text(LOCTEXT(
+									"ProjectIndexHelp",
+									"Display threads_index.json and drill into a selected thread’s persisted context artifacts. Open chat tabs are highlighted."))
+								.Font(FUnrealAiEditorStyle::FontBodySmall())
+								.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+						]
+						+ SVerticalBox::Slot().FillHeight(1.f)
+						[
+							SNew(SSplitter)
+							.Orientation(Orient_Horizontal)
+							+ SSplitter::Slot()
+							.Value(0.35f)
+							[
+								SNew(SVerticalBox)
+								+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 6.f))
+								[
+									SNew(STextBlock)
+										.Font(FUnrealAiEditorStyle::FontSectionHeading())
+										.Text(LOCTEXT("ProjIndexThreadsLbl", "Threads in index"))
+								]
+								+ SVerticalBox::Slot().FillHeight(1.f)
+								[
+									SNew(SScrollBox)
+									+ SScrollBox::Slot()
+									[
+										SAssignNew(ProjectIndexThreadListVBox, SVerticalBox)
+									]
+								]
+							]
+							+ SSplitter::Slot()
+							.Value(0.65f)
+							[
+								SNew(SVerticalBox)
+								+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+								[
+									SNew(STextBlock)
+										.Font(FUnrealAiEditorStyle::FontSectionHeading())
+										.Text(LOCTEXT("ProjIndexInspectorLbl", "threads_index.json + selected thread artifacts"))
+								]
+								+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
+								[
+									SNew(SHorizontalBox)
+									+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+									[
+										SNew(SButton)
+											.Text(LOCTEXT("LoadIndexBtn", "Load threads_index.json"))
+											.OnClicked_Lambda([this]()
+											{
+												LoadThreadsIndexJson();
+												return FReply::Handled();
+											})
+									]
+									+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+									[
+										SNew(SButton)
+											.Text(LOCTEXT("ProjLoadCtxBtn", "Load context.json"))
+											.OnClicked_Lambda([this]() { return OnProjectIndexLoadClicked(0); })
+									]
+									+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+									[
+										SNew(SButton)
+											.Text(LOCTEXT("ProjLoadConvBtn", "Load conversation.json"))
+											.OnClicked_Lambda([this]() { return OnProjectIndexLoadClicked(1); })
+									]
+									+ SHorizontalBox::Slot().AutoWidth()
+									[
+										SNew(SButton)
+											.Text(LOCTEXT("ProjLoadPlanBtn", "Load plan draft"))
+											.OnClicked_Lambda([this]() { return OnProjectIndexLoadClicked(2); })
+									]
+								]
+								+ SVerticalBox::Slot().FillHeight(1.f).Padding(FMargin(0.f, 0.f, 0.f, 0.f))
+								[
+									SAssignNew(ProjectIndexInspectorPanel, SUnrealAiLocalJsonInspectorPanel)
+								]
+							]
+						]
+					]
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 16.f, 0.f, 0.f))
 					[
@@ -1398,7 +1743,8 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 								})
 						]
 					]
-				]];
+				]
+			];
 
 	LoadSettingsIntoUi();
 	RefreshUsageHeaderText();
@@ -1425,6 +1771,7 @@ void SUnrealAiEditorSettingsTab::TickSlowUiRefresh()
 		if (Now - LastVectorDbOverviewPollSeconds >= 3.0)
 		{
 			LastVectorDbOverviewPollSeconds = Now;
+			RefreshVectorDbTopGraphUi();
 			RefreshVectorDbOverviewUi();
 		}
 	}
@@ -1448,14 +1795,539 @@ FReply SUnrealAiEditorSettingsTab::OnSettingsSegmentClicked(const int32 Index)
 	else if (Index == 3)
 	{
 		LastVectorDbOverviewPollSeconds = 0.0;
+		RefreshVectorDbTopGraphUi();
 		RefreshVectorDbOverviewUi();
 	}
+	else if (Index == 4)
+	{
+		RebuildContextThreadListUi();
+		RebuildContextLocalFilesUi();
+		if (!SelectedContextThreadIdDigitsWithHyphens.IsEmpty())
+		{
+			LoadSelectedContextJson();
+		}
+	}
+	else if (Index == 5)
+	{
+		RebuildProjectIndexThreadListUi();
+		if (!SelectedProjectIndexThreadIdDigitsWithHyphens.IsEmpty())
+		{
+			LoadThreadsIndexJson();
+		}
+	}
 	return FReply::Handled();
+}
+
+FReply SUnrealAiEditorSettingsTab::OnContextLoadClicked(const int32 Which)
+{
+	if (Which == 0)
+	{
+		LoadSelectedContextJson();
+	}
+	else if (Which == 1)
+	{
+		LoadSelectedConversationJson();
+	}
+	else if (Which == 2)
+	{
+		LoadSelectedPlanDraftJson();
+	}
+	return FReply::Handled();
+}
+
+void SUnrealAiEditorSettingsTab::SelectContextThread(const FString& ThreadIdDigitsWithHyphens)
+{
+	SelectedContextThreadIdDigitsWithHyphens = ThreadIdDigitsWithHyphens;
+	RebuildContextLocalFilesUi();
+	LoadSelectedContextJson();
+}
+
+void SUnrealAiEditorSettingsTab::RebuildContextThreadListUi()
+{
+	if (!ContextThreadListVBox.IsValid())
+	{
+		return;
+	}
+	ContextThreadListVBox->ClearChildren();
+
+	if (!BackendRegistry.IsValid())
+	{
+		ContextThreadListVBox->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock)
+				.Font(FUnrealAiEditorStyle::FontBodySmall())
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+				.Text(LOCTEXT("CtxBackendMissing", "Backend not ready."))
+		];
+		return;
+	}
+
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	if (!Persist)
+	{
+		ContextThreadListVBox->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock)
+				.Font(FUnrealAiEditorStyle::FontBodySmall())
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+				.Text(LOCTEXT("CtxPersistMissing", "Persistence not available."))
+		];
+		return;
+	}
+
+	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+	TArray<FString> ThreadIds;
+	TArray<FString> DisplayNames;
+	Persist->ListPersistedThreadsForHistory(ProjectId, ThreadIds, DisplayNames);
+	if (ThreadIds.Num() == 0)
+	{
+		ContextThreadListVBox->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock)
+				.Font(FUnrealAiEditorStyle::FontBodySmall())
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+				.Text(LOCTEXT("CtxThreadsEmpty", "No saved chats indexed yet for this project."))
+		];
+		return;
+	}
+
+	TArray<FGuid> Open;
+	FUnrealAiEditorModule::GetOpenAgentChatThreadIds(Open);
+	TSet<FString> OpenThreadIds;
+	for (const FGuid& G : Open)
+	{
+		if (!G.IsValid())
+		{
+			continue;
+		}
+		const FString Tid = G.ToString(EGuidFormats::DigitsWithHyphens);
+		OpenThreadIds.Add(Tid);
+	}
+
+	for (int32 i = 0; i < ThreadIds.Num(); ++i)
+	{
+		const FString& ThreadId = ThreadIds[i];
+		const FString Label = DisplayNames.IsValidIndex(i) ? DisplayNames[i] : ThreadId;
+		const bool bIsOpen = OpenThreadIds.Contains(ThreadId);
+
+		ContextThreadListVBox->AddSlot().AutoHeight().Padding(FMargin(0.f, 2.f))
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(0.f, 0.f, 8.f, 0.f)
+			[
+				SNew(STextBlock)
+					.Font(FUnrealAiEditorStyle::FontBodySmall())
+					.AutoWrapText(true)
+					.Text(FText::FromString(bIsOpen ? (Label + TEXT("  [OPEN]")) : Label))
+					.ColorAndOpacity(bIsOpen ? FUnrealAiEditorStyle::ColorAccent() : FUnrealAiEditorStyle::ColorTextPrimary())
+			]
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				SNew(SButton)
+					.Text(LOCTEXT("CtxInspectBtn", "Inspect"))
+					.OnClicked_Lambda([this, ThreadId]()
+					{
+						SelectContextThread(ThreadId);
+						return FReply::Handled();
+					})
+			]
+		];
+	}
+
+	if (SelectedContextThreadIdDigitsWithHyphens.IsEmpty())
+	{
+		SelectedContextThreadIdDigitsWithHyphens = ThreadIds[0];
+	}
+}
+
+void SUnrealAiEditorSettingsTab::RebuildContextLocalFilesUi()
+{
+	if (!ContextLocalFilesVBox.IsValid())
+	{
+		return;
+	}
+	ContextLocalFilesVBox->ClearChildren();
+
+	if (!BackendRegistry.IsValid())
+	{
+		return;
+	}
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	if (!Persist)
+	{
+		return;
+	}
+	if (SelectedContextThreadIdDigitsWithHyphens.IsEmpty())
+	{
+		ContextLocalFilesVBox->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock)
+				.Font(FUnrealAiEditorStyle::FontBodySmall())
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+				.Text(LOCTEXT("CtxPickThreadFirst", "Pick a thread to view local files."))
+		];
+		return;
+	}
+
+	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+	const FString ThreadsRoot = FPaths::Combine(Persist->GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("threads"));
+	const FString Slug = Persist->GetThreadStorageSlug(ProjectId, SelectedContextThreadIdDigitsWithHyphens);
+
+	if (Slug.IsEmpty())
+	{
+		ContextLocalFilesVBox->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock)
+				.Font(FUnrealAiEditorStyle::FontBodySmall())
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+				.Text(LOCTEXT("CtxNoSlug", "Could not resolve thread storage slug on disk."))
+		];
+		return;
+	}
+
+	auto AddInspectRow = [this](const FString& Kind, const FString& Path, const bool bExists)
+	{
+		ContextLocalFilesVBox->AddSlot().AutoHeight().Padding(FMargin(0.f, 2.f))
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+			[
+				SNew(STextBlock)
+					.AutoWrapText(true)
+					.Font(FUnrealAiEditorStyle::FontBodySmall())
+					.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextPrimary())
+					.Text(bExists ? FText::FromString(Kind + TEXT(": ") + Path) : FText::FromString(Kind + TEXT(": (missing)")))
+			]
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				SNew(SButton)
+					.Text(LOCTEXT("CtxInspectFile", "Inspect file"))
+					.Visibility(bExists ? EVisibility::Visible : EVisibility::Collapsed)
+					.OnClicked_Lambda([this, Path]()
+					{
+						if (ContextInspectorPanel.IsValid())
+						{
+							ContextInspectorPanel->InspectFilePath(Path);
+						}
+						return FReply::Handled();
+					})
+			]
+		];
+	};
+
+	// Flat (current) filenames.
+	const FString FlatCtx = FPaths::Combine(ThreadsRoot, Slug + TEXT("-context.json"));
+	const FString FlatConv = FPaths::Combine(ThreadsRoot, Slug + TEXT("-conversation.json"));
+	const FString FlatPlan = FPaths::Combine(ThreadsRoot, Slug + TEXT("-plan-draft.json"));
+
+	// Legacy filenames are inside a subdirectory named by the slug.
+	const FString LegacyDir = FPaths::Combine(ThreadsRoot, Slug);
+	const FString LegacyCtx = FPaths::Combine(LegacyDir, TEXT("context.json"));
+	const FString LegacyConv = FPaths::Combine(LegacyDir, TEXT("conversation.json"));
+	const FString LegacyPlan = FPaths::Combine(LegacyDir, TEXT("plan-draft.json"));
+
+	const bool bCtxExists = FPaths::FileExists(FlatCtx) || FPaths::FileExists(LegacyCtx);
+	const bool bConvExists = FPaths::FileExists(FlatConv) || FPaths::FileExists(LegacyConv);
+	const bool bPlanExists = FPaths::FileExists(FlatPlan) || FPaths::FileExists(LegacyPlan);
+
+	// Prefer flat if both exist (should be rare but keep deterministic).
+	AddInspectRow(
+		TEXT("context.json"),
+		FPaths::FileExists(FlatCtx) ? FlatCtx : LegacyCtx,
+		bCtxExists);
+	AddInspectRow(
+		TEXT("conversation.json"),
+		FPaths::FileExists(FlatConv) ? FlatConv : LegacyConv,
+		bConvExists);
+	AddInspectRow(
+		TEXT("plan-draft"),
+		FPaths::FileExists(FlatPlan) ? FlatPlan : LegacyPlan,
+		bPlanExists);
+}
+
+void SUnrealAiEditorSettingsTab::LoadSelectedContextJson()
+{
+	if (!ContextInspectorPanel.IsValid() || !BackendRegistry.IsValid())
+	{
+		return;
+	}
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	if (!Persist || SelectedContextThreadIdDigitsWithHyphens.IsEmpty())
+	{
+		ContextInspectorPanel->SetInspectorText(TEXT("(no thread selected)"));
+		return;
+	}
+	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+	FString Json;
+	if (!Persist->LoadThreadContextJson(ProjectId, SelectedContextThreadIdDigitsWithHyphens, Json))
+	{
+		ContextInspectorPanel->SetInspectorText(LOCTEXT("CtxMissing", "No context.json on disk for this thread yet.").ToString());
+		return;
+	}
+	ContextInspectorPanel->SetInspectorText(Json);
+}
+
+void SUnrealAiEditorSettingsTab::LoadSelectedConversationJson()
+{
+	if (!ContextInspectorPanel.IsValid() || !BackendRegistry.IsValid())
+	{
+		return;
+	}
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	if (!Persist || SelectedContextThreadIdDigitsWithHyphens.IsEmpty())
+	{
+		ContextInspectorPanel->SetInspectorText(TEXT("(no thread selected)"));
+		return;
+	}
+	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+	FString Json;
+	if (!Persist->LoadThreadConversationJson(ProjectId, SelectedContextThreadIdDigitsWithHyphens, Json))
+	{
+		ContextInspectorPanel->SetInspectorText(LOCTEXT("ConvMissing", "No conversation.json on disk for this thread yet.").ToString());
+		return;
+	}
+	ContextInspectorPanel->SetInspectorText(Json);
+}
+
+void SUnrealAiEditorSettingsTab::LoadSelectedPlanDraftJson()
+{
+	if (!ContextInspectorPanel.IsValid() || !BackendRegistry.IsValid())
+	{
+		return;
+	}
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	if (!Persist || SelectedContextThreadIdDigitsWithHyphens.IsEmpty())
+	{
+		ContextInspectorPanel->SetInspectorText(TEXT("(no thread selected)"));
+		return;
+	}
+	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+	FString Json;
+	if (!Persist->LoadThreadPlanDraftJson(ProjectId, SelectedContextThreadIdDigitsWithHyphens, Json))
+	{
+		ContextInspectorPanel->SetInspectorText(LOCTEXT("PlanMissing", "No plan draft JSON on disk for this thread yet.").ToString());
+		return;
+	}
+	ContextInspectorPanel->SetInspectorText(Json);
+}
+
+FReply SUnrealAiEditorSettingsTab::OnProjectIndexLoadClicked(const int32 Which)
+{
+	if (Which == 0)
+	{
+		LoadSelectedProjectIndexContextJson();
+	}
+	else if (Which == 1)
+	{
+		LoadSelectedProjectIndexConversationJson();
+	}
+	else if (Which == 2)
+	{
+		LoadSelectedProjectIndexPlanDraftJson();
+	}
+	return FReply::Handled();
+}
+
+void SUnrealAiEditorSettingsTab::SelectProjectIndexThread(const FString& ThreadIdDigitsWithHyphens)
+{
+	SelectedProjectIndexThreadIdDigitsWithHyphens = ThreadIdDigitsWithHyphens;
+	LoadSelectedProjectIndexContextJson();
+}
+
+void SUnrealAiEditorSettingsTab::RebuildProjectIndexThreadListUi()
+{
+	if (!ProjectIndexThreadListVBox.IsValid())
+	{
+		return;
+	}
+	ProjectIndexThreadListVBox->ClearChildren();
+
+	if (!BackendRegistry.IsValid())
+	{
+		ProjectIndexThreadListVBox->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock)
+				.Font(FUnrealAiEditorStyle::FontBodySmall())
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+				.Text(LOCTEXT("ProjIdxBackendMissing", "Backend not ready."))
+		];
+		return;
+	}
+
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	if (!Persist)
+	{
+		ProjectIndexThreadListVBox->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock)
+				.Font(FUnrealAiEditorStyle::FontBodySmall())
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+				.Text(LOCTEXT("ProjIdxPersistMissing", "Persistence not available."))
+		];
+		return;
+	}
+
+	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+	TArray<FString> ThreadIds;
+	TArray<FString> DisplayNames;
+	Persist->ListPersistedThreadsForHistory(ProjectId, ThreadIds, DisplayNames);
+	if (ThreadIds.Num() == 0)
+	{
+		ProjectIndexThreadListVBox->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock)
+				.Font(FUnrealAiEditorStyle::FontBodySmall())
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+				.Text(LOCTEXT("ProjIdxEmpty", "No saved chats indexed yet for this project."))
+		];
+		return;
+	}
+
+	TArray<FGuid> Open;
+	FUnrealAiEditorModule::GetOpenAgentChatThreadIds(Open);
+	TSet<FString> OpenThreadIds;
+	for (const FGuid& G : Open)
+	{
+		if (!G.IsValid())
+		{
+			continue;
+		}
+		OpenThreadIds.Add(G.ToString(EGuidFormats::DigitsWithHyphens));
+	}
+
+	for (int32 i = 0; i < ThreadIds.Num(); ++i)
+	{
+		const FString& ThreadId = ThreadIds[i];
+		const FString Label = DisplayNames.IsValidIndex(i) ? DisplayNames[i] : ThreadId;
+		const bool bIsOpen = OpenThreadIds.Contains(ThreadId);
+
+		ProjectIndexThreadListVBox->AddSlot().AutoHeight().Padding(0.f, 2.f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(0.f, 0.f, 8.f, 0.f)
+			[
+				SNew(STextBlock)
+					.AutoWrapText(true)
+					.Font(FUnrealAiEditorStyle::FontBodySmall())
+					.Text(FText::FromString(bIsOpen ? (Label + TEXT("  [OPEN]")) : Label))
+					.ColorAndOpacity(bIsOpen ? FUnrealAiEditorStyle::ColorAccent() : FUnrealAiEditorStyle::ColorTextPrimary())
+			]
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				SNew(SButton)
+					.Text(LOCTEXT("ProjIdxInspectBtn", "Select"))
+					.OnClicked_Lambda([this, ThreadId]()
+					{
+						SelectProjectIndexThread(ThreadId);
+						return FReply::Handled();
+					})
+			]
+		];
+	}
+
+	if (SelectedProjectIndexThreadIdDigitsWithHyphens.IsEmpty())
+	{
+		SelectedProjectIndexThreadIdDigitsWithHyphens = ThreadIds[0];
+	}
+}
+
+void SUnrealAiEditorSettingsTab::LoadThreadsIndexJson()
+{
+	if (!ProjectIndexInspectorPanel.IsValid() || !BackendRegistry.IsValid())
+	{
+		return;
+	}
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	if (!Persist)
+	{
+		ProjectIndexInspectorPanel->SetInspectorText(TEXT("(persistence not available)"));
+		return;
+	}
+
+	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+	const FString IndexPath = FPaths::Combine(Persist->GetDataRootDirectory(), TEXT("chats"), ProjectId, TEXT("threads_index.json"));
+	FString Json;
+	if (!FFileHelper::LoadFileToString(Json, *IndexPath))
+	{
+		ProjectIndexInspectorPanel->SetInspectorText(FString::Printf(TEXT("Could not read threads_index.json at %s"), *IndexPath));
+		return;
+	}
+	ProjectIndexInspectorPanel->SetInspectorText(Json);
+}
+
+void SUnrealAiEditorSettingsTab::LoadSelectedProjectIndexContextJson()
+{
+	if (!ProjectIndexInspectorPanel.IsValid() || !BackendRegistry.IsValid())
+	{
+		return;
+	}
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	if (!Persist || SelectedProjectIndexThreadIdDigitsWithHyphens.IsEmpty())
+	{
+		ProjectIndexInspectorPanel->SetInspectorText(TEXT("(no thread selected)"));
+		return;
+	}
+
+	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+	FString Json;
+	if (!Persist->LoadThreadContextJson(ProjectId, SelectedProjectIndexThreadIdDigitsWithHyphens, Json))
+	{
+		ProjectIndexInspectorPanel->SetInspectorText(LOCTEXT("ProjIdxCtxMissing", "No context.json on disk for this thread yet.").ToString());
+		return;
+	}
+	ProjectIndexInspectorPanel->SetInspectorText(Json);
+}
+
+void SUnrealAiEditorSettingsTab::LoadSelectedProjectIndexConversationJson()
+{
+	if (!ProjectIndexInspectorPanel.IsValid() || !BackendRegistry.IsValid())
+	{
+		return;
+	}
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	if (!Persist || SelectedProjectIndexThreadIdDigitsWithHyphens.IsEmpty())
+	{
+		ProjectIndexInspectorPanel->SetInspectorText(TEXT("(no thread selected)"));
+		return;
+	}
+
+	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+	FString Json;
+	if (!Persist->LoadThreadConversationJson(ProjectId, SelectedProjectIndexThreadIdDigitsWithHyphens, Json))
+	{
+		ProjectIndexInspectorPanel->SetInspectorText(LOCTEXT("ProjIdxConvMissing", "No conversation.json on disk for this thread yet.").ToString());
+		return;
+	}
+	ProjectIndexInspectorPanel->SetInspectorText(Json);
+}
+
+void SUnrealAiEditorSettingsTab::LoadSelectedProjectIndexPlanDraftJson()
+{
+	if (!ProjectIndexInspectorPanel.IsValid() || !BackendRegistry.IsValid())
+	{
+		return;
+	}
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	if (!Persist || SelectedProjectIndexThreadIdDigitsWithHyphens.IsEmpty())
+	{
+		ProjectIndexInspectorPanel->SetInspectorText(TEXT("(no thread selected)"));
+		return;
+	}
+
+	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+	FString Json;
+	if (!Persist->LoadThreadPlanDraftJson(ProjectId, SelectedProjectIndexThreadIdDigitsWithHyphens, Json))
+	{
+		ProjectIndexInspectorPanel->SetInspectorText(LOCTEXT("ProjIdxPlanMissing", "No plan-draft JSON on disk for this thread yet.").ToString());
+		return;
+	}
+	ProjectIndexInspectorPanel->SetInspectorText(Json);
 }
 
 FReply SUnrealAiEditorSettingsTab::OnVectorDbOverviewRefreshClicked()
 {
 	RefreshVectorDbOverviewUi();
+	RefreshVectorDbTopGraphUi();
 	return FReply::Handled();
 }
 
@@ -1480,6 +2352,170 @@ void SUnrealAiEditorSettingsTab::RefreshVectorDbOverviewUi()
 	VectorDbOverviewBlock->SetText(FText::FromString(UnrealAiVectorDbOverviewUi::FormatOverviewText(Overview)));
 }
 
+void SUnrealAiEditorSettingsTab::RefreshVectorDbTopGraphUi()
+{
+	VectorDbTopSources.Reset();
+	if (!BackendRegistry.IsValid() || !BackendRegistry->GetRetrievalService())
+	{
+		if (VectorDbTopSourcesVBox.IsValid())
+		{
+			VectorDbTopSourcesVBox->ClearChildren();
+			VectorDbTopSourcesVBox->AddSlot().AutoHeight()
+			[
+				SNew(STextBlock)
+					.Font(FUnrealAiEditorStyle::FontBodySmall())
+					.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+					.Text(LOCTEXT("VectorDbTopGraphNoService", "Retrieval service is not available."))
+			];
+		}
+		return;
+	}
+
+	FString Err;
+	const int32 TopN = 16;
+	const int32 SamplePerSource = 3;
+	if (!BackendRegistry->GetRetrievalService()->GetVectorDbTopGraphData(
+			UnrealAiProjectId::GetCurrentProjectId(),
+			TopN,
+			SamplePerSource,
+			VectorDbTopSources,
+			Err))
+	{
+		if (VectorDbTopSourcesVBox.IsValid())
+		{
+			VectorDbTopSourcesVBox->ClearChildren();
+			VectorDbTopSourcesVBox->AddSlot().AutoHeight()
+			[
+				SNew(STextBlock)
+					.Font(FUnrealAiEditorStyle::FontBodySmall())
+					.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+					.Text(FText::FromString(FString::Printf(TEXT("Could not load vector top graph: %s"), *Err)))
+			];
+		}
+		return;
+	}
+
+	RebuildVectorDbTopGraphNodesUi(VectorDbLastGraphSearch);
+}
+
+void SUnrealAiEditorSettingsTab::RebuildVectorDbTopGraphNodesUi(const FString& SearchText)
+{
+	VectorDbLastGraphSearch = SearchText;
+	if (!VectorDbTopSourcesVBox.IsValid())
+	{
+		return;
+	}
+	VectorDbTopSourcesVBox->ClearChildren();
+
+	const FString Needle = SearchText.ToLower();
+
+	TArray<const FUnrealAiVectorDbTopSourceRow*> Filtered;
+	for (const FUnrealAiVectorDbTopSourceRow& Row : VectorDbTopSources)
+	{
+		if (Needle.IsEmpty())
+		{
+			Filtered.Add(&Row);
+			continue;
+		}
+		const FString SourceLower = Row.SourcePath.ToLower();
+		const bool bMatchPath = SourceLower.Contains(Needle);
+		const bool bMatchThread = !Row.ThreadIdHint.IsEmpty() && Row.ThreadIdHint.ToLower().Contains(Needle);
+		if (bMatchPath || bMatchThread)
+		{
+			Filtered.Add(&Row);
+		}
+	}
+
+	bool bSelectedFound = false;
+	for (const FUnrealAiVectorDbTopSourceRow* RowPtr : Filtered)
+	{
+		if (RowPtr->SourcePath.Equals(VectorDbSelectedSourcePath, ESearchCase::CaseSensitive))
+		{
+			bSelectedFound = true;
+			break;
+		}
+	}
+	if (!bSelectedFound)
+	{
+		VectorDbSelectedSourcePath = Filtered.Num() > 0 ? Filtered[0]->SourcePath : FString();
+	}
+
+	for (const FUnrealAiVectorDbTopSourceRow* RowPtr : Filtered)
+	{
+		const FUnrealAiVectorDbTopSourceRow& Row = *RowPtr;
+		const bool bSelected = Row.SourcePath.Equals(VectorDbSelectedSourcePath, ESearchCase::CaseSensitive);
+		const FString Short = Row.SourcePath.Len() > 70 ? (Row.SourcePath.Left(67) + TEXT("…")) : Row.SourcePath;
+		const FString ThreadSuffix = Row.ThreadIdHint.IsEmpty() ? TEXT("") : FString::Printf(TEXT("  [thread:%s]"), *Row.ThreadIdHint);
+
+		VectorDbTopSourcesVBox->AddSlot().AutoHeight().Padding(0.f, 2.f)
+		[
+			SNew(SButton)
+				.Text(FText::FromString(Short + TEXT("  (") + FString::FromInt(Row.ChunkCount) + TEXT(")") + ThreadSuffix))
+				.OnClicked_Lambda([this, SourcePath = Row.SourcePath]()
+					{
+						VectorDbSelectedSourcePath = SourcePath;
+						UpdateVectorDbSourceInspectorPanel();
+						return FReply::Handled();
+					})
+				.ButtonColorAndOpacity(bSelected ? FUnrealAiEditorStyle::ColorAccent() : FUnrealAiEditorStyle::ColorTextPrimary())
+		];
+	}
+
+	UpdateVectorDbSourceInspectorPanel();
+}
+
+void SUnrealAiEditorSettingsTab::UpdateVectorDbSourceInspectorPanel()
+{
+	if (!VectorDbSourceInspectorPanel.IsValid())
+	{
+		return;
+	}
+
+	if (VectorDbSelectedSourcePath.IsEmpty() || VectorDbTopSources.Num() == 0)
+	{
+		VectorDbSourceInspectorPanel->SetInspectorText(TEXT("(no source selected)"));
+		return;
+	}
+
+	const FUnrealAiVectorDbTopSourceRow* Selected = nullptr;
+	for (const FUnrealAiVectorDbTopSourceRow& Row : VectorDbTopSources)
+	{
+		if (Row.SourcePath.Equals(VectorDbSelectedSourcePath, ESearchCase::CaseSensitive))
+		{
+			Selected = &Row;
+			break;
+		}
+	}
+	if (!Selected)
+	{
+		VectorDbSourceInspectorPanel->SetInspectorText(TEXT("(selected source not found)"));
+		return;
+	}
+
+	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetStringField(TEXT("source_path"), Selected->SourcePath);
+	Root->SetNumberField(TEXT("chunk_count"), Selected->ChunkCount);
+	if (!Selected->ThreadIdHint.IsEmpty())
+	{
+		Root->SetStringField(TEXT("thread_id_hint"), Selected->ThreadIdHint);
+	}
+	TArray<TSharedPtr<FJsonValue>> Samples;
+	for (const FUnrealAiVectorDbTopChunkRow& C : Selected->ChunkSamples)
+	{
+		TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+		Obj->SetStringField(TEXT("chunk_id"), C.ChunkId);
+		Obj->SetStringField(TEXT("chunk_text"), C.ChunkText);
+		Samples.Add(MakeShared<FJsonValueObject>(Obj));
+	}
+	Root->SetArrayField(TEXT("chunk_samples"), Samples);
+
+	FString Out;
+	const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> W =
+		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Out);
+	FJsonSerializer::Serialize(Root.ToSharedRef(), W);
+	VectorDbSourceInspectorPanel->SetInspectorText(Out);
+}
+
 FReply SUnrealAiEditorSettingsTab::OnChatHistoryRefreshClicked()
 {
 	RebuildChatHistoryListUi();
@@ -1498,6 +2534,8 @@ void SUnrealAiEditorSettingsTab::RebuildChatHistoryListUi()
 		ChatHistoryListVBox->AddSlot().AutoHeight()
 		[
 			SNew(STextBlock)
+				.Font(FUnrealAiEditorStyle::FontBodySmall())
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 				.Text(LOCTEXT("ChatHistoryNoBackend", "Backend not ready."))
 		];
 		return;
@@ -1508,6 +2546,8 @@ void SUnrealAiEditorSettingsTab::RebuildChatHistoryListUi()
 		ChatHistoryListVBox->AddSlot().AutoHeight()
 		[
 			SNew(STextBlock)
+				.Font(FUnrealAiEditorStyle::FontBodySmall())
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 				.Text(LOCTEXT("ChatHistoryNoPersist", "Persistence not available."))
 		];
 		return;
@@ -1520,37 +2560,129 @@ void SUnrealAiEditorSettingsTab::RebuildChatHistoryListUi()
 		ChatHistoryListVBox->AddSlot().AutoHeight()
 		[
 			SNew(STextBlock)
+				.Font(FUnrealAiEditorStyle::FontBodySmall())
 				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 				.Text(LOCTEXT("ChatHistoryEmpty", "No saved chats indexed yet for this project."))
 		];
 		return;
 	}
+
+	TArray<FGuid> Open;
+	FUnrealAiEditorModule::GetOpenAgentChatThreadIds(Open);
+	TSet<FString> OpenThreadIds;
+	for (const FGuid& G : Open)
+	{
+		if (!G.IsValid())
+		{
+			continue;
+		}
+		OpenThreadIds.Add(G.ToString(EGuidFormats::DigitsWithHyphens));
+	}
 	for (int32 i = 0; i < ThreadIds.Num(); ++i)
 	{
 		const FString& ThreadId = ThreadIds[i];
 		const FString Label = DisplayNames.IsValidIndex(i) ? DisplayNames[i] : ThreadId;
-		ChatHistoryListVBox->AddSlot().AutoHeight().Padding(0.f, 2.f)
+		const bool bIsOpen = OpenThreadIds.Contains(ThreadId);
+		ChatHistoryListVBox->AddSlot().AutoHeight().Padding(FMargin(0.f, 2.f))
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(0.f, 0.f, 8.f, 0.f)
 			[
 				SNew(STextBlock)
+					.Font(FUnrealAiEditorStyle::FontBodySmall())
 					.AutoWrapText(true)
-					.Text(FText::FromString(Label))
+					.Text(FText::FromString(bIsOpen ? (Label + TEXT("  [OPEN]")) : Label))
 					.ToolTipText(FText::FromString(ThreadId))
+					.ColorAndOpacity(bIsOpen ? FUnrealAiEditorStyle::ColorAccent() : FUnrealAiEditorStyle::ColorTextPrimary())
 			]
 			+ SHorizontalBox::Slot().AutoWidth()
 			[
 				SNew(SButton)
-					.Text(LOCTEXT("ChatHistoryOpen", "Open"))
-					.OnClicked_Lambda([ThreadId]()
+					.Text(LOCTEXT("ChatHistoryInspect", "Inspect"))
+					.OnClicked_Lambda([this, ThreadId]()
 					{
+						SelectChatHistoryThread(ThreadId);
+						return FReply::Handled();
+					})
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(8.f, 0.f, 0.f, 0.f))
+			[
+				SNew(SButton)
+					.Text(LOCTEXT("ChatHistoryOpen", "Open"))
+					.OnClicked_Lambda([this, ThreadId]()
+					{
+						SelectChatHistoryThread(ThreadId);
 						FUnrealAiEditorModule::OpenAgentChatTabWithPersistedThread(ThreadId);
 						return FReply::Handled();
 					})
 			]
 		];
 	}
+
+	if (SelectedChatHistoryThreadIdDigitsWithHyphens.IsEmpty() && ThreadIds.Num() > 0)
+	{
+		SelectedChatHistoryThreadIdDigitsWithHyphens = ThreadIds[0];
+	}
+	if (ChatHistoryInspectorPanel.IsValid() && !SelectedChatHistoryThreadIdDigitsWithHyphens.IsEmpty())
+	{
+		LoadSelectedChatHistoryContextJson();
+	}
+}
+
+void SUnrealAiEditorSettingsTab::SelectChatHistoryThread(const FString& ThreadIdDigitsWithHyphens)
+{
+	SelectedChatHistoryThreadIdDigitsWithHyphens = ThreadIdDigitsWithHyphens;
+	LoadSelectedChatHistoryContextJson();
+}
+
+void SUnrealAiEditorSettingsTab::LoadSelectedChatHistoryContextJson()
+{
+	if (!ChatHistoryInspectorPanel.IsValid() || !BackendRegistry.IsValid())
+	{
+		return;
+	}
+
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	if (!Persist || SelectedChatHistoryThreadIdDigitsWithHyphens.IsEmpty())
+	{
+		ChatHistoryInspectorPanel->SetInspectorText(TEXT("(no thread selected)"));
+		return;
+	}
+
+	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+	FString Json;
+	if (!Persist->LoadThreadContextJson(ProjectId, SelectedChatHistoryThreadIdDigitsWithHyphens, Json))
+	{
+		ChatHistoryInspectorPanel->SetInspectorText(
+			LOCTEXT("ChatHistoryCtxMissing", "No context.json on disk for this thread yet.").ToString());
+		return;
+	}
+	ChatHistoryInspectorPanel->SetInspectorText(Json);
+}
+
+void SUnrealAiEditorSettingsTab::LoadSelectedChatHistoryConversationJson()
+{
+	if (!ChatHistoryInspectorPanel.IsValid() || !BackendRegistry.IsValid())
+	{
+		return;
+	}
+
+	IUnrealAiPersistence* Persist = BackendRegistry->GetPersistence();
+	if (!Persist || SelectedChatHistoryThreadIdDigitsWithHyphens.IsEmpty())
+	{
+		ChatHistoryInspectorPanel->SetInspectorText(TEXT("(no thread selected)"));
+		return;
+	}
+
+	const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+	FString Json;
+	if (!Persist->LoadThreadConversationJson(ProjectId, SelectedChatHistoryThreadIdDigitsWithHyphens, Json))
+	{
+		ChatHistoryInspectorPanel->SetInspectorText(
+			LOCTEXT("ChatHistoryConvMissing", "No conversation.json on disk for this thread yet.").ToString());
+		return;
+	}
+	ChatHistoryInspectorPanel->SetInspectorText(Json);
 }
 
 bool SUnrealAiEditorSettingsTab::LoadMemorySettingsFromRoot(const TSharedPtr<FJsonObject>& Root)
@@ -1874,7 +3006,7 @@ void SUnrealAiEditorSettingsTab::RebuildMemoryListUi()
 		}
 		const FString Id = Row.Id;
 		const FString Label = FString::Printf(TEXT("%s  [%.2f]"), *Row.Title, Row.Confidence);
-		MemoryListVBox->AddSlot().AutoHeight().Padding(0.f, 2.f)
+		MemoryListVBox->AddSlot().AutoHeight().Padding(FMargin(0.f, 2.f))
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
@@ -2185,6 +3317,8 @@ void SUnrealAiEditorSettingsTab::LoadSettingsIntoUi()
 	CachedSettingsRoot = UnrealAiSettingsTabUtil::CloneJsonObject(Root);
 	FUnrealAiEditorModule::HydrateEditorFocusFromJsonRoot(Root);
 	FUnrealAiEditorModule::HydrateSubagentsFromJsonRoot(Root);
+	FUnrealAiEditorModule::HydrateAgentCodeTypePreferenceFromJsonRoot(Root);
+	FUnrealAiEditorModule::HydrateAutoConfirmDestructiveFromJsonRoot(Root);
 	LoadMemorySettingsFromRoot(Root);
 	LoadRetrievalSettingsFromRoot(Root);
 
@@ -2206,6 +3340,24 @@ void SUnrealAiEditorSettingsTab::LoadSettingsIntoUi()
 		if (Match.IsValid())
 		{
 			RetrievalRootPresetCombo->SetSelectedItem(Match);
+		}
+	}
+
+	if (CodeTypePreferenceCombo.IsValid())
+	{
+		const FString Pref = FUnrealAiEditorModule::GetAgentCodeTypePreference();
+		TSharedPtr<FString> PrefMatch;
+		for (const TSharedPtr<FString>& Opt : CodeTypePreferenceOptions)
+		{
+			if (Opt.IsValid() && *Opt == Pref)
+			{
+				PrefMatch = Opt;
+				break;
+			}
+		}
+		if (PrefMatch.IsValid())
+		{
+			CodeTypePreferenceCombo->SetSelectedItem(PrefMatch);
 		}
 	}
 
@@ -2923,6 +4075,8 @@ bool SUnrealAiEditorSettingsTab::BuildJsonFromUi(FString& OutJson, FString& OutE
 			}
 		}
 		AgentObj->SetBoolField(TEXT("useSubagents"), FUnrealAiEditorModule::IsSubagentsEnabled());
+		AgentObj->SetStringField(TEXT("codeTypePreference"), FUnrealAiEditorModule::GetAgentCodeTypePreference());
+		AgentObj->SetBoolField(TEXT("autoConfirmDestructive"), FUnrealAiEditorModule::IsAutoConfirmDestructiveEnabled());
 		Root->SetObjectField(TEXT("agent"), AgentObj);
 	}
 

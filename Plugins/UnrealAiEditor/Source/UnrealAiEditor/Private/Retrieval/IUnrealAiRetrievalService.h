@@ -18,5 +18,11 @@ public:
 		const FString& ProjectId,
 		FUnrealAiRetrievalVectorDbOverview& OutOverview,
 		FString& OutError) const = 0;
+	virtual bool GetVectorDbTopGraphData(
+		const FString& ProjectId,
+		int32 TopN,
+		int32 SamplePerSource,
+		TArray<FUnrealAiVectorDbTopSourceRow>& OutSources,
+		FString& OutError) const = 0;
 	virtual void RequestRebuild(const FString& ProjectId) = 0;
 };

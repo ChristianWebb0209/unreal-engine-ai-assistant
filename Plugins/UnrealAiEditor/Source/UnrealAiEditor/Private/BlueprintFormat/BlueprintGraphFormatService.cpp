@@ -3,12 +3,44 @@
 
 #include "BlueprintFormat/BlueprintGraphFormatService.h"
 
+#include "BlueprintFormat/BlueprintGraphCommentReflow.h"
+#include "BlueprintFormat/BlueprintGraphKnotService.h"
+#include "BlueprintFormat/BlueprintGraphStrandLayout.h"
+
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraphNode_Comment.h"
 
 namespace UnrealBlueprintFormatServicePriv
 {
+	static bool TakesPartInScriptLayout(const UEdGraphNode* N)
+	{
+		return N && !Cast<UEdGraphNode_Comment>(N);
+	}
+
+	static void RunPostLayoutPasses(
+		UEdGraph* Graph,
+		const FUnrealBlueprintGraphFormatOptions& Options,
+		FUnrealBlueprintGraphFormatResult& R)
+	{
+		if (!Graph)
+		{
+			return;
+		}
+		if (Options.WireKnotAggression != EUnrealBlueprintWireKnotAggression::Off)
+		{
+			const int32 K = UnrealBlueprintKnotService::InsertDataWireKnots(Graph, Options.WireKnotAggression);
+			if (K > 0)
+			{
+				R.Warnings.Add(FString::Printf(TEXT("inserted_data_knots:%d"), K));
+			}
+		}
+		if (Options.bReflowCommentsByGeometry)
+		{
+			UnrealBlueprintCommentReflow::RefitAllCommentsToGeometricMembers(Graph);
+		}
+	}
+
 	struct FNodeRect
 	{
 		int32 MinX = 0;
@@ -338,12 +370,31 @@ namespace UnrealBlueprintFormatServicePriv
 			++OutResult.NodesPositioned;
 		}
 	}
+
+	static void RunScriptStripLayout(
+		UEdGraph* Graph,
+		TArray<UEdGraphNode*>& ScriptNodes,
+		const FUnrealBlueprintGraphFormatOptions& Options,
+		FUnrealBlueprintGraphFormatResult& R)
+	{
+		if (Options.LayoutStrategy == EUnrealBlueprintGraphLayoutStrategy::MultiStrand)
+		{
+			int32 N = 0;
+			UnrealBlueprintStrandLayout::LayoutNodesMultiStrand(Graph, ScriptNodes, N);
+			R.NodesPositioned += N;
+		}
+		else
+		{
+			LayoutNodesHorizontal(ScriptNodes, R);
+		}
+	}
 }
 
 FUnrealBlueprintGraphFormatResult FUnrealBlueprintGraphFormatService::LayoutAfterAiIrApply(
 	UEdGraph* Graph,
 	const TArray<UEdGraphNode*>& MaterializedNodes,
-	const TArray<FUnrealBlueprintIrNodeLayoutHint>& Hints)
+	const TArray<FUnrealBlueprintIrNodeLayoutHint>& Hints,
+	const FUnrealBlueprintGraphFormatOptions& Options)
 {
 	FUnrealBlueprintGraphFormatResult R;
 	if (!Graph || MaterializedNodes.Num() == 0)
@@ -378,61 +429,86 @@ FUnrealBlueprintGraphFormatResult FUnrealBlueprintGraphFormatService::LayoutAfte
 			++R.NodesPositioned;
 		}
 		UnrealBlueprintFormatServicePriv::EnforceCommentContainmentAfterMove(Graph, MaterializedNodes, BeforePositions);
+		UnrealBlueprintFormatServicePriv::RunPostLayoutPasses(Graph, Options, R);
 		return R;
 	}
 
-	TArray<UEdGraphNode*> Copy = MaterializedNodes;
-	UnrealBlueprintFormatServicePriv::LayoutNodesHorizontal(Copy, R);
+	TArray<UEdGraphNode*> Copy;
+	Copy.Reserve(MaterializedNodes.Num());
+	for (UEdGraphNode* N : MaterializedNodes)
+	{
+		if (UnrealBlueprintFormatServicePriv::TakesPartInScriptLayout(N))
+		{
+			Copy.Add(N);
+		}
+	}
+	UnrealBlueprintFormatServicePriv::RunScriptStripLayout(Graph, Copy, Options, R);
 	UnrealBlueprintFormatServicePriv::EnforceCommentContainmentAfterMove(Graph, MaterializedNodes, BeforePositions);
+	UnrealBlueprintFormatServicePriv::RunPostLayoutPasses(Graph, Options, R);
 	return R;
 }
 
-void FUnrealBlueprintGraphFormatService::LayoutEntireGraph(UEdGraph* Graph)
+FUnrealBlueprintGraphFormatResult FUnrealBlueprintGraphFormatService::LayoutEntireGraph(
+	UEdGraph* Graph,
+	const FUnrealBlueprintGraphFormatOptions& Options)
 {
+	FUnrealBlueprintGraphFormatResult R;
 	if (!Graph)
 	{
-		return;
+		return R;
 	}
-	TArray<UEdGraphNode*> Nodes;
+	TArray<UEdGraphNode*> ScriptNodes;
 	for (UEdGraphNode* N : Graph->Nodes)
 	{
-		if (N)
+		if (UnrealBlueprintFormatServicePriv::TakesPartInScriptLayout(N))
 		{
-			Nodes.Add(N);
+			ScriptNodes.Add(N);
 		}
 	}
+	if (ScriptNodes.Num() == 0)
+	{
+		UnrealBlueprintFormatServicePriv::RunPostLayoutPasses(Graph, Options, R);
+		return R;
+	}
 	const TMap<const UEdGraphNode*, FIntPoint> BeforePositions =
-		UnrealBlueprintFormatServicePriv::SnapshotNodePositions(Nodes);
-	FUnrealBlueprintGraphFormatResult Tmp;
-	UnrealBlueprintFormatServicePriv::LayoutNodesHorizontal(Nodes, Tmp);
-	UnrealBlueprintFormatServicePriv::EnforceCommentContainmentAfterMove(Graph, Nodes, BeforePositions);
+		UnrealBlueprintFormatServicePriv::SnapshotNodePositions(ScriptNodes);
+	UnrealBlueprintFormatServicePriv::RunScriptStripLayout(Graph, ScriptNodes, Options, R);
+	UnrealBlueprintFormatServicePriv::EnforceCommentContainmentAfterMove(Graph, ScriptNodes, BeforePositions);
+	UnrealBlueprintFormatServicePriv::RunPostLayoutPasses(Graph, Options, R);
+	return R;
 }
 
-void FUnrealBlueprintGraphFormatService::LayoutSelectedNodes(UEdGraph* Graph, const TArray<UEdGraphNode*>& SelectedNodes)
+FUnrealBlueprintGraphFormatResult FUnrealBlueprintGraphFormatService::LayoutSelectedNodes(
+	UEdGraph* Graph,
+	const TArray<UEdGraphNode*>& SelectedNodes,
+	const FUnrealBlueprintGraphFormatOptions& Options)
 {
+	FUnrealBlueprintGraphFormatResult R;
 	if (!Graph || SelectedNodes.Num() == 0)
 	{
-		return;
+		return R;
 	}
 
-	TArray<UEdGraphNode*> Nodes;
-	Nodes.Reserve(SelectedNodes.Num());
+	TArray<UEdGraphNode*> ScriptNodes;
+	ScriptNodes.Reserve(SelectedNodes.Num());
 	for (UEdGraphNode* Node : SelectedNodes)
 	{
-		if (Node)
+		if (UnrealBlueprintFormatServicePriv::TakesPartInScriptLayout(Node))
 		{
-			Nodes.Add(Node);
+			ScriptNodes.Add(Node);
 		}
 	}
 
-	if (Nodes.Num() == 0)
+	if (ScriptNodes.Num() == 0)
 	{
-		return;
+		UnrealBlueprintFormatServicePriv::RunPostLayoutPasses(Graph, Options, R);
+		return R;
 	}
 
 	const TMap<const UEdGraphNode*, FIntPoint> BeforePositions =
-		UnrealBlueprintFormatServicePriv::SnapshotNodePositions(Nodes);
-	FUnrealBlueprintGraphFormatResult Tmp;
-	UnrealBlueprintFormatServicePriv::LayoutNodesHorizontal(Nodes, Tmp);
-	UnrealBlueprintFormatServicePriv::EnforceCommentContainmentAfterMove(Graph, Nodes, BeforePositions);
+		UnrealBlueprintFormatServicePriv::SnapshotNodePositions(ScriptNodes);
+	UnrealBlueprintFormatServicePriv::RunScriptStripLayout(Graph, ScriptNodes, Options, R);
+	UnrealBlueprintFormatServicePriv::EnforceCommentContainmentAfterMove(Graph, ScriptNodes, BeforePositions);
+	UnrealBlueprintFormatServicePriv::RunPostLayoutPasses(Graph, Options, R);
+	return R;
 }

@@ -11,10 +11,15 @@
 - [ ] Add optional per-node verification hooks (e.g., required tool seen before success).
 - [ ] Upgrade guarded wave prep into true concurrent child execution with merge ordering and stricter conflict policy.
 
-## Blueprint Organizer (In separate plugin)
+## Blueprint Organizer
 
-- Verify everything is working
-- - Verify - that there are two buttons added at the top of the blueprint editor event graph: organize all, and (only if user has selected something), organize selected. Both buttons need to have icons and tooltip hints.
+- We are in the process of unifying the plugins so everything just lives here
+- Having the user-facing buttons to format automatically is not a top priority, since that isn't the main goal of this plugin
+- We must focus on the planning/blueprint-formatter-expansions.md, which documents a ton of ways we will expand the agent's abilities to write super well formed and well documented blueprints
+- [x] Blueprint formatter expansions: data-wire knots, multi-strand lane layout, `graph_comment` IR + comment-box reflow, and selection formatting (`blueprint_format_selection` + `UnrealAi.BlueprintFormatSelection` console command).
+- [ ] Verify Blueprint editor toolbar/menu integration for selection formatting reliability across UE 5.7 minors.
+- [x] Vector DB UI: add vector top-graph search + drill-down inspector panel in `SUnrealAiEditorSettingsTab`.
+- - A key feature is getting the agent to recognize when functionality can be abstracted into custom events 
 
 # Future Features
 

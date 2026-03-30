@@ -38,6 +38,20 @@ public:
 	static FSimpleMulticastDelegate& OnSubagentsPolicyChanged();
 
 	/**
+	 * Agent code preference: auto | blueprint_first | cpp_first | blueprint_only | cpp_only.
+	 * Persisted under plugin_settings.json agent.codeTypePreference.
+	 */
+	static FString GetAgentCodeTypePreference();
+	static void SetAgentCodeTypePreference(const FString& Preference);
+	static void HydrateAgentCodeTypePreferenceFromJsonRoot(const TSharedPtr<FJsonObject>& Root);
+	static FSimpleMulticastDelegate& OnAgentCodeTypePreferenceChanged();
+	/** Default destructive-tool auto-confirm (avoids LLM retry on missing confirm). agent.autoConfirmDestructive in plugin_settings.json */
+	static bool IsAutoConfirmDestructiveEnabled();
+	static void SetAutoConfirmDestructiveEnabled(bool bEnabled);
+	static void HydrateAutoConfirmDestructiveFromJsonRoot(const TSharedPtr<FJsonObject>& Root);
+	static FSimpleMulticastDelegate& OnAutoConfirmDestructivePolicyChanged();
+
+	/**
 	 * Opens a new Agent Chat dock tab immediately to the right of the tab that contains FromWidget (same tab stack).
 	 * @return The new chat widget, or null on failure.
 	 */
@@ -101,4 +115,6 @@ private:
 
 	bool bEditorFocusEnabled = false;
 	bool bSubagentsEnabled = true;
+	FString AgentCodeTypePreference = TEXT("auto");
+	bool bAutoConfirmDestructive = true;
 };

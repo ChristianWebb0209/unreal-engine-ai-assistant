@@ -1,7 +1,10 @@
 #include "Tools/UnrealAiToolDispatch_BlueprintTools.h"
 
 #include "Tools/UnrealAiToolDispatch_ArgRepair.h"
+#include "BlueprintFormat/BlueprintGraphCommentReflow.h"
+#include "BlueprintFormat/BlueprintGraphFormatOptions.h"
 #include "BlueprintFormat/UnrealAiBlueprintFormatterBridge.h"
+#include "BlueprintFormat/UnrealAiBlueprintGraphSelectionLayout.h"
 #include "Tools/UnrealAiBlueprintIrHallucinationNormalizer.h"
 #include "Tools/UnrealAiToolDispatch_MoreAssets.h"
 #include "Tools/UnrealAiToolJson.h"
@@ -26,7 +29,9 @@
 #include "EdGraphSchema_K2.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "K2Node_CustomEvent.h"
+#include "EdGraphNode_Comment.h"
 #include "Logging/TokenizedMessage.h"
+#include "UnrealAiEditorSettings.h"
 #include "Editor.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "ScopedTransaction.h"
@@ -62,6 +67,9 @@ namespace UnrealAiBlueprintToolsPriv
 		FString Name;
 		int32 X = 0;
 		int32 Y = 0;
+		int32 Width = 0;
+		int32 Height = 0;
+		TArray<FString> MemberNodeIds;
 		FString ClassPath;
 		FString FunctionName;
 		FString Variable;
@@ -96,6 +104,10 @@ namespace UnrealAiBlueprintToolsPriv
 		FString MergePolicy;
 		/** ir_nodes | full_graph — ir_nodes layouts only IR-touched nodes; full_graph runs LayoutEntireGraph on the target graph. */
 		FString LayoutScope;
+		/** single_row | multi_strand — empty uses project default (Unreal AI settings). */
+		FString LayoutMode;
+		/** off | light | aggressive — empty uses project default. */
+		FString WireKnots;
 	};
 
 	struct FEventMergePlan
@@ -1074,6 +1086,65 @@ namespace UnrealAiBlueprintToolsPriv
 		return R;
 	}
 
+	FUnrealBlueprintGraphFormatOptions MakeBlueprintFormatOptions(
+		const FString& LayoutModeIn,
+		const FString& WireKnotsIn,
+		const UUnrealAiEditorSettings* Settings)
+	{
+		FUnrealBlueprintGraphFormatOptions O;
+		FString LM = LayoutModeIn;
+		LM.TrimStartAndEndInline();
+		if (LM.IsEmpty())
+		{
+			if (Settings && Settings->BlueprintDefaultLayoutStrategy == EUnrealAiBlueprintDefaultLayoutStrategy::MultiStrand)
+			{
+				O.LayoutStrategy = EUnrealBlueprintGraphLayoutStrategy::MultiStrand;
+			}
+		}
+		else if (LM.Equals(TEXT("multi_strand"), ESearchCase::IgnoreCase))
+		{
+			O.LayoutStrategy = EUnrealBlueprintGraphLayoutStrategy::MultiStrand;
+		}
+		else
+		{
+			O.LayoutStrategy = EUnrealBlueprintGraphLayoutStrategy::SingleRow;
+		}
+
+		FString WK = WireKnotsIn;
+		WK.TrimStartAndEndInline();
+		if (WK.IsEmpty())
+		{
+			if (Settings)
+			{
+				switch (Settings->BlueprintDefaultWireKnotMode)
+				{
+				case EUnrealAiBlueprintDefaultWireKnotMode::Light:
+					O.WireKnotAggression = EUnrealBlueprintWireKnotAggression::Light;
+					break;
+				case EUnrealAiBlueprintDefaultWireKnotMode::Aggressive:
+					O.WireKnotAggression = EUnrealBlueprintWireKnotAggression::Aggressive;
+					break;
+				default:
+					O.WireKnotAggression = EUnrealBlueprintWireKnotAggression::Off;
+					break;
+				}
+			}
+		}
+		else if (WK.Equals(TEXT("light"), ESearchCase::IgnoreCase))
+		{
+			O.WireKnotAggression = EUnrealBlueprintWireKnotAggression::Light;
+		}
+		else if (WK.Equals(TEXT("aggressive"), ESearchCase::IgnoreCase))
+		{
+			O.WireKnotAggression = EUnrealBlueprintWireKnotAggression::Aggressive;
+		}
+		else
+		{
+			O.WireKnotAggression = EUnrealBlueprintWireKnotAggression::Off;
+		}
+		return O;
+	}
+
 	static bool TryParseIr(const TSharedPtr<FJsonObject>& Args, FBlueprintIr& OutIr, TArray<FIrError>& OutErrors)
 	{
 		if (!Args.IsValid())
@@ -1153,6 +1224,20 @@ namespace UnrealAiBlueprintToolsPriv
 				(*O)->TryGetStringField(TEXT("variable"), D.Variable);
 				(*O)->TryGetNumberField(TEXT("x"), D.X);
 				(*O)->TryGetNumberField(TEXT("y"), D.Y);
+				(*O)->TryGetNumberField(TEXT("width"), D.Width);
+				(*O)->TryGetNumberField(TEXT("height"), D.Height);
+				const TArray<TSharedPtr<FJsonValue>>* MemberArr = nullptr;
+				if ((*O)->TryGetArrayField(TEXT("member_node_ids"), MemberArr) && MemberArr)
+				{
+					for (const TSharedPtr<FJsonValue>& Mv : *MemberArr)
+					{
+						FString Mid;
+						if (Mv.IsValid() && Mv->TryGetString(Mid) && !Mid.IsEmpty())
+						{
+							D.MemberNodeIds.Add(Mid);
+						}
+					}
+				}
 				if (D.NodeId.IsEmpty() || D.Op.IsEmpty())
 				{
 					AddError(
@@ -1270,6 +1355,35 @@ namespace UnrealAiBlueprintToolsPriv
 				TEXT("ir_nodes: layout only nodes from this IR; full_graph: run formatter on the whole graph"));
 		}
 
+		Args->TryGetStringField(TEXT("layout_mode"), OutIr.LayoutMode);
+		OutIr.LayoutMode.TrimStartAndEndInline();
+		if (!OutIr.LayoutMode.IsEmpty()
+			&& !OutIr.LayoutMode.Equals(TEXT("single_row"), ESearchCase::IgnoreCase)
+			&& !OutIr.LayoutMode.Equals(TEXT("multi_strand"), ESearchCase::IgnoreCase))
+		{
+			AddError(
+				OutErrors,
+				TEXT("invalid_value"),
+				TEXT("$.layout_mode"),
+				TEXT("layout_mode must be single_row or multi_strand"),
+				TEXT("Omit layout_mode to use the Unreal AI project default"));
+		}
+
+		Args->TryGetStringField(TEXT("wire_knots"), OutIr.WireKnots);
+		OutIr.WireKnots.TrimStartAndEndInline();
+		if (!OutIr.WireKnots.IsEmpty()
+			&& !OutIr.WireKnots.Equals(TEXT("off"), ESearchCase::IgnoreCase)
+			&& !OutIr.WireKnots.Equals(TEXT("light"), ESearchCase::IgnoreCase)
+			&& !OutIr.WireKnots.Equals(TEXT("aggressive"), ESearchCase::IgnoreCase))
+		{
+			AddError(
+				OutErrors,
+				TEXT("invalid_value"),
+				TEXT("$.wire_knots"),
+				TEXT("wire_knots must be off, light, or aggressive"),
+				TEXT("Omit wire_knots to use the Unreal AI project default"));
+		}
+
 		return OutErrors.Num() == 0;
 	}
 
@@ -1322,11 +1436,67 @@ namespace UnrealAiBlueprintToolsPriv
 		return N ? LexToString(N->NodeGuid) : FString();
 	}
 
-	static void ExportNodeFields(UEdGraphNode* N, TSharedPtr<FJsonObject>& OutObj, FString& OutOp)
+	static void ExportNodeFields(
+		UEdGraph* Graph,
+		const TMap<UEdGraphNode*, FString>& IdByNode,
+		UEdGraphNode* N,
+		TSharedPtr<FJsonObject>& OutObj,
+		FString& OutOp)
 	{
 		OutObj = MakeShared<FJsonObject>();
+		if (!N)
+		{
+			OutOp = TEXT("unknown");
+			return;
+		}
 		OutObj->SetNumberField(TEXT("x"), static_cast<double>(N->NodePosX));
 		OutObj->SetNumberField(TEXT("y"), static_cast<double>(N->NodePosY));
+
+		if (UEdGraphNode_Comment* Cc = Cast<UEdGraphNode_Comment>(N))
+		{
+			OutOp = TEXT("graph_comment");
+			OutObj->SetStringField(TEXT("op"), OutOp);
+			OutObj->SetStringField(TEXT("name"), Cc->NodeComment.IsEmpty() ? FString() : Cc->NodeComment);
+			OutObj->SetNumberField(TEXT("width"), static_cast<double>(FMath::Max(1, Cc->NodeWidth)));
+			OutObj->SetNumberField(TEXT("height"), static_cast<double>(FMath::Max(1, Cc->NodeHeight)));
+			const int32 Cw = FMath::Max(64, Cc->NodeWidth > 0 ? Cc->NodeWidth : 240);
+			const int32 Ch = FMath::Max(32, Cc->NodeHeight > 0 ? Cc->NodeHeight : 120);
+			const int32 MinX = Cc->NodePosX;
+			const int32 MinY = Cc->NodePosY;
+			const int32 MaxX = Cc->NodePosX + Cw;
+			const int32 MaxY = Cc->NodePosY + Ch;
+			TArray<FString> Mids;
+			if (Graph)
+			{
+				for (const TPair<UEdGraphNode*, FString>& Pair : IdByNode)
+				{
+					UEdGraphNode* Other = Pair.Key;
+					if (!Other || Other == N || Cast<UEdGraphNode_Comment>(Other))
+					{
+						continue;
+					}
+					const int32 Ow = FMath::Max(64, Other->NodeWidth > 0 ? Other->NodeWidth : 240);
+					const int32 Oh = FMath::Max(32, Other->NodeHeight > 0 ? Other->NodeHeight : 120);
+					const int32 CX = Other->NodePosX + Ow / 2;
+					const int32 CY = Other->NodePosY + Oh / 2;
+					if (CX >= MinX && CX <= MaxX && CY >= MinY && CY <= MaxY)
+					{
+						Mids.Add(Pair.Value);
+					}
+				}
+			}
+			Mids.Sort();
+			TArray<TSharedPtr<FJsonValue>> MArr;
+			for (const FString& Id : Mids)
+			{
+				MArr.Add(MakeShareable(new FJsonValueString(Id)));
+			}
+			if (MArr.Num() > 0)
+			{
+				OutObj->SetArrayField(TEXT("member_node_ids"), MArr);
+			}
+			return;
+		}
 
 		if (UK2Node_Event* Ev = Cast<UK2Node_Event>(N))
 		{
@@ -1885,6 +2055,20 @@ namespace UnrealAiBlueprintToolsPriv
 			N->AllocateDefaultPins();
 			Created = N;
 		}
+		else if (Op == TEXT("graph_comment"))
+		{
+			UEdGraphNode_Comment* C = NewObject<UEdGraphNode_Comment>(Graph);
+			Graph->AddNode(C, true, false);
+			C->NodePosX = D.X;
+			C->NodePosY = D.Y;
+			C->CreateNewGuid();
+			const FString Title = D.Name.IsEmpty() ? FString(TEXT("Comment")) : D.Name;
+			C->NodeComment = Title;
+			C->NodeWidth = D.Width > 0 ? D.Width : 400;
+			C->NodeHeight = D.Height > 0 ? D.Height : 200;
+			C->PostPlacedNewNode();
+			Created = C;
+		}
 		else
 		{
 			AddError(
@@ -1892,7 +2076,7 @@ namespace UnrealAiBlueprintToolsPriv
 				TEXT("unsupported_op"),
 				FString::Printf(TEXT("$.nodes[%s].op"), *D.NodeId),
 				FString::Printf(TEXT("Unsupported op '%s'"), *D.Op),
-				TEXT("Supported ops: event_begin_play, event_tick, custom_event, branch, sequence, call_function, delay, get_variable, set_variable, dynamic_cast. For gameplay actions, use call_function with class_path + function_name."));
+				TEXT("Supported ops: event_begin_play, event_tick, event_actor_begin_overlap, custom_event, branch, sequence, call_function, delay, get_variable, set_variable, dynamic_cast, graph_comment. For gameplay actions, use call_function with class_path + function_name."));
 			return nullptr;
 		}
 
@@ -2048,7 +2232,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportIr(const TSharedPt
 		IdByNode.Add(N, Nid);
 		FString Op;
 		TSharedPtr<FJsonObject> No;
-		ExportNodeFields(N, No, Op);
+		ExportNodeFields(Graph, IdByNode, N, No, Op);
 		No->SetStringField(TEXT("node_id"), Nid);
 		NodeArr.Add(MakeShareable(new FJsonValueObject(No.ToSharedRef())));
 	}
@@ -2491,12 +2675,49 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 	}
 	UnrealAiBlueprintFormatterBridge::EnsureFormatterModuleLoaded(nullptr);
 	const bool bFullGraphLayout = Ir.LayoutScope.Equals(TEXT("full_graph"), ESearchCase::IgnoreCase);
+	const UUnrealAiEditorSettings* AiSettings = GetDefault<UUnrealAiEditorSettings>();
+	const FUnrealBlueprintGraphFormatOptions FormatOpts =
+		MakeBlueprintFormatOptions(Ir.LayoutMode, Ir.WireKnots, AiSettings);
 	FUnrealBlueprintGraphFormatResult FormatResult;
 	if (Ir.bAutoLayout)
 	{
 		FormatResult = bFullGraphLayout
-			? UnrealAiBlueprintFormatterBridge::TryLayoutEntireGraph(Graph, true)
-			: UnrealAiBlueprintFormatterBridge::TryLayoutAfterAiIrApply(Graph, MaterializedNodes, LayoutHints, true);
+			? UnrealAiBlueprintFormatterBridge::TryLayoutEntireGraph(Graph, true, FormatOpts)
+			: UnrealAiBlueprintFormatterBridge::TryLayoutAfterAiIrApply(
+				  Graph,
+				  MaterializedNodes,
+				  LayoutHints,
+				  true,
+				  FormatOpts);
+	}
+	for (const FIrNodeDecl& CD : Ir.Nodes)
+	{
+		if (!CD.Op.Equals(TEXT("graph_comment"), ESearchCase::IgnoreCase) || CD.MemberNodeIds.Num() == 0)
+		{
+			continue;
+		}
+		UEdGraphNode* const* CPtr = NodeById.Find(CD.NodeId);
+		if (!CPtr || !*CPtr)
+		{
+			continue;
+		}
+		UEdGraphNode_Comment* CC = Cast<UEdGraphNode_Comment>(*CPtr);
+		if (!CC)
+		{
+			continue;
+		}
+		TArray<UEdGraphNode*> Mem;
+		for (const FString& Mid : CD.MemberNodeIds)
+		{
+			if (UEdGraphNode* MN = NodeById.FindRef(Mid))
+			{
+				Mem.Add(MN);
+			}
+		}
+		if (Mem.Num() > 0)
+		{
+			UnrealBlueprintCommentReflow::FitCommentAroundNodes(CC, Mem, 80);
+		}
 	}
 	const bool bFormatterAvailable = UnrealAiBlueprintFormatterBridge::IsFormatterModuleReady();
 	const bool bLayoutApplied = FormatResult.NodesPositioned > 0;
@@ -2589,19 +2810,20 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Ir.BlueprintPath, Ir.GraphName, ToolMarkdown));
 }
 
-FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintFormatGraph(const TSharedPtr<FJsonObject>& Args)
+static FUnrealAiToolInvocationResult DispatchBlueprintFormatLayout(
+	const TSharedPtr<FJsonObject>& Args,
+	bool bForceSelectionScope)
 {
-	using namespace UnrealAiBlueprintToolsPriv;
 	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
 	FString Path;
-	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
+	if (!Args.IsValid() || !Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
 	{
 		return UnrealAiToolJson::Error(TEXT("blueprint_path is required"));
 	}
 	FString GraphName;
 	Args->TryGetStringField(TEXT("graph_name"), GraphName);
-	NormalizeBlueprintObjectPath(Path);
-	UBlueprint* BP = LoadBlueprint(Path);
+	UnrealAiBlueprintToolsPriv::NormalizeBlueprintObjectPath(Path);
+	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path);
 	if (!BP)
 	{
 		return UnrealAiToolJson::Error(UnrealAiBlueprintLoadHint(Path));
@@ -2609,7 +2831,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintFormatGraph(const TShare
 	UEdGraph* Graph = nullptr;
 	if (!GraphName.IsEmpty())
 	{
-		Graph = FindGraphByName(BP, GraphName);
+		Graph = UnrealAiBlueprintToolsPriv::FindGraphByName(BP, GraphName);
 	}
 	else
 	{
@@ -2620,13 +2842,55 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintFormatGraph(const TShare
 		return UnrealAiToolJson::Error(TEXT("Graph not found"));
 	}
 
+	FString FormatScope;
+	if (bForceSelectionScope)
+	{
+		FormatScope = TEXT("selection");
+	}
+	else
+	{
+		Args->TryGetStringField(TEXT("format_scope"), FormatScope);
+		FormatScope.TrimStartAndEndInline();
+		if (FormatScope.IsEmpty())
+		{
+			FormatScope = TEXT("full_graph");
+		}
+	}
+	if (!FormatScope.Equals(TEXT("full_graph"), ESearchCase::IgnoreCase)
+		&& !FormatScope.Equals(TEXT("selection"), ESearchCase::IgnoreCase))
+	{
+		return UnrealAiToolJson::Error(TEXT("format_scope must be full_graph or selection"));
+	}
+
+	FString LayoutModeStr;
+	FString WireKnotsStr;
+	Args->TryGetStringField(TEXT("layout_mode"), LayoutModeStr);
+	Args->TryGetStringField(TEXT("wire_knots"), WireKnotsStr);
+	const UUnrealAiEditorSettings* AiSettings = GetDefault<UUnrealAiEditorSettings>();
+	const FUnrealBlueprintGraphFormatOptions FmtOpts =
+		UnrealAiBlueprintToolsPriv::MakeBlueprintFormatOptions(LayoutModeStr, WireKnotsStr, AiSettings);
+
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnBpFormatGraph", "Unreal AI: format Blueprint graph"));
 	BP->Modify();
 	Graph->Modify();
 
 	UnrealAiBlueprintFormatterBridge::EnsureFormatterModuleLoaded(nullptr);
 	const bool bFmt = UnrealAiBlueprintFormatterBridge::IsFormatterModuleReady();
-	const FUnrealBlueprintGraphFormatResult FormatResult = UnrealAiBlueprintFormatterBridge::TryLayoutEntireGraph(Graph, true);
+	FUnrealBlueprintGraphFormatResult FormatResult;
+	if (FormatScope.Equals(TEXT("selection"), ESearchCase::IgnoreCase))
+	{
+		TArray<UEdGraphNode*> Sel;
+		FString SelErr;
+		if (!UnrealAiTryGetBlueprintGraphSelectedNodes(BP, Graph, Sel, &SelErr))
+		{
+			return UnrealAiToolJson::Error(SelErr);
+		}
+		FormatResult = UnrealAiBlueprintFormatterBridge::TryLayoutSelectedNodes(Graph, Sel, true, FmtOpts);
+	}
+	else
+	{
+		FormatResult = UnrealAiBlueprintFormatterBridge::TryLayoutEntireGraph(Graph, true, FmtOpts);
+	}
 
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
 
@@ -2634,6 +2898,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintFormatGraph(const TShare
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("blueprint_path"), Path);
 	O->SetStringField(TEXT("graph_name"), Graph->GetName());
+	O->SetStringField(TEXT("format_scope"), FormatScope);
 	O->SetBoolField(TEXT("formatter_available"), bFmt);
 	O->SetBoolField(TEXT("layout_applied"), FormatResult.NodesPositioned > 0);
 	O->SetNumberField(TEXT("layout_nodes_positioned"), static_cast<double>(FormatResult.NodesPositioned));
@@ -2654,6 +2919,16 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintFormatGraph(const TShare
 	return UnrealAiToolJson::OkWithEditorPresentation(
 		O,
 		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Path, Graph->GetName(), ToolMarkdown));
+}
+
+FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintFormatGraph(const TSharedPtr<FJsonObject>& Args)
+{
+	return DispatchBlueprintFormatLayout(Args, false);
+}
+
+FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintFormatSelection(const TSharedPtr<FJsonObject>& Args)
+{
+	return DispatchBlueprintFormatLayout(Args, true);
 }
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGetGraphSummary(const TSharedPtr<FJsonObject>& Args)

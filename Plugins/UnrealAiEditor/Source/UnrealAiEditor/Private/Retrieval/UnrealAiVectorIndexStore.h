@@ -45,6 +45,11 @@ public:
 	bool GetIndexCounts(int32& OutFiles, int32& OutChunks, FString& OutError);
 	bool CheckIntegrity(FString& OutError);
 	bool GetTopSourcesByChunkCount(int32 Limit, TArray<TPair<FString, int32>>& OutRows, FString& OutError);
+	bool GetTopSourcesByChunkCountWithSamples(
+		int32 Limit,
+		int32 SamplePerSource,
+		TArray<FUnrealAiVectorDbTopSourceRow>& OutRows,
+		FString& OutError);
 
 	bool LoadManifest(FUnrealAiVectorManifest& OutManifest) const;
 	bool SaveManifest(const FUnrealAiVectorManifest& Manifest) const;

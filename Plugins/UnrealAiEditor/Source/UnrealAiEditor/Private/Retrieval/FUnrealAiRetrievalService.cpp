@@ -405,6 +405,44 @@ bool FUnrealAiRetrievalService::GetVectorDbOverview(
 	return true;
 }
 
+bool FUnrealAiRetrievalService::GetVectorDbTopGraphData(
+	const FString& ProjectId,
+	const int32 TopN,
+	const int32 SamplePerSource,
+	TArray<FUnrealAiVectorDbTopSourceRow>& OutSources,
+	FString& OutError) const
+{
+	OutSources.Reset();
+	OutError.Reset();
+
+	if (ProjectId.IsEmpty())
+	{
+		OutError = TEXT("No project id.");
+		return false;
+	}
+
+	const int32 UseTopN = FMath::Clamp(TopN, 0, 64);
+	const int32 UseSamplePerSource = FMath::Clamp(SamplePerSource, 0, 20);
+	if (UseTopN <= 0 || UseSamplePerSource <= 0)
+	{
+		return true;
+	}
+
+	FString StoreErr;
+	FUnrealAiVectorIndexStore* Store = GetOrCreateStore(ProjectId, StoreErr);
+	if (!Store)
+	{
+		OutError = StoreErr;
+		return false;
+	}
+
+	return Store->GetTopSourcesByChunkCountWithSamples(
+		UseTopN,
+		UseSamplePerSource,
+		OutSources,
+		OutError);
+}
+
 void FUnrealAiRetrievalService::RequestRebuild(const FString& ProjectId)
 {
 	if (ProjectId.IsEmpty())

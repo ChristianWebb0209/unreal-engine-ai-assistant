@@ -140,11 +140,15 @@ Layout is **vendored inside Unreal AI Editor** (`Private/BlueprintFormat/`). No 
 - **`merge_policy`:** `create_new` always spawns new event nodes from IR. **`append_to_existing`** (default on **ubergraph** `EventGraph`) reuses the first matching **`ReceiveBeginPlay`** / **`ReceiveTick`** already in the graph, maps your IR `node_id` to that node, and wires new exec from the **exec tail** (follow `Then` / latent completion pins such as **`Completed`** on **`Delay`**). It warns when multiple matching events exist or when IR repeats the same builtin event op twice. On **function/macro** graphs the default is **`create_new`**.
 - Use **`event_tick`** and **`event_begin_play`** in IR so the merger can anchor correctly; do not invent duplicate top-level events for the same builtin when using **`append_to_existing`**.
 
-### Layout: `auto_layout`, `layout_scope`, `blueprint_format_graph`, `format_graphs`
+### Layout: `auto_layout`, `layout_scope`, `layout_mode`, `wire_knots`, `graph_comment`, `blueprint_format_graph`, `blueprint_format_selection`, `format_graphs`
 
 - **`auto_layout`** (default **`true`**): after wiring, runs layout when **every IR node has `x,y` at 0** (non-zero positions are left as author intent). **`formatter_available`** is normally true in editor builds.
 - **`layout_scope`** (when **`auto_layout`** is on): **`ir_nodes`** (default) lays out only IR-touched nodes; **`full_graph`** calls **`LayoutEntireGraph`** on the whole target graph—use when the graph is messy outside your IR patch.
-- **`blueprint_format_graph`:** readability-only pass: **`LayoutEntireGraph`** on a chosen script graph (`blueprint_path`, optional `graph_name`). Use after manual edits or when you did not want **`layout_scope: full_graph`** on apply.
+- **`layout_mode`** (optional on apply and format tools): **`single_row`** vs **`multi_strand`** exec layout. Omit to use Unreal AI Editor project default.
+- **`wire_knots`** (optional): **`off`**, **`light`**, or **`aggressive`** for data-wire reroute knots. Omit to use project default.
+- **`graph_comment`** IR nodes: use **`op":"graph_comment"`** with optional **`name`**, **`width`** / **`height`**, and **`member_node_ids`** (other nodes’ **`node_id`** strings) to refit the comment box around those nodes after layout.
+- **`blueprint_format_graph`**: in-process layout on a script graph: **`blueprint_path`**, optional **`graph_name`**, **`format_scope`** **`full_graph`** (default) or **`selection`**, plus optional **`layout_mode`**, **`wire_knots`**, and **`focused`**.
+- **`blueprint_format_selection`**: same pipeline as `blueprint_format_graph` but always targets the editor’s current graph **selection** (Blueprint graph tab must be open with nodes selected); still pass `blueprint_path` (and optional `graph_name`) so the tool can resolve the asset.
 - **`blueprint_compile`** accepts **`format_graphs: true`**: runs the formatter on **all** non-empty ubergraph, function, and macro graphs **before** compile—good after large multi-graph changes so you do not call **`blueprint_format_graph`** once per graph.
 
 ### Result fields to respect
@@ -155,7 +159,7 @@ Layout is **vendored inside Unreal AI Editor** (`Private/BlueprintFormat/`). No 
 ### IR shape
 
 - Node references must be stable **`node_id`**; links must be **string pin refs** in **`node_id.pin`** form (example: `{ "from":"beginplay.Then", "to":"delay.execute" }`).
-- Ops: `event_begin_play`, **`event_tick`**, `custom_event`, `branch`, `sequence`, `call_function`, `delay`, `get_variable`, `set_variable`, `dynamic_cast`.
+- Ops: `event_begin_play`, **`event_tick`**, **`event_actor_begin_overlap`**, `custom_event`, `branch`, `sequence`, `call_function`, `delay`, `get_variable`, `set_variable`, `dynamic_cast`, **`graph_comment`**.
 - For **`call_function`**, always provide **`class_path`** + **`function_name`**.
 - Do **not invent pseudo-ops** (for example `launch_character`, `play_sound`, `event_overlap`, `play_sound_at_location`, `add_component`). If the intent is gameplay behavior, express it as a supported op, usually **`call_function`**.
 - Use canonical overlap event op names from the list above (for overlap flows, use `event_actor_begin_overlap`).
