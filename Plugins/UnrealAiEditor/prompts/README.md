@@ -21,7 +21,7 @@ This folder holds **semantic fragments** the harness assembles into **system** a
 | [`chunks/01-identity.md`](chunks/01-identity.md) | âœ“ | âœ“ | âœ“ | Base role + scope; identity + **Examples contract**. |
 | [`chunks/02-operating-modes.md`](chunks/02-operating-modes.md) | inject **Ask** only | inject **Agent** only | inject **Plan** only | Shared preamble + one `## Mode:` block (`UnrealAiPromptBuilder::ExtractOperatingModeSection`). |
 | [`chunks/03-complexity-and-todo-plan.md`](chunks/03-complexity-and-todo-plan.md) | âœ“ (plan allowed; no mutating tools) | âœ“ | âœ“ | Complexity, scope, graceful handoff when blocked; Plan mode for structured DAGs. |
-| [`chunks/04-tool-calling-contract.md`](chunks/04-tool-calling-contract.md) | âœ“ (read tools only) | âœ“ | âœ“ | General tool discipline; Blueprint IR + **UnrealBlueprintFormatter** (`merge_policy`, `layout_scope`, `blueprint_format_graph`, `format_graphs`). |
+| [`chunks/04-tool-calling-contract.md`](chunks/04-tool-calling-contract.md) | âœ“ (read tools only) | âœ“ | âœ“ | General tool discipline; Blueprint IR + in-process layout (`merge_policy`, `layout_scope`, `blueprint_format_graph`, `format_graphs`). |
 | [`chunks/05-context-and-editor.md`](chunks/05-context-and-editor.md) | âœ“ | âœ“ | âœ“ | Attachments, snapshot, `@` mentions. |
 | [`chunks/10-mvp-gameplay-and-tooling.md`](chunks/10-mvp-gameplay-and-tooling.md) | âœ“ | âœ“ | âœ“ | MVP gameplay flows, PIE, matrix `ok:false` semantics (`UnrealAiPromptBuilder` after `05`). |
 | [`chunks/11-plan-node-execution.md`](chunks/11-plan-node-execution.md) | â€” | when thread `*_plan_*` | â€” | Serial plan DAG node turns only (`UnrealAiTurnLlmRequestBuilder`). |

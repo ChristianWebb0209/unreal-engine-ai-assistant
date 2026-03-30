@@ -123,9 +123,11 @@ For **gameplay Blueprint** work (movement, overlap, timers, health, spawners), r
 
 - Successful tools may attach **`EditorPresentation`**: markdown, **clickable asset links**, and optional **PNG thumbnail** (e.g. Blueprint graphs via `MakeBlueprintToolNote`). This payload is **not** sent to the LLM; it appears in the chat tool card. Blueprint **compile**, **apply IR**, **export IR**, **graph summary**, **open graph**, and **add variable** include Blueprint notes with thumbnail when capture succeeds.
 
-## Blueprint IR + Unreal Blueprint Formatter (graph plugin)
+## Blueprint IR + graph layout (in-process)
 
-Unreal AI Editor is built to use **`UnrealBlueprintFormatter`** as shipped: it is an **enabled plugin dependency** and the AI module **links** the formatter module. From this repo’s root, **`.\build-editor.ps1`** **clones or `git pull --ff-only`** the formatter into `Plugins/UnrealBlueprintFormatter` before building. Use **`-SkipBlueprintFormatterSync`** on **`.\build-editor.ps1`** only when you intentionally manage that folder yourself.
+Layout is **vendored inside Unreal AI Editor** (`Private/BlueprintFormat/`). No sibling formatter plugin or git sync.
+
+**Respect user-owned graphs:** Prefer **`layout_scope: ir_nodes`** when patching; use **`full_graph`** / **`blueprint_format_graph`** / **`format_graphs`** only when explicitly reformatting. **`Blueprint comments`** is a user setting in Editor Preferences.
 
 ### Read / write loop
 
@@ -140,7 +142,7 @@ Unreal AI Editor is built to use **`UnrealBlueprintFormatter`** as shipped: it i
 
 ### Layout: `auto_layout`, `layout_scope`, `blueprint_format_graph`, `format_graphs`
 
-- **`auto_layout`** (default **`true`**): after wiring, runs the formatter when **every IR node has `x,y` at 0** (non-zero positions are left as author intent). If the formatter module is not usable, **`blueprint_apply_ir`** still applies IR; read **`formatter_hint`** / **`formatter_available`** in the result.
+- **`auto_layout`** (default **`true`**): after wiring, runs layout when **every IR node has `x,y` at 0** (non-zero positions are left as author intent). **`formatter_available`** is normally true in editor builds.
 - **`layout_scope`** (when **`auto_layout`** is on): **`ir_nodes`** (default) lays out only IR-touched nodes; **`full_graph`** calls **`LayoutEntireGraph`** on the whole target graph—use when the graph is messy outside your IR patch.
 - **`blueprint_format_graph`:** readability-only pass: **`LayoutEntireGraph`** on a chosen script graph (`blueprint_path`, optional `graph_name`). Use after manual edits or when you did not want **`layout_scope: full_graph`** on apply.
 - **`blueprint_compile`** accepts **`format_graphs: true`**: runs the formatter on **all** non-empty ubergraph, function, and macro graphs **before** compile—good after large multi-graph changes so you do not call **`blueprint_format_graph`** once per graph.

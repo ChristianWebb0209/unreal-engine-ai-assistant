@@ -15,11 +15,8 @@
     .\build-editor.ps1 -AutomationTests -Headless
     .\build-editor.ps1 -GenerateProjectFiles
     Set UE_ENGINE_ROOT in repo .env (see .env.example) or: $env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\build-editor.ps1
-    .\build-editor.ps1 -SkipBlueprintFormatterSync   # offline / local formatter tree
     # Batch headed suites + full logging: tests\long-running-tests\run-long-running-headed.ps1 — docs\tooling\AGENT_HARNESS_HANDOFF.md
     # Full harness + iteration context for agents: docs\tooling\AGENT_HARNESS_HANDOFF.md
-
-  Each build syncs Plugins\UnrealBlueprintFormatter from git (clone or pull --ff-only) unless skipped.
 
   If execution is blocked:
     powershell -ExecutionPolicy Bypass -File .\build-editor.ps1
@@ -38,8 +35,6 @@ param(
     [switch]$Headless,
     [switch]$Restart,
     [switch]$AutomationTests,
-    [switch]$SkipBlueprintFormatterSync,
-    [string]$BlueprintFormatterRepoUrl = 'https://github.com/ChristianWebb0209/ue-blueprint-formatter.git',
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$RemainingArguments
 )
@@ -53,9 +48,6 @@ foreach ($r in $RemainingArguments) {
     }
     if ($r -eq '--restart' -or $r -eq '-restart') {
         $Restart = $true
-    }
-    if ($r -eq '--SkipBlueprintFormatterSync' -or $r -eq '-SkipBlueprintFormatterSync') {
-        $SkipBlueprintFormatterSync = $true
     }
 }
 
@@ -115,56 +107,6 @@ function Start-ProcessWithoutStealingFocus {
     }
 }
 
-function Sync-UnrealBlueprintFormatterPlugin {
-    param(
-        [string]$RepoRoot,
-        [string]$RepoUrl,
-        [switch]$Skip
-    )
-    if ($Skip) {
-        Write-Host 'Skipping UnrealBlueprintFormatter git sync (-SkipBlueprintFormatterSync).' -ForegroundColor Yellow
-        return
-    }
-    $gitExe = Get-Command git -ErrorAction SilentlyContinue
-    if (-not $gitExe) {
-        Write-Error "git is not on PATH; cannot sync Plugins\UnrealBlueprintFormatter. Install Git or use -SkipBlueprintFormatterSync."
-    }
-    $Dest = Join-Path $RepoRoot 'Plugins\UnrealBlueprintFormatter'
-    if (Test-Path (Join-Path $Dest '.git')) {
-        # Keep existing clones healthy if the upstream repository was renamed/moved.
-        Push-Location $Dest
-        try {
-            $currentOrigin = (& git remote get-url origin 2>$null)
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($currentOrigin) -and $currentOrigin -ne $RepoUrl) {
-                Write-Host "Updating UnrealBlueprintFormatter origin URL -> $RepoUrl" -ForegroundColor Cyan
-                & git remote set-url origin $RepoUrl
-            }
-        } finally {
-            Pop-Location
-        }
-        Write-Host 'Updating UnrealBlueprintFormatter (git pull --ff-only)...' -ForegroundColor Cyan
-        Push-Location $Dest
-        try {
-            & git pull --ff-only
-        } finally {
-            Pop-Location
-        }
-        if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-        }
-        return
-    }
-    if (Test-Path $Dest) {
-        Write-Error "Plugins\UnrealBlueprintFormatter exists but is not a git clone (missing .git). Remove or rename that folder, then run build again so the repository can be cloned."
-    }
-    Write-Host "Cloning UnrealBlueprintFormatter into Plugins (first run)..." -ForegroundColor Cyan
-    & git clone $RepoUrl $Dest
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
-    }
-}
-
-Sync-UnrealBlueprintFormatterPlugin -RepoRoot $ProjectRoot -RepoUrl $BlueprintFormatterRepoUrl -Skip:$SkipBlueprintFormatterSync
 $BuildBat = Join-Path $EngineRoot 'Engine\Build\BatchFiles\Build.bat'
 $EditorExe = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor.exe'
 $EditorCmdExe = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'

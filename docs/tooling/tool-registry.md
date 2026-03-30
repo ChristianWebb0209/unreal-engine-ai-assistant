@@ -670,7 +670,7 @@ These are the first implementation wave. Each row is expanded in its domain sect
 
 ## Blueprints & graph tooling
 
-**Layout + merge (append new logic to existing events like Tick instead of duplicating):** the **Unreal Blueprint Formatter** plugin (`Plugins/UnrealBlueprintFormatter/`) supplies `FUnrealBlueprintGraphFormatService` for `auto_layout`, `layout_scope: full_graph`, and **`blueprint_format_graph`**.
+**Layout + merge (append new logic to existing events like Tick instead of duplicating):** in-process **`FUnrealBlueprintGraphFormatService`** (`Plugins/UnrealAiEditor/.../Private/BlueprintFormat/`) drives `auto_layout`, `layout_scope: full_graph`, and **`blueprint_format_graph`**.
 
 ### `blueprint_export_ir`
 

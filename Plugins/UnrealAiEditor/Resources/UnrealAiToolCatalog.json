@@ -1080,7 +1080,7 @@
     },
     {
       "tool_id": "blueprint_compile",
-      "summary": "Compile a Blueprint and return diagnostics. Use this after blueprint_apply_ir or graph edits to validate/fix compile state; do not use as a graph discovery tool (use blueprint_get_graph_summary or blueprint_export_ir for read-only inspection). Use format_graphs to run UnrealBlueprintFormatter on script graphs before compile when graphs should be laid out.",
+      "summary": "Compile a Blueprint and return diagnostics. Use this after blueprint_apply_ir or graph edits to validate/fix compile state; do not use as a graph discovery tool (use blueprint_get_graph_summary or blueprint_export_ir for read-only inspection). Use format_graphs to run in-process graph layout on script graphs before compile when graphs should be laid out.",
       "category": "blueprints",
       "tags": [
         "blueprint"
@@ -1105,7 +1105,7 @@
           },
           "format_graphs": {
             "type": "boolean",
-            "description": "When true, run Unreal Blueprint Formatter on all non-empty ubergraph, function, and macro graphs before compiling. Requires the UnrealBlueprintFormatter plugin (declared dependency of Unreal AI Editor)."
+            "description": "When true, run bundled graph layout on all non-empty ubergraph, function, and macro graphs before compiling."
           },
           "focused": {
             "type": "boolean",
@@ -1187,7 +1187,7 @@
           },
           "auto_layout": {
             "type": "boolean",
-            "description": "When true (default), run Unreal Blueprint Formatter after wiring when every IR node has x,y at 0. Requires the UnrealBlueprintFormatter plugin; if missing, apply still succeeds and formatter_hint explains how to enable it."
+            "description": "When true (default), run bundled graph layout after wiring when every IR node has x,y at 0. formatter_available is normally true in editor builds."
           },
           "variables": {
             "type": "array",
@@ -1324,7 +1324,7 @@
     },
     {
       "tool_id": "blueprint_format_graph",
-      "summary": "Run Unreal Blueprint Formatter LayoutEntireGraph on a Blueprint script graph (readability pass). Requires UnrealBlueprintFormatter; no-op with formatter_hint if missing.",
+      "summary": "Run in-process LayoutEntireGraph on a Blueprint script graph (readability pass).",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -2960,6 +2960,15 @@
         "ask": true,
         "agent": true,
         "plan": true
+      },
+      "context_selector": {
+        "priority": 64,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
         "anyOf": [
           {
             "required": [
@@ -2971,16 +2980,7 @@
               "path_prefix"
             ]
           }
-        ]
-      },
-      "context_selector": {
-        "priority": 64,
-        "always_include_in_core_pack": true,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
+        ],
         "properties": {
           "query": {
             "type": "string",

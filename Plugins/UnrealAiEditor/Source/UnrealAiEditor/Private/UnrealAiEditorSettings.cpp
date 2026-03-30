@@ -11,6 +11,7 @@ UUnrealAiEditorSettings::UUnrealAiEditorSettings(const FObjectInitializer& Objec
 	, AssistantTypewriterCps(88.f)
 	, bAutoContinuePlanSteps(true)
 	, bPlanAutoReplan(true)
+	, BlueprintCommentsMode(EUnrealAiBlueprintCommentsMode::Minimal)
 	, PlanAutoReplanMaxAttemptsPerRun(2)
 	, bLogLlmRequestsToHarnessRunFile(true)
 {

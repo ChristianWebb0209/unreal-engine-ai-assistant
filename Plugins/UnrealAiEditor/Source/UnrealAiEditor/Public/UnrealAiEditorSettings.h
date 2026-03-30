@@ -4,6 +4,15 @@
 #include "Engine/DeveloperSettings.h"
 #include "UnrealAiEditorSettings.generated.h"
 
+/** How the agent should treat Blueprint graph commentary (section labels, future comment-box IR). */
+UENUM()
+enum class EUnrealAiBlueprintCommentsMode : uint8
+{
+	Off UMETA(DisplayName = "Off"),
+	Minimal UMETA(DisplayName = "Minimal"),
+	Verbose UMETA(DisplayName = "Verbose")
+};
+
 UCLASS(Config = Editor, defaultconfig, meta = (DisplayName = "Unreal AI Editor"))
 class UUnrealAiEditorSettings : public UDeveloperSettings
 {
@@ -55,6 +64,13 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Plan: auto-replan on failure or wall stall"))
 	bool bPlanAutoReplan = true;
+
+	/**
+	 * Blueprint graph commentary policy for agent turns (injected into the static prompt).
+	 * Off: logic-only; Minimal: short labels where helpful; Verbose: richer sectioning guidance.
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Blueprint comments"))
+	EUnrealAiBlueprintCommentsMode BlueprintCommentsMode = EUnrealAiBlueprintCommentsMode::Minimal;
 
 	/** Maximum supplemental planner (replan) HTTP turns per plan executor run; 0 disables replanning. */
 	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (ClampMin = "0", ClampMax = "8"))

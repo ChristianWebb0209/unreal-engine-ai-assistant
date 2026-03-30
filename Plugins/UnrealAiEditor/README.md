@@ -10,21 +10,20 @@
 - **Nomad tabs** for each surface; dockable like other editor tabs. **Agent Chat** is invoked automatically on editor startup (see **Project Settings â†’ Plugins â†’ Unreal AI Editor â†’ Open Agent Chat on editor startup**). Dock it once where you want it; the editor remembers layout.
 - **Agent Chat**: transcript (`FUnrealAiChatTranscript`), tool rows (`SToolCallCard`), reasoning subline (`SThinkingSubline`), assistant streaming + optional typewriter (`SAssistantStreamBlock`), todo panel (`STodoPlanPanel`), **run progress** (`RunProgress` rows: status line + optional **Show details** timeline from harness events), **Stop** (same control as Send in the composer) â†’ `CancelTurn`. Streaming defaults on (`UUnrealAiEditorSettings::bStreamLlmChat`). For current harness/testing behavior, see [`docs/HEADLESS_TESTING_PLAYBOOK.md`](../../docs/HEADLESS_TESTING_PLAYBOOK.md).
 - **AI Settings** (`Window â†’ Unreal AI â†’ AI Settings`): `plugin_settings.json` (v4: nested **API key sections** with unlimited models each), per-model caps including **`maxAgentLlmRounds`** (max toolâ†”LLM iterations per send, default 16), company presets + provider-specific model picker (search + select known OpenAI-compatible model ids), and session **usage** per model + rough **USD** estimates from a small curated in-code pricing catalog. Cumulative usage in `settings/usage_stats.json`. **Editor integration** includes **`agent.useSubagents`** (**Use subagents**) for plan wave policy. **Test connection**, **Save** â†’ persistence / LLM reload.
-- **Project Settings â†’ Plugins â†’ Unreal AI Editor**: `UUnrealAiEditorSettings` (default agent, auto connect, verbose logging, OpenRouter fields).
+- **Project Settings -> Plugins -> Unreal AI Editor**: `UUnrealAiEditorSettings` (default agent, auto connect, verbose logging, OpenRouter fields, **Blueprint comments** Off/Minimal/Verbose for agent prompt injection).
 - **In-module stubs** (`Private/Backend/` â€” not a separate server process): persistence (writes under `%LOCALAPPDATA%\UnrealAiEditor\` on Windows), chat service (fake stream), model connector (delayed success).
 - **Tool catalog + execution:** [`Resources/UnrealAiToolCatalog.json`](Resources/UnrealAiToolCatalog.json) â€” single JSON (`meta` + `tools[]`). **`FUnrealAiToolExecutionHost`** (`Private/Tools/`) implements `IToolExecutionHost::InvokeTool` and dispatches to UE5 handlers via `UnrealAiToolDispatch.cpp` and modular `UnrealAiToolDispatch_*.cpp` units (game thread). **Search:** `scene_fuzzy_search`, `asset_index_fuzzy_search`, `source_search_symbol` (`UnrealAiFuzzySearch.cpp`). **Blueprints:** `blueprint_compile`, `blueprint_export_ir`, `blueprint_apply_ir` (merge_policy / event_tick / layout_scope), `blueprint_format_graph`, summaries, open graph, add variable. **Generic assets:** `asset_create`, `asset_export_properties`, `asset_apply_properties`, dependencies/referencers, and moreâ€”see catalog and router for the full set. Tools without a handler return a structured `not_implemented`.
-- **Unreal Blueprint Formatter:** `UnrealAiEditor.uplugin` lists **`UnrealBlueprintFormatter`** as an enabled plugin dependency and `UnrealAiEditor.Build.cs` links the module. **`.\build-editor.ps1`** syncs the canonical repo into `Plugins/UnrealBlueprintFormatter/` (clone or `git pull --ff-only`) before each build. Opt out with **`-SkipBlueprintFormatterSync`**. AI prompts in `prompts/chunks/04-tool-calling-contract.md` describe **`merge_policy`**, **`layout_scope`**, **`blueprint_format_graph`**, and **`blueprint_compile`**â€™s **`format_graphs`** flag so agents use the formatter end-to-end.
+- **Blueprint graph layout:** Vendored in `Source/.../Private/BlueprintFormat/` (MIT attribution in headers). Prompts in `prompts/chunks/04-tool-calling-contract.md` describe **`merge_policy`**, **`layout_scope`**, **`blueprint_format_graph`**, and **`blueprint_compile`**'s **`format_graphs`**. **Blueprint comments** mode lives in **Editor Preferences → Plugins → Unreal AI Editor** and is injected into the static prompt (`01-identity.md` token).
 
 ## Install into a UE project
 
-**Recommended distribution model (bundled):** ship/install both plugins together:
+**Recommended distribution:** ship the plugin folder:
 
 - `Plugins/UnrealAiEditor/`
-- `Plugins/UnrealBlueprintFormatter/`
 
-Copy both folders into `<YourProject>/Plugins/`.
+Copy it into `<YourProject>/Plugins/`.
 
-**This repo** already has a minimal UE project at the root (`blank.uproject`) with both plugin folders under `Plugins/`.
+**This repo** has a minimal UE project at the root (`blank.uproject`) with `Plugins/UnrealAiEditor/`.
 
 Then:
 
@@ -70,7 +69,7 @@ When `WITH_DEV_AUTOMATION_TESTS` is enabled (default for **Development** Editor 
 **Run from repo root (headless automation + matrix):**
 
 ```powershell
-.\build-editor.ps1 -AutomationTests -Headless -SkipBlueprintFormatterSync
+.\build-editor.ps1 -AutomationTests -Headless
 ```
 
 Artifacts: `Saved/UnrealAiEditor/Automation/tool_matrix_last.json`, editor logs under `Saved/Logs/`. Primary qualitative batches: [`tests/long-running-tests/run-long-running-headed.ps1`](../tests/long-running-tests/run-long-running-headed.ps1). Maintainer entry point: [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](../docs/tooling/AGENT_HARNESS_HANDOFF.md).

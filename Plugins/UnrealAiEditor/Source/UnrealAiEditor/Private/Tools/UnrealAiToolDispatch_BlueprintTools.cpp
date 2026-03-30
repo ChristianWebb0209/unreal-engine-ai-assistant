@@ -1,7 +1,7 @@
 #include "Tools/UnrealAiToolDispatch_BlueprintTools.h"
 
 #include "Tools/UnrealAiToolDispatch_ArgRepair.h"
-#include "Tools/UnrealAiBlueprintFormatterBridge.h"
+#include "BlueprintFormat/UnrealAiBlueprintFormatterBridge.h"
 #include "Tools/UnrealAiBlueprintIrHallucinationNormalizer.h"
 #include "Tools/UnrealAiToolDispatch_MoreAssets.h"
 #include "Tools/UnrealAiToolJson.h"
@@ -90,7 +90,7 @@ namespace UnrealAiBlueprintToolsPriv
 		TArray<FIrDefaultDecl> Defaults;
 		bool bCreateIfMissing = false;
 		FString ParentClassPath;
-		/** When true, run formatter after apply if all IR node positions are zero (requires UnrealBlueprintFormatter). */
+		/** When true, run in-process layout after apply if all IR node positions are zero. */
 		bool bAutoLayout = true;
 		/** create_new | append_to_existing — empty uses default (append on ubergraph, create_new on function/macro graphs). */
 		FString MergePolicy;

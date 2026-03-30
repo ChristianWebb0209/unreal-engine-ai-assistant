@@ -5,6 +5,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Prompt/UnrealAiPromptAssembleParams.h"
+#include "UnrealAiEditorSettings.h"
 
 namespace UnrealAiPromptChunkUtilsPriv
 {
@@ -30,6 +31,23 @@ namespace UnrealAiPromptChunkUtilsPriv
 		{
 			S = S.Left(Pos) + To + S.Mid(Pos + From.Len());
 			Pos += To.Len();
+		}
+	}
+
+	static FString BlueprintCommentsPolicyText(const EUnrealAiBlueprintCommentsMode Mode)
+	{
+		switch (Mode)
+		{
+		case EUnrealAiBlueprintCommentsMode::Off:
+			return TEXT(
+				"Off — Do not add Blueprint graph comment boxes or extra narrative/section labels in IR unless the user explicitly asks for comments.");
+		case EUnrealAiBlueprintCommentsMode::Verbose:
+			return TEXT(
+				"Verbose — Prefer clear sectioning for Blueprint work: describe intent, use Sequence/structure where it helps readability, and add short readable labels when patching graphs (within blueprint_apply_ir capabilities).");
+		case EUnrealAiBlueprintCommentsMode::Minimal:
+		default:
+			return TEXT(
+				"Minimal — Use brief section labels or sparse annotations only where they materially aid navigation; avoid long prose.");
 		}
 	}
 } // namespace UnrealAiPromptChunkUtilsPriv
@@ -125,4 +143,15 @@ void UnrealAiPromptChunkUtils::ApplyTemplateTokens(
 		P.ThreadId.IsEmpty() ? TEXT("(unknown)") : *P.ThreadId);
 	ReplaceAll(Doc, TEXT("{{PLAN_POINTER}}"), Pointer);
 	ReplaceAll(Doc, TEXT("((project version))"), UnrealAiAgentContextFormat::GetProjectEngineVersionLabel());
+	if (const UUnrealAiEditorSettings* EdSet = GetDefault<UUnrealAiEditorSettings>())
+	{
+		ReplaceAll(
+			Doc,
+			TEXT("{{BLUEPRINT_COMMENTS_POLICY}}"),
+			UnrealAiPromptChunkUtilsPriv::BlueprintCommentsPolicyText(EdSet->BlueprintCommentsMode));
+	}
+	else
+	{
+		ReplaceAll(Doc, TEXT("{{BLUEPRINT_COMMENTS_POLICY}}"), FString());
+	}
 }

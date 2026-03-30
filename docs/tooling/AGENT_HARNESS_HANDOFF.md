@@ -27,7 +27,7 @@ Index of all `docs/` files: [docs/README.md](../README.md)
 
 ### 1a — CI / contract (headless)
 
-`.\build-editor.ps1 -AutomationTests -Headless -SkipBlueprintFormatterSync`
+`.\build-editor.ps1 -AutomationTests -Headless`
 
 ### 2 — Headed qualitative (real API)
 
@@ -73,7 +73,7 @@ From Output Log:
   - `.\build-editor.ps1 -Headless`
   - If DLL lock issue: `.\build-editor.ps1 -Restart -Headless`
 - Headless CI:
-  - `.\build-editor.ps1 -AutomationTests -Headless -SkipBlueprintFormatterSync`
+  - `.\build-editor.ps1 -AutomationTests -Headless`
 - Long-running headed batches (suites + full logging):
   - `.\tests\long-running-tests\run-long-running-headed.ps1`
 - Assert last/specific JSONL:

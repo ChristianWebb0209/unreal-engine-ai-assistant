@@ -9,14 +9,10 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $PluginsRoot = Join-Path $RepoRoot "Plugins"
 $AiPlugin = Join-Path $PluginsRoot "UnrealAiEditor"
-$FormatterPlugin = Join-Path $PluginsRoot "UnrealBlueprintFormatter"
 $DistDir = Join-Path $RepoRoot "dist"
 
 if (-not (Test-Path $AiPlugin)) {
     throw "Missing plugin folder: $AiPlugin"
-}
-if (-not (Test-Path $FormatterPlugin)) {
-    throw "Missing plugin folder: $FormatterPlugin"
 }
 
 if ([string]::IsNullOrWhiteSpace($OutputZip)) {
@@ -63,7 +59,6 @@ function Copy-PluginForBundle {
 
 $DestPluginsRoot = Join-Path $Staging "Plugins"
 Copy-PluginForBundle -SourcePluginDir $AiPlugin -DestPluginsRoot $DestPluginsRoot
-Copy-PluginForBundle -SourcePluginDir $FormatterPlugin -DestPluginsRoot $DestPluginsRoot
 
 if (-not (Test-Path $DistDir)) {
     New-Item -ItemType Directory -Path $DistDir | Out-Null

@@ -57,7 +57,6 @@
 #include "HAL/IConsoleManager.h"
 #include "Misc/Paths.h"
 #include "Tools/UnrealAiToolCatalogMatrixRunner.h"
-#include "Tools/UnrealAiBlueprintFormatterBridge.h"
 #include "Harness/UnrealAiHarnessScenarioRunner.h"
 #include "Retrieval/IUnrealAiRetrievalService.h"
 #include "Misc/FileHelper.h"
@@ -163,8 +162,6 @@ void FUnrealAiEditorModule::StartupModule()
 			BackendRegistry->GetPersistence(),
 			UnrealAiProjectId::GetCurrentProjectId());
 	}
-
-	UnrealAiBlueprintFormatterBridge::ValidatePluginDependencyOnStartup();
 
 	GUnrealAiCatalogMatrixConsole = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("UnrealAi.RunCatalogMatrix"),

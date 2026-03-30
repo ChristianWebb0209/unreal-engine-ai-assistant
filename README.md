@@ -262,10 +262,9 @@ From **Cursor** or VS Code, use the integrated terminal for the same commands.
 
 ## Bundled plugin distribution
 
-For end users, distribute a single bundle that contains both required plugin folders:
+For end users, distribute the plugin folder:
 
 - `Plugins/UnrealAiEditor`
-- `Plugins/UnrealBlueprintFormatter`
 
 Create a zip bundle from repo root:
 

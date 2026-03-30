@@ -51,7 +51,9 @@ public class UnrealAiEditor : ModuleRules
 				"MovieScene",
 				"ImageWrapper",
 				"SQLiteCore",
-				"UnrealBlueprintFormatter"
+				"Kismet",
+				"KismetWidgets",
+				"GraphEditor"
 			});
 	}
 }

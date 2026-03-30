@@ -25,7 +25,7 @@
 *.xcodeproj
 *.xcworkspace
 
-# Only UnrealAiEditor is part of this repo; other folders under Plugins/ (e.g. UnrealBlueprintFormatter) stay local.
+# Only UnrealAiEditor is tracked under Plugins/; blueprint layout is vendored inside that plugin.
 /Plugins/*
 !/Plugins/UnrealAiEditor/
 !/Plugins/UnrealAiEditor/**
