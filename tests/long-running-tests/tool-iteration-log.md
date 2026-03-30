@@ -90,10 +90,11 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 ---
 
-## Entry 25 — Subagents architecture doc + `bUseSubagents` setting (default on)
+## Entry 25 — Subagents architecture doc + subagents policy toggle (default on)
 
 - **`docs/planning/subagents-architecture.md`:** Current serial plan-DAG architecture; safety rules and minimum task size for future parallel nodes; phased rollout; proposed new files (`UnrealAiPlanParallelPolicy`, `FUnrealAiPlanWaveScheduler`); linked from [`docs/README.md`](../docs/README.md).
-- **`UUnrealAiEditorSettings`:** **`bUseSubagents`** (`Config = Editor`, default **true**) — display **Use subagents (parallel plan nodes)**; parallel scheduling not implemented yet; when false, executor should **keep serial** once parallel exists.
+- **Policy toggle:** **`agent.useSubagents`** in **`plugin_settings.json`** (AI Settings tab, Editor integration — **Use subagents**; default **true**). Runtime: `FUnrealAiEditorModule::IsSubagentsEnabled()` → `FUnrealAiPlanExecutor` wave width. Parallel scheduling not implemented yet; when false, executor keeps serial once parallel exists.
+- **Historical note:** Originally shipped as **`bUseSubagents`** on `UUnrealAiEditorSettings` (Project Settings); migrated to plugin settings JSON.
 - **Build:** Recompile plugin after settings change.
 
 ---

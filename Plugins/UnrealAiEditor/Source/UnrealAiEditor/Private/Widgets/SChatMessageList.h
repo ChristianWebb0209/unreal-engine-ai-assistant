@@ -70,6 +70,8 @@ private:
 
 	/** Tool call blocks the user left expanded; preserved across transcript rebuilds. */
 	TSet<FGuid> ExpandedToolCallBlockIds;
+	/** Run-progress rows that are expanded to show detailed timeline lines. */
+	TSet<FGuid> ExpandedRunProgressBlockIds;
 
 	/** SExpandableArea may emit "collapsed" while destroying old rows; ignore during rebuild. */
 	bool bSuppressToolExpansionCallbacks = false;

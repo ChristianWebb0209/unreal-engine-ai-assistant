@@ -140,6 +140,7 @@ void FUnrealAiEditorModule::StartupModule()
 			if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
 			{
 				FUnrealAiEditorModule::HydrateEditorFocusFromJsonRoot(Root);
+				FUnrealAiEditorModule::HydrateSubagentsFromJsonRoot(Root);
 			}
 		}
 	}
@@ -737,6 +738,11 @@ bool FUnrealAiEditorModule::IsEditorFocusEnabled()
 	return GUnrealAiModule ? GUnrealAiModule->bEditorFocusEnabled : false;
 }
 
+bool FUnrealAiEditorModule::IsSubagentsEnabled()
+{
+	return GUnrealAiModule ? GUnrealAiModule->bSubagentsEnabled : true;
+}
+
 void FUnrealAiEditorModule::HydrateEditorFocusFromJsonRoot(const TSharedPtr<FJsonObject>& Root)
 {
 	if (!GUnrealAiModule || !Root.IsValid())
@@ -801,6 +807,72 @@ void FUnrealAiEditorModule::SetEditorFocusEnabled(bool bEnabled)
 }
 
 FSimpleMulticastDelegate& FUnrealAiEditorModule::OnEditorFocusPolicyChanged()
+{
+	static FSimpleMulticastDelegate Delegate;
+	return Delegate;
+}
+
+void FUnrealAiEditorModule::HydrateSubagentsFromJsonRoot(const TSharedPtr<FJsonObject>& Root)
+{
+	if (!GUnrealAiModule || !Root.IsValid())
+	{
+		return;
+	}
+	bool b = true;
+	const TSharedPtr<FJsonObject>* AgentObj = nullptr;
+	if (Root->TryGetObjectField(TEXT("agent"), AgentObj) && AgentObj && AgentObj->IsValid())
+	{
+		(*AgentObj)->TryGetBoolField(TEXT("useSubagents"), b);
+	}
+	GUnrealAiModule->bSubagentsEnabled = b;
+}
+
+void FUnrealAiEditorModule::SetSubagentsEnabled(bool bEnabled)
+{
+	if (!GUnrealAiModule)
+	{
+		return;
+	}
+	if (GUnrealAiModule->bSubagentsEnabled == bEnabled)
+	{
+		return;
+	}
+	GUnrealAiModule->bSubagentsEnabled = bEnabled;
+
+	if (GUnrealAiModule->BackendRegistry.IsValid())
+	{
+		if (IUnrealAiPersistence* P = GUnrealAiModule->BackendRegistry->GetPersistence())
+		{
+			FString Json;
+			if (P->LoadSettingsJson(Json) && !Json.IsEmpty())
+			{
+				TSharedPtr<FJsonObject> Root;
+				const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+				if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
+				{
+					TSharedPtr<FJsonObject> AgentObj = MakeShared<FJsonObject>();
+					const TSharedPtr<FJsonObject>* ExistingAgent = nullptr;
+					if (Root->TryGetObjectField(TEXT("agent"), ExistingAgent) && ExistingAgent && ExistingAgent->IsValid())
+					{
+						AgentObj = UnrealAiEditorModulePriv::CloneJsonObjectShallow(*ExistingAgent);
+					}
+					AgentObj->SetBoolField(TEXT("useSubagents"), bEnabled);
+					Root->SetObjectField(TEXT("agent"), AgentObj);
+					FString Out;
+					const TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
+					if (FJsonSerializer::Serialize(Root.ToSharedRef(), W))
+					{
+						P->SaveSettingsJson(Out);
+					}
+				}
+			}
+		}
+	}
+
+	OnSubagentsPolicyChanged().Broadcast();
+}
+
+FSimpleMulticastDelegate& FUnrealAiEditorModule::OnSubagentsPolicyChanged()
 {
 	static FSimpleMulticastDelegate Delegate;
 	return Delegate;

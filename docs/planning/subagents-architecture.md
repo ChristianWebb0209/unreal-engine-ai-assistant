@@ -12,10 +12,11 @@ This is the authoritative description of shipped plan-mode behavior and the curr
 
 - **Planner pass (`EUnrealAiAgentMode::Plan`):** The model emits a single JSON object, schema `unreal_ai.plan_dag`, with a `nodes[]` array (`id`, `title`, `hint`, `dependsOn` / `depends_on`). No tools in this pass.
 - **Validation:** `UnrealAiPlanDag::ParseDagJson` and `UnrealAiPlanDag::ValidateDag` run before any node executes (duplicate ids, unknown deps, cycles, max node count). Invalid graphs do not run children; the executor may perform a **one-shot planner repair** (`FUnrealAiPlanExecutor`).
-- **Execution:** `FUnrealAiPlanExecutor` (`Plugins/UnrealAiEditor/.../Private/Planning/FUnrealAiPlanExecutor.cpp`) computes a deterministic ready **wave** (policy width `1` when `bUseSubagents=false`, `2` when true) and currently dispatches one child turn at a time in wave order.
+- **Execution:** `FUnrealAiPlanExecutor` (`Plugins/UnrealAiEditor/.../Private/Planning/FUnrealAiPlanExecutor.cpp`) computes a deterministic ready **wave** (policy width `1` when plugin setting `agent.useSubagents=false`, `2` when true) and currently dispatches one child turn at a time in wave order.
 - **Thread isolation (per node):** Child runs use thread ids of the form `<parentThreadId>_plan_<nodeId>` so context/logs stay separable, while plan-scoped state mutations always target the **parent** thread via explicit context APIs.
 - **Harness:** `FUnrealAiAgentHarness` runs one turn at a time; plan pipeline lifetime is tracked (`IsPlanPipelineActive`, idle-abort tuning for headed runs).
 - **Prompts:** Chunk `09-plan-dag.md` (planner); chunk `11-plan-node-execution.md` for Agent turns whose thread id contains `_plan_` (anti–tool-loop / checklist discipline).
+- **Agent Chat UI:** `FUnrealAiChatRunSink` surfaces plan/run progress in transcript **RunProgress** blocks (phase text + expandable **Show details** timeline: continuation, harness progress, enforcement, plan sub-turn boundaries). Rendered in `SChatMessageList` (`EUnrealAiChatBlockKind::RunProgress`).
 - **Legacy:** `agent_emit_todo_plan` / `unreal_ai.todo_plan` persistence is **separate** from the plan DAG executor and is **deprecated** (not exposed to the model).
 
 ### 1.2 Guardrails and fail-mode routing
@@ -70,7 +71,7 @@ flowchart TD
 
 Proposed **all** must hold before scheduling two (or more) plan nodes concurrently:
 
-1. **User/product gate:** Editor setting **`Use subagents`** (`bUseSubagents` in `UUnrealAiEditorSettings`) is **true** (see §5). If false, **always serial**.
+1. **User/product gate:** Plugin settings tab toggle **Use subagents** (`plugin_settings.json` key `agent.useSubagents`) is **true** (see §5). If false, **always serial**.
 2. **Graph gate:** At least **two** node ids are **simultaneously ready** (`GetReadyNodeIds` returns ≥2) and the planner has marked them **eligible** for parallel execution (see §3.2).
 3. **Independence gate (heuristic):** Nodes must not declare overlapping **critical scopes** (e.g. same primary asset path, same level/map, or both requiring global compile/PIE in ways we cannot order). Exact rules live in **policy code**, not only in prompts.
 4. **Size / worth gate:** Each node must meet a **minimum “worth”** threshold so we do not spawn extra harness work for trivial steps (see §3.3).
@@ -121,7 +122,7 @@ Below is a **target** layout. Names can shift; responsibilities should not.
 
 | Responsibility | Proposed location | Notes |
 |----------------|-------------------|--------|
-| **Settings** | [`UnrealAiEditorSettings.h`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Public/UnrealAiEditorSettings.h) | `bUseSubagents` (default **true**); persisted in Editor config. |
+| **Settings** | [`SUnrealAiEditorSettingsTab.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tabs/SUnrealAiEditorSettingsTab.cpp), [`UnrealAiEditorModule.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/UnrealAiEditorModule.cpp) | `agent.useSubagents` (default **true**); persisted in plugin settings JSON. |
 | **DAG types + parse/validate** | Existing: `Private/Planning/UnrealAiPlanDag.h/.cpp` | Extend when adding optional node metadata. |
 | **Serial execution (current)** | Existing: `Private/Planning/FUnrealAiPlanExecutor.h/.cpp` | Keep orchestration readable; branch **serial vs parallel wave** here or delegate. |
 | **Parallel eligibility + thresholds** | **New:** `Private/Planning/UnrealAiPlanParallelPolicy.h` (+ `.cpp`) | Pure functions / small class: given `FUnrealAiPlanDag`, ready ids, settings, return `EScheduleDecision` or ordered waves. |
@@ -135,14 +136,14 @@ Below is a **target** layout. Names can shift; responsibilities should not.
 
 ---
 
-## 5. Editor setting: Use subagents
+## 5. Plugin setting: Use subagents
 
-- **Name (C++):** `bUseSubagents`  
-- **Display name:** e.g. **Use subagents (parallel plan nodes)**  
-- **Storage:** `UUnrealAiEditorSettings` with `Config = Editor` (same as other plugin settings) — **local to the machine/editor user**, not committed to the repo.  
+- **Name (JSON):** `agent.useSubagents`  
+- **Display name:** **Use subagents** (plugin settings tab, Editor integration section)  
+- **Storage:** plugin settings JSON (`plugin_settings.json`) — **local to the machine/editor user**, not committed to the repo.  
 - **Default:** **true** — product intent is to allow parallel delegation when the implementation ships; users can disable globally if they want deterministic serial behavior.
 
-**Wiring (future):** `FUnrealAiPlanExecutor` (or policy) reads `GetDefault<UUnrealAiEditorSettings>()->bUseSubagents` before scheduling a wave. When **false**, skip parallel branches and keep current serial loop.
+**Wiring:** `FUnrealAiPlanExecutor` reads `FUnrealAiEditorModule::IsSubagentsEnabled()` before scheduling a wave. When **false**, skip parallel branches and keep current serial loop.
 
 ---
 
@@ -169,5 +170,5 @@ Below is a **target** layout. Names can shift; responsibilities should not.
 ## 8. Summary
 
 - **Today:** Plan DAG is **validated** and executed **serially**; thread ids isolate nodes; **no** parallel ready-node scheduling.
-- **Tomorrow:** Add **policy-gated** parallel waves behind **`bUseSubagents`**, with **stringent** independence and **minimum size** rules, implemented in **new policy/scheduler files** so `FUnrealAiPlanExecutor` stays maintainable.
+- **Tomorrow:** Add **policy-gated** parallel waves behind plugin setting **`agent.useSubagents`**, with **stringent** independence and **minimum size** rules, implemented in **new policy/scheduler files** so `FUnrealAiPlanExecutor` stays maintainable.
 - **Product truth:** **Zero subagents**, **no branching**, or **always serial** remain **first-class** outcomes.

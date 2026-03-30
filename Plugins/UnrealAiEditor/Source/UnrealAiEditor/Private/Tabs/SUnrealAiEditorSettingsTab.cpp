@@ -165,6 +165,9 @@ namespace UnrealAiSettingsTemplate
 		"\t\t\"indexMemoryRecordsInVectorStore\": false,\n"
 		"\t\t\"blueprintMaxFeatureRecords\": 0\n"
 		"\t},\n"
+		"\t\"agent\": {\n"
+		"\t\t\"useSubagents\": true\n"
+		"\t},\n"
 		"\t\"ui\": {\n"
 		"\t\t\"editorFocus\": false\n"
 		"\t}\n"
@@ -727,6 +730,33 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 																	.Text(LOCTEXT("DefaultProviderDropdownLabel", "Pick section"))
 															]
 													]
+												]
+											]
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
+											[
+												SNew(SHorizontalBox)
+												+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+												[
+													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
+														.IsChecked_Lambda([]()
+														{
+															return FUnrealAiEditorModule::IsSubagentsEnabled()
+																? ECheckBoxState::Checked
+																: ECheckBoxState::Unchecked;
+														})
+														.OnCheckStateChanged_Lambda([](ECheckBoxState S)
+														{
+															FUnrealAiEditorModule::SetSubagentsEnabled(S == ECheckBoxState::Checked);
+														})
+												]
+												+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+												[
+													SNew(STextBlock)
+														.AutoWrapText(true)
+														.WrapTextAt(520.f)
+														.Text(LOCTEXT(
+															"UseSubagentsHelp",
+															"Use subagents: when on, plan execution may schedule independent ready nodes as subagent waves (guarded policy). When off, plan nodes run serially."))
 												]
 											]
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
@@ -2154,6 +2184,7 @@ void SUnrealAiEditorSettingsTab::LoadSettingsIntoUi()
 
 	CachedSettingsRoot = UnrealAiSettingsTabUtil::CloneJsonObject(Root);
 	FUnrealAiEditorModule::HydrateEditorFocusFromJsonRoot(Root);
+	FUnrealAiEditorModule::HydrateSubagentsFromJsonRoot(Root);
 	LoadMemorySettingsFromRoot(Root);
 	LoadRetrievalSettingsFromRoot(Root);
 
@@ -2880,6 +2911,20 @@ bool SUnrealAiEditorSettingsTab::BuildJsonFromUi(FString& OutJson, FString& OutE
 	Root->SetObjectField(TEXT("api"), Api);
 	WriteMemorySettingsToRoot(Root);
 	WriteRetrievalSettingsToRoot(Root);
+
+	{
+		TSharedPtr<FJsonObject> AgentObj = MakeShared<FJsonObject>();
+		const TSharedPtr<FJsonObject>* ExistingAgent = nullptr;
+		if (Root->TryGetObjectField(TEXT("agent"), ExistingAgent) && ExistingAgent && ExistingAgent->IsValid())
+		{
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*ExistingAgent)->Values)
+			{
+				AgentObj->SetField(Pair.Key, Pair.Value);
+			}
+		}
+		AgentObj->SetBoolField(TEXT("useSubagents"), FUnrealAiEditorModule::IsSubagentsEnabled());
+		Root->SetObjectField(TEXT("agent"), AgentObj);
+	}
 
 	{
 		TSharedPtr<FJsonObject> UiObj = MakeShared<FJsonObject>();

@@ -43,6 +43,7 @@ struct FUnrealAiChatBlock
 	FString TodoTitle;
 	FString TodoJson;
 	FString ProgressLabel;
+	FString ProgressDetails;
 	bool bRunCancelled = false;
 
 	/** FPlatformTime::Seconds() when this step started; 0 if not tracking. */
@@ -88,6 +89,8 @@ public:
 	void RemovePlanDraftPendingBlocks();
 	void SetPlanDraftJsonForBlock(const FGuid& BlockId, const FString& DagJson);
 	void SetRunProgress(const FString& Label);
+	void AppendRunEvent(const FString& EventLine);
+	void ClearRunProgress();
 	void EndRun(bool bSuccess, const FString& ErrorMessage);
 	void OnContinuation(int32 PhaseIndex, int32 TotalPhasesHint);
 	/** Non-error notice (e.g. context policy dropped an attachment). */

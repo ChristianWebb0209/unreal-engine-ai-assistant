@@ -31,6 +31,11 @@ public:
 	static void SetEditorFocusEnabled(bool bEnabled);
 	static void HydrateEditorFocusFromJsonRoot(const TSharedPtr<FJsonObject>& Root);
 	static FSimpleMulticastDelegate& OnEditorFocusPolicyChanged();
+	/** Global: allow plan execution to use subagent wave policy. Persisted in plugin_settings.json under agent.useSubagents. */
+	static bool IsSubagentsEnabled();
+	static void SetSubagentsEnabled(bool bEnabled);
+	static void HydrateSubagentsFromJsonRoot(const TSharedPtr<FJsonObject>& Root);
+	static FSimpleMulticastDelegate& OnSubagentsPolicyChanged();
 
 	/**
 	 * Opens a new Agent Chat dock tab immediately to the right of the tab that contains FromWidget (same tab stack).
@@ -95,4 +100,5 @@ private:
 	bool bAgentChatRestoreChainBusy = false;
 
 	bool bEditorFocusEnabled = false;
+	bool bSubagentsEnabled = true;
 };

@@ -117,7 +117,12 @@ FString FUnrealAiChatTranscript::FormatPlainText() const
 			Out += FString::Printf(TEXT("--- Plan draft (awaiting Build) ---\n%s\n\n"), *B.TodoJson);
 			break;
 		case EUnrealAiChatBlockKind::RunProgress:
-			Out += FString::Printf(TEXT("--- Progress ---\n%s\n\n"), *B.ProgressLabel);
+			Out += FString::Printf(TEXT("--- Progress ---\n%s\n"), *B.ProgressLabel);
+			if (!B.ProgressDetails.IsEmpty())
+			{
+				Out += B.ProgressDetails + TEXT("\n");
+			}
+			Out += TEXT("\n");
 			break;
 		case EUnrealAiChatBlockKind::Notice:
 			Out += FString::Printf(TEXT("--- Notice ---\n%s\n\n"), *B.NoticeText);
@@ -390,12 +395,74 @@ void FUnrealAiChatTranscript::SetPlanDraftJsonForBlock(const FGuid& BlockId, con
 
 void FUnrealAiChatTranscript::SetRunProgress(const FString& Label)
 {
-	FUnrealAiChatBlock B;
-	B.Id = FGuid::NewGuid();
-	B.RunId = ActiveRunId;
-	B.Kind = EUnrealAiChatBlockKind::RunProgress;
-	B.ProgressLabel = Label;
-	Blocks.Add(MoveTemp(B));
+	for (int32 i = Blocks.Num() - 1; i >= 0; --i)
+	{
+		FUnrealAiChatBlock& Existing = Blocks[i];
+		if (Existing.Kind == EUnrealAiChatBlockKind::RunProgress && Existing.RunId == ActiveRunId)
+		{
+			Existing.ProgressLabel = Label;
+			OnStructuralChange.Broadcast();
+			return;
+		}
+	}
+	FUnrealAiChatBlock NewBlock;
+	NewBlock.Id = FGuid::NewGuid();
+	NewBlock.RunId = ActiveRunId;
+	NewBlock.Kind = EUnrealAiChatBlockKind::RunProgress;
+	NewBlock.ProgressLabel = Label;
+	Blocks.Add(MoveTemp(NewBlock));
+	OnStructuralChange.Broadcast();
+}
+
+void FUnrealAiChatTranscript::AppendRunEvent(const FString& EventLine)
+{
+	if (EventLine.IsEmpty())
+	{
+		return;
+	}
+	for (int32 i = Blocks.Num() - 1; i >= 0; --i)
+	{
+		FUnrealAiChatBlock& Existing = Blocks[i];
+		if (Existing.Kind != EUnrealAiChatBlockKind::RunProgress || Existing.RunId != ActiveRunId)
+		{
+			continue;
+		}
+		if (!Existing.ProgressDetails.IsEmpty())
+		{
+			Existing.ProgressDetails += TEXT("\n");
+		}
+		Existing.ProgressDetails += EventLine;
+		TArray<FString> Lines;
+		Existing.ProgressDetails.ParseIntoArrayLines(Lines, true);
+		static constexpr int32 MaxProgressLines = 40;
+		if (Lines.Num() > MaxProgressLines)
+		{
+			const int32 Start = Lines.Num() - MaxProgressLines;
+			TArray<FString> Trimmed;
+			Trimmed.Reserve(MaxProgressLines);
+			for (int32 Idx = Start; Idx < Lines.Num(); ++Idx)
+			{
+				Trimmed.Add(Lines[Idx]);
+			}
+			Lines = MoveTemp(Trimmed);
+			Existing.ProgressDetails = FString::Join(Lines, TEXT("\n"));
+		}
+		OnStructuralChange.Broadcast();
+		return;
+	}
+	SetRunProgress(TEXT("Run in progress"));
+	AppendRunEvent(EventLine);
+}
+
+void FUnrealAiChatTranscript::ClearRunProgress()
+{
+	for (int32 i = Blocks.Num() - 1; i >= 0; --i)
+	{
+		if (Blocks[i].Kind == EUnrealAiChatBlockKind::RunProgress && Blocks[i].RunId == ActiveRunId)
+		{
+			Blocks.RemoveAt(i);
+		}
+	}
 	OnStructuralChange.Broadcast();
 }
 

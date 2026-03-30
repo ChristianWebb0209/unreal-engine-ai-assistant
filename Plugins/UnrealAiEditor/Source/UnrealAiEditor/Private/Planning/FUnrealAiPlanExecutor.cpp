@@ -14,6 +14,7 @@
 #include "Harness/IUnrealAiAgentHarness.h"
 #include "Logging/LogMacros.h"
 #include "Templates/Function.h"
+#include "UnrealAiEditorModule.h"
 #include "UnrealAiEditorSettings.h"
 
 namespace UnrealAiPlanExecutorPriv
@@ -313,7 +314,7 @@ TSharedRef<FUnrealAiPlanExecutor> FUnrealAiPlanExecutor::Start(
 	const UUnrealAiEditorSettings* EdSet = GetDefault<UUnrealAiEditorSettings>();
 	Exec->bPlanAutoReplan = EdSet->bPlanAutoReplan && !Options.bDisableAutoReplan;
 	Exec->PlanAutoReplanMaxAttempts = FMath::Clamp(EdSet->PlanAutoReplanMaxAttemptsPerRun, 0, 8);
-	Exec->bUseSubagentsPolicy = EdSet->bUseSubagents;
+	Exec->bUseSubagentsPolicy = FUnrealAiEditorModule::IsSubagentsEnabled();
 	Exec->MaxParallelWaveNodesPolicy = Exec->bUseSubagentsPolicy ? 2 : 1;
 	if (Exec->PlanAutoReplanMaxAttempts == 0)
 	{
@@ -384,7 +385,7 @@ TSharedRef<FUnrealAiPlanExecutor> FUnrealAiPlanExecutor::ResumeExecutionFromDag(
 		const UUnrealAiEditorSettings* EdSet = GetDefault<UUnrealAiEditorSettings>();
 		Exec->bPlanAutoReplan = EdSet->bPlanAutoReplan;
 		Exec->PlanAutoReplanMaxAttempts = FMath::Clamp(EdSet->PlanAutoReplanMaxAttemptsPerRun, 0, 8);
-		Exec->bUseSubagentsPolicy = EdSet->bUseSubagents;
+		Exec->bUseSubagentsPolicy = FUnrealAiEditorModule::IsSubagentsEnabled();
 		Exec->MaxParallelWaveNodesPolicy = Exec->bUseSubagentsPolicy ? 2 : 1;
 		if (Exec->PlanAutoReplanMaxAttempts == 0)
 		{

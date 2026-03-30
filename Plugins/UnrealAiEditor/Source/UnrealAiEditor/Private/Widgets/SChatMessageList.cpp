@@ -306,6 +306,7 @@ void SChatMessageList::ClearTranscript()
 {
 	PendingUserAnimId = FGuid();
 	ExpandedToolCallBlockIds.Reset();
+	ExpandedRunProgressBlockIds.Reset();
 	bStickToBottom = true;
 	if (Transcript.IsValid())
 	{
@@ -627,18 +628,52 @@ void SChatMessageList::RebuildTranscript()
 			}
 			break;
 		case EUnrealAiChatBlockKind::RunProgress:
-			MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
-				[
-					SNew(SBorder)
-						.BorderBackgroundColor(FLinearColor(0.2f, 0.2f, 0.25f, 0.6f))
-						.Padding(FMargin(6.f))
-						[
-							SNew(SMultiLineEditableText)
-								.IsReadOnly(true)
-								.AutoWrapText(true)
-								.Text(FText::FromString(B.ProgressLabel))
-						]
-				];
+			{
+				const bool bExpanded = ExpandedRunProgressBlockIds.Contains(B.Id);
+				MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
+					[
+						SNew(SBorder)
+							.BorderBackgroundColor(FLinearColor(0.2f, 0.2f, 0.25f, 0.6f))
+							.Padding(FMargin(8.f))
+							[
+								SNew(SVerticalBox)
+								+ SVerticalBox::Slot().AutoHeight()
+								[
+									SNew(SMultiLineEditableText)
+										.IsReadOnly(true)
+										.AutoWrapText(true)
+										.Text(FText::FromString(B.ProgressLabel))
+								]
+								+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 6.f, 0.f, 0.f)
+								[
+									SNew(SButton)
+										.Visibility(B.ProgressDetails.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+										.Text(bExpanded ? LOCTEXT("HideRunDetails", "Hide details") : LOCTEXT("ShowRunDetails", "Show details"))
+										.OnClicked_Lambda([this, BlockId = B.Id]()
+										{
+											if (ExpandedRunProgressBlockIds.Contains(BlockId))
+											{
+												ExpandedRunProgressBlockIds.Remove(BlockId);
+											}
+											else
+											{
+												ExpandedRunProgressBlockIds.Add(BlockId);
+											}
+											ScheduleRebuildTranscript();
+											return FReply::Handled();
+										})
+								]
+								+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 6.f, 0.f, 0.f)
+								[
+									SNew(SMultiLineEditableText)
+										.Visibility(bExpanded ? EVisibility::Visible : EVisibility::Collapsed)
+										.IsReadOnly(true)
+										.AutoWrapText(true)
+										.Text(FText::FromString(B.ProgressDetails))
+								]
+							]
+					];
+			}
 			break;
 		case EUnrealAiChatBlockKind::Notice:
 			MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)

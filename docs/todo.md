@@ -7,7 +7,7 @@
 - [x] Automatic replan on node failure is implemented and bounded (`bPlanAutoReplan`, per-run attempt cap).
 - [x] Deterministic fail-mode routing is implemented for node failures (validation/tool-budget failures skip dependents; stream/transport/empty-assistant failures can trigger auto-replan).
 - [x] Persistence/resume path now preserves existing node statuses when resuming from DAG and flushes context state at plan finish.
-- [x] Guarded wave scheduling prep is in place behind `bUseSubagents` policy with deterministic wave selection + diagnostics; execution remains single-child serial until true concurrent dispatch is enabled.
+- [x] Guarded wave scheduling prep is in place behind plugin setting `agent.useSubagents` (`FUnrealAiEditorModule::IsSubagentsEnabled`) with deterministic wave selection + diagnostics; execution remains single-child serial until true concurrent dispatch is enabled.
 - [ ] Add optional per-node verification hooks (e.g., required tool seen before success).
 - [ ] Upgrade guarded wave prep into true concurrent child execution with merge ordering and stricter conflict policy.
 

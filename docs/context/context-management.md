@@ -2,7 +2,7 @@
 
 This document is the **single source of truth** for how the Unreal AI Editor plugin **assembles, budgets, persists, and injects** editor-side context into LLM requests. It also covers **planning artifacts** (complexity signal, todo plans, plan DAG state) that live in the same persistence layer.
 
-**Related (not duplicated here):** harness iteration and scripts in [`AGENT_HARNESS_HANDOFF.md`](../tooling/AGENT_HARNESS_HANDOFF.md). For current testing/review workflow, see [`HEADLESS_TESTING_PLAYBOOK.md`](HEADLESS_TESTING_PLAYBOOK.md). Plan-mode DAG: C++ under `Plugins/UnrealAiEditor/.../Private/Planning/`; overview [`planning/subagents-architecture.md`](../planning/subagents-architecture.md); prompts **`09-plan-dag.md`** / **`11-plan-node-execution.md`**. Legacy todo persistence may still appear in state.
+**Related (not duplicated here):** harness iteration and scripts in [`AGENT_HARNESS_HANDOFF.md`](../tooling/AGENT_HARNESS_HANDOFF.md). For current testing/review workflow, see [`HEADLESS_TESTING_PLAYBOOK.md`](HEADLESS_TESTING_PLAYBOOK.md). Plan-mode DAG: C++ under `Plugins/UnrealAiEditor/.../Private/Planning/`; overview [`planning/subagents-architecture.md`](../planning/subagents-architecture.md); prompts **`09-plan-dag.md`** / **`11-plan-node-execution.md`**. Plan **subagent wave policy** is **`agent.useSubagents`** in **`plugin_settings.json`** (AI Settings tab), not context ranking. Legacy todo persistence may still appear in state.
 
 ---
 

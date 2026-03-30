@@ -50,13 +50,6 @@ public:
 	bool bAutoContinuePlanSteps;
 
 	/**
-	 * When true (default), future plan-DAG execution may schedule parallel child Agent runs for independent ready nodes.
-	 * When false, plan nodes always run serially (current behavior). See docs/planning/subagents-architecture.md.
-	 */
-	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Use subagents (parallel plan nodes)"))
-	bool bUseSubagents = true;
-
-	/**
 	 * When true, plan mode may run an extra Plan-mode LLM pass after a node failure or headed scenario wall stall
 	 * (between sub-turns) to merge a revised DAG for remaining work. See docs/todo.md (automatic replan).
 	 */

@@ -89,7 +89,7 @@ The plugin’s **structured** planning path is **Plan-mode DAG** (`FUnrealAiPlan
 | **Plan-mode DAG** | Plan chat: assistant emits **`unreal_ai.plan_dag`** JSON (no tools in planner pass). | `Private/Planning/UnrealAiPlanDag`, `Private/Planning/FUnrealAiPlanExecutor` |
 | **Legacy todo plan** | **`agent_emit_todo_plan`** deprecated (not in model tool list); **`activeTodoPlan`** may load from old saves. | Context service + harness; summaries via `Private/Planning/UnrealAiStructuredPlanSummary` |
 
-Plan DAG execution now uses deterministic ready-wave selection with guarded width policy (`bUseSubagents`), but child dispatch is currently single-turn serial. Plan-scoped status writes target the parent thread explicitly, and node failures are categorized for deterministic replan-vs-skip handling.
+Plan DAG execution now uses deterministic ready-wave selection with guarded width policy (`agent.useSubagents` in `plugin_settings.json`, read via `FUnrealAiEditorModule::IsSubagentsEnabled()`), but child dispatch is currently single-turn serial. Plan-scoped status writes target the parent thread explicitly, and node failures are categorized for deterministic replan-vs-skip handling.
 
 ---
 
@@ -115,7 +115,7 @@ Prefer **structured tool definitions + validation**. Fine-tune only if metrics s
 
 ## 5. Multi-agent handoff (status)
 
-This plugin build does not expose `subagent_spawn`, `worker_merge_results`, or a merge orchestrator. Tool results and plan state flow through the single harness + context service. `bUseSubagents` currently gates wave-selection policy and diagnostics, not true concurrent child worker execution.
+This plugin build does not expose `subagent_spawn`, `worker_merge_results`, or a merge orchestrator. Tool results and plan state flow through the single harness + context service. Plugin setting `agent.useSubagents` currently gates wave-selection policy and diagnostics, not true concurrent child worker execution.
 
 ---
 
@@ -233,4 +233,4 @@ Many Unreal-oriented integrations use **standard models** + **structured tools**
 
 ---
 
-*Document version: 1.3 â€” removes subagent/worker-merge product scope; aligns with `Private/Planning/` plan DAG + todo summaries. v1.2: MVP plugin-only / no product backend (Â§1.4). v1.1: no vector search (Â§1.3).*
+*Document version: 1.4 — subagent wave policy documented as `agent.useSubagents` in `plugin_settings.json` (not Project Settings `bUseSubagents`). v1.3 — removes subagent/worker-merge product scope; aligns with `Private/Planning/` plan DAG + todo summaries. v1.2: MVP plugin-only / no product backend (§1.4). v1.1: no vector search (§1.3).*
