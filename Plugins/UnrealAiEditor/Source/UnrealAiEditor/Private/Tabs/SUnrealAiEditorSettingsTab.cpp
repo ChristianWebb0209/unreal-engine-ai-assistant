@@ -96,7 +96,8 @@ namespace UnrealAiSettingsTemplate
 		"\t\t\"embeddingBatchSize\": 8,\n"
 		"\t\t\"minDelayMsBetweenEmbeddingBatches\": 0,\n"
 		"\t\t\"indexMemoryRecordsInVectorStore\": false,\n"
-		"\t\t\"blueprintMaxFeatureRecords\": 0\n"
+		"\t\t\"blueprintMaxFeatureRecords\": 0,\n"
+		"\t\t\"contextAggression\": 0.5\n"
 		"\t},\n"
 		"\t\"agent\": {\n"
 		"\t\t\"useSubagents\": true,\n"
@@ -176,6 +177,33 @@ namespace UnrealAiSettingsTabUtil
 			return TEXT("xai");
 		}
 		return TEXT("custom");
+	}
+
+	static FString PresetToSectionId(const FString& PresetId)
+	{
+		if (PresetId == TEXT("openrouter")
+			|| PresetId == TEXT("openai")
+			|| PresetId == TEXT("anthropic")
+			|| PresetId == TEXT("groq")
+			|| PresetId == TEXT("deepseek")
+			|| PresetId == TEXT("xai")
+			|| PresetId == TEXT("azure"))
+		{
+			return PresetId;
+		}
+		return TEXT("custom");
+	}
+
+	static FString PresetToSectionLabel(const FString& PresetId)
+	{
+		if (PresetId == TEXT("openrouter")) return TEXT("OpenRouter");
+		if (PresetId == TEXT("openai")) return TEXT("OpenAI");
+		if (PresetId == TEXT("anthropic")) return TEXT("Anthropic");
+		if (PresetId == TEXT("groq")) return TEXT("Groq");
+		if (PresetId == TEXT("deepseek")) return TEXT("DeepSeek");
+		if (PresetId == TEXT("xai")) return TEXT("xAI");
+		if (PresetId == TEXT("azure")) return TEXT("Azure OpenAI");
+		return TEXT("Custom");
 	}
 
 	static const TMap<FString, TArray<FString>>& GetKnownProviderModels()
@@ -1226,6 +1254,20 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 														.OnTextChanged_Lambda([this](const FText& T)
 														{
 															RetrievalBlueprintMaxFeatureRecordsStr = T.ToString();
+															OnAnySettingsChanged(T);
+														})
+												]
+												+ SGridPanel::Slot(0, 17).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalCtxAggLbl", "Context aggression (0-1)"))
+												]
+												+ SGridPanel::Slot(1, 17).Padding(4.f)
+												[
+													SNew(SEditableTextBox)
+														.Text_Lambda([this]() { return FText::FromString(RetrievalContextAggressionStr); })
+														.OnTextChanged_Lambda([this](const FText& T)
+														{
+															RetrievalContextAggressionStr = T.ToString();
 															OnAnySettingsChanged(T);
 														})
 												]
@@ -2521,6 +2563,7 @@ bool SUnrealAiEditorSettingsTab::LoadRetrievalSettingsFromRoot(const TSharedPtr<
 	RetrievalMinDelayMsBetweenBatchesStr = TEXT("0");
 	bRetrievalIndexMemoryRecordsInVectorStore = false;
 	RetrievalBlueprintMaxFeatureRecordsStr = TEXT("0");
+	RetrievalContextAggressionStr = TEXT("0.5");
 	if (!Root.IsValid())
 	{
 		return false;
@@ -2610,6 +2653,10 @@ bool SUnrealAiEditorSettingsTab::LoadRetrievalSettingsFromRoot(const TSharedPtr<
 	{
 		RetrievalBlueprintMaxFeatureRecordsStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
 	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("contextAggression"), Number))
+	{
+		RetrievalContextAggressionStr = FString::Printf(TEXT("%.2f"), FMath::Clamp(Number, 0.0, 1.0));
+	}
 	return true;
 }
 
@@ -2683,6 +2730,7 @@ void SUnrealAiEditorSettingsTab::WriteRetrievalSettingsToRoot(TSharedPtr<FJsonOb
 	RetrievalObj->SetNumberField(TEXT("minDelayMsBetweenEmbeddingBatches"), FMath::Max(0, FCString::Atoi(*RetrievalMinDelayMsBetweenBatchesStr)));
 	RetrievalObj->SetBoolField(TEXT("indexMemoryRecordsInVectorStore"), bRetrievalIndexMemoryRecordsInVectorStore);
 	RetrievalObj->SetNumberField(TEXT("blueprintMaxFeatureRecords"), FMath::Max(0, FCString::Atoi(*RetrievalBlueprintMaxFeatureRecordsStr)));
+	RetrievalObj->SetNumberField(TEXT("contextAggression"), FMath::Clamp(FCString::Atof(*RetrievalContextAggressionStr), 0.0f, 1.0f));
 
 	Root->SetObjectField(TEXT("retrieval"), RetrievalObj);
 }
@@ -2912,6 +2960,9 @@ void SUnrealAiEditorSettingsTab::RefreshUsageHeaderText()
 void SUnrealAiEditorSettingsTab::ApplyCompanyPreset(FDynSectionRow& Row, const FString& PresetId)
 {
 	Row.CompanyPreset = PresetId;
+	// Keep section metadata aligned with the selected provider preset.
+	Row.Id = UnrealAiSettingsTabUtil::PresetToSectionId(PresetId);
+	Row.Label = UnrealAiSettingsTabUtil::PresetToSectionLabel(PresetId);
 	if (PresetId == TEXT("openrouter"))
 	{
 		Row.BaseUrl = TEXT("https://openrouter.ai/api/v1");
@@ -3439,6 +3490,14 @@ void SUnrealAiEditorSettingsTab::RebuildDynamicRows()
 										if (SectionRows[SectionIdx].BaseUrlBox.IsValid())
 										{
 											SectionRows[SectionIdx].BaseUrlBox->SetText(FText::FromString(SectionRows[SectionIdx].BaseUrl));
+										}
+										if (SectionRows[SectionIdx].IdBox.IsValid())
+										{
+											SectionRows[SectionIdx].IdBox->SetText(FText::FromString(SectionRows[SectionIdx].Id));
+										}
+										if (SectionRows[SectionIdx].LabelBox.IsValid())
+										{
+											SectionRows[SectionIdx].LabelBox->SetText(FText::FromString(SectionRows[SectionIdx].Label));
 										}
 										OnAnySettingsChanged(FText::GetEmpty());
 										RebuildDynamicRows();

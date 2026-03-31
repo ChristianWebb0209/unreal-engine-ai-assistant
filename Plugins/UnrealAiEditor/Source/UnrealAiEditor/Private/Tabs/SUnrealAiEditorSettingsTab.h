@@ -203,6 +203,7 @@ private:
 	FString RetrievalMinDelayMsBetweenBatchesStr = TEXT("0");
 	bool bRetrievalIndexMemoryRecordsInVectorStore = false;
 	FString RetrievalBlueprintMaxFeatureRecordsStr = TEXT("0");
+	FString RetrievalContextAggressionStr = TEXT("0.5");
 
 	TArray<TSharedPtr<FString>> RetrievalRootPresetOptions;
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> RetrievalRootPresetCombo;
