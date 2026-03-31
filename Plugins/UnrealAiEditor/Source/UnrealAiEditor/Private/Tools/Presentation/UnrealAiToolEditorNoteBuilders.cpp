@@ -1,20 +1,7 @@
 #include "Tools/Presentation/UnrealAiToolEditorNoteBuilders.h"
 
-#include "Misc/Paths.h"
-#include "HAL/FileManager.h"
-
-#include "Tools/Presentation/UnrealAiBlueprintThumbnailCapture.h"
-
-namespace
-{
-	static FString MakeSafeToolNoteFileBase(const FString& In)
-	{
-		FString S = In;
-		S.ReplaceInline(TEXT("/"), TEXT("_"));
-		S.ReplaceInline(TEXT("."), TEXT("_"));
-		return S;
-	}
-}
+#include "UObject/UObjectGlobals.h"
+#include "UObject/Object.h"
 
 TSharedPtr<FUnrealAiToolEditorPresentation> UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(
 	const FString& BlueprintObjectPath,
@@ -33,7 +20,6 @@ TSharedPtr<FUnrealAiToolEditorPresentation> UnrealAiToolEditorNoteBuilders::Make
 	Pres->AssetLinks.Add(FUnrealAiToolAssetLink{Label, BlueprintObjectPath});
 
 	// Compose markdown (small subset handled by markdown UI).
-	// Tools are responsible for any additional markdown beyond this scaffold.
 	if (!ToolMarkdownBody.IsEmpty())
 	{
 		Pres->MarkdownBody = ToolMarkdownBody + TEXT("\n\n");
@@ -44,17 +30,8 @@ TSharedPtr<FUnrealAiToolEditorPresentation> UnrealAiToolEditorNoteBuilders::Make
 		Pres->MarkdownBody += FString::Printf(TEXT("- Graph: %s\n"), *GraphName);
 	}
 
-	// Best-effort thumbnail capture: keep it small; failures are non-fatal.
-	const uint32 W = 420;
-	const uint32 H = 300;
-	const FString OutDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAiEditor"), TEXT("ToolNotes"));
-	const FString SafeBase = MakeSafeToolNoteFileBase(BlueprintObjectPath);
-	const FString OutPath = FPaths::Combine(OutDir, FString::Printf(TEXT("%s.png"), *SafeBase));
-
-	if (UnrealAiBlueprintThumbnailCapture::TryCaptureBlueprintThumbnailPng(BlueprintObjectPath, OutPath, W, H))
-	{
-		Pres->ImageFilePath = OutPath;
-	}
+	// No ImageFilePath: blueprint RenderThumbnail output is often unusable in chat (magenta / garbage when
+	// graph previews or materials do not resolve cleanly). Use the markdown link + asset hyperlink row instead.
 
 	return Pres;
 }

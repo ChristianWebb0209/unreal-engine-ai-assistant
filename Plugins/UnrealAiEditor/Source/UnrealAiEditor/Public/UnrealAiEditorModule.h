@@ -37,6 +37,12 @@ public:
 	static void HydrateSubagentsFromJsonRoot(const TSharedPtr<FJsonObject>& Root);
 	static FSimpleMulticastDelegate& OnSubagentsPolicyChanged();
 
+	/** Global: allow runtime/PIE tools (pie_start/stop/status, runtime collision/physics helpers). Persisted in plugin_settings.json under agent.enablePieTools. */
+	static bool IsPieToolsEnabled();
+	static void SetPieToolsEnabled(bool bEnabled);
+	static void HydratePieToolsFromJsonRoot(const TSharedPtr<FJsonObject>& Root);
+	static FSimpleMulticastDelegate& OnPieToolsPolicyChanged();
+
 	/**
 	 * Agent code preference: auto | blueprint_first | cpp_first | blueprint_only | cpp_only.
 	 * Persisted under plugin_settings.json agent.codeTypePreference.
@@ -83,6 +89,7 @@ private:
 	void UnregisterSettings();
 	void UnregisterOpenChatOnStartup();
 	void UnregisterSaveOpenChatsOnExit();
+	void TryKickoffStartupDiscoveryAndIndexing(const TSharedPtr<FUnrealAiBackendRegistry>& Reg, const FString& ProjectId);
 
 	void BeginRestoreOpenChats(const TArray<FGuid>& Ids);
 	void SaveOpenAgentChatTabsNow();
@@ -115,6 +122,8 @@ private:
 
 	bool bEditorFocusEnabled = false;
 	bool bSubagentsEnabled = true;
+	bool bPieToolsEnabled = false;
 	FString AgentCodeTypePreference = TEXT("auto");
 	bool bAutoConfirmDestructive = true;
+	bool bStartupDiscoveryBootstrapTriggered = false;
 };

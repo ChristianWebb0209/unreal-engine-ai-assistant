@@ -49,11 +49,10 @@ public class UnrealAiEditor : ModuleRules
 				"RenderCore",
 				"LevelSequence",
 				"MovieScene",
-				"ImageWrapper",
 				"SQLiteCore",
 				"Kismet",
 				"KismetWidgets",
-				"GraphEditor"
+				"GraphEditor",
 			});
 	}
 }

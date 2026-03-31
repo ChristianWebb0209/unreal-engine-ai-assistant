@@ -443,14 +443,26 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 
 	if (ToolId == TEXT("pie_start"))
 	{
+		if (!FUnrealAiEditorModule::IsPieToolsEnabled())
+		{
+			return UnrealAiToolJson::Error(TEXT("pie_start disabled by Unreal AI Editor settings (enable PIE tools in plugin settings to use)."));
+		}
 		return UnrealAiDispatch_PieStart(A);
 	}
 	if (ToolId == TEXT("pie_stop"))
 	{
+		if (!FUnrealAiEditorModule::IsPieToolsEnabled())
+		{
+			return UnrealAiToolJson::Error(TEXT("pie_stop disabled by Unreal AI Editor settings (enable PIE tools in plugin settings to use)."));
+		}
 		return UnrealAiDispatch_PieStop(A);
 	}
 	if (ToolId == TEXT("pie_status"))
 	{
+		if (!FUnrealAiEditorModule::IsPieToolsEnabled())
+		{
+			return UnrealAiToolJson::Error(TEXT("pie_status disabled by Unreal AI Editor settings (enable PIE tools in plugin settings to use)."));
+		}
 		return UnrealAiDispatch_PieStatus(A);
 	}
 

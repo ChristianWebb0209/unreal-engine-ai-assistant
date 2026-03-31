@@ -2,8 +2,11 @@
 
 #include "Tools/UnrealAiToolJson.h"
 
+#include "Async/TaskGraphInterfaces.h"
 #include "Editor/EditorEngine.h"
 #include "Editor.h"
+#include "HttpModule.h"
+#include "HttpManager.h"
 #include "UnrealEdGlobals.h"
 #include "PlayInEditorDataTypes.h"
 #include "HAL/PlatformProcess.h"
@@ -69,9 +72,39 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_PieStop(const TSharedPtr<FJsonObj
 		O->SetStringField(TEXT("note"), TEXT("PIE not running"));
 		return UnrealAiToolJson::Ok(O);
 	}
+	// RequestEndPlayMap only queues end-play; we need to pump the game thread so the teardown runs
+	// before we return, otherwise immediate pie_status checks can observe stale "still playing" state.
 	GEditor->RequestEndPlayMap();
+	{
+		// EndPlayMap itself is executed from UEditorEngine::Tick when the queued flag is observed.
+		// We cannot safely rely on harness pumping here, so tick the editor a small number of times.
+		// Keep it bounded to avoid deadlocks/hangs.
+		const double Deadline = FPlatformTime::Seconds() + 10.0;
+		for (int32 i = 0; i < 50 && FPlatformTime::Seconds() < Deadline; ++i)
+		{
+			const bool bAllStopped = !GEditor->IsPlayingSessionInEditor()
+				&& !GEditor->IsPlaySessionInProgress()
+				&& !GEditor->IsPlaySessionRequestQueued();
+			if (bAllStopped)
+			{
+				break;
+			}
+
+			FHttpModule::Get().GetHttpManager().Tick(0.f);
+			// bIdleMode=true reduces expensive/editor-idle side effects vs idleMode=false.
+			GEditor->Tick(0.f, true /*bIdleMode*/);
+			FPlatformProcess::SleepNoStats(0.001f);
+		}
+	}
+	const bool bPlaying = GEditor->IsPlayingSessionInEditor();
+	const bool bInProgress = GEditor->IsPlaySessionInProgress();
+	const bool bQueued = GEditor->IsPlaySessionRequestQueued();
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
+	O->SetBoolField(TEXT("playing_in_editor"), bPlaying);
+	O->SetBoolField(TEXT("play_session_in_progress"), bInProgress);
+	O->SetBoolField(TEXT("play_session_request_queued"), bQueued);
+	O->SetStringField(TEXT("note"), TEXT("PIE stop requested; pumped teardown up to 15s."));
 	return UnrealAiToolJson::Ok(O);
 }
 

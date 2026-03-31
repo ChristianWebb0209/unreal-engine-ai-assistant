@@ -16,6 +16,9 @@
 #include "Selection.h"
 #include "UnrealClient.h"
 #include "UnrealEdGlobals.h"
+#include "HttpModule.h"
+#include "HttpManager.h"
+#include "HAL/PlatformProcess.h"
 
 static FEditorViewportClient* GetVc()
 {
@@ -380,6 +383,26 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportCapturePng(const TSharedP
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportCaptureDelayed(const TSharedPtr<FJsonObject>& Args)
 {
+	int32 DelayFrames = 0;
+	if (Args)
+	{
+		Args->TryGetNumberField(TEXT("delay_frames"), DelayFrames);
+	}
+	DelayFrames = FMath::Max(0, DelayFrames);
+
+	// The "delayed" variant is used as a deterministic frame pump in strict/harness runs.
+	// Previously this tool ignored delay_frames and simply queued the screenshot immediately.
+	// Tick the editor for the requested number of frames so queued state changes (eg PIE teardown) land.
+	if (DelayFrames > 0 && GEditor)
+	{
+		for (int32 i = 0; i < DelayFrames; ++i)
+		{
+			FHttpModule::Get().GetHttpManager().Tick(0.f);
+			GEditor->Tick(0.f, true /*bIdleMode*/);
+			FPlatformProcess::SleepNoStats(0.001f);
+		}
+	}
+
 	return UnrealAiDispatch_ViewportCapturePng(Args);
 }
 

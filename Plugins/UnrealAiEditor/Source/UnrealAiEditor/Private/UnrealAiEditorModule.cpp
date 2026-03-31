@@ -6,6 +6,7 @@
 #include "Backend/IUnrealAiPersistence.h"
 #include "Backend/UnrealAiBackendRegistry.h"
 #include "Context/UnrealAiProjectId.h"
+#include "Context/UnrealAiProjectTreeSampler.h"
 #include "Context/UnrealAiContextRankingPolicy.h"
 #include "Context/AgentContextTypes.h"
 #include "Context/IAgentContextService.h"
@@ -27,6 +28,7 @@
 #include "ContentBrowserModule.h"
 #include "Editor.h"
 #include "Misc/CommandLine.h"
+#include "Misc/App.h"
 #include "Framework/Commands/UIAction.h"
 #include "Framework/Commands/UICommandList.h"
 #include "Framework/Docking/TabManager.h"
@@ -49,14 +51,17 @@
 #include "Misc/UnrealAiRuntimeDefaults.h"
 #include "Misc/UnrealAiRecentUiTracker.h"
 #include "Misc/Guid.h"
+#include "Observability/UnrealAiBackgroundOpsLog.h"
 #include "WorkspaceMenuStructureModule.h"
 #include "Containers/Ticker.h"
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/Paths.h"
+#include "Tools/UnrealAiToolProjectPathAllowlist.h"
 #include "Tools/UnrealAiToolCatalogMatrixRunner.h"
 #include "Harness/UnrealAiHarnessScenarioRunner.h"
+#include "Harness/UnrealAiHarnessTurnPaths.h"
 #include "BlueprintFormat/UnrealAiBlueprintFormatEditorRegistration.h"
 #include "Retrieval/IUnrealAiRetrievalService.h"
 #include "Misc/FileHelper.h"
@@ -297,6 +302,8 @@ void FUnrealAiEditorModule::StartupModule()
 				return;
 			}
 
+			const FScopedHarnessStepOutputDir HarnessStepScopeForAssertions(OutDir);
+
 			FString JsonText;
 			if (!FFileHelper::LoadFileToString(JsonText, *AssertionsPath))
 			{
@@ -533,7 +540,14 @@ void FUnrealAiEditorModule::StartupModule()
 						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
 						continue;
 					}
-					const FString Abs = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir(), RelativePath);
+					FString Abs;
+					FString ResolveErr;
+					if (!UnrealAiResolveProjectFilePath(RelativePath, Abs, ResolveErr))
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("project_file_exists: %s"), *ResolveErr));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
 					if (!IFileManager::Get().FileExists(*Abs))
 					{
 						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("file missing: %s"), *RelativePath));
@@ -1629,6 +1643,30 @@ void FUnrealAiEditorModule::HydrateSubagentsFromJsonRoot(const TSharedPtr<FJsonO
 	GUnrealAiModule->bSubagentsEnabled = b;
 }
 
+bool FUnrealAiEditorModule::IsPieToolsEnabled()
+{
+	return GUnrealAiModule ? GUnrealAiModule->bPieToolsEnabled : false;
+}
+
+void FUnrealAiEditorModule::HydratePieToolsFromJsonRoot(const TSharedPtr<FJsonObject>& Root)
+{
+	if (!GUnrealAiModule || !Root.IsValid())
+	{
+		return;
+	}
+	bool b = false;
+	const TSharedPtr<FJsonObject>* AgentObj = nullptr;
+	if (Root->TryGetObjectField(TEXT("agent"), AgentObj) && AgentObj && AgentObj->IsValid())
+	{
+		bool Tmp = false;
+		if ((*AgentObj)->TryGetBoolField(TEXT("enablePieTools"), Tmp))
+		{
+			b = Tmp;
+		}
+	}
+	GUnrealAiModule->bPieToolsEnabled = b;
+}
+
 namespace UnrealAiEditorModuleAgentPolicy
 {
 	static FString SanitizeCodeTypePreference(FString In)
@@ -1852,6 +1890,57 @@ void FUnrealAiEditorModule::SetSubagentsEnabled(bool bEnabled)
 }
 
 FSimpleMulticastDelegate& FUnrealAiEditorModule::OnSubagentsPolicyChanged()
+{
+	static FSimpleMulticastDelegate Delegate;
+	return Delegate;
+}
+
+void FUnrealAiEditorModule::SetPieToolsEnabled(bool bEnabled)
+{
+	if (!GUnrealAiModule)
+	{
+		return;
+	}
+	if (GUnrealAiModule->bPieToolsEnabled == bEnabled)
+	{
+		return;
+	}
+	GUnrealAiModule->bPieToolsEnabled = bEnabled;
+
+	if (GUnrealAiModule->BackendRegistry.IsValid())
+	{
+		if (IUnrealAiPersistence* P = GUnrealAiModule->BackendRegistry->GetPersistence())
+		{
+			FString Json;
+			if (P->LoadSettingsJson(Json) && !Json.IsEmpty())
+			{
+				TSharedPtr<FJsonObject> Root;
+				const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+				if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
+				{
+					TSharedPtr<FJsonObject> AgentObj = MakeShared<FJsonObject>();
+					const TSharedPtr<FJsonObject>* ExistingAgent = nullptr;
+					if (Root->TryGetObjectField(TEXT("agent"), ExistingAgent) && ExistingAgent && ExistingAgent->IsValid())
+					{
+						AgentObj = UnrealAiEditorModulePriv::CloneJsonObjectShallow(*ExistingAgent);
+					}
+					AgentObj->SetBoolField(TEXT("enablePieTools"), bEnabled);
+					Root->SetObjectField(TEXT("agent"), AgentObj);
+					FString Out;
+					const TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
+					if (FJsonSerializer::Serialize(Root.ToSharedRef(), W))
+					{
+						P->SaveSettingsJson(Out);
+					}
+				}
+			}
+		}
+	}
+
+	OnPieToolsPolicyChanged().Broadcast();
+}
+
+FSimpleMulticastDelegate& FUnrealAiEditorModule::OnPieToolsPolicyChanged()
 {
 	static FSimpleMulticastDelegate Delegate;
 	return Delegate;
@@ -2401,6 +2490,10 @@ void FUnrealAiEditorModule::RegisterOpenChatOnStartup()
 			return;
 		}
 		const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+		if (GUnrealAiModule)
+		{
+			GUnrealAiModule->TryKickoffStartupDiscoveryAndIndexing(Reg, ProjectId);
+		}
 		TArray<FGuid> OpenThreads;
 		if (P->LoadOpenChatTabsState(ProjectId, OpenThreads) && OpenThreads.Num() > 0)
 		{
@@ -2426,6 +2519,75 @@ void FUnrealAiEditorModule::RegisterOpenChatOnStartup()
 			GUnrealAiModule->ScheduleDeferredAgentChatDocumentInsert(Reg);
 		}
 	});
+}
+
+void FUnrealAiEditorModule::TryKickoffStartupDiscoveryAndIndexing(
+	const TSharedPtr<FUnrealAiBackendRegistry>& Reg,
+	const FString& ProjectId)
+{
+	const FString Cmd = FCommandLine::Get();
+	if (FApp::IsUnattended()
+		|| Cmd.Contains(TEXT("UnrealAi.RunAgentTurn"))
+		|| Cmd.Contains(TEXT("UnrealAi.RunStrictAssertions"))
+		|| Cmd.Contains(TEXT("Automation RunTests"))
+		|| Cmd.Contains(TEXT("Automation ListTests")))
+	{
+		return;
+	}
+
+	if (bStartupDiscoveryBootstrapTriggered || !Reg.IsValid() || ProjectId.IsEmpty())
+	{
+		return;
+	}
+	bStartupDiscoveryBootstrapTriggered = true;
+
+	const FProjectTreeSummary& Summary = UnrealAiProjectTreeSampler::GetOrRefreshProjectSummary(
+		ProjectId,
+		true,
+		TEXT("startup_bootstrap"));
+	const FString DiscoveryDetail = UnrealAiBackgroundOpsLog::BuildDetailJson(
+		TEXT("startup_project_tree_refresh"),
+		TEXT("ok"),
+		ProjectId,
+		TEXT(""),
+		Summary.LastQueryDurationMs,
+		[&Summary](const TSharedPtr<FJsonObject>& O)
+		{
+			O->SetStringField(TEXT("status"), Summary.LastQueryStatus);
+			O->SetNumberField(TEXT("top_folder_count"), Summary.TopLevelFolders.Num());
+		});
+	UnrealAiBackgroundOpsLog::EmitLogLine(
+		TEXT("startup_project_tree_refresh"),
+		TEXT("ok"),
+		Summary.LastQueryDurationMs,
+		DiscoveryDetail);
+
+	IUnrealAiRetrievalService* Retrieval = Reg->GetRetrievalService();
+	if (!Retrieval)
+	{
+		return;
+	}
+	const FUnrealAiRetrievalSettings RetrievalSettings = Retrieval->LoadSettings();
+	if (!RetrievalSettings.bEnabled || !RetrievalSettings.bAutoIndexOnProjectOpen)
+	{
+		return;
+	}
+	Retrieval->RequestRebuild(ProjectId);
+	const FString RetrievalDetail = UnrealAiBackgroundOpsLog::BuildDetailJson(
+		TEXT("startup_retrieval_rebuild"),
+		TEXT("queued"),
+		ProjectId,
+		TEXT(""),
+		0.0,
+		[](const TSharedPtr<FJsonObject>& O)
+		{
+			O->SetStringField(TEXT("reason"), TEXT("autoIndexOnProjectOpen"));
+		});
+	UnrealAiBackgroundOpsLog::EmitLogLine(
+		TEXT("startup_retrieval_rebuild"),
+		TEXT("queued"),
+		0.0,
+		RetrievalDetail);
 }
 
 void FUnrealAiEditorModule::RegisterSaveOpenChatsOnExit()

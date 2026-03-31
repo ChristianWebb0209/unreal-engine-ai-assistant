@@ -8,6 +8,36 @@
 
 namespace
 {
+	static FString NormalizeAssetObjectPath(FString S)
+	{
+		S.TrimStartAndEndInline();
+		if (S.IsEmpty())
+		{
+			return S;
+		}
+		if (S.StartsWith(TEXT("\"")) && S.EndsWith(TEXT("\"")) && S.Len() > 1)
+		{
+			S = S.Mid(1, S.Len() - 2);
+			S.TrimStartAndEndInline();
+		}
+		if (S.Contains(TEXT(":")))
+		{
+			return S;
+		}
+		const int32 Slash = S.Find(TEXT("/"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+		if (Slash == INDEX_NONE || Slash + 1 >= S.Len())
+		{
+			return S;
+		}
+		const FString Leaf = S.Mid(Slash + 1);
+		// Convert package path form "/Game/Foo/Bar" to object path form "/Game/Foo/Bar.Bar".
+		if (!Leaf.Contains(TEXT(".")))
+		{
+			S = FString::Printf(TEXT("%s.%s"), *S, *Leaf);
+		}
+		return S;
+	}
+
 	static FString NormalizePotentialObjectPath(FString S)
 	{
 		S.TrimStartAndEndInline();
@@ -15,6 +45,7 @@ namespace
 		{
 			S = FString(TEXT("/")) + S;
 		}
+		S = NormalizeAssetObjectPath(S);
 		return S;
 	}
 
@@ -82,6 +113,12 @@ bool UnrealAiEditorNavigation::NavigateToAssetObjectPath(const FString& ObjectPa
 		return false;
 	}
 
+	// Surface navigation in the Content Drawer and open the asset editor.
+	{
+		TArray<UObject*> ToSync;
+		ToSync.Add(Obj);
+		GEditor->SyncBrowserToObjects(ToSync);
+	}
 	Sub->OpenEditorForAsset(Obj);
 	return true;
 }
@@ -111,7 +148,7 @@ bool UnrealAiEditorNavigation::NavigateFromChatMarkdownTarget(const FString& Tar
 	}
 
 	// Subobject / actor paths (e.g. /Game/Maps/Foo.Foo:PersistentLevel.StaticMeshActor_0)
-	if (Target.Contains(TEXT(":")))
+	if (Target.Contains(TEXT(":")) || Target.StartsWith(TEXT("PersistentLevel.")))
 	{
 		if (AActor* Act = Cast<AActor>(StaticFindObject(AActor::StaticClass(), nullptr, *Target, EFindObjectFlags::None)))
 		{

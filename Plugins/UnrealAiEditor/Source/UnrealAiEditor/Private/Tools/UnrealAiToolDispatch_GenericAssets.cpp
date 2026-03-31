@@ -464,6 +464,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetCreate(const TSharedPtr<FJso
 			TEXT("asset_create"),
 			SuggestedArgs);
 	}
+	if (AssetClass->HasAnyClassFlags(CLASS_Abstract))
+	{
+		return UnrealAiToolJson::Error(FString::Printf(
+			TEXT("asset_create: asset_class is abstract and cannot be instantiated (%s). Use a concrete subclass, or /Script/Engine.Blueprint with parent_class set to a concrete type."),
+			*ClassPath));
+	}
 
 	// If the asset already exists, return success to prevent repeated CreateAsset failures
 	// from consuming agent LLM rounds.
