@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Context/AgentContextTypes.h"
+#include "Retrieval/UnrealAiRetrievalTypes.h"
 
 namespace UnrealAiProjectTreeSampler
 {
@@ -27,6 +28,14 @@ namespace UnrealAiProjectTreeSampler
 		const FString& AssetFamily,
 		const FString& FallbackPath,
 		bool bForceRefresh = false);
+
+	/**
+	 * Phase 1: inject retrieval-derived folder/path hints into an already sampled summary.
+	 * This is additive and keeps Asset Registry defaults when retrieval has no usable hits.
+	 */
+	void ApplyRetrievalHintsToSummary(
+		FProjectTreeSummary& InOutSummary,
+		const TArray<FUnrealAiRetrievalSnippet>& RetrievalSnippets);
 
 	/** Build compact context block that helps path grounding for create flows. */
 	FString BuildContextBlurb(const FProjectTreeSummary& Summary);
