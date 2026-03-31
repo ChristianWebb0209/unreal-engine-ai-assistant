@@ -266,15 +266,12 @@ For end users, distribute the plugin folder:
 
 - `Plugins/UnrealAiEditor`
 
-Create a zip bundle from repo root:
+From a clean copy, omit `Binaries`, `Intermediate`, and `.git`. To build a zip from repo root:
 
 ```powershell
-.\scripts\package-bundled-plugins.ps1
+New-Item -ItemType Directory -Force -Path dist | Out-Null
+Compress-Archive -Path 'Plugins\UnrealAiEditor' -DestinationPath 'dist\UnrealAiEditor.zip' -Force
 ```
-
-Output:
-
-- `dist/UnrealAiEditor-bundled-plugins.zip`
 
 **Agent / harness iteration (prompts, tools, tests):** read [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](docs/tooling/AGENT_HARNESS_HANDOFF.md) — one file for scripts, file map, and when to report bigger issues or tool catalog changes.
 

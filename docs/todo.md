@@ -13,7 +13,6 @@
 
 ## Blueprint Organizer
 
-- We are in the process of unifying the plugins so everything just lives here
 - Having the user-facing buttons to format automatically is not a top priority, since that isn't the main goal of this plugin
 - We must focus on the planning/blueprint-formatter-expansions.md, which documents a ton of ways we will expand the agent's abilities to write super well formed and well documented blueprints
 - [x] Blueprint formatter expansions: data-wire knots, multi-strand lane layout, `graph_comment` IR + comment-box reflow, and selection formatting (`blueprint_format_selection` + `UnrealAi.BlueprintFormatSelection` console command).
@@ -21,24 +20,15 @@
 - [x] Vector DB UI: add vector top-graph search + drill-down inspector panel in `SUnrealAiEditorSettingsTab`.
 - - A key feature is getting the agent to recognize when functionality can be abstracted into custom events 
 
-# Future Features
+## Release Readiness Testing
 
-- "Asset Fetcher" setting. When toggled, it will enable a tool (which corresponds with a service) that will interface with FAB or some other asset library to allow LLM to get free fairuse assets, import them into project, and wire them up.
-- - This will be super hard because FAB doesn't expose a lot of useful APIs for us to use. We may have to do a hybrid approach, where our assistant will open a FAB instance and listen for what the user selects, then try to make use of whatever the user imports.
-- Stage changes before making them. Add checkpoints and reverting capabilities.
-- Unreal docs RAG
-- Unreal forums RAG
-- Support for other versions, ideally all 5.x verisions. Currently this only works for 5.7.
-
-## Context
-
-- We need to think about the prompt chunks more and find some more aggressive ways to prune them without losing accuracy. Our current agents take like a whole minute for a simple task, and they use so many tokens.
-
-## Tooling
-
-- Ensure tools are working for PERFORMANT and FAST: multi-select, select by class, fuzzy search for selection (within scene or within file tree).
-- - Ensure fast workflow for batch operations like replace material on every wall in scene, etc. We should make a testing situation for this.
-- Ensure tools catalog has high coverage of editor functionality:
-- - Data assets, animation basics, building components within components (building an actor then attatching a collision mesh, etc.)
-- (Consider) We should redo the entire tools catalog. I think we can implement some basic semantic patterns like get_ tools where the model knows that each get_ tool has a corresponding set_ tool, we could also make a unified set_setting tool that has a specific schema to indicate which type of setting it is (based on UEs literal schemea), like viewport (change from lit to unlit), project settings, editor settings. 
-- - We should analyze how unreal exposes functions to set and get all different types of settings to build this tool, and try to find similar patterns to reduce the complexity of other bunches of tools.
+- [ ] Strict PIE lifecycle: rerun `tests/strict-tests/run-strict-headed.ps1 -Suite strict_catalog_runtime_render_gap_v1` until it passes. Recent history shows `pie_stop` teardown can leave `playing_in_editor` / `play_session_in_progress` true even after the stop call, and the latest attempt was paused after a harness stall (`Harness turns 0/2`) so we can revisit PIE start/stop prompts (making viewport captures a last-resort tool, not the primary way to infer `pie_status`) and harden crash-proofing before the next run.
+- [ ] Strict tool contract smoke: rerun `tests/strict-tests/run-strict-headed.ps1 -Suite strict_tool_catalog_coverage_v1` and confirm `strict_assertions_fail_count == 0`.
+- [ ] Strict safety/guardrails: rerun `tests/strict-tests/run-strict-headed.ps1 -Suite strict_natural_autonomous_discovery_v1` to ensure “refusal on unsafe or under-specified mutations” still behaves correctly.
+- [ ] Qualitative end-to-end regression: run `tests/qualitative-tests/run-qualitative-headed.ps1 -Suite passed-tests.json`
+- [ ] Qualitative end-to-end regression: run `tests/qualitative-tests/run-qualitative-headed.ps1 -Suite regression-watchlist.json`
+- [ ] Qualitative end-to-end regression: run `tests/qualitative-tests/run-qualitative-headed.ps1 -Suite pre-release-natural-gaps.json`
+- [ ] Qualitative continuity/stress: run at least `tests/qualitative-tests/run-qualitative-headed.ps1 -Suite context-continuity-corridor-build.json` and confirm no tool retries/truncations lead to missing `run_finished`.
+- [ ] Embedding/retrieval integration (missing coverage): add a targeted strict suite or unit test that exercises `FOpenAiCompatibleEmbeddingProvider` success, HTTP timeout, invalid payload/JSON, and fallback behavior to lexical retrieval.
+- [ ] Context assembly around project tree sampling (missing coverage): add a strict suite that forces the “preferred package path / context blurb / sampler refresh” path (via create/rename or preferred-path decisions) and asserts it never invents `/Game/...` paths and never produces orphan `role=tool` rows.
+- [ ] Startup ops status + persistence/resume (missing coverage): restart editor and verify startup gating/ops status does not block chat/harness initialization; then run a harness scenario that resumes a plan/DAG and confirm node status persistence matches expectations.

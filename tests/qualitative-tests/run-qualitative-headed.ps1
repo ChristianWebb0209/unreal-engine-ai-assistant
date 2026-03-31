@@ -45,9 +45,10 @@
   Notes
   - "type" values allowed: ask, agent, plan.
   - "plan" is mapped to harness mode "plan".
-  - Output layout (each script invocation gets one new folder under the central runs directory; older batches are kept):
+  -   Output layout (each script invocation gets one new folder under the central runs directory; older batches are kept):
       tests\qualitative-tests\runs\run-<month>-<day>-<hour>-<minute>-<suite_name>\
         - last-suite-summary.json  (batch metadata; only under this run folder)
+        - turn-time-summary.json / turn-time-summary.md  (per-turn wall clock from harness UTC markers in run.jsonl; model_wall_sec is N/A if the turn did not finish or timestamps are missing)
         - editor_console_saved.log  (single-session mode: full Unreal Saved/Logs copy for the whole batch)
         <path-slug>\
           - summary.json
@@ -297,6 +298,171 @@ function Get-RunJsonlQuickStats {
     }
     catch {}
     return $stats
+}
+
+function Get-RunJsonlModelWallDuration {
+    param([string]$RunJsonlPath)
+    $result = [ordered]@{
+        has_run_finished = $false
+        utc_start        = $null
+        utc_end          = $null
+        model_wall_sec   = $null
+    }
+    if ([string]::IsNullOrWhiteSpace($RunJsonlPath) -or -not (Test-Path -LiteralPath $RunJsonlPath)) {
+        return $result
+    }
+    $startIso = $null
+    $fallbackStartIso = $null
+    $endIso = $null
+    $hasFinished = $false
+    try {
+        Get-Content -LiteralPath $RunJsonlPath -Encoding UTF8 -ErrorAction Stop | ForEach-Object {
+            $line = $_.Trim()
+            if ([string]::IsNullOrWhiteSpace($line)) {
+                return
+            }
+            $obj = $null
+            try {
+                $obj = $line | ConvertFrom-Json -ErrorAction Stop
+            }
+            catch {
+                return
+            }
+            if (-not $obj) { return }
+            $t = [string]$obj.type
+            if ($t -eq 'run_finished') {
+                $hasFinished = $true
+            }
+            if ($t -eq 'context_build_timing' -and $obj.utc_start -and -not $fallbackStartIso) {
+                $fallbackStartIso = [string]$obj.utc_start
+            }
+            if (-not $startIso) {
+                if ($t -eq 'harness_sync_wait_start' -and $obj.utc_iso8601) {
+                    $startIso = [string]$obj.utc_iso8601
+                }
+                elseif ($t -eq 'harness_sync_segment_wait_start' -and $obj.utc_iso8601) {
+                    $startIso = [string]$obj.utc_iso8601
+                }
+            }
+            if ($t -eq 'harness_sync_wait_finished' -and $obj.utc_iso8601) {
+                $endIso = [string]$obj.utc_iso8601
+            }
+            if ($t -eq 'harness_sync_segment_result' -and $obj.utc_iso8601) {
+                $endIso = [string]$obj.utc_iso8601
+            }
+        }
+    }
+    catch {
+        return $result
+    }
+    if (-not $startIso) {
+        $startIso = $fallbackStartIso
+    }
+    $result.has_run_finished = $hasFinished
+    $result.utc_start = $startIso
+    $result.utc_end = $endIso
+    if ($hasFinished -and $startIso -and $endIso) {
+        try {
+            $a = [System.DateTimeOffset]::Parse($startIso)
+            $b = [System.DateTimeOffset]::Parse($endIso)
+            $sec = [Math]::Round(($b - $a).TotalSeconds, 3)
+            if ($sec -ge 0) {
+                $result.model_wall_sec = $sec
+            }
+        }
+        catch {}
+    }
+    return $result
+}
+
+function Write-BatchTurnTimeSummary {
+    param(
+        [string]$BatchOutputRootAbs,
+        [string]$ProjectRootAbs,
+        [object[]]$SuiteRunEntries
+    )
+    if ([string]::IsNullOrWhiteSpace($BatchOutputRootAbs) -or -not (Test-Path -LiteralPath $BatchOutputRootAbs)) {
+        return
+    }
+    if ($null -eq $SuiteRunEntries -or $SuiteRunEntries.Count -eq 0) {
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($ProjectRootAbs)) {
+        return
+    }
+    $sep = [string][IO.Path]::DirectorySeparatorChar
+    $doc = [ordered]@{
+        generated_utc       = (Get-Date).ToUniversalTime().ToString('o')
+        batch_output_folder = $BatchOutputRootAbs
+        suites              = @()
+    }
+    $mdLines = @(
+        '# Turn time summary',
+        '',
+        ('Generated UTC: {0}' -f $doc.generated_utc),
+        ('Wall time is from first harness wait/start UTC to last harness wait-finished or segment-result UTC in each `run.jsonl` (full turn: model + tools + plan segments).'),
+        ''
+    )
+    foreach ($suite in $SuiteRunEntries) {
+        $suiteId = [string]$suite.suite_id
+        if ([string]::IsNullOrWhiteSpace($suiteId)) {
+            $suiteId = [string]$suite.path_slug
+        }
+        $paths = @($suite.expected_run_jsonls)
+        if ($paths.Count -eq 0) {
+            continue
+        }
+        $suiteObj = [ordered]@{
+            suite_id = $suiteId
+            path_slug = [string]$suite.path_slug
+            turns = @()
+        }
+        $mdLines += ('## {0}' -f $suiteId)
+        $mdLines += ''
+        $mdLines += '| Turn | run_finished | model_wall_sec | utc_start | utc_end |'
+        $mdLines += '| --- | --- | --- | --- | --- |'
+        foreach ($rel in $paths) {
+            $relNorm = ([string]$rel) -replace '/', $sep
+            $absJsonl = Join-Path $ProjectRootAbs $relNorm
+            $leaf = Split-Path -Parent $absJsonl
+            $stepFolder = Split-Path -Leaf $leaf
+            if ([string]::IsNullOrWhiteSpace($stepFolder)) {
+                $stepFolder = 'turn'
+            }
+            $timing = Get-RunJsonlModelWallDuration -RunJsonlPath $absJsonl
+            $wallDisplay = if ($null -ne $timing.model_wall_sec) {
+                ([string]$timing.model_wall_sec)
+            }
+            else {
+                'N/A'
+            }
+            $suiteObj.turns += [ordered]@{
+                step_folder      = $stepFolder
+                run_jsonl        = $relNorm
+                run_finished     = [bool]$timing.has_run_finished
+                model_wall_sec   = $timing.model_wall_sec
+                model_wall_display = $wallDisplay
+                utc_start        = $timing.utc_start
+                utc_end          = $timing.utc_end
+            }
+            $fin = if ($timing.has_run_finished) { 'yes' } else { 'no' }
+            $us = if ($timing.utc_start) { $timing.utc_start } else { '' }
+            $ue = if ($timing.utc_end) { $timing.utc_end } else { '' }
+            $mdLines += ('| {0} | {1} | {2} | {3} | {4} |' -f $stepFolder, $fin, $wallDisplay, $us, $ue)
+        }
+        $mdLines += ''
+        $doc.suites += $suiteObj
+    }
+    try {
+        $jsonPath = Join-Path $BatchOutputRootAbs 'turn-time-summary.json'
+        (($doc | ConvertTo-Json -Depth 8) + "`n") | Set-Content -LiteralPath $jsonPath -Encoding UTF8
+        $mdPath = Join-Path $BatchOutputRootAbs 'turn-time-summary.md'
+        Set-Content -LiteralPath $mdPath -Encoding UTF8 -Value $mdLines
+        Write-Host ("Wrote turn timing: {0}" -f $jsonPath) -ForegroundColor DarkGray
+    }
+    catch {
+        Write-Warning ('Write-BatchTurnTimeSummary failed: {0}' -f $_)
+    }
 }
 
 function Stop-TrackedEditors {
@@ -912,7 +1078,9 @@ if ($MaxSuites -ne 0) {
     Write-Host ("MaxSuites={0}: running {1} of {2} suite file(s) (sorted by path)." -f $MaxSuites, $suiteFiles.Count, $suitesDiscoveredCount) -ForegroundColor Yellow
 }
 
-# One folder per batch: tests/qualitative-tests/runs/run-<month>-<day>-<hour>-<minute>-<suite_name>.
+# One folder per **this script invocation** under `$runsParent` (default: qualitative `runs/`, or `-RunsRoot`
+# e.g. strict-tests/runs): `run-<MM>-<dd>-<HH>-<mm>-<suite_slug>[-<n>]`. All suites/turns/logs for the batch nest inside
+# that single directory — no additional top-level run-* folders are created for the same invocation.
 $batchStartedLocal = Get-Date
 $batchStampCulture = [System.Globalization.CultureInfo]::GetCultureInfo('en-US')
 $batchStampCore = $batchStartedLocal.ToString('MM-dd-HH-mm', $batchStampCulture)
@@ -970,6 +1138,12 @@ foreach ($jf in $suiteFiles) {
     $pathSlug = Get-SuitePathSlug -ScenarioRootAbs $scenarioAbs -SuiteFileFullPath $jf.FullName
 
     $runRoot = Join-Path $batchRunsRoot $pathSlug
+    $batchRunsRootNorm = [System.IO.Path]::GetFullPath($batchRunsRoot)
+    $runRootNorm = [System.IO.Path]::GetFullPath($runRoot)
+    $batchPrefix = $batchRunsRootNorm.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $runRootNorm.StartsWith($batchPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Harness layout bug: suite run_root must be under batch folder. batch='$batchRunsRootNorm' run='$runRootNorm'"
+    }
     $turnsRoot = Join-Path $runRoot 'turns'
     $msgRoot = Join-Path $runRoot 'turn_messages'
     New-Item -ItemType Directory -Force -Path $turnsRoot | Out-Null
@@ -1416,6 +1590,16 @@ if (-not $DryRun -and $allStatuses.Count -gt 0) {
 $summaryJson = ($suiteSummary | ConvertTo-Json -Depth 8) + "`n"
 if ($null -ne $batchRunsRoot) {
     $summaryJson | Set-Content -LiteralPath (Join-Path $batchRunsRoot 'last-suite-summary.json') -Encoding UTF8
+}
+
+if ($null -ne $batchRunsRoot -and -not $DryRun -and $allStatuses.Count -gt 0) {
+    try {
+        $batchAbs = (Resolve-Path -LiteralPath $batchRunsRoot).Path
+        Write-BatchTurnTimeSummary -BatchOutputRootAbs $batchAbs -ProjectRootAbs $ProjectRootForEnv -SuiteRunEntries @($suiteSummary.runs)
+    }
+    catch {
+        Write-Warning ('Turn time summary skipped: {0}' -f $_)
+    }
 }
 
 if ($null -ne $batchRunsRoot -and -not $DryRun -and $allStatuses.Count -gt 0 -and -not $SkipClassification) {

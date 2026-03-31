@@ -31,17 +31,14 @@ Then:
 2. Build the **Editor** target.
 3. Launch the editor; enable plugins if prompted (**Edit â†’ Plugins â†’ Unreal AI Editor**).
 
-### Create a bundled install zip
+### Create an install zip
 
-From repo root, build a single distributable zip containing both plugins:
+Zip the `Plugins/UnrealAiEditor` folder (omit `Binaries`, `Intermediate`, and `.git` from release copies). Example from repo root:
 
 ```powershell
-.\scripts\package-bundled-plugins.ps1
+New-Item -ItemType Directory -Force -Path dist | Out-Null
+Compress-Archive -Path 'Plugins\UnrealAiEditor' -DestinationPath 'dist\UnrealAiEditor.zip' -Force
 ```
-
-Default output:
-
-- `dist/UnrealAiEditor-bundled-plugins.zip`
 
 ## Manual verification
 

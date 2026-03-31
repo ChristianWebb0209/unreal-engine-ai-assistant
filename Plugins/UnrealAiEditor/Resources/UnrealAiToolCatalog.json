@@ -2673,7 +2673,7 @@
     },
     {
       "tool_id": "project_file_read_text",
-      "summary": "Read a text file anywhere under the project directory (path relative to project root; Saved/, Intermediate/, etc. allowed). `relative_path` is required (`file_path` alias). Do not call with `{}` repeatedly: pass a concrete project-relative file path or use suggested_correct_call. For engine/plugin lines, read this project’s `.uproject` manifest using the actual basename (see system context “Project workspace” when present—not a placeholder name). Large or binary files may be truncated or unsuitable—use max_bytes.",
+      "summary": "Read a text file anywhere under the project directory (path relative to project root; Saved/, Intermediate/, etc. allowed). During a headed harness turn, paths may use the virtual prefix `harness_step/` to read files beside the current turn’s `run.jsonl` (harness batch output), e.g. `harness_step/UnrealAiDiscoveryNotes.txt`. `relative_path` is required (`file_path` alias). Do not call with `{}` repeatedly: pass a concrete project-relative file path or use suggested_correct_call. For engine/plugin lines, read this project’s `.uproject` manifest using the actual basename (see system context “Project workspace” when present—not a placeholder name). Large or binary files may be truncated or unsuitable—use max_bytes.",
       "category": "project_files_search",
       "tags": [
         "filesystem",
@@ -2724,7 +2724,7 @@
     },
     {
       "tool_id": "project_file_write_text",
-      "summary": "Write a text file anywhere under the project directory (same path rules as project_file_read_text; destructive—confirm in headed runs unless auto-run env is set).",
+      "summary": "Write a text file anywhere under the project directory (same path rules as project_file_read_text, including `harness_step/` for headed harness turn artifacts beside `run.jsonl`; destructive—confirm in headed runs unless auto-run env is set).",
       "category": "project_files_search",
       "tags": [
         "filesystem"
