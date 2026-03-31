@@ -46,6 +46,9 @@ private:
 	void CollectBlueprintFeatureChunks(const FUnrealAiRetrievalSettings& Settings, TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
 	void GatherAssetRegistryShardTexts(const FUnrealAiRetrievalSettings& Settings, TArray<TPair<FString, FString>>& OutVirtualPathAndFullText) const;
 	void CollectMemoryChunks(const FUnrealAiRetrievalSettings& Settings, TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
+	void CollectDirectorySummaryChunks(const TMap<FString, FString>& SourceHashesByPath, TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
+	void CollectAssetEquivalenceSummaryChunks(const TMap<FString, FString>& SourceHashesByPath, TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
+	void ApplySummaryPreference(const FString& QueryText, int32 MaxResults, TArray<struct FUnrealAiRetrievalSnippet>& InOutSnippets) const;
 
 	IUnrealAiPersistence* Persistence = nullptr;
 	FUnrealAiModelProfileRegistry* Profiles = nullptr;

@@ -12,6 +12,7 @@
 #include "Misc/Paths.h"
 #include "Misc/Crc.h"
 #include "Misc/SecureHash.h"
+#include "Misc/Paths.h"
 #include "Retrieval/FOpenAiCompatibleEmbeddingProvider.h"
 #include "Retrieval/UnrealAiBlueprintFeatureExtractor.h"
 #include "Retrieval/UnrealAiRetrievalDiagnostics.h"
@@ -97,6 +98,21 @@ namespace
 			Query.MaxResults,
 			*Query.QueryText);
 		return FCrc::StrCrc32(*Canonical);
+	}
+
+	static bool IsSummarySourcePath(const FString& SourceId)
+	{
+		return SourceId.StartsWith(TEXT("virtual://summary/"));
+	}
+
+	static bool QueryNeedsConcretePath(const FString& QueryText)
+	{
+		const FString Lower = QueryText.ToLower();
+		return Lower.Contains(TEXT("/game/"))
+			|| Lower.Contains(TEXT("object_path"))
+			|| Lower.Contains(TEXT("asset_path"))
+			|| Lower.Contains(TEXT("exact path"))
+			|| Lower.Contains(TEXT("concrete path"));
 	}
 }
 
@@ -202,6 +218,10 @@ FUnrealAiRetrievalSettings FUnrealAiRetrievalService::LoadSettings() const
 	if ((*RetrievalObj)->TryGetNumberField(TEXT("blueprintMaxFeatureRecords"), NumberField))
 	{
 		Settings.BlueprintMaxFeatureRecords = FMath::Max(0, static_cast<int32>(NumberField));
+	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("contextAggression"), NumberField))
+	{
+		Settings.ContextAggression = static_cast<float>(FMath::Clamp(NumberField, 0.0, 1.0));
 	}
 
 	ClampChunkParams(Settings.ChunkChars, Settings.ChunkOverlap);
@@ -589,6 +609,7 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 	FUnrealAiEmbeddingResponse EmbeddingResponse;
 	const int32 TopKRaw = Query.MaxResults > 0 ? Query.MaxResults : Settings.MaxSnippetsPerTurn;
 	const int32 TopK = FMath::Max(1, TopKRaw);
+	const int32 FetchK = FMath::Max(TopK, FMath::Min(TopK * 3, TopK + 24));
 	if (TopKRaw <= 0)
 	{
 		Result.Warnings.Add(TEXT("Retrieval max snippets <= 0; clamped to 1."));
@@ -648,10 +669,11 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 		if (bSkipEmbeddings)
 		{
 			FString CircuitLexicalStoreError;
-			if (!Store->QueryTopKByLexical(Query.QueryText, TopK, Result.Snippets, CircuitLexicalStoreError))
+			if (!Store->QueryTopKByLexical(Query.QueryText, FetchK, Result.Snippets, CircuitLexicalStoreError))
 			{
 				Result.Warnings.Add(FString::Printf(TEXT("Retrieval lexical fallback failed (circuit breaker active): %s"), *CircuitLexicalStoreError));
 			}
+			ApplySummaryPreference(Query.QueryText, TopK, Result.Snippets);
 			UE_LOG(
 				LogTemp,
 				Error,
@@ -689,10 +711,11 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 			EmbeddingFailureUntilSecondsByThread.Add(Query.ThreadId, NowSeconds + EmbeddingCircuitBreakerSeconds);
 		}
 
-		if (!Store->QueryTopKByLexical(Query.QueryText, TopK, Result.Snippets, StoreError))
+		if (!Store->QueryTopKByLexical(Query.QueryText, FetchK, Result.Snippets, StoreError))
 		{
 			Result.Warnings.Add(FString::Printf(TEXT("Retrieval lexical fallback failed: %s"), *StoreError));
 		}
+		ApplySummaryPreference(Query.QueryText, TopK, Result.Snippets);
 		UE_LOG(
 			LogTemp,
 			Log,
@@ -709,7 +732,7 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 		return Result;
 	}
 
-	if (!Store->QueryTopKByCosine(EmbeddingResponse.Vector, TopK, Result.Snippets, StoreError))
+	if (!Store->QueryTopKByCosine(EmbeddingResponse.Vector, FetchK, Result.Snippets, StoreError))
 	{
 		Result.Warnings.Add(FString::Printf(TEXT("Retrieval query failed: %s"), *StoreError));
 	}
@@ -731,7 +754,7 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 			Error,
 			TEXT("Retrieval fallback engaged (empty vector hits) project_id=%s"),
 			*Query.ProjectId);
-		if (Store->QueryTopKByLexical(Query.QueryText, TopK, Result.Snippets, StoreError))
+		if (Store->QueryTopKByLexical(Query.QueryText, FetchK, Result.Snippets, StoreError))
 		{
 			UE_LOG(
 				LogTemp,
@@ -746,6 +769,7 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 			Result.Warnings.Add(FString::Printf(TEXT("Retrieval lexical fallback failed: %s"), *StoreError));
 		}
 	}
+	ApplySummaryPreference(Query.QueryText, TopK, Result.Snippets);
 	{
 		FScopeLock Lock(&QueryCacheMutex);
 		FRetrievalQueryCacheEntry& Cached = QueryCacheByKey.FindOrAdd(CacheKey);
@@ -753,6 +777,39 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 		Cached.ExpiresAtSeconds = QueryStartSeconds + 15.0;
 	}
 	return Result;
+}
+
+void FUnrealAiRetrievalService::ApplySummaryPreference(
+	const FString& QueryText,
+	const int32 MaxResults,
+	TArray<FUnrealAiRetrievalSnippet>& InOutSnippets) const
+{
+	if (InOutSnippets.Num() <= 1)
+	{
+		return;
+	}
+	const bool bNeedsConcretePath = QueryNeedsConcretePath(QueryText);
+	InOutSnippets.Sort([bNeedsConcretePath](const FUnrealAiRetrievalSnippet& A, const FUnrealAiRetrievalSnippet& B)
+	{
+		const bool bASummary = IsSummarySourcePath(A.SourceId);
+		const bool bBSummary = IsSummarySourcePath(B.SourceId);
+		float AScore = A.Score + (bASummary ? 0.08f : 0.0f);
+		float BScore = B.Score + (bBSummary ? 0.08f : 0.0f);
+		if (!bNeedsConcretePath)
+		{
+			AScore += bASummary ? 0.02f : -0.02f;
+			BScore += bBSummary ? 0.02f : -0.02f;
+		}
+		if (!FMath::IsNearlyEqual(AScore, BScore))
+		{
+			return AScore > BScore;
+		}
+		return A.SourceId < B.SourceId;
+	});
+	if (MaxResults > 0 && InOutSnippets.Num() > MaxResults)
+	{
+		InOutSnippets.SetNum(MaxResults);
+	}
 }
 
 void FUnrealAiRetrievalService::StartPrefetch(const FUnrealAiRetrievalQuery& InQuery, const FString& TurnKey)
@@ -1143,6 +1200,176 @@ void FUnrealAiRetrievalService::CollectMemoryChunks(const FUnrealAiRetrievalSett
 	}
 }
 
+void FUnrealAiRetrievalService::CollectDirectorySummaryChunks(
+	const TMap<FString, FString>& SourceHashesByPath,
+	TArray<FUnrealAiVectorChunkRow>& OutChunks) const
+{
+	TMap<FString, TArray<FString>> PathsByDirectory;
+	for (const TPair<FString, FString>& Pair : SourceHashesByPath)
+	{
+		const FString& SourcePath = Pair.Key;
+		if (SourcePath.StartsWith(TEXT("virtual://")))
+		{
+			continue;
+		}
+		const FString Dir = FPaths::GetPath(SourcePath);
+		if (Dir.IsEmpty())
+		{
+			continue;
+		}
+		PathsByDirectory.FindOrAdd(Dir).Add(SourcePath);
+	}
+
+	TArray<FString> Directories;
+	PathsByDirectory.GetKeys(Directories);
+	Directories.Sort();
+	const int32 MaxDirectorySummaries = 800;
+	for (int32 i = 0; i < Directories.Num() && i < MaxDirectorySummaries; ++i)
+	{
+		const FString& Dir = Directories[i];
+		TArray<FString>& Members = PathsByDirectory.FindChecked(Dir);
+		Members.Sort();
+		const int32 Count = Members.Num();
+		if (Count <= 0)
+		{
+			continue;
+		}
+		const FString First = Members[0];
+		const FString Mid = Members[Count / 2];
+		const FString Last = Members[Count - 1];
+		const FString Text = FString::Printf(
+			TEXT("Directory summary (L0/L1): path=%s count=%d examples=[%s, %s, %s]"),
+			*Dir,
+			Count,
+			*First,
+			*Mid,
+			*Last);
+
+		FUnrealAiVectorChunkRow Row;
+		Row.SourcePath = FString::Printf(TEXT("virtual://summary/directory%s"), *Dir);
+		Row.Text = Text;
+		Row.ContentHash = FMD5::HashAnsiString(*Text);
+		Row.ChunkId = MakeChunkId(Row.SourcePath, 0, Text);
+		OutChunks.Add(MoveTemp(Row));
+	}
+}
+
+void FUnrealAiRetrievalService::CollectAssetEquivalenceSummaryChunks(
+	const TMap<FString, FString>& SourceHashesByPath,
+	TArray<FUnrealAiVectorChunkRow>& OutChunks) const
+{
+	struct FAssetGroup
+	{
+		TArray<FString> Members;
+	};
+	TMap<FString, FAssetGroup> Groups;
+
+	auto NormalizeName = [](FString Name) -> FString
+	{
+		Name = Name.ToLower();
+		const TArray<FString> Prefixes = { TEXT("bp_"), TEXT("mi_"), TEXT("m_"), TEXT("sm_"), TEXT("sk_"), TEXT("t_") };
+		for (const FString& Prefix : Prefixes)
+		{
+			if (Name.StartsWith(Prefix))
+			{
+				Name = Name.RightChop(Prefix.Len());
+				break;
+			}
+		}
+		const TArray<FString> Suffixes = { TEXT("_c"), TEXT("_inst"), TEXT("_instance"), TEXT("_lod0"), TEXT("_lod1") };
+		for (const FString& Suffix : Suffixes)
+		{
+			if (Name.EndsWith(Suffix))
+			{
+				Name.LeftChopInline(Suffix.Len());
+				break;
+			}
+		}
+		return Name.IsEmpty() ? TEXT("unknown") : Name;
+	};
+	auto ClassFamilyFromName = [](const FString& AssetName) -> FString
+	{
+		const FString Lower = AssetName.ToLower();
+		if (Lower.StartsWith(TEXT("bp_"))) return TEXT("blueprint");
+		if (Lower.StartsWith(TEXT("mi_"))) return TEXT("material_instance");
+		if (Lower.StartsWith(TEXT("m_"))) return TEXT("material");
+		if (Lower.StartsWith(TEXT("sm_"))) return TEXT("static_mesh");
+		if (Lower.StartsWith(TEXT("sk_"))) return TEXT("skeletal_mesh");
+		if (Lower.StartsWith(TEXT("t_"))) return TEXT("texture");
+		return TEXT("asset");
+	};
+
+	for (const TPair<FString, FString>& Pair : SourceHashesByPath)
+	{
+		const FString& SourcePath = Pair.Key;
+		if (!(SourcePath.StartsWith(TEXT("/Game/")) || SourcePath.StartsWith(TEXT("/Engine/"))))
+		{
+			continue;
+		}
+		FString AssetPath = SourcePath;
+		int32 Dot = INDEX_NONE;
+		if (AssetPath.FindChar(TEXT('.'), Dot))
+		{
+			AssetPath = AssetPath.Left(Dot);
+		}
+		const FString Folder = FPaths::GetPath(AssetPath);
+		const FString AssetName = FPaths::GetBaseFilename(AssetPath, false);
+		if (Folder.IsEmpty() || AssetName.IsEmpty())
+		{
+			continue;
+		}
+		const FString ClassFamily = ClassFamilyFromName(AssetName);
+		const FString Equivalence = NormalizeName(AssetName);
+		const FString GroupKey = FString::Printf(TEXT("%s|%s|%s"), *Folder, *ClassFamily, *Equivalence);
+		Groups.FindOrAdd(GroupKey).Members.Add(AssetPath);
+	}
+
+	TArray<FString> GroupKeys;
+	Groups.GetKeys(GroupKeys);
+	GroupKeys.Sort();
+	const int32 MaxAssetSummaryGroups = 1200;
+	for (int32 i = 0; i < GroupKeys.Num() && i < MaxAssetSummaryGroups; ++i)
+	{
+		const FString& Key = GroupKeys[i];
+		const int32 FirstSep = Key.Find(TEXT("|"));
+		const int32 LastSep = Key.Find(TEXT("|"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+		if (FirstSep == INDEX_NONE || LastSep == INDEX_NONE || LastSep <= FirstSep)
+		{
+			continue;
+		}
+		const FString Folder = Key.Left(FirstSep);
+		const FString ClassFamily = Key.Mid(FirstSep + 1, LastSep - FirstSep - 1);
+		const FString Equivalence = Key.Mid(LastSep + 1);
+
+		TArray<FString>& Members = Groups.FindChecked(Key).Members;
+		Members.Sort();
+		const int32 Count = Members.Num();
+		if (Count <= 0)
+		{
+			continue;
+		}
+		const FString First = Members[0];
+		const FString Mid = Members[Count / 2];
+		const FString Last = Members[Count - 1];
+		const FString Text = FString::Printf(
+			TEXT("Asset family summary (L0/L1): folder=%s class=%s equivalence=%s count=%d examples=[%s, %s, %s]"),
+			*Folder,
+			*ClassFamily,
+			*Equivalence,
+			Count,
+			*First,
+			*Mid,
+			*Last);
+
+		FUnrealAiVectorChunkRow Row;
+		Row.SourcePath = FString::Printf(TEXT("virtual://summary/asset_family%s/%s/%s"), *Folder, *ClassFamily, *Equivalence);
+		Row.Text = Text;
+		Row.ContentHash = FMD5::HashAnsiString(*Text);
+		Row.ChunkId = MakeChunkId(Row.SourcePath, 0, Text);
+		OutChunks.Add(MoveTemp(Row));
+	}
+}
+
 bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId, const FUnrealAiRetrievalSettings& Settings, FString& OutError)
 {
 	FUnrealAiVectorIndexStore Store(ProjectId);
@@ -1260,6 +1487,42 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 		TArray<FUnrealAiVectorChunkRow> MemoryChunks;
 		CollectMemoryChunks(Settings, MemoryChunks);
 		for (FUnrealAiVectorChunkRow& Row : MemoryChunks)
+		{
+			const FString SourceHash = Row.ContentHash;
+			NewSourceHashes.Add(Row.SourcePath, SourceHash);
+			RemovedSources.Remove(Row.SourcePath);
+			const FString* ExistingHash = ExistingSourceHashes.Find(Row.SourcePath);
+			const bool bChanged = !ExistingHash || *ExistingHash != SourceHash;
+			if (bChanged)
+			{
+				++ChangedFiles;
+				TArray<FUnrealAiVectorChunkRow>& Arr = ChangedChunksBySource.FindOrAdd(Row.SourcePath);
+				Arr.Add(MoveTemp(Row));
+			}
+		}
+	}
+	{
+		TArray<FUnrealAiVectorChunkRow> DirectorySummaryChunks;
+		CollectDirectorySummaryChunks(NewSourceHashes, DirectorySummaryChunks);
+		for (FUnrealAiVectorChunkRow& Row : DirectorySummaryChunks)
+		{
+			const FString SourceHash = Row.ContentHash;
+			NewSourceHashes.Add(Row.SourcePath, SourceHash);
+			RemovedSources.Remove(Row.SourcePath);
+			const FString* ExistingHash = ExistingSourceHashes.Find(Row.SourcePath);
+			const bool bChanged = !ExistingHash || *ExistingHash != SourceHash;
+			if (bChanged)
+			{
+				++ChangedFiles;
+				TArray<FUnrealAiVectorChunkRow>& Arr = ChangedChunksBySource.FindOrAdd(Row.SourcePath);
+				Arr.Add(MoveTemp(Row));
+			}
+		}
+	}
+	{
+		TArray<FUnrealAiVectorChunkRow> AssetFamilySummaryChunks;
+		CollectAssetEquivalenceSummaryChunks(NewSourceHashes, AssetFamilySummaryChunks);
+		for (FUnrealAiVectorChunkRow& Row : AssetFamilySummaryChunks)
 		{
 			const FString SourceHash = Row.ContentHash;
 			NewSourceHashes.Add(Row.SourcePath, SourceHash);

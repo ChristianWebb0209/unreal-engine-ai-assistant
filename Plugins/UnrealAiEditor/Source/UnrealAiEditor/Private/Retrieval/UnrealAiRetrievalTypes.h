@@ -53,6 +53,8 @@ struct FUnrealAiRetrievalSettings
 
 	/** 0 = use extractor default cap (~4000). */
 	int32 BlueprintMaxFeatureRecords = 0;
+	/** Context packer aggression [0,1], default 0.5. */
+	float ContextAggression = 0.5f;
 };
 
 struct FUnrealAiRetrievalQuery
