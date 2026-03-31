@@ -334,6 +334,36 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
             autoLayout tb
         }
 
+        component plugin.contextService "vector-context-unified" "Unified vector-context graph for file system + scene context.\nSingle view: index build/query, L0/L1/L2 summaries, utility/head/tail scoring,\nand deterministic scene anchors merged in one rank/pack flow." {
+            include plugin.contextService.sessionStore
+            include plugin.contextService.editorSnapshot
+            include plugin.contextService.candidateCollector
+            include plugin.contextService.candidateScorer
+            include plugin.contextService.packer
+            include plugin.contextService.contextFormatter
+            include plugin.contextService.contextJson
+
+            include plugin.retrievalService.indexManager
+            include plugin.retrievalService.indexPolicy
+            include plugin.retrievalService.corpusFs
+            include plugin.retrievalService.corpusAr
+            include plugin.retrievalService.corpusBp
+            include plugin.retrievalService.corpusMem
+            include plugin.retrievalService.queryEngine
+            include plugin.retrievalService.store
+            include plugin.embeddingProvider.openAiCompat
+            include plugin.observability.contextDecisionLogs
+
+            include localData.vectorDb
+            include localData.vectorManifest
+            include localData.contextJson
+            include localData.settingsJson
+            include unrealEditor
+            include llmProvider
+
+            autoLayout lr
+        }
+
         dynamic plugin "vector-db-query-sequence" "Per LLM round: optional retrieval prefetch.\nEmbed + SQLite query (or cache / lexical fallback).\nBuildContextWindow consumes snippets into ranked candidates." {
             plugin.harness -> plugin.contextService "StartRetrievalPrefetch (turn key)"
             plugin.requestBuilder -> plugin.contextService "BuildContextWindow"
@@ -487,5 +517,14 @@ BEGIN_README_MAP vector-db-query-sequence
 **Per-LLM-round query path**: harness may **prefetch** retrieval; **`BuildContextWindow`** consumes **TryConsumePrefetch** or **Query**; **embed** query when needed (BYOK **HTTPS**); **SQLite** cosine Top-K with **lexical fallback**; snippets feed the same **context ranker** as other candidate types.
 
 Described in [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 2.1 table (`vector-db-query-sequence`) and retrieval sections of [`docs/context/context-management.md`](docs/context/context-management.md).
+END_README_MAP
+BEGIN_README_MAP vector-context-unified
+**Unified vector-context graph** (single diagram): both **file-system vector context** and **scene/editor context** converge through one candidate ranking + packing pipeline.
+
+- **File-system side**: retrieval index lifecycle and corpora (filesystem text, Asset Registry shards, Blueprint features, optional memory), embedding adapter, SQLite vector store + manifest.
+- **Scene side**: deterministic live anchors from editor snapshot (selection, Content Browser focus, open editors) entering the same candidate flow.
+- **Merge point**: candidate collection, scoring, and budget packing with utility/head/tail behavior and representation levels (L0/L1/L2).
+- **Output and diagnostics**: formatted context + persisted context JSON + decision logs.
+END_README_MAP
     */
 }
