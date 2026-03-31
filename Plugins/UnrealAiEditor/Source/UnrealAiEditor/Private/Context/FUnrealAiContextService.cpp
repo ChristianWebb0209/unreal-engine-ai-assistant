@@ -29,6 +29,8 @@
 #include "Serialization/JsonSerializer.h"
 #include "Misc/UnrealAiRecentUiTracker.h"
 #include "Planning/UnrealAiPlanDag.h"
+#include "Misc/FileHelper.h"
+#include "HAL/FileManager.h"
 
 namespace UnrealAiCtxPlanChildPriv
 {
@@ -96,6 +98,7 @@ void FUnrealAiContextService::LoadOrCreate(const FString& ProjectId, const FStri
 {
 	ActiveProjectId = ProjectId;
 	ActiveThreadId = ThreadId;
+	LoadProjectRetrievalState(ProjectId);
 
 	const FString Key = SessionKey(ProjectId, ThreadId);
 	if (Sessions.Contains(Key))
@@ -132,7 +135,10 @@ void FUnrealAiContextService::ClearSession(const FString& ProjectId, const FStri
 	{
 		RetrievalService->CancelPrefetchForThread(ProjectId, ThreadId);
 	}
-	Sessions.Remove(SessionKey(ProjectId, ThreadId));
+	const FString Key = SessionKey(ProjectId, ThreadId);
+	Sessions.Remove(Key);
+	RetrievalUtilityBySession.Remove(Key);
+	LastPackedCanonicalRefsBySessionByEntity.Remove(Key);
 	if (ActiveProjectId == ProjectId && ActiveThreadId == ThreadId)
 	{
 		ActiveProjectId.Reset();
@@ -230,6 +236,7 @@ void FUnrealAiContextService::RecordToolResult(
 	}
 	E.Timestamp = FDateTime::UtcNow();
 	S->ToolResults.Add(MoveTemp(E));
+	RegisterActionReferencesFromToolResult(ActiveProjectId, SessionKey(ActiveProjectId, ActiveThreadId), Result);
 	ScheduleSave(ActiveProjectId, ActiveThreadId);
 }
 
@@ -625,6 +632,12 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 
 	FAgentContextBuildOptions EffectiveOptions = Options;
 	EffectiveOptions.ThreadIdForMemory = ActiveThreadId;
+	if (RetrievalService)
+	{
+		const FUnrealAiRetrievalSettings RetrievalSettings = RetrievalService->LoadSettings();
+		EffectiveOptions.ContextAggression = FMath::Clamp(RetrievalSettings.ContextAggression, 0.0f, 1.0f);
+	}
+	BuildRetrievalUtilityOptions(ActiveProjectId, SessionKey(ActiveProjectId, ActiveThreadId), EffectiveOptions);
 	TArray<FUnrealAiRetrievalSnippet> RetrievalSnippets;
 	if (RetrievalService && RetrievalService->IsEnabledForProject(ActiveProjectId))
 	{
@@ -714,12 +727,15 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 		AddTraceLine(FString::Printf(TEXT("[Ranker] actionable_target_anchor_drops=%d"), ActionableTargetAnchorDrops));
 	}
 	Block = Unified.ContextBlock;
+	RegisterPackedEntityState(SessionKey(ActiveProjectId, ActiveThreadId), Unified.Packed);
+	UpdateRetrievalUtilityCounters(ActiveProjectId, SessionKey(ActiveProjectId, ActiveThreadId), Unified.Packed, Unified.Dropped);
 	{
 		const FDateTime PrevUpdated = ProjectTreeByProjectId.Contains(ActiveProjectId)
 			? ProjectTreeByProjectId[ActiveProjectId].UpdatedUtc
 			: FDateTime::MinValue();
 		const FProjectTreeSummary& SharedSummary = UnrealAiProjectTreeSampler::GetOrRefreshProjectSummary(ActiveProjectId, false);
 		FProjectTreeSummary Cached = SharedSummary;
+		UnrealAiProjectTreeSampler::ApplyRetrievalHintsToSummary(Cached, RetrievalSnippets);
 		const bool bRefreshed = Cached.UpdatedUtc != FDateTime::MinValue() && Cached.UpdatedUtc > PrevUpdated;
 		ProjectTreeByProjectId.FindOrAdd(ActiveProjectId) = Cached;
 		Working.ProjectTreeSummary = Cached;
@@ -920,6 +936,12 @@ void FUnrealAiContextService::FlushAllSessionsToDisk()
 	{
 		FlushSaveBySessionKey(Pair.Key);
 	}
+	TArray<FString> ProjectIds;
+	RetrievalStateByProject.GetKeys(ProjectIds);
+	for (const FString& ProjectId : ProjectIds)
+	{
+		SaveProjectRetrievalState(ProjectId);
+	}
 }
 
 void FUnrealAiContextService::WipeAllSessionsInMemory()
@@ -931,6 +953,539 @@ void FUnrealAiContextService::WipeAllSessionsInMemory()
 	}
 	PendingSaveKeys.Reset();
 	Sessions.Reset();
+	RetrievalUtilityBySession.Reset();
+	LastPackedCanonicalRefsBySessionByEntity.Reset();
+	RetrievalStateByProject.Reset();
 	ActiveProjectId.Reset();
 	ActiveThreadId.Reset();
+}
+
+bool FUnrealAiContextService::IsBudgetOrCapDropReason(const FString& DropReason)
+{
+	return DropReason == TEXT("pack:budget")
+		|| DropReason == TEXT("pack:soft_budget")
+		|| DropReason == TEXT("pack:per_type_cap")
+		|| DropReason == TEXT("pack:max_candidates")
+		|| DropReason == TEXT("pack:budget_anchor_actionable_target");
+}
+
+void FUnrealAiContextService::UpdateRetrievalUtilityCounters(
+	const FString& ProjectId,
+	const FString& SessionId,
+	const TArray<UnrealAiContextCandidates::FContextCandidateEnvelope>& Packed,
+	const TArray<UnrealAiContextCandidates::FContextCandidateEnvelope>& Dropped)
+{
+	if (SessionId.IsEmpty() || ProjectId.IsEmpty())
+	{
+		return;
+	}
+
+	TMap<FString, int32> HitByEntity;
+	TMap<FString, int32> KeptByEntity;
+	TMap<FString, int32> BudgetDropByEntity;
+
+	auto CountCandidate = [&HitByEntity, &KeptByEntity, &BudgetDropByEntity](const UnrealAiContextCandidates::FContextCandidateEnvelope& Candidate, const bool bKept)
+	{
+		if (Candidate.Type != UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet)
+		{
+			return;
+		}
+		if (Candidate.EntityId.IsEmpty())
+		{
+			return;
+		}
+		HitByEntity.FindOrAdd(Candidate.EntityId) += 1;
+		if (bKept)
+		{
+			KeptByEntity.FindOrAdd(Candidate.EntityId) += 1;
+			return;
+		}
+		if (IsBudgetOrCapDropReason(Candidate.DropReason))
+		{
+			BudgetDropByEntity.FindOrAdd(Candidate.EntityId) += 1;
+		}
+	};
+
+	for (const UnrealAiContextCandidates::FContextCandidateEnvelope& Candidate : Packed)
+	{
+		CountCandidate(Candidate, true);
+	}
+	for (const UnrealAiContextCandidates::FContextCandidateEnvelope& Candidate : Dropped)
+	{
+		CountCandidate(Candidate, false);
+	}
+
+	if (HitByEntity.Num() == 0)
+	{
+		return;
+	}
+
+	TMap<FString, FRetrievalEntityUtilityCounters>& SessionCounters = RetrievalUtilityBySession.FindOrAdd(SessionId);
+	FProjectRetrievalState& ProjectState = RetrievalStateByProject.FindOrAdd(ProjectId);
+	TArray<FString> PackedEntities;
+	for (const UnrealAiContextCandidates::FContextCandidateEnvelope& Candidate : Packed)
+	{
+		if (Candidate.Type == UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet && !Candidate.EntityId.IsEmpty())
+		{
+			PackedEntities.AddUnique(Candidate.EntityId);
+		}
+	}
+	for (int32 i = 0; i < PackedEntities.Num(); ++i)
+	{
+		for (int32 j = 0; j < PackedEntities.Num(); ++j)
+		{
+			if (i == j)
+			{
+				continue;
+			}
+			ProjectState.EdgeWeightsByEntity.FindOrAdd(PackedEntities[i]).FindOrAdd(PackedEntities[j]) += 1;
+		}
+	}
+
+	constexpr float Decay = 0.85f;
+	constexpr float KeepReward = 1.0f;
+	constexpr float ActionReward = 1.5f;
+	constexpr float BudgetDropPenalty = 0.25f;
+
+	TArray<FString> Keys;
+	HitByEntity.GetKeys(Keys);
+	for (const FString& EntityId : Keys)
+	{
+		FRetrievalEntityUtilityCounters& Counters = SessionCounters.FindOrAdd(EntityId);
+		FRetrievalEntityUtilityCounters& GlobalCounters = ProjectState.CountersByEntity.FindOrAdd(EntityId);
+		const int32 Hits = HitByEntity.FindRef(EntityId);
+		const int32 Keeps = KeptByEntity.FindRef(EntityId);
+		const int32 BudgetDrops = BudgetDropByEntity.FindRef(EntityId);
+		const int32 ActionRefs = Counters.ActionRefCount;
+
+		Counters.RetrievalHitCount += Hits;
+		Counters.KeptCount += Keeps;
+		Counters.BudgetDropCount += BudgetDrops;
+		Counters.UtilityScore = (Counters.UtilityScore * Decay)
+			+ (KeepReward * static_cast<float>(Keeps))
+			+ (ActionReward * static_cast<float>(ActionRefs))
+			- (BudgetDropPenalty * static_cast<float>(BudgetDrops));
+		Counters.StaleTurns = Keeps > 0 ? 0 : (Counters.StaleTurns + 1);
+		Counters.ActionRefCount = 0;
+
+		GlobalCounters.RetrievalHitCount += Hits;
+		GlobalCounters.KeptCount += Keeps;
+		GlobalCounters.BudgetDropCount += BudgetDrops;
+		GlobalCounters.ActionRefCount += ActionRefs;
+		GlobalCounters.UtilityScore = (GlobalCounters.UtilityScore * Decay)
+			+ (KeepReward * static_cast<float>(Keeps))
+			+ (ActionReward * static_cast<float>(ActionRefs))
+			- (BudgetDropPenalty * static_cast<float>(BudgetDrops));
+		GlobalCounters.StaleTurns = Keeps > 0 ? 0 : (GlobalCounters.StaleTurns + 1);
+	}
+	RefreshHeadSetForProject(ProjectId);
+	ProjectState.UpdatedUtc = FDateTime::UtcNow();
+	SaveProjectRetrievalState(ProjectId);
+}
+
+void FUnrealAiContextService::BuildRetrievalUtilityOptions(
+	const FString& ProjectId,
+	const FString& SessionId,
+	FAgentContextBuildOptions& InOutOptions) const
+{
+	InOutOptions.RetrievalUtilityMultiplierByEntity.Reset();
+	InOutOptions.RetrievalLongTailEntityFloor.Reset();
+	InOutOptions.RetrievalHeadEntitySet.Reset();
+	InOutOptions.RetrievalNeighborsByEntity.Reset();
+	InOutOptions.RetrievalLongTailFloorCount = 0;
+
+	if (SessionId.IsEmpty())
+	{
+		return;
+	}
+	const TMap<FString, FRetrievalEntityUtilityCounters>* SessionCounters = RetrievalUtilityBySession.Find(SessionId);
+	if (!SessionCounters || SessionCounters->Num() == 0)
+	{
+		return;
+	}
+
+	struct FEntityAndScore
+	{
+		FString EntityId;
+		float UtilityScore = 0.f;
+	};
+	TArray<FEntityAndScore> TailFolders;
+	TArray<FEntityAndScore> TailAssetFamilies;
+
+	for (const TPair<FString, FRetrievalEntityUtilityCounters>& Pair : *SessionCounters)
+	{
+		const FString& EntityId = Pair.Key;
+		const FRetrievalEntityUtilityCounters& C = Pair.Value;
+
+		const float ClampedUtility = FMath::Clamp(C.UtilityScore, 0.0f, 1.0f);
+		const float UtilityMultiplier = (C.UtilityScore < 0.15f) ? 0.2f : ClampedUtility;
+		InOutOptions.RetrievalUtilityMultiplierByEntity.Add(EntityId, UtilityMultiplier);
+
+		// Stale candidates form the long-tail recovery floor.
+		if (C.UtilityScore < 0.15f && C.StaleTurns >= 3)
+		{
+			if (EntityId.StartsWith(TEXT("folder:")))
+			{
+				TailFolders.Add({ EntityId, C.UtilityScore });
+			}
+			else if (EntityId.StartsWith(TEXT("asset_family:")))
+			{
+				TailAssetFamilies.Add({ EntityId, C.UtilityScore });
+			}
+		}
+	}
+
+	auto SortAscByUtility = [](const FEntityAndScore& A, const FEntityAndScore& B)
+	{
+		if (!FMath::IsNearlyEqual(A.UtilityScore, B.UtilityScore))
+		{
+			return A.UtilityScore < B.UtilityScore;
+		}
+		return A.EntityId < B.EntityId;
+	};
+	TailFolders.Sort(SortAscByUtility);
+	TailAssetFamilies.Sort(SortAscByUtility);
+
+	constexpr int32 FolderFloor = 8;
+	constexpr int32 AssetFamilyFloor = 4;
+	for (int32 i = 0; i < TailFolders.Num() && i < FolderFloor; ++i)
+	{
+		InOutOptions.RetrievalLongTailEntityFloor.Add(TailFolders[i].EntityId);
+	}
+	for (int32 i = 0; i < TailAssetFamilies.Num() && i < AssetFamilyFloor; ++i)
+	{
+		InOutOptions.RetrievalLongTailEntityFloor.Add(TailAssetFamilies[i].EntityId);
+	}
+	InOutOptions.RetrievalLongTailFloorCount = InOutOptions.RetrievalLongTailEntityFloor.Num();
+
+	if (!ProjectId.IsEmpty())
+	{
+		if (const FProjectRetrievalState* ProjectState = RetrievalStateByProject.Find(ProjectId))
+		{
+			InOutOptions.RetrievalHeadEntitySet = ProjectState->HeadEntitySet;
+			for (const TPair<FString, TMap<FString, int32>>& Pair : ProjectState->EdgeWeightsByEntity)
+			{
+				TArray<TPair<FString, int32>> Sorted;
+				for (const TPair<FString, int32>& Edge : Pair.Value)
+				{
+					Sorted.Add(Edge);
+				}
+				Sorted.Sort([](const TPair<FString, int32>& A, const TPair<FString, int32>& B)
+				{
+					if (A.Value != B.Value)
+					{
+						return A.Value > B.Value;
+					}
+					return A.Key < B.Key;
+				});
+				TArray<FString> Neighbors;
+				for (int32 i = 0; i < Sorted.Num() && i < 8; ++i)
+				{
+					Neighbors.Add(Sorted[i].Key);
+				}
+				if (Neighbors.Num() > 0)
+				{
+					InOutOptions.RetrievalNeighborsByEntity.Add(Pair.Key, MoveTemp(Neighbors));
+				}
+			}
+		}
+	}
+}
+
+void FUnrealAiContextService::RegisterPackedEntityState(
+	const FString& SessionId,
+	const TArray<UnrealAiContextCandidates::FContextCandidateEnvelope>& Packed)
+{
+	if (SessionId.IsEmpty())
+	{
+		return;
+	}
+	TMap<FString, TSet<FString>> PackedRefsByEntity;
+	for (const UnrealAiContextCandidates::FContextCandidateEnvelope& Candidate : Packed)
+	{
+		if (Candidate.Type != UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet || Candidate.EntityId.IsEmpty())
+		{
+			continue;
+		}
+		TSet<FString>& EntityRefs = PackedRefsByEntity.FindOrAdd(Candidate.EntityId);
+		ExtractCanonicalActionRefs(Candidate.SourceId, EntityRefs);
+		ExtractCanonicalActionRefs(Candidate.Payload, EntityRefs);
+	}
+	LastPackedCanonicalRefsBySessionByEntity.Add(SessionId, MoveTemp(PackedRefsByEntity));
+}
+
+void FUnrealAiContextService::RegisterActionReferencesFromToolResult(
+	const FString& ProjectId,
+	const FString& SessionId,
+	const FString& ToolResultText)
+{
+	if (ProjectId.IsEmpty() || SessionId.IsEmpty() || ToolResultText.IsEmpty())
+	{
+		return;
+	}
+	TSet<FString> Refs;
+	ExtractCanonicalActionRefs(ToolResultText, Refs);
+	if (Refs.Num() == 0)
+	{
+		return;
+	}
+	const TMap<FString, TSet<FString>>* PackedEntityRefs = LastPackedCanonicalRefsBySessionByEntity.Find(SessionId);
+	if (!PackedEntityRefs)
+	{
+		return;
+	}
+	TMap<FString, FRetrievalEntityUtilityCounters>& SessionCounters = RetrievalUtilityBySession.FindOrAdd(SessionId);
+	FProjectRetrievalState& ProjectState = RetrievalStateByProject.FindOrAdd(ProjectId);
+	for (const TPair<FString, TSet<FString>>& Pair : *PackedEntityRefs)
+	{
+		const FString& EntityId = Pair.Key;
+		const TSet<FString>& EntityRefs = Pair.Value;
+		bool bMatched = false;
+		for (const FString& Ref : Refs)
+		{
+			if (EntityRefs.Contains(Ref))
+			{
+				bMatched = true;
+				break;
+			}
+		}
+		if (!bMatched)
+		{
+			continue;
+		}
+		SessionCounters.FindOrAdd(EntityId).ActionRefCount += 1;
+		ProjectState.CountersByEntity.FindOrAdd(EntityId).ActionRefCount += 1;
+	}
+}
+
+void FUnrealAiContextService::RefreshHeadSetForProject(const FString& ProjectId)
+{
+	FProjectRetrievalState* ProjectState = RetrievalStateByProject.Find(ProjectId);
+	if (!ProjectState)
+	{
+		return;
+	}
+	struct FRow
+	{
+		FString EntityId;
+		float Utility = 0.f;
+		int32 Kept = 0;
+		int32 ActionRefs = 0;
+	};
+	TArray<FRow> Rows;
+	int64 TotalKept = 0;
+	int64 TotalAction = 0;
+	for (const TPair<FString, FRetrievalEntityUtilityCounters>& Pair : ProjectState->CountersByEntity)
+	{
+		FRow Row;
+		Row.EntityId = Pair.Key;
+		Row.Utility = Pair.Value.UtilityScore;
+		Row.Kept = Pair.Value.KeptCount;
+		Row.ActionRefs = Pair.Value.ActionRefCount;
+		TotalKept += Pair.Value.KeptCount;
+		TotalAction += Pair.Value.ActionRefCount;
+		Rows.Add(MoveTemp(Row));
+	}
+	Rows.Sort([](const FRow& A, const FRow& B)
+	{
+		if (!FMath::IsNearlyEqual(A.Utility, B.Utility))
+		{
+			return A.Utility > B.Utility;
+		}
+		return A.EntityId < B.EntityId;
+	});
+	ProjectState->HeadEntitySet.Reset();
+	int64 CumKept = 0;
+	int64 CumAction = 0;
+	const float CoverageThreshold = 0.8f;
+	const int32 FlatFallbackTopN = FMath::Max(1, FMath::CeilToInt(static_cast<float>(Rows.Num()) * 0.02f));
+	for (int32 i = 0; i < Rows.Num(); ++i)
+	{
+		ProjectState->HeadEntitySet.Add(Rows[i].EntityId);
+		CumKept += Rows[i].Kept;
+		CumAction += Rows[i].ActionRefs;
+		const float KeptCoverage = TotalKept > 0 ? static_cast<float>(CumKept) / static_cast<float>(TotalKept) : 0.0f;
+		const float ActionCoverage = TotalAction > 0 ? static_cast<float>(CumAction) / static_cast<float>(TotalAction) : 0.0f;
+		if ((KeptCoverage >= CoverageThreshold && ActionCoverage >= CoverageThreshold)
+			|| i + 1 >= FlatFallbackTopN)
+		{
+			break;
+		}
+	}
+}
+
+FString FUnrealAiContextService::GetProjectRetrievalStatePath(const FString& ProjectId) const
+{
+	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAiEditor"), TEXT("ContextUtility"), ProjectId + TEXT("-retrieval-state.json"));
+}
+
+void FUnrealAiContextService::SaveProjectRetrievalState(const FString& ProjectId)
+{
+	if (ProjectId.IsEmpty())
+	{
+		return;
+	}
+	const FProjectRetrievalState* ProjectState = RetrievalStateByProject.Find(ProjectId);
+	if (!ProjectState)
+	{
+		return;
+	}
+	IFileManager::Get().MakeDirectory(*FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAiEditor"), TEXT("ContextUtility")), true);
+	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetStringField(TEXT("projectId"), ProjectId);
+	Root->SetStringField(TEXT("updatedUtc"), ProjectState->UpdatedUtc.ToIso8601());
+	TArray<TSharedPtr<FJsonValue>> Entities;
+	for (const TPair<FString, FRetrievalEntityUtilityCounters>& Pair : ProjectState->CountersByEntity)
+	{
+		TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
+		E->SetStringField(TEXT("entityId"), Pair.Key);
+		E->SetNumberField(TEXT("utilityScore"), Pair.Value.UtilityScore);
+		E->SetNumberField(TEXT("retrievalHitCount"), Pair.Value.RetrievalHitCount);
+		E->SetNumberField(TEXT("keptCount"), Pair.Value.KeptCount);
+		E->SetNumberField(TEXT("budgetDropCount"), Pair.Value.BudgetDropCount);
+		E->SetNumberField(TEXT("actionRefCount"), Pair.Value.ActionRefCount);
+		E->SetNumberField(TEXT("staleTurns"), Pair.Value.StaleTurns);
+		Entities.Add(MakeShared<FJsonValueObject>(E));
+	}
+	Root->SetArrayField(TEXT("entities"), Entities);
+	TArray<TSharedPtr<FJsonValue>> Head;
+	for (const FString& EntityId : ProjectState->HeadEntitySet)
+	{
+		Head.Add(MakeShared<FJsonValueString>(EntityId));
+	}
+	Root->SetArrayField(TEXT("headEntities"), Head);
+	TArray<TSharedPtr<FJsonValue>> Edges;
+	for (const TPair<FString, TMap<FString, int32>>& Pair : ProjectState->EdgeWeightsByEntity)
+	{
+		for (const TPair<FString, int32>& Edge : Pair.Value)
+		{
+			TSharedPtr<FJsonObject> E = MakeShared<FJsonObject>();
+			E->SetStringField(TEXT("from"), Pair.Key);
+			E->SetStringField(TEXT("to"), Edge.Key);
+			E->SetNumberField(TEXT("weight"), Edge.Value);
+			Edges.Add(MakeShared<FJsonValueObject>(E));
+		}
+	}
+	Root->SetArrayField(TEXT("edges"), Edges);
+	FString Json;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Json);
+	if (FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
+	{
+		FFileHelper::SaveStringToFile(Json, *GetProjectRetrievalStatePath(ProjectId), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	}
+}
+
+void FUnrealAiContextService::LoadProjectRetrievalState(const FString& ProjectId)
+{
+	if (ProjectId.IsEmpty() || RetrievalStateByProject.Contains(ProjectId))
+	{
+		return;
+	}
+	FProjectRetrievalState Loaded;
+	FString Json;
+	if (!FFileHelper::LoadFileToString(Json, *GetProjectRetrievalStatePath(ProjectId)))
+	{
+		RetrievalStateByProject.Add(ProjectId, MoveTemp(Loaded));
+		return;
+	}
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		RetrievalStateByProject.Add(ProjectId, MoveTemp(Loaded));
+		return;
+	}
+	FString UpdatedStr;
+	if (Root->TryGetStringField(TEXT("updatedUtc"), UpdatedStr))
+	{
+		FDateTime::ParseIso8601(*UpdatedStr, Loaded.UpdatedUtc);
+	}
+	if (const TArray<TSharedPtr<FJsonValue>>* Entities = nullptr; Root->TryGetArrayField(TEXT("entities"), Entities) && Entities)
+	{
+		for (const TSharedPtr<FJsonValue>& V : *Entities)
+		{
+			const TSharedPtr<FJsonObject> O = V.IsValid() ? V->AsObject() : nullptr;
+			if (!O.IsValid())
+			{
+				continue;
+			}
+			FString EntityId;
+			if (!O->TryGetStringField(TEXT("entityId"), EntityId) || EntityId.IsEmpty())
+			{
+				continue;
+			}
+			FRetrievalEntityUtilityCounters& C = Loaded.CountersByEntity.FindOrAdd(EntityId);
+			double Num = 0.0;
+			if (O->TryGetNumberField(TEXT("utilityScore"), Num)) C.UtilityScore = static_cast<float>(Num);
+			if (O->TryGetNumberField(TEXT("retrievalHitCount"), Num)) C.RetrievalHitCount = static_cast<int32>(Num);
+			if (O->TryGetNumberField(TEXT("keptCount"), Num)) C.KeptCount = static_cast<int32>(Num);
+			if (O->TryGetNumberField(TEXT("budgetDropCount"), Num)) C.BudgetDropCount = static_cast<int32>(Num);
+			if (O->TryGetNumberField(TEXT("actionRefCount"), Num)) C.ActionRefCount = static_cast<int32>(Num);
+			if (O->TryGetNumberField(TEXT("staleTurns"), Num)) C.StaleTurns = static_cast<int32>(Num);
+		}
+	}
+	if (const TArray<TSharedPtr<FJsonValue>>* Head = nullptr; Root->TryGetArrayField(TEXT("headEntities"), Head) && Head)
+	{
+		for (const TSharedPtr<FJsonValue>& V : *Head)
+		{
+			FString S;
+			if (V.IsValid() && V->TryGetString(S) && !S.IsEmpty())
+			{
+				Loaded.HeadEntitySet.Add(S);
+			}
+		}
+	}
+	if (const TArray<TSharedPtr<FJsonValue>>* Edges = nullptr; Root->TryGetArrayField(TEXT("edges"), Edges) && Edges)
+	{
+		for (const TSharedPtr<FJsonValue>& V : *Edges)
+		{
+			const TSharedPtr<FJsonObject> O = V.IsValid() ? V->AsObject() : nullptr;
+			if (!O.IsValid())
+			{
+				continue;
+			}
+			FString From;
+			FString To;
+			double Weight = 0.0;
+			if (!O->TryGetStringField(TEXT("from"), From) || !O->TryGetStringField(TEXT("to"), To) || !O->TryGetNumberField(TEXT("weight"), Weight))
+			{
+				continue;
+			}
+			Loaded.EdgeWeightsByEntity.FindOrAdd(From).Add(To, static_cast<int32>(Weight));
+		}
+	}
+	RetrievalStateByProject.Add(ProjectId, MoveTemp(Loaded));
+}
+
+void FUnrealAiContextService::ExtractCanonicalActionRefs(const FString& Text, TSet<FString>& OutRefs)
+{
+	if (Text.IsEmpty())
+	{
+		return;
+	}
+	int32 SearchFrom = 0;
+	while (SearchFrom < Text.Len())
+	{
+		const int32 Pos = Text.Find(TEXT("/Game/"), ESearchCase::CaseSensitive, ESearchDir::FromStart, SearchFrom);
+		if (Pos == INDEX_NONE)
+		{
+			break;
+		}
+		int32 End = Pos;
+		while (End < Text.Len())
+		{
+			const TCHAR C = Text[End];
+			if (FChar::IsWhitespace(C) || C == TEXT('"') || C == TEXT('\'') || C == TEXT(',') || C == TEXT(']') || C == TEXT('}'))
+			{
+				break;
+			}
+			++End;
+		}
+		const FString Ref = Text.Mid(Pos, End - Pos);
+		if (Ref.Len() >= 6)
+		{
+			OutRefs.Add(Ref);
+		}
+		SearchFrom = End;
+	}
 }
