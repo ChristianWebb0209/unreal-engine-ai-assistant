@@ -52,6 +52,10 @@ namespace UnrealAiContextDecisionLogger
 			O->SetStringField(TEXT("invocationReason"), InvocationReason);
 			O->SetStringField(TEXT("type"), UnrealAiContextRankingPolicy::CandidateTypeName(C.Type));
 			O->SetStringField(TEXT("sourceId"), C.SourceId);
+			if (!C.EntityId.IsEmpty())
+			{
+				O->SetStringField(TEXT("entityId"), C.EntityId);
+			}
 			O->SetNumberField(TEXT("tokenCostEstimate"), C.TokenCostEstimate);
 			O->SetNumberField(TEXT("scoreTotal"), C.Score.Total);
 
@@ -66,6 +70,9 @@ namespace UnrealAiContextDecisionLogger
 			Features->SetNumberField(TEXT("frequency"), C.Features.Frequency);
 			Features->SetNumberField(TEXT("vectorSimilarity"), C.Features.VectorSimilarity);
 			Features->SetNumberField(TEXT("threadScope"), C.Features.ThreadScope);
+			Features->SetNumberField(TEXT("utilityMultiplier"), C.Features.UtilityMultiplier);
+			Features->SetBoolField(TEXT("retrievalLongTailFloor"), C.bRetrievalLongTailFloorCandidate);
+			Features->SetNumberField(TEXT("retrievalRepresentationLevel"), static_cast<int32>(C.RetrievalRepresentationLevel));
 			O->SetObjectField(TEXT("features"), Features);
 
 			TSharedPtr<FJsonObject> Score = MakeShared<FJsonObject>();
@@ -165,6 +172,11 @@ namespace UnrealAiContextDecisionLogger
 			Meta->SetNumberField(TEXT("memorySnippetCapApplied"), Unified.MemorySnippetCapApplied);
 			Meta->SetNumberField(TEXT("softBudgetCharsApplied"), Unified.SoftBudgetCharsApplied);
 			Meta->SetNumberField(TEXT("maxPackedCandidatesApplied"), Unified.MaxPackedCandidatesApplied);
+			Meta->SetNumberField(TEXT("packedRetrievalL0Count"), Unified.PackedRetrievalL0Count);
+			Meta->SetNumberField(TEXT("packedRetrievalL1Count"), Unified.PackedRetrievalL1Count);
+			Meta->SetNumberField(TEXT("packedRetrievalL2Count"), Unified.PackedRetrievalL2Count);
+			Meta->SetNumberField(TEXT("retrievalHeadSetSize"), Options.RetrievalHeadEntitySet.Num());
+			Meta->SetNumberField(TEXT("retrievalLongTailFloorCount"), Options.RetrievalLongTailFloorCount);
 			Meta->SetNumberField(TEXT("budgetChars"), BudgetChars);
 			Meta->SetNumberField(TEXT("emittedChars"), EmittedContextBlock.Len());
 			Meta->SetNumberField(TEXT("keptCount"), Unified.Packed.Num());
