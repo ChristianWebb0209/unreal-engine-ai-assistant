@@ -4,6 +4,55 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 ---
 
+## Entry 44 — Clarify persisted `unreal_ai_dispatch` tool cards in chat
+
+- **Chat UI (UI-only):** Updated [`Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/UnrealAiChatTranscript.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/UnrealAiChatTranscript.cpp) so `FUnrealAiChatTranscript::HydrateFromConversationMessages` unwraps persisted `unreal_ai_dispatch` tool calls for display. Tool cards now show the inner `tool_id` and inner `arguments` (instead of the dispatch wrapper), with a safe fallback to the raw wrapper when parsing fails or `tool_id` is missing.
+- **Build verification:** Ran headless compile (`./build-editor.ps1 -Headless`) successfully after the UI change.
+- **Testing hygiene:** No qualitative suite turn triage performed for this change (no new headed qualitative run executed as part of this edit).
+
+## Entry 42 — Turn timing averages from harness logs
+
+- Added `tests/analyze_turn_timings.py` to parse `tests/**/harness_progress.log` and compute per-turn wall time grouped by mode (`plan`, `agent`, `ask`), plus `llm_round` counts.
+- Aggregated across **178** parsed turns (from **191** harness logs):
+  - `plan`: n=11, mean=79.8s, median=80.7s, p90=105.6s
+  - `agent`: n=130, mean=16.1s, median=11.5s, p90=32.8s, p95=53.8s, p99=68.3s
+  - `ask`: n=37, mean=21.4s, median=13.0s, p90=49.4s, p95=59.2s, p99=76.0s
+- Tail latency is mostly explained by agent turns with high `llm_round` loops (slowest observed: ~85.7s, 8 rounds max).
+
+---
+## Entry 43 — Tool call back-and-forth hotspots
+
+- Added `tests/analyze_tool_call_backandforth.py` to scan all `turns/**/run.jsonl` and rank tools by:
+  - adjacent same-tool repeats (`A` then `A`)
+  - retry-after-failure (failed `X` then soon `X`)
+  - `A->B->A` loop patterns
+- Key hotspots from current artifacts (197 run.jsonl scanned; 173 with tool_start):
+  - `asset_create`: highest adjacent repeats (43) and also dominates `A->B->A` loops (`asset_create -> asset_create -> asset_create`, count=31).
+  - High-failure “loop” tools in negative-testing suites: `asset_get_dependencies` / `asset_find_referencers` show ~100% fail rates and repeated looping; likely expected-failure scenarios but still waste calls.
+  - Schema/arg-mismatch loopers: `asset_rename` (100% fail_rate; retry-after-failure=3), `viewport_frame_actors` (fail_rate ~64%).
+  - Mutation-shape sensitivity: `blueprint_apply_ir` (high fail_rate ~88%, retry-after-failure=9).
+
+## Entry 41 — Release test gap audit + todo updates
+
+- Audited existing deterministic strict suites (`tests/strict-tests/suites/*.json`), headed qualitative suites (`tests/qualitative-tests/suites/*.json`), and in-editor UE Automation tests under `Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tests/`.
+- History signal: the latest headed qualitative run folder `run-03-30-15-54-mass-dummy-structure-and-asset-stress` finished 15/16 turns and recorded `tool_finish_false=13` (per `harness-classification.json`), highlighting remaining flake/non-determinism risk.
+- History signal: the latest strict run `run-03-30-18-19-strict_catalog_runtime_render_gap_v1` failed exactly one strict assertion after `pie_stop`, where `pie_status.playing_in_editor` / `pie_status.play_session_in_progress` did not reach the expected `false` values.
+- Updated `docs/todo.md` with a new “Release Readiness Testing” checklist for areas that are currently under-covered: embedding/retrieval HTTP/error handling, context assembly around project tree sampling, startup ops status + persistence/resume, and chat/settings UI regression smoke.
+
+## Entry 40 — Tighten `pie_stop` teardown + PIE-flag strict suite
+
+- **Plugin (editor-side):** `UnrealAiDispatch_PieStop` now pumps the game thread and waits up to **5s** until PIE is fully stopped (checks all three PIE flags), and returns:
+  - `playing_in_editor`
+  - `play_session_in_progress`
+  - `play_session_request_queued`
+
+- **Strict suite (`tests/strict-tests/suites/strict_catalog_runtime_render_gap_v1.json`):**
+  - Pruned `t04`–`t07` so reruns focus on the PIE-teardown failure.
+  - `t02_agent_exit_preview` now asserts **all** PIE teardown flags are false via `pie_status`.
+  - Added `t04_agent_viewport_capture_delayed_probe` for `viewport_capture_delayed` strict assertions (`requested_path` non-empty and contains `ViewportCaptures`).
+
+- **Next verification:** rebuild editor + rerun `tests/strict-tests/run-strict-headed.ps1 -Suite strict_catalog_runtime_render_gap_v1`.
+
 ## Entry 39 — Expanded strict assertions + tool-catalog coverage suite
 
 - **Plugin strict assertions (`UnrealAi.RunStrictAssertions`):** Added broad deterministic assertion support beyond `asset_exists` / `tool_invoke_ok` / `blueprint_export_ir_node_count_min`.

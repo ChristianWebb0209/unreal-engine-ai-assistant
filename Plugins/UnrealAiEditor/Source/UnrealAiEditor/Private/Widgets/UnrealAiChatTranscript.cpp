@@ -2,6 +2,11 @@
 
 #include "HAL/PlatformTime.h"
 
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+
 FString UnrealAiFormatStepDurationForUi(const double Sec)
 {
 	if (Sec < 0.0)
@@ -136,6 +141,77 @@ FString FUnrealAiChatTranscript::FormatPlainText() const
 
 namespace
 {
+	/**
+	 * Persisted tool calls often store the dispatch wrapper (`unreal_ai_dispatch`) as the visible tool name.
+	 * For chat UI readability, unwrap it into the inner `tool_id` + inner `arguments` when possible.
+	 *
+	 * This is display-only: the backend execution already runs the unwrapped inner tool.
+	 */
+	static bool TryUnwrapDispatchToolCallForUi(
+		const FString& TcName,
+		const FString& TcArgumentsJson,
+		FString& OutInnerToolId,
+		FString& OutInnerArgsJson)
+	{
+		OutInnerToolId.Reset();
+		OutInnerArgsJson.Reset();
+
+		if (!TcName.Equals(TEXT("unreal_ai_dispatch"), ESearchCase::IgnoreCase))
+		{
+			return false;
+		}
+
+		TSharedPtr<FJsonObject> Root;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(TcArgumentsJson);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			return false;
+		}
+
+		FString InnerId;
+		if (!Root->TryGetStringField(TEXT("tool_id"), InnerId) || InnerId.TrimStartAndEnd().IsEmpty())
+		{
+			return false;
+		}
+
+		OutInnerToolId = MoveTemp(InnerId);
+
+		// Match harness unwrapping semantics:
+		// - `arguments` is normally a JSON object, but can also be a JSON string.
+		// - if `arguments` is missing/unexpected, fall back to `{}` so the UI remains usable.
+		const TSharedPtr<FJsonObject>* ArgsObjPtr = nullptr;
+		if (Root->TryGetObjectField(TEXT("arguments"), ArgsObjPtr) && ArgsObjPtr && (*ArgsObjPtr).IsValid())
+		{
+			FString Out;
+			const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+				TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Out);
+			if (FJsonSerializer::Serialize((*ArgsObjPtr).ToSharedRef(), Writer))
+			{
+				OutInnerArgsJson = MoveTemp(Out);
+			}
+			else
+			{
+				OutInnerArgsJson = TEXT("{}");
+			}
+		}
+		else
+		{
+			FString ArgsStr;
+			if (Root->TryGetStringField(TEXT("arguments"), ArgsStr))
+			{
+				OutInnerArgsJson = MoveTemp(ArgsStr);
+			}
+			else
+			{
+				OutInnerArgsJson = TEXT("{}");
+			}
+		}
+
+		OutInnerToolId.TrimStartAndEndInline();
+		OutInnerArgsJson.TrimStartAndEndInline();
+		return true;
+	}
+
 	static bool IsHarnessInjectedUserText(const FString& Text)
 	{
 		FString T = Text;
@@ -144,7 +220,7 @@ namespace
 	}
 }
 
-FGuid FUnrealAiChatTranscript::AddUserMessage(const FString& Text, FGuid DesiredId)
+FGuid FUnrealAiChatTranscript::AddUserMessage(const FString& Text, FGuid DesiredId, const EUnrealAiAgentMode* SentMode)
 {
 	FUnrealAiChatBlock B;
 	const FGuid NewId = DesiredId.IsValid() ? DesiredId : FGuid::NewGuid();
@@ -152,6 +228,11 @@ FGuid FUnrealAiChatTranscript::AddUserMessage(const FString& Text, FGuid Desired
 	B.Kind = EUnrealAiChatBlockKind::User;
 	B.UserText = Text;
 	B.bHarnessSystemUser = IsHarnessInjectedUserText(Text);
+	if (!B.bHarnessSystemUser && SentMode)
+	{
+		B.bHasUserAgentMode = true;
+		B.UserAgentMode = *SentMode;
+	}
 	Blocks.Add(MoveTemp(B));
 	OnStructuralChange.Broadcast();
 	return NewId;
@@ -569,7 +650,14 @@ void FUnrealAiChatTranscript::HydrateFromConversationMessages(const TArray<FUnre
 		}
 		if (M.Role == TEXT("user"))
 		{
-			AddUserMessage(M.Content);
+			if (M.bHasUserAgentMode)
+			{
+				AddUserMessage(M.Content, FGuid(), &M.UserAgentMode);
+			}
+			else
+			{
+				AddUserMessage(M.Content, FGuid(), nullptr);
+			}
 			continue;
 		}
 		if (M.Role == TEXT("assistant"))
@@ -588,12 +676,24 @@ void FUnrealAiChatTranscript::HydrateFromConversationMessages(const TArray<FUnre
 				{
 					continue;
 				}
+
+				FString UnwrappedToolId;
+				FString UnwrappedArgs;
+
 				FUnrealAiChatBlock B;
 				B.Id = FGuid::NewGuid();
 				B.Kind = EUnrealAiChatBlockKind::ToolCall;
 				B.ToolName = Tc.Name;
 				B.ToolCallId = Tc.Id;
 				B.ToolArgsPreview = Tc.ArgumentsJson;
+
+				// If the persisted tool is the dispatch wrapper, show the inner dispatched tool in the UI.
+				if (TryUnwrapDispatchToolCallForUi(Tc.Name, Tc.ArgumentsJson, UnwrappedToolId, UnwrappedArgs))
+				{
+					B.ToolName = MoveTemp(UnwrappedToolId);
+					B.ToolArgsPreview = MoveTemp(UnwrappedArgs);
+				}
+
 				B.bToolRunning = true;
 				B.bToolOk = false;
 				Blocks.Add(MoveTemp(B));
