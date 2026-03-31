@@ -44,6 +44,8 @@ namespace UnrealAiAgentHarnessPriv
 
 	/** Stop after this many consecutive identical tool failures (same invoke + args). */
 	static constexpr int32 GHarnessRepeatedFailureStopCount = 4;
+	/** How many retries we allow when streamed tool JSON is truncated and never becomes valid. */
+	static constexpr int32 GHarnessStreamToolCallIncompleteMaxRetriesPerRound = 1;
 	/** Default token budget per agent turn when profile does not set maxAgentTurnTokens and env is unset. */
 	static constexpr int32 GHarnessDefaultMaxTurnTokens = 500000;
 	/** Hard backstop on LLM↔tool iterations if token/repeat limits do not apply first. */
@@ -761,6 +763,10 @@ namespace UnrealAiAgentHarnessPriv
 		/** Plan-node agent only: retries HTTP complete-without-Finish (truncated SSE) without consuming a round. */
 		int32 StreamNoFinishRetryCountThisRound = 0;
 
+		/** Streamed tool call JSON may arrive fragmented; if args never complete, we recover once per LLM round. */
+		bool bStreamToolCallIncompleteTimedOut = false;
+		int32 StreamToolCallIncompleteRetryCountThisRound = 0;
+
 		FString AssistantBuffer;
 		TArray<FUnrealAiToolCallSpec> PendingToolCalls;
 		TArray<int32> CompletedToolCallQueue;
@@ -1135,6 +1141,8 @@ namespace UnrealAiAgentHarnessPriv
 			++LlmRound;
 			TransientTransportRetryCountThisRound = 0;
 			StreamNoFinishRetryCountThisRound = 0;
+			bStreamToolCallIncompleteTimedOut = false;
+			StreamToolCallIncompleteRetryCountThisRound = 0;
 			if (LlmRound > 1 && Sink.IsValid())
 			{
 				Sink->OnRunContinuation(LlmRound - 1, EffectiveMaxLlmRounds);
@@ -1420,6 +1428,50 @@ namespace UnrealAiAgentHarnessPriv
 			EmitEnforcementEvent(
 				TEXT("stream_tool_call_incomplete_timeout"),
 				FString::Printf(TEXT("index=%d id=%s name=%s age_events=%d age_ms=%d"), I, *Tc.Id, *Tc.Name, AgeEvents, AgeMs));
+			if (!bForceOnFinish)
+			{
+				// Don't hard-fail during the live stream: SSE can be fragmented and might still complete after thresholds.
+				// We mark once and wait until HTTP finishes, where we can retry safely.
+				bStreamToolCallIncompleteTimedOut = true;
+				return false;
+			}
+
+			// On Finish: recover with a single repair nudge (bounded per LLM round).
+			if (StreamToolCallIncompleteRetryCountThisRound < GHarnessStreamToolCallIncompleteMaxRetriesPerRound)
+			{
+				++StreamToolCallIncompleteRetryCountThisRound;
+				bStreamToolCallIncompleteTimedOut = false;
+
+				if (Conv.IsValid())
+				{
+					FUnrealAiConversationMessage RepairNudge;
+					RepairNudge.Role = TEXT("user");
+					RepairNudge.Content = TEXT(
+						"[Harness][reason=stream_tool_call_incomplete] The previous tool call arguments were truncated. "
+						"Retry the same `unreal_ai_dispatch` tool call with complete JSON arguments (do not truncate; ensure `tool_id` and the full `arguments` object are present).");
+
+					if (Catalog)
+					{
+						const FString RepairSchemaLine = UnrealAiAgentHarnessPriv::BuildToolRepairUserLine(Catalog, PendingToolCalls);
+						if (!RepairSchemaLine.IsEmpty())
+						{
+							RepairNudge.Content += TEXT("\n");
+							RepairNudge.Content += RepairSchemaLine;
+						}
+					}
+					Conv->GetMessagesMutable().Add(RepairNudge);
+				}
+
+				if (Sink.IsValid())
+				{
+					EmitEnforcementEvent(TEXT("stream_tool_call_incomplete_retry"), FString::Printf(TEXT("retry=%d/%d"), StreamToolCallIncompleteRetryCountThisRound, GHarnessStreamToolCallIncompleteMaxRetriesPerRound));
+				}
+
+				// Retry the same round (retry does not increment LlmRound).
+				DispatchLlm(true);
+				return true;
+			}
+
 			Fail(FString::Printf(
 				TEXT("Streamed tool call did not reach complete JSON arguments in time (index=%d, id=%s, name=%s)."),
 				I,

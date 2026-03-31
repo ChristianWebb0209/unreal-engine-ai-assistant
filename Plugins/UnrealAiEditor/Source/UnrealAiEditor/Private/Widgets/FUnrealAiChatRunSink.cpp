@@ -113,6 +113,15 @@ void FUnrealAiChatRunSink::OnContextUserMessages(const TArray<FString>& Messages
 	{
 		if (!Line.IsEmpty())
 		{
+			// These "ops" lines come from context background housekeeping (project tree refresh / startup status),
+			// and they should never be shown as end-user-visible chat content.
+			const FString LowerLine = Line.ToLower();
+			if (LowerLine.Contains(TEXT("background query ran"))
+				|| LowerLine.Contains(TEXT("startup ops"))
+				|| LowerLine.Contains(TEXT("start ops")))
+			{
+				continue;
+			}
 			Transcript->AddInformationalNotice(Line);
 		}
 	}
@@ -237,7 +246,15 @@ void FUnrealAiChatRunSink::OnEnforcementEvent(const FString& EventType, const FS
 {
 	if (Transcript.IsValid())
 	{
-		Transcript->AppendRunEvent(FString::Printf(TEXT("Enforcement: %s — %s"), *EventType, *Detail));
+		const bool bHideInternalBackgroundOps =
+			EventType.Equals(TEXT("background_op"), ESearchCase::IgnoreCase)
+			|| EventType.Equals(TEXT("tool_selector_ranks"), ESearchCase::IgnoreCase)
+			|| EventType.StartsWith(TEXT("tool_surface_"), ESearchCase::IgnoreCase);
+
+		if (!bHideInternalBackgroundOps)
+		{
+			Transcript->AppendRunEvent(FString::Printf(TEXT("Enforcement: %s — %s"), *EventType, *Detail));
+		}
 	}
 }
 

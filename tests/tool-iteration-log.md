@@ -4,22 +4,23 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 ---
 
+## Entry 45 — Add deterministic `suggested_correct_call` for tool hotspots
+
+- **`asset_rename`:** Updated `UnrealAiDispatch_AssetRename` to accept the `object_path` alias, normalize `from_path` before `LoadObject`, and return `suggested_correct_call` to `asset_index_fuzzy_search` when the asset can’t be loaded. Also switched rename failure (`RenameAssets` returns false) from an `Ok({ok:false})` shape to a hard `Error(...)` so retries are treated as failures.
+- **`asset_find_referencers` / `asset_get_dependencies`:** Added `object_path`/`path` normalization and returned `suggested_correct_call` to `asset_index_fuzzy_search` when the AssetRegistry lookup fails (asset not found).
+- **`viewport_frame_actors`:** When actor paths don’t resolve to valid non-zero bounds, now returns `ErrorWithSuggestedCall` pointing to `editor_get_selection` (empty args) instead of a raw error.
+- **`blueprint_apply_ir`:** For `invalid_ir` parse failures caused specifically by missing/empty `nodes` (`missing_required` at `$.nodes`), now returns `suggested_correct_call` to `blueprint_export_ir` (preserving `blueprint_path` + `graph_name`).
+- **Automation tests:** Extended `UnrealAiToolDispatchAutomationTests.cpp` with contract assertions checking `suggested_correct_call` presence/tool_id/arguments for the above failure modes. Also made a couple assertions tolerant to headless transient package behavior.
+- **Build/verification:**
+  - `./build-editor.ps1 -Headless` build succeeded.
+  - Ran Unreal Automation tests individually (all passed): `BlueprintApplyIrContract`, `GenericAssetToolsContract`, `CatalogMatrix`, `DispatchEditorSmoke`, `JsonHelpers`, `KPolicyMargin`, `QueryShaperHeuristic`, `TodoPlanContract`.
+
 ## Entry 44 — Clarify persisted `unreal_ai_dispatch` tool cards in chat
 
 - **Chat UI (UI-only):** Updated [`Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/UnrealAiChatTranscript.cpp`](../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Widgets/UnrealAiChatTranscript.cpp) so `FUnrealAiChatTranscript::HydrateFromConversationMessages` unwraps persisted `unreal_ai_dispatch` tool calls for display. Tool cards now show the inner `tool_id` and inner `arguments` (instead of the dispatch wrapper), with a safe fallback to the raw wrapper when parsing fails or `tool_id` is missing.
 - **Build verification:** Ran headless compile (`./build-editor.ps1 -Headless`) successfully after the UI change.
 - **Testing hygiene:** No qualitative suite turn triage performed for this change (no new headed qualitative run executed as part of this edit).
 
-## Entry 42 — Turn timing averages from harness logs
-
-- Added `tests/analyze_turn_timings.py` to parse `tests/**/harness_progress.log` and compute per-turn wall time grouped by mode (`plan`, `agent`, `ask`), plus `llm_round` counts.
-- Aggregated across **178** parsed turns (from **191** harness logs):
-  - `plan`: n=11, mean=79.8s, median=80.7s, p90=105.6s
-  - `agent`: n=130, mean=16.1s, median=11.5s, p90=32.8s, p95=53.8s, p99=68.3s
-  - `ask`: n=37, mean=21.4s, median=13.0s, p90=49.4s, p95=59.2s, p99=76.0s
-- Tail latency is mostly explained by agent turns with high `llm_round` loops (slowest observed: ~85.7s, 8 rounds max).
-
----
 ## Entry 43 — Tool call back-and-forth hotspots
 
 - Added `tests/analyze_tool_call_backandforth.py` to scan all `turns/**/run.jsonl` and rank tools by:
@@ -31,6 +32,16 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
   - High-failure “loop” tools in negative-testing suites: `asset_get_dependencies` / `asset_find_referencers` show ~100% fail rates and repeated looping; likely expected-failure scenarios but still waste calls.
   - Schema/arg-mismatch loopers: `asset_rename` (100% fail_rate; retry-after-failure=3), `viewport_frame_actors` (fail_rate ~64%).
   - Mutation-shape sensitivity: `blueprint_apply_ir` (high fail_rate ~88%, retry-after-failure=9).
+
+---
+## Entry 42 — Turn timing averages from harness logs
+
+- Added `tests/analyze_turn_timings.py` to parse `tests/**/harness_progress.log` and compute per-turn wall time grouped by mode (`plan`, `agent`, `ask`), plus `llm_round` counts.
+- Aggregated across **178** parsed turns (from **191** harness logs):
+  - `plan`: n=11, mean=79.8s, median=80.7s, p90=105.6s
+  - `agent`: n=130, mean=16.1s, median=11.5s, p90=32.8s, p95=53.8s, p99=68.3s
+  - `ask`: n=37, mean=21.4s, median=13.0s, p90=49.4s, p95=59.2s, p99=76.0s
+- Tail latency is mostly explained by agent turns with high `llm_round` loops (slowest observed: ~85.7s, 8 rounds max).
 
 ## Entry 41 — Release test gap audit + todo updates
 

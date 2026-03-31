@@ -268,7 +268,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRename(const TSharedPtr<FJso
 {
 	FString From;
 	FString ToName;
-	if (!Args->TryGetStringField(TEXT("from_path"), From) || From.IsEmpty())
+	Args->TryGetStringField(TEXT("from_path"), From);
+	// Common model alias: object_path (same shape as from_path but key differs).
+	if (From.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("object_path"), From);
+	}
+	if (From.IsEmpty())
 	{
 		Args->TryGetStringField(TEXT("asset_path"), From);
 	}
@@ -306,10 +312,40 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRename(const TSharedPtr<FJso
 			TEXT("asset_rename"),
 			SuggestedArgs);
 	}
+
+	// Canonicalize inputs so downstream loads and repeated-validation signatures are stable.
+	UnrealAiToolDispatchArgRepair::NormalizeAssetLikeObjectPath(From);
 	UObject* Obj = LoadObject<UObject>(nullptr, *From);
 	if (!Obj)
 	{
-		return UnrealAiToolJson::Error(TEXT("Could not load asset"));
+		// Best-effort fuzzy recovery: if the model passed a stale/partial object path,
+		// suggest resolving a concrete object_path first.
+		FString Query;
+		{
+			int32 LastSlash = INDEX_NONE;
+			if (From.FindLastChar(TEXT('/'), LastSlash) && LastSlash > 0 && LastSlash < From.Len() - 1)
+			{
+				FString Leaf = From.Mid(LastSlash + 1);
+				int32 LastDot = INDEX_NONE;
+				if (Leaf.FindLastChar(TEXT('.'), LastDot) && LastDot > 0 && LastDot < Leaf.Len() - 1)
+				{
+					Leaf = Leaf.Left(LastDot);
+				}
+				Leaf.TrimStartAndEndInline();
+				Query = Leaf;
+			}
+		}
+		if (Query.IsEmpty())
+		{
+			Query = TEXT("Asset");
+		}
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("query"), Query);
+		SuggestedArgs->SetStringField(TEXT("path_prefix"), TEXT("/Game"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("Could not load asset from from_path/object_path. Discover a valid /Game object path first."),
+			TEXT("asset_index_fuzzy_search"),
+			SuggestedArgs);
 	}
 	FAssetRenameData RD;
 	RD.Asset = Obj;
@@ -319,9 +355,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRename(const TSharedPtr<FJso
 	TArray<FAssetRenameData> Batch;
 	Batch.Add(RD);
 	const bool bRenamed = IAssetTools::Get().RenameAssets(Batch);
+	if (!bRenamed)
+	{
+		return UnrealAiToolJson::Error(FString::Printf(TEXT("asset_rename failed (RenameAssets returned false). From='%s' ToName='%s'."), *From, *ToName));
+	}
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
-	O->SetBoolField(TEXT("ok"), bRenamed);
-	O->SetNumberField(TEXT("renamed_count"), bRenamed ? 1.0 : 0.0);
+	O->SetBoolField(TEXT("ok"), true);
+	O->SetNumberField(TEXT("renamed_count"), 1.0);
 	return UnrealAiToolJson::Ok(O);
 }
 

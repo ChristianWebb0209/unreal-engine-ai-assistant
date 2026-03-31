@@ -285,10 +285,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameActors(const TShared
 	}
 	if (!Bounds.IsValid || Bounds.GetExtent().IsNearlyZero(1.f))
 	{
-		return UnrealAiToolJson::Error(
-			TEXT("No resolvable actors for framing. "
-				 "Pass full world actor paths from editor_get_selection or scene_fuzzy_search. "
-				 "Do not use the level instance name alone (e.g. a single path `PersistentLevel` is invalid)."));
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("No resolvable actors for framing. Discover/select level actors first, then pass the returned actor_paths."),
+			TEXT("editor_get_selection"),
+			SuggestedArgs);
 	}
 	bool bUiSuppressed = false;
 	if (FUnrealAiEditorModule::IsEditorFocusEnabled())

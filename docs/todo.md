@@ -1,5 +1,14 @@
 # Todo List
 
+## Core Functionality
+
+- None of the main tools really seem to work too well. 
+
+### Problems List:
+
+- I made a sphere named MySphere and asked agent to focus. It responded by first doing a fuzzy search. Our context window is way too narrow at the start. At least the most likely scene objects, maybe including most recently created, should be included as default context. Success metric for this is that query should know to call just one tool, actor focus in scene, because it knows the scene enough from default.
+- Simply saying "make me a cool blueprint" failed completely. My plugin really sucks.
+
 ## Subagents and plan mode
 
 - [x] Plan mode parent-thread state writes now use explicit context APIs (`SetActivePlanDagForThread`, `SetPlanNodeStatusForThread`, `ReplaceActivePlanDagWithFreshNodeResetForThread`) so node runs cannot mutate the wrong thread session.
@@ -19,16 +28,3 @@
 - [ ] Verify Blueprint editor toolbar/menu integration for selection formatting reliability across UE 5.7 minors.
 - [x] Vector DB UI: add vector top-graph search + drill-down inspector panel in `SUnrealAiEditorSettingsTab`.
 - - A key feature is getting the agent to recognize when functionality can be abstracted into custom events 
-
-## Release Readiness Testing
-
-- [ ] Strict PIE lifecycle: rerun `tests/strict-tests/run-strict-headed.ps1 -Suite strict_catalog_runtime_render_gap_v1` until it passes. Recent history shows `pie_stop` teardown can leave `playing_in_editor` / `play_session_in_progress` true even after the stop call, and the latest attempt was paused after a harness stall (`Harness turns 0/2`) so we can revisit PIE start/stop prompts (making viewport captures a last-resort tool, not the primary way to infer `pie_status`) and harden crash-proofing before the next run.
-- [ ] Strict tool contract smoke: rerun `tests/strict-tests/run-strict-headed.ps1 -Suite strict_tool_catalog_coverage_v1` and confirm `strict_assertions_fail_count == 0`.
-- [ ] Strict safety/guardrails: rerun `tests/strict-tests/run-strict-headed.ps1 -Suite strict_natural_autonomous_discovery_v1` to ensure “refusal on unsafe or under-specified mutations” still behaves correctly.
-- [ ] Qualitative end-to-end regression: run `tests/qualitative-tests/run-qualitative-headed.ps1 -Suite passed-tests.json`
-- [ ] Qualitative end-to-end regression: run `tests/qualitative-tests/run-qualitative-headed.ps1 -Suite regression-watchlist.json`
-- [ ] Qualitative end-to-end regression: run `tests/qualitative-tests/run-qualitative-headed.ps1 -Suite pre-release-natural-gaps.json`
-- [ ] Qualitative continuity/stress: run at least `tests/qualitative-tests/run-qualitative-headed.ps1 -Suite context-continuity-corridor-build.json` and confirm no tool retries/truncations lead to missing `run_finished`.
-- [ ] Embedding/retrieval integration (missing coverage): add a targeted strict suite or unit test that exercises `FOpenAiCompatibleEmbeddingProvider` success, HTTP timeout, invalid payload/JSON, and fallback behavior to lexical retrieval.
-- [ ] Context assembly around project tree sampling (missing coverage): add a strict suite that forces the “preferred package path / context blurb / sampler refresh” path (via create/rename or preferred-path decisions) and asserts it never invents `/Game/...` paths and never produces orphan `role=tool` rows.
-- [ ] Startup ops status + persistence/resume (missing coverage): restart editor and verify startup gating/ops status does not block chat/harness initialization; then run a harness scenario that resumes a plan/DAG and confirm node status persistence matches expectations.

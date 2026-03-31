@@ -165,6 +165,49 @@ namespace
 		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(TcArgumentsJson);
 		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
 		{
+			// If the tool call arguments were streamed/truncated, JSON parsing fails.
+			// Best-effort extraction of inner `tool_id` keeps the UI readable.
+			const FString Pattern = TEXT("\"tool_id\"");
+			const int32 ToolIdFieldPos = TcArgumentsJson.Find(Pattern, ESearchCase::IgnoreCase);
+			if (ToolIdFieldPos == INDEX_NONE)
+			{
+				return false;
+			}
+
+			const FString Tail = TcArgumentsJson.Mid(ToolIdFieldPos + Pattern.Len());
+			const int32 ColonPos = Tail.Find(TEXT(":"));
+			if (ColonPos == INDEX_NONE)
+			{
+				return false;
+			}
+
+			FString AfterColon = Tail.Mid(ColonPos + 1);
+			AfterColon.TrimStartAndEndInline();
+
+			// Expect JSON string:  "tool_id":"viewport_frame_actors"
+			const int32 FirstQuote = AfterColon.Find(TEXT("\""));
+			if (FirstQuote == INDEX_NONE)
+			{
+				return false;
+			}
+
+			const int32 ValueStart = FirstQuote + 1;
+			for (int32 i = ValueStart; i < AfterColon.Len(); ++i)
+			{
+				if (AfterColon[i] != TEXT('"'))
+				{
+					continue;
+				}
+				// Ignore escaped quotes.
+				if (i > ValueStart && AfterColon[i - 1] == TEXT('\\'))
+				{
+					continue;
+				}
+				OutInnerToolId = AfterColon.Mid(ValueStart, i - ValueStart);
+				OutInnerToolId.TrimStartAndEndInline();
+				OutInnerArgsJson = TEXT("{}");
+				return !OutInnerToolId.IsEmpty();
+			}
 			return false;
 		}
 
@@ -692,6 +735,11 @@ void FUnrealAiChatTranscript::HydrateFromConversationMessages(const TArray<FUnre
 				{
 					B.ToolName = MoveTemp(UnwrappedToolId);
 					B.ToolArgsPreview = MoveTemp(UnwrappedArgs);
+				}
+				else if (Tc.Name.Equals(TEXT("unreal_ai_dispatch"), ESearchCase::IgnoreCase))
+				{
+					// Never leak the internal wrapper name to the user.
+					B.ToolName = TEXT("Tool");
 				}
 
 				B.bToolRunning = true;

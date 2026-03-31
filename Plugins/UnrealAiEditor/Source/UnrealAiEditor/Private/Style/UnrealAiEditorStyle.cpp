@@ -17,9 +17,10 @@ namespace UnrealAiEditorBubbleColors
 {
 	static FLinearColor UserBubbleFill()
 	{
-		// Match the editor's brighter panel tone used for assistant surfaces.
-		// This avoids the user bubble appearing too dark under some dark themes.
-		return FStyleColors::Panel.GetSpecifiedColor();
+		// Must visually match run/notice boxes: a darker recessed rounded surface.
+		// Using Panel can blend into the chat background, making the rounded "bubble"
+		// look like it has no background at all.
+		return FStyleColors::Recessed.GetSpecifiedColor();
 	}
 
 	static FLinearColor AssistantBubbleFill()

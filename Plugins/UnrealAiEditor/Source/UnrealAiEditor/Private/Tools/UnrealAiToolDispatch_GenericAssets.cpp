@@ -14,10 +14,15 @@
 #include "Factories/Factory.h"
 #include "IAssetTools.h"
 #include "Misc/PackageName.h"
+#include "FileHelpers.h"
 #include "ScopedTransaction.h"
 #include "GameFramework/Actor.h"
 #include "UObject/UnrealType.h"
 #include "UObject/Class.h"
+#include "Engine/World.h"
+#include "Engine/Level.h"
+#include "Engine/Engine.h"
+#include "Editor.h"
 #include "LevelSequence.h"
 #include "Materials/MaterialInterface.h"
 
@@ -471,6 +476,104 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetCreate(const TSharedPtr<FJso
 			*ClassPath));
 	}
 
+	// Map/world creation special-case.
+	// This repo's non-interactive factory resolver often can't instantiate UWorld/ULevel,
+	// but gameplay tasks need a fresh editor world so subsequent actor/spawn and actor search tools work.
+	{
+		const bool bWantsMap =
+			ClassPath.Equals(TEXT("/Script/Engine.World"), ESearchCase::IgnoreCase)
+			|| ClassPath.Equals(TEXT("/Script/Engine.Level"), ESearchCase::IgnoreCase);
+
+		if (bWantsMap)
+		{
+			UClass* EffectiveWorldClass = UWorld::StaticClass();
+			if (!EffectiveWorldClass)
+			{
+				return UnrealAiToolJson::Error(TEXT("asset_create: UWorld::StaticClass unavailable"));
+			}
+
+			// Ensure consistent object path for maps.
+			const FString ExpectedObjPath = BuildExpectedObjectPath(PackagePath, AssetName);
+			if (UObject* ExistingObj = LoadObject<UObject>(nullptr, *ExpectedObjPath))
+			{
+				if (ExistingObj && ExistingObj->IsA(EffectiveWorldClass))
+				{
+					// Best-effort open the map so this becomes the active editor world.
+					if (GEngine && GEditor)
+					{
+						const FString MapLongPackageName = PackagePath + TEXT("/") + AssetName; // /Game/.../MapName
+						(void)GEngine->Exec(nullptr, *FString::Printf(TEXT("open %s"), *MapLongPackageName), *GLog);
+					}
+
+					TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+					O->SetBoolField(TEXT("ok"), true);
+					O->SetStringField(TEXT("object_path"), ExistingObj->GetPathName());
+					O->SetBoolField(TEXT("already_existed"), true);
+					return UnrealAiToolJson::Ok(O);
+				}
+
+				return UnrealAiToolJson::Error(TEXT("asset_create: asset already exists with a different class"));
+			}
+
+			const FString PackageName = PackagePath + TEXT("/") + AssetName; // /Game/.../MapName (package, not object)
+			UPackage* Pkg = CreatePackage(*PackageName);
+			if (!Pkg)
+			{
+				return UnrealAiToolJson::Error(TEXT("asset_create: failed to CreatePackage for map/world"));
+			}
+			Pkg->FullyLoad();
+
+			UWorld* NewWorld = NewObject<UWorld>(Pkg, *AssetName, RF_Public | RF_Standalone | RF_Transactional);
+			if (!NewWorld)
+			{
+				return UnrealAiToolJson::Error(TEXT("asset_create: failed to allocate new UWorld"));
+			}
+
+			// Initialize and ensure PersistentLevel exists.
+			// We keep this minimal and best-effort across UE minor versions.
+			{
+				// Some UE versions provide InitializeNewWorld; if available, it typically creates PersistentLevel.
+				// If the signature differs in your UE version, the build will surface it and we can adjust.
+				NewWorld->InitializeNewWorld(UWorld::InitializationValues());
+			}
+
+			if (!NewWorld->PersistentLevel)
+			{
+				ULevel* Persistent = NewObject<ULevel>(NewWorld, NAME_PersistentLevel, RF_Public | RF_Standalone | RF_Transactional);
+				if (!Persistent)
+				{
+					return UnrealAiToolJson::Error(TEXT("asset_create: failed to create PersistentLevel for blank map/world"));
+				}
+				Persistent->OwningWorld = NewWorld;
+				NewWorld->PersistentLevel = Persistent;
+				NewWorld->SetCurrentLevel(Persistent);
+			}
+
+			Pkg->MarkPackageDirty();
+			FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+			ARM.Get().AssetCreated(NewWorld);
+
+			// Save packages so the editor can open the new map.
+			{
+				// In headless / automation scenarios we avoid prompts and save dirty packages.
+				// This is best-effort: it may save more than just the newly created world.
+				(void)FEditorFileUtils::SaveDirtyPackages(false, true, true, true, false, false);
+			}
+
+			// Open the created map (best-effort) so actor spawn/search tools target it.
+			if (GEngine && GEditor)
+			{
+				const FString MapLongPackageName = PackagePath + TEXT("/") + AssetName; // /Game/.../MapName
+				(void)GEngine->Exec(nullptr, *FString::Printf(TEXT("open %s"), *MapLongPackageName), *GLog);
+			}
+
+			TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+			O->SetBoolField(TEXT("ok"), true);
+			O->SetStringField(TEXT("object_path"), NewWorld->GetPathName());
+			return UnrealAiToolJson::Ok(O);
+		}
+	}
+
 	// If the asset already exists, return success to prevent repeated CreateAsset failures
 	// from consuming agent LLM rounds.
 	{
@@ -773,13 +876,40 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetFindReferencers(const TShare
 	{
 		return UnrealAiToolJson::Error(TEXT("object_path is required (asset object path, e.g. /Game/Folder/Asset.Asset)"));
 	}
+	UnrealAiToolDispatchArgRepair::NormalizeAssetLikeObjectPath(Path);
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 	IAssetRegistry& AR = ARM.Get();
 	const FSoftObjectPath SOP(Path);
 	const FAssetData AD = AR.GetAssetByObjectPath(SOP);
 	if (!AD.IsValid())
 	{
-		return UnrealAiToolJson::Error(TEXT("Asset not found"));
+		// Best-effort fuzzy recovery: ask for concrete object paths under /Game.
+		FString Query;
+		{
+			int32 LastSlash = INDEX_NONE;
+			if (Path.FindLastChar(TEXT('/'), LastSlash) && LastSlash > 0 && LastSlash < Path.Len() - 1)
+			{
+				FString Leaf = Path.Mid(LastSlash + 1);
+				int32 LastDot = INDEX_NONE;
+				if (Leaf.FindLastChar(TEXT('.'), LastDot) && LastDot > 0 && LastDot < Leaf.Len() - 1)
+				{
+					Leaf = Leaf.Left(LastDot);
+				}
+				Leaf.TrimStartAndEndInline();
+				Query = Leaf;
+			}
+		}
+		if (Query.IsEmpty())
+		{
+			Query = TEXT("Asset");
+		}
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("query"), Query);
+		SuggestedArgs->SetStringField(TEXT("path_prefix"), TEXT("/Game"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("Asset not found for object_path; resolve a valid /Game object path first."),
+			TEXT("asset_index_fuzzy_search"),
+			SuggestedArgs);
 	}
 	const FAssetIdentifier Id(AD.PackageName, AD.AssetName);
 	TArray<FAssetIdentifier> Referencers;
@@ -808,13 +938,39 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetGetDependencies(const TShare
 	{
 		return UnrealAiToolJson::Error(TEXT("object_path is required (asset object path, e.g. /Game/Folder/Asset.Asset)"));
 	}
+	UnrealAiToolDispatchArgRepair::NormalizeAssetLikeObjectPath(Path);
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 	IAssetRegistry& AR = ARM.Get();
 	const FSoftObjectPath SOP(Path);
 	const FAssetData AD = AR.GetAssetByObjectPath(SOP);
 	if (!AD.IsValid())
 	{
-		return UnrealAiToolJson::Error(TEXT("Asset not found"));
+		FString Query;
+		{
+			int32 LastSlash = INDEX_NONE;
+			if (Path.FindLastChar(TEXT('/'), LastSlash) && LastSlash > 0 && LastSlash < Path.Len() - 1)
+			{
+				FString Leaf = Path.Mid(LastSlash + 1);
+				int32 LastDot = INDEX_NONE;
+				if (Leaf.FindLastChar(TEXT('.'), LastDot) && LastDot > 0 && LastDot < Leaf.Len() - 1)
+				{
+					Leaf = Leaf.Left(LastDot);
+				}
+				Leaf.TrimStartAndEndInline();
+				Query = Leaf;
+			}
+		}
+		if (Query.IsEmpty())
+		{
+			Query = TEXT("Asset");
+		}
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("query"), Query);
+		SuggestedArgs->SetStringField(TEXT("path_prefix"), TEXT("/Game"));
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("Asset not found for object_path; resolve a valid /Game object path first."),
+			TEXT("asset_index_fuzzy_search"),
+			SuggestedArgs);
 	}
 	const FAssetIdentifier Id(AD.PackageName, AD.AssetName);
 	TArray<FAssetIdentifier> Deps;

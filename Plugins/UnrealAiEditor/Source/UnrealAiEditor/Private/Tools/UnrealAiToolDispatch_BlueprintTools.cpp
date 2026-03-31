@@ -2320,14 +2320,48 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 	TArray<FIrError> ParseErrors;
 	if (!TryParseIr(Args, Ir, ParseErrors))
 	{
+		// When the model omits `nodes` (or sends `nodes: []`), the correct recovery is usually
+		// to first call blueprint_export_ir, then apply that exported IR.
+		TSharedPtr<FJsonObject> SuggestedArgs = Normalization.bApplied ? Args : nullptr;
+		const TCHAR* SuggestedToolId = TEXT("blueprint_apply_ir");
+		{
+			bool bMissingNodes = false;
+			for (const FIrError& E : ParseErrors)
+			{
+				if (E.Code.Equals(TEXT("missing_required"), ESearchCase::IgnoreCase)
+					&& E.Path.Equals(TEXT("$.nodes"), ESearchCase::CaseSensitive))
+				{
+					bMissingNodes = true;
+					break;
+				}
+			}
+			if (bMissingNodes)
+			{
+				FString BlueprintPath;
+				if (Args->TryGetStringField(TEXT("blueprint_path"), BlueprintPath) && !BlueprintPath.IsEmpty())
+				{
+					FString GraphName;
+					Args->TryGetStringField(TEXT("graph_name"), GraphName);
+					if (GraphName.IsEmpty())
+					{
+						GraphName = TEXT("EventGraph");
+					}
+					TSharedPtr<FJsonObject> ExportArgs = MakeShared<FJsonObject>();
+					ExportArgs->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+					ExportArgs->SetStringField(TEXT("graph_name"), GraphName);
+					SuggestedArgs = ExportArgs;
+					SuggestedToolId = TEXT("blueprint_export_ir");
+				}
+			}
+		}
 		return MakeIrErrorResult(
 			TEXT("invalid_ir"),
 			TEXT("Invalid blueprint IR (check required keys/types in error_details)."),
 			ParseErrors,
 			Normalization.Notes,
 			Normalization.DeprecatedFieldsSeen,
-			Normalization.bApplied ? Args : nullptr,
-			TEXT("blueprint_apply_ir"));
+			SuggestedArgs,
+			SuggestedToolId);
 	}
 
 	bool bCreatedBlueprint = false;

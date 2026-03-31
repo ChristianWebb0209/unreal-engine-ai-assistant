@@ -2042,6 +2042,20 @@ static TSharedPtr<SDockTab> FindParentDockTabForWidget(const TSharedRef<const SW
 	return nullptr;
 }
 
+static TSharedPtr<SDockingTabStack> FindParentDockingTabStackForWidget(const TSharedRef<const SWidget>& Widget)
+{
+	TSharedPtr<SWidget> Current = Widget->GetParentWidget();
+	while (Current.IsValid())
+	{
+		if (Current->GetType() == FName(TEXT("SDockingTabStack")))
+		{
+			return StaticCastSharedPtr<SDockingTabStack>(Current);
+		}
+		Current = Current->GetParentWidget();
+	}
+	return nullptr;
+}
+
 static TSharedRef<SDockTab> SpawnAgentChatDockTab(
 	const TSharedPtr<FUnrealAiBackendRegistry>& Reg,
 	const FSpawnTabArgs& Args,
@@ -2157,6 +2171,13 @@ TSharedPtr<SUnrealAiEditorChatTab> FUnrealAiEditorModule::OpenNewAgentChatTabBes
 		return nullptr;
 	}
 	TSharedPtr<SDockTab> ParentDock = FindParentDockTabForWidget(FromWidget.ToSharedRef());
+	TSharedPtr<SDockingTabStack> ParentStack = ParentDock.IsValid() ? ParentDock->GetParentDockTabStack() : nullptr;
+	if (!ParentStack.IsValid())
+	{
+		// Some Slate hierarchies (during rebuild / startup) may not surface a working GetParentDockTabStack(),
+		// but the docking stack still exists in the parent chain.
+		ParentStack = FindParentDockingTabStackForWidget(FromWidget.ToSharedRef());
+	}
 	TSharedPtr<SWindow> OwnerWindow;
 	if (ParentDock.IsValid())
 	{
@@ -2173,10 +2194,10 @@ TSharedPtr<SUnrealAiEditorChatTab> FUnrealAiEditorModule::OpenNewAgentChatTabBes
 	// Note: SDockTab::SetLayoutIdentifier is protected (friend FTabManager only). Extra Agent Chat tabs
 	// are spawned manually so FTabManager::SpawnTab is not used (nomad spawner tracks a single SpawnedTabPtr).
 
-	if (TSharedPtr<SDockingTabStack> Stack = ParentDock.IsValid() ? ParentDock->GetParentDockTabStack() : nullptr)
+	if (ParentStack.IsValid())
 	{
 		int32 InsertIdx = INDEX_NONE;
-		const TSlotlessChildren<SDockTab>& Tabs = Stack->GetTabs();
+		const TSlotlessChildren<SDockTab>& Tabs = ParentStack->GetTabs();
 		if (ParentDock.IsValid())
 		{
 			const FTabId CurrentId = ParentDock->GetLayoutIdentifier();
@@ -2189,7 +2210,7 @@ TSharedPtr<SUnrealAiEditorChatTab> FUnrealAiEditorModule::OpenNewAgentChatTabBes
 				}
 			}
 		}
-		Stack->OpenTab(NewTab, InsertIdx, false);
+		ParentStack->OpenTab(NewTab, InsertIdx, false);
 	}
 	else
 	{
