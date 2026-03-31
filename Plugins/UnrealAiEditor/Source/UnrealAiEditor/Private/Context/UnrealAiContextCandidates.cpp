@@ -6,6 +6,7 @@
 #include "Memory/IUnrealAiMemoryService.h"
 #include "Misc/EngineVersion.h"
 #include "Retrieval/UnrealAiRetrievalTypes.h"
+#include "UnrealAiEditorModule.h"
 
 namespace UnrealAiContextCandidates
 {
@@ -207,6 +208,14 @@ namespace UnrealAiContextCandidates
 		for (int32 i = 0; i < State.ToolResults.Num(); ++i)
 		{
 			const FToolContextEntry& T = State.ToolResults[i];
+			if (!FUnrealAiEditorModule::IsPieToolsEnabled())
+			{
+				const FString ToolNameLower = T.ToolName.ToLower();
+				if (ToolNameLower.Contains(TEXT("pie_")))
+				{
+					continue;
+				}
+			}
 			FContextCandidateEnvelope E;
 			E.Type = UnrealAiContextRankingPolicy::ECandidateType::ToolResult;
 			E.SourceId = FString::Printf(TEXT("tool:%d:%s"), i, *T.ToolName);

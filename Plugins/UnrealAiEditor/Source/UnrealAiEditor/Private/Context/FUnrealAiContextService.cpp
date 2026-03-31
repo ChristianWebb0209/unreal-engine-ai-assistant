@@ -7,6 +7,7 @@
 #include "Context/UnrealAiContextDecisionLogger.h"
 #include "Context/UnrealAiEditorContextQueries.h"
 #include "Context/UnrealAiProjectTreeSampler.h"
+#include "Context/UnrealAiStartupOpsStatus.h"
 #include "Context/UnrealAiRecentUiRanking.h"
 #include "Memory/IUnrealAiMemoryService.h"
 #include "Observability/UnrealAiBackgroundOpsLog.h"
@@ -743,6 +744,15 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 				});
 			UnrealAiBackgroundOpsLog::EmitLogLine(TEXT("project_tree_sample"), TEXT("ok"), Cached.LastQueryDurationMs, Detail);
 			Result.UserVisibleMessages.Add(FString::Printf(TEXT("Background query ran: %s"), *Detail));
+		}
+		const FString StartupOpsLine = UnrealAiStartupOpsStatus::BuildCompactLine(
+			UnrealAiStartupOpsStatus::BuildStatus(RetrievalService, Cached, ActiveProjectId));
+		const bool bStartupBootstrapped = Cached.LastQueryStatus.Contains(TEXT("startup_bootstrap"));
+		const bool bFreshStartupSample = Cached.UpdatedUtc != FDateTime::MinValue()
+			&& (FDateTime::UtcNow() - Cached.UpdatedUtc).GetTotalMinutes() <= 5.0;
+		if (bRefreshed || (bStartupBootstrapped && bFreshStartupSample))
+		{
+			Result.UserVisibleMessages.Add(StartupOpsLine);
 		}
 		Block += TEXT("\n\n");
 		Block += UnrealAiProjectTreeSampler::BuildContextBlurb(Cached);

@@ -1,5 +1,6 @@
 #include "Harness/UnrealAiConversationJson.h"
 
+#include "Context/AgentContextTypes.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
@@ -60,6 +61,29 @@ namespace UnrealAiConversationJson
 		return O;
 	}
 
+	static TSharedPtr<FJsonObject> MessageToPersistedJsonObject(const FUnrealAiConversationMessage& M)
+	{
+		TSharedPtr<FJsonObject> O = MessageToJsonObject(M);
+		if (M.Role == TEXT("user") && M.bHasUserAgentMode)
+		{
+			const TCHAR* S = TEXT("agent");
+			switch (M.UserAgentMode)
+			{
+			case EUnrealAiAgentMode::Ask:
+				S = TEXT("ask");
+				break;
+			case EUnrealAiAgentMode::Plan:
+				S = TEXT("plan");
+				break;
+			default:
+				S = TEXT("agent");
+				break;
+			}
+			O->SetStringField(TEXT("ui_agent_mode"), FString(S));
+		}
+		return O;
+	}
+
 	bool MessagesToJson(const TArray<FUnrealAiConversationMessage>& Messages, FString& OutJson)
 	{
 		TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
@@ -67,7 +91,7 @@ namespace UnrealAiConversationJson
 		TArray<TSharedPtr<FJsonValue>> Arr;
 		for (const FUnrealAiConversationMessage& M : Messages)
 		{
-			Arr.Add(MakeShared<FJsonValueObject>(MessageToJsonObject(M).ToSharedRef()));
+			Arr.Add(MakeShared<FJsonValueObject>(MessageToPersistedJsonObject(M).ToSharedRef()));
 		}
 		Root->SetArrayField(TEXT("messages"), Arr);
 		FString Out;
@@ -140,6 +164,26 @@ namespace UnrealAiConversationJson
 			if ((*Mo)->TryGetArrayField(TEXT("tool_calls"), Tc))
 			{
 				ParseToolCalls(Tc, M.ToolCalls);
+			}
+			FString UiMode;
+			if ((*Mo)->TryGetStringField(TEXT("ui_agent_mode"), UiMode))
+			{
+				UiMode.TrimStartAndEndInline();
+				if (UiMode.Equals(TEXT("ask"), ESearchCase::IgnoreCase))
+				{
+					M.bHasUserAgentMode = true;
+					M.UserAgentMode = EUnrealAiAgentMode::Ask;
+				}
+				else if (UiMode.Equals(TEXT("plan"), ESearchCase::IgnoreCase))
+				{
+					M.bHasUserAgentMode = true;
+					M.UserAgentMode = EUnrealAiAgentMode::Plan;
+				}
+				else if (UiMode.Equals(TEXT("agent"), ESearchCase::IgnoreCase))
+				{
+					M.bHasUserAgentMode = true;
+					M.UserAgentMode = EUnrealAiAgentMode::Agent;
+				}
 			}
 			OutMessages.Add(MoveTemp(M));
 		}

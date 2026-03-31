@@ -3,7 +3,7 @@
 #include "Harness/UnrealAiHarnessTpmThrottle.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
-#include "Async/TaskGraphInterfaces.h"
+#include "Async/Async.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "HttpModule.h"
 #include "HttpManager.h"
@@ -19,6 +19,36 @@
 
 namespace
 {
+	struct FEmbedGameThreadSync
+	{
+		FEvent* DoneEvent = nullptr;
+
+		FEmbedGameThreadSync()
+		{
+			DoneEvent = FPlatformProcess::GetSynchEventFromPool(false);
+		}
+
+		~FEmbedGameThreadSync()
+		{
+			if (DoneEvent)
+			{
+				FPlatformProcess::ReturnSynchEventToPool(DoneEvent);
+				DoneEvent = nullptr;
+			}
+		}
+
+		void SignalDone()
+		{
+			if (DoneEvent)
+			{
+				DoneEvent->Trigger();
+			}
+		}
+
+		FEmbedGameThreadSync(const FEmbedGameThreadSync&) = delete;
+		FEmbedGameThreadSync& operator=(const FEmbedGameThreadSync&) = delete;
+	};
+
 	static bool WaitForEventWhilePumpingHttpAndGameThread(FEvent* Event, uint32 WaitMs)
 	{
 		if (!Event)
@@ -38,7 +68,6 @@ namespace
 				return true;
 			}
 			FHttpModule::Get().GetHttpManager().Tick(0.f);
-			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
 			FPlatformProcess::SleepNoStats(0.001f);
 		}
 		return Event->Wait(0u);
@@ -51,6 +80,64 @@ FOpenAiCompatibleEmbeddingProvider::FOpenAiCompatibleEmbeddingProvider(FUnrealAi
 }
 
 bool FOpenAiCompatibleEmbeddingProvider::EmbedOne(
+	const FString& ModelId,
+	const FUnrealAiEmbeddingRequest& Request,
+	FUnrealAiEmbeddingResponse& OutResponse)
+{
+	if (!IsInGameThread())
+	{
+		const TSharedPtr<FEmbedGameThreadSync> Sync = MakeShared<FEmbedGameThreadSync>();
+		if (!Sync->DoneEvent)
+		{
+			OutResponse.Error = TEXT("Failed to allocate sync event for game-thread embedding dispatch.");
+			return false;
+		}
+
+		// Copy everything the game-thread task needs; capturing references to the caller stack is UB
+		// once the waiter returns or if the task is reordered relative to unrelated pumping.
+		const FString ModelIdCopy(ModelId);
+		const FUnrealAiEmbeddingRequest RequestCopy(Request);
+		const TSharedPtr<FUnrealAiEmbeddingResponse> GameThreadResponse = MakeShared<FUnrealAiEmbeddingResponse>();
+		struct FSyncOutcome
+		{
+			bool bOk = false;
+		};
+		const TSharedPtr<FSyncOutcome> Outcome = MakeShared<FSyncOutcome>();
+
+		AsyncTask(ENamedThreads::GameThread, [this, ModelIdCopy, RequestCopy, GameThreadResponse, Outcome, Sync]()
+		{
+			struct FAlwaysSignal
+			{
+				TSharedPtr<FEmbedGameThreadSync> S;
+				~FAlwaysSignal()
+				{
+					if (S.IsValid())
+					{
+						S->SignalDone();
+					}
+				}
+			} AlwaysSignal{Sync};
+
+			Outcome->bOk = EmbedOne_OnGameThread(ModelIdCopy, RequestCopy, *GameThreadResponse);
+		});
+
+		// If Wait times out, the calling thread must not return Sync->DoneEvent to the pool while the
+		// game-thread task may still run; FEmbedGameThreadSync lifetime is tied to this TSharedPtr and
+		// the AsyncTask capture so the event is pooled only after Trigger (or last ref drop).
+		const bool bSignaled = Sync->DoneEvent->Wait(static_cast<uint32>(FMath::Max(1000.0f, (UnrealAiWaitTime::EmbeddingHttpTimeoutSec * 1000.0f) + 2000.0f)));
+		if (!bSignaled)
+		{
+			OutResponse.Error = TEXT("Timed out waiting for game-thread embedding dispatch.");
+			return false;
+		}
+		OutResponse = MoveTemp(*GameThreadResponse);
+		return Outcome->bOk;
+	}
+
+	return EmbedOne_OnGameThread(ModelId, Request, OutResponse);
+}
+
+bool FOpenAiCompatibleEmbeddingProvider::EmbedOne_OnGameThread(
 	const FString& ModelId,
 	const FUnrealAiEmbeddingRequest& Request,
 	FUnrealAiEmbeddingResponse& OutResponse)

@@ -14,6 +14,7 @@
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Planning/FUnrealAiPlanExecutor.h"
 #include "Harness/IUnrealAiAgentHarness.h"
+#include "Harness/UnrealAiHarnessTurnPaths.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "HttpManager.h"
 #include "HttpModule.h"
@@ -352,6 +353,8 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		OutRunDir = RunDir;
 		OutJsonlPath = FPaths::Combine(RunDir, TEXT("run.jsonl"));
 		FFileHelper::SaveStringToFile(FString(), *OutJsonlPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+
+		const FScopedHarnessStepOutputDir HarnessStepScope(RunDir);
 
 		FEvent* DoneEvent = FPlatformProcess::GetSynchEventFromPool(true);
 		FEvent* PlanSubTurnEvent = nullptr;

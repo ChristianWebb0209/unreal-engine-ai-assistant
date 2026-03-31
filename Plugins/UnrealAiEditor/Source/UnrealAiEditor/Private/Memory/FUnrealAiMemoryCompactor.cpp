@@ -1,5 +1,6 @@
 #include "Memory/FUnrealAiMemoryCompactor.h"
 
+#include "Harness/UnrealAiConversationJson.h"
 #include "Memory/IUnrealAiMemoryService.h"
 #include "Misc/Guid.h"
 
@@ -10,6 +11,43 @@ FUnrealAiMemoryCompactor::FUnrealAiMemoryCompactor(IUnrealAiMemoryService* InMem
 
 namespace
 {
+	static FString BuildMeaningfulTitle(const FUnrealAiMemoryCompactionInput& Input)
+	{
+		TArray<FUnrealAiConversationMessage> Messages;
+		TArray<FString> Warnings;
+		if (UnrealAiConversationJson::JsonToMessages(Input.ConversationJson, Messages, Warnings))
+		{
+			for (int32 i = Messages.Num() - 1; i >= 0; --i)
+			{
+				const FUnrealAiConversationMessage& Message = Messages[i];
+				if (Message.Role != TEXT("user"))
+				{
+					continue;
+				}
+				FString Candidate = Message.Content;
+				Candidate.ReplaceInline(TEXT("\r"), TEXT(" "));
+				Candidate.ReplaceInline(TEXT("\n"), TEXT(" "));
+				Candidate.TrimStartAndEndInline();
+				if (Candidate.IsEmpty())
+				{
+					continue;
+				}
+				const int32 Period = Candidate.Find(TEXT("."));
+				if (Period > 8)
+				{
+					Candidate = Candidate.Left(Period);
+				}
+				if (Candidate.Len() > 64)
+				{
+					Candidate = Candidate.Left(64).TrimEnd();
+					Candidate += TEXT("...");
+				}
+				return FString::Printf(TEXT("Lesson: %s"), *Candidate);
+			}
+		}
+		return TEXT("Thread memory");
+	}
+
 	static void AddHashtagTags(const FString& Text, TArray<FString>& InOutTags)
 	{
 		if (Text.IsEmpty())
@@ -84,13 +122,9 @@ FUnrealAiMemoryCompactionResult FUnrealAiMemoryCompactor::Run(
 
 	// Conservative extractor v1: create at most one compacted memory per invocation,
 	// and allow zero output when confidence gating fails.
-	FString CandidateTitle = TEXT("Thread lesson");
-	if (!Input.ThreadId.IsEmpty())
-	{
-		CandidateTitle = FString::Printf(TEXT("Thread lesson (%s)"), *Input.ThreadId.Left(8));
-	}
+	const FString CandidateTitle = BuildMeaningfulTitle(Input);
 	const FString CandidateDescription = TEXT("Auto-compacted summary candidate from recent thread activity.");
-	const FString CandidateBody = Input.ConversationJson.Left(1200);
+	const FString CandidateBody = Input.ConversationJson;
 	const float Confidence = Input.ConversationJson.Len() >= 200 ? 0.55f : 0.25f;
 
 	Out.Candidates = 1;

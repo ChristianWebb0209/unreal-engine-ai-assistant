@@ -2555,6 +2555,8 @@ void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TS
 	FUnrealAiConversationMessage UserMsg;
 	UserMsg.Role = TEXT("user");
 	UserMsg.Content = Request.UserText;
+	UserMsg.bHasUserAgentMode = true;
+	UserMsg.UserAgentMode = Request.Mode;
 	Runner->Conv->GetMessagesMutable().Add(UserMsg);
 
 	Runner->DispatchLlm();

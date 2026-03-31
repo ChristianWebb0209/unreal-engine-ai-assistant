@@ -15,5 +15,10 @@ public:
 		FUnrealAiEmbeddingResponse& OutResponse) override;
 
 private:
+	bool EmbedOne_OnGameThread(
+		const FString& ModelId,
+		const FUnrealAiEmbeddingRequest& Request,
+		FUnrealAiEmbeddingResponse& OutResponse);
+
 	FUnrealAiModelProfileRegistry* Profiles = nullptr;
 };

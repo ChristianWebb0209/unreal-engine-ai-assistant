@@ -55,7 +55,11 @@ namespace UnrealAiProjectTreeSampler
 		}
 	}
 
-	bool MaybeRefreshProjectTreeSummary(const FString& ProjectId, FProjectTreeSummary& InOutSummary, const bool bForceRefresh)
+	bool MaybeRefreshProjectTreeSummary(
+		const FString& ProjectId,
+		FProjectTreeSummary& InOutSummary,
+		const bool bForceRefresh,
+		const FString& RefreshReason)
 	{
 		const FDateTime Now = FDateTime::UtcNow();
 		if (!bForceRefresh && InOutSummary.UpdatedUtc != FDateTime::MinValue())
@@ -63,7 +67,9 @@ namespace UnrealAiProjectTreeSampler
 			const FTimespan Age = Now - InOutSummary.UpdatedUtc;
 			if (Age.GetTotalMinutes() < static_cast<double>(RefreshMinutes))
 			{
-				InOutSummary.LastQueryStatus = TEXT("skipped_fresh");
+				InOutSummary.LastQueryStatus = RefreshReason.IsEmpty()
+					? TEXT("skipped_fresh")
+					: FString::Printf(TEXT("skipped_fresh reason=%s"), *RefreshReason);
 				return false;
 			}
 		}
@@ -134,7 +140,9 @@ namespace UnrealAiProjectTreeSampler
 		AppendPreferredPath(InOutSummary, TEXT("blueprint"), BlueprintFolders, TEXT("/Game/Blueprints"));
 		AppendPreferredPath(InOutSummary, TEXT("material_instance"), MaterialInstanceFolders, TEXT("/Game/Materials"));
 		InOutSummary.UpdatedUtc = FDateTime::UtcNow();
-		InOutSummary.LastQueryStatus = FString::Printf(TEXT("ok assets=%d project=%s"), Assets.Num(), *ProjectId);
+		InOutSummary.LastQueryStatus = RefreshReason.IsEmpty()
+			? FString::Printf(TEXT("ok assets=%d project=%s"), Assets.Num(), *ProjectId)
+			: FString::Printf(TEXT("ok reason=%s assets=%d project=%s"), *RefreshReason, Assets.Num(), *ProjectId);
 #else
 		InOutSummary.TopLevelFolders = { TEXT("/Game") };
 		InOutSummary.PreferredCreatePaths.Reset();
@@ -145,7 +153,9 @@ namespace UnrealAiProjectTreeSampler
 		P.Confidence = 0.2;
 		InOutSummary.PreferredCreatePaths.Add(MoveTemp(P));
 		InOutSummary.UpdatedUtc = FDateTime::UtcNow();
-		InOutSummary.LastQueryStatus = TEXT("non_editor_defaults");
+		InOutSummary.LastQueryStatus = RefreshReason.IsEmpty()
+			? TEXT("non_editor_defaults")
+			: FString::Printf(TEXT("non_editor_defaults reason=%s"), *RefreshReason);
 #endif
 
 		InOutSummary.LastQueryEndUtc = FDateTime::UtcNow();
@@ -153,10 +163,13 @@ namespace UnrealAiProjectTreeSampler
 		return true;
 	}
 
-	const FProjectTreeSummary& GetOrRefreshProjectSummary(const FString& ProjectId, const bool bForceRefresh)
+	const FProjectTreeSummary& GetOrRefreshProjectSummary(
+		const FString& ProjectId,
+		const bool bForceRefresh,
+		const FString& RefreshReason)
 	{
 		FProjectTreeSummary& Summary = GProjectSummaryCache.FindOrAdd(ProjectId);
-		MaybeRefreshProjectTreeSummary(ProjectId, Summary, bForceRefresh);
+		MaybeRefreshProjectTreeSummary(ProjectId, Summary, bForceRefresh, RefreshReason);
 		return Summary;
 	}
 

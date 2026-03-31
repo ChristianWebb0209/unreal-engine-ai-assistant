@@ -52,6 +52,12 @@ struct FUnrealAiConversationMessage
 	FString Content;
 	TArray<FUnrealAiToolCallSpec> ToolCalls;
 	FString ToolCallId;
+	/**
+	 * When Role is "user": mode active when the message was sent (UI + conversation.json only).
+	 * Never included in LLM API payloads.
+	 */
+	bool bHasUserAgentMode = false;
+	EUnrealAiAgentMode UserAgentMode = EUnrealAiAgentMode::Agent;
 };
 
 enum class EUnrealAiLlmStreamEventType : uint8
