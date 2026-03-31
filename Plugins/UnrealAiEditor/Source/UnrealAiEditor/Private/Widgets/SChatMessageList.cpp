@@ -285,7 +285,7 @@ void SChatMessageList::Construct(const FArguments& InArgs)
 		];
 }
 
-FGuid SChatMessageList::AddUserMessage(const FString& Text)
+FGuid SChatMessageList::AddUserMessage(const FString& Text, const EUnrealAiAgentMode SentMode)
 {
 	ForceScrollToBottomAndFollow();
 	if (!Transcript.IsValid())
@@ -294,7 +294,7 @@ FGuid SChatMessageList::AddUserMessage(const FString& Text)
 	}
 	const FGuid Id = FGuid::NewGuid();
 	PendingUserAnimId = Id;
-	return Transcript->AddUserMessage(Text, Id);
+	return Transcript->AddUserMessage(Text, Id, &SentMode);
 }
 
 void SChatMessageList::ClearUserAnimId()
@@ -433,6 +433,40 @@ void SChatMessageList::RebuildTranscript()
 									  ]
 							  ]);
 
+				TSharedRef<SWidget> UserWrapped = UserBubble;
+				if (B.bHasUserAgentMode && !B.bHarnessSystemUser)
+				{
+					const FText ModeTxt = B.UserAgentMode == EUnrealAiAgentMode::Ask
+						? LOCTEXT("UserModeAsk", "Ask")
+						: (B.UserAgentMode == EUnrealAiAgentMode::Plan
+							   ? LOCTEXT("UserModePlan", "Plan")
+							   : LOCTEXT("UserModeAgent", "Agent"));
+					UserWrapped = SNew(SVerticalBox)
+						+ SVerticalBox::Slot()
+							  .AutoHeight()
+							  .Padding(0.f, 0.f, 0.f, 5.f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth()
+							[
+								SNew(SBorder)
+									.BorderImage(FAppStyle::GetBrush(TEXT("NoBorder")))
+									.BorderBackgroundColor(FLinearColor(0.11f, 0.13f, 0.17f, 0.55f))
+									.Padding(FMargin(7.f, 3.f))
+									[
+										SNew(STextBlock)
+											.Text(ModeTxt)
+											.Font(FUnrealAiEditorStyle::FontCaption())
+											.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+									]
+							]
+						]
+						+ SVerticalBox::Slot().AutoHeight()
+						[
+							UserBubble
+						];
+				}
+
 				if (B.Id == PendingUserAnimId)
 				{
 					MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListRowMargin)
@@ -440,7 +474,7 @@ void SChatMessageList::RebuildTranscript()
 							SNew(SChatUserMessageAnimated)
 								.OwnerList(WeakList)
 								[
-									UserBubble
+									UserWrapped
 								]
 						];
 				}
@@ -448,7 +482,7 @@ void SChatMessageList::RebuildTranscript()
 				{
 					MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListRowMargin)
 						[
-							UserBubble
+							UserWrapped
 						];
 				}
 			}

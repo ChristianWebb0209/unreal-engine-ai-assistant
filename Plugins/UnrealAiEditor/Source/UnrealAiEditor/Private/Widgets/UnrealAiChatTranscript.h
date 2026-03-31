@@ -29,6 +29,9 @@ struct FUnrealAiChatBlock
 	FString UserText;
 	/** Synthetic harness nudges stored as user role in conversation.json ([Harness] prefix). */
 	bool bHarnessSystemUser = false;
+	/** When Kind==User and not harness-injected: mode used for that send (for badge UI). */
+	bool bHasUserAgentMode = false;
+	EUnrealAiAgentMode UserAgentMode = EUnrealAiAgentMode::Agent;
 	FString ThinkingText;
 	FString AssistantText;
 	FString ToolName;
@@ -73,7 +76,8 @@ public:
 	/** Plain-text export / clipboard (game-thread snapshot of Blocks). */
 	FString FormatPlainText() const;
 	/** @return Id of the new user block (for attaching async metadata). Pass a valid DesiredId to control the block id (e.g. UI animation coordination). */
-	FGuid AddUserMessage(const FString& Text, FGuid DesiredId = FGuid());
+	/** @param SentMode If non-null, show a mode badge on the user bubble (ignored for harness user lines). */
+	FGuid AddUserMessage(const FString& Text, FGuid DesiredId = FGuid(), const EUnrealAiAgentMode* SentMode = nullptr);
 	void BeginRun(const FGuid& RunId);
 	void AppendThinkingDelta(const FString& Chunk);
 	void AppendAssistantDelta(const FString& Chunk);

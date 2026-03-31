@@ -1,5 +1,7 @@
 #include "Widgets/UnrealAiChatUiHelpers.h"
 
+#include "Misc/EngineVersion.h"
+#include "Interfaces/IPluginManager.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Widgets/UnrealAiChatTranscript.h"
 #include "Widgets/SChatMessageList.h"
@@ -161,4 +163,15 @@ void UnrealAiChatUi_LoadPersistedThreadIntoUi(
 			MessageList->GetTranscript()->AddPlanDraftPending(Dag);
 		}
 	}
+}
+
+FText UnrealAiChatUi_GetComposerFooterVersionText()
+{
+	FString PluginVer = TEXT("dev");
+	if (TSharedPtr<IPlugin> P = IPluginManager::Get().FindPlugin(TEXT("UnrealAiEditor")); P.IsValid())
+	{
+		PluginVer = P->GetDescriptor().VersionName;
+	}
+	const FString EngineLabel = FEngineVersion::Current().ToString();
+	return FText::FromString(FString::Printf(TEXT("Unreal AI Editor %s · %s"), *PluginVer, *EngineLabel));
 }

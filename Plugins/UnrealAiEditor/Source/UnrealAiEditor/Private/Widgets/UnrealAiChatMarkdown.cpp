@@ -7,6 +7,7 @@
 #include "Styling/AppStyle.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SHyperlink.h"
+#include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
@@ -28,6 +29,7 @@ FString UnrealAiStripInlineMarkdown(const FString& Line)
 	FString O = Line;
 	O.ReplaceInline(TEXT("**"), TEXT(""));
 	O.ReplaceInline(TEXT("__"), TEXT(""));
+	O.ReplaceInline(TEXT("`"), TEXT(""));
 	return O;
 }
 
@@ -37,6 +39,8 @@ namespace UnrealAiChatMarkdownInline
 	{
 		Text,
 		Link,
+		Code,
+		Bold,
 	};
 
 	struct FInlineSegment
@@ -141,6 +145,172 @@ namespace UnrealAiChatMarkdownInline
 		Segs = MoveTemp(Expanded);
 	}
 
+	static bool IsLikelyUnrealTargetPath(const FString& InText)
+	{
+		FString T = InText;
+		T.TrimStartAndEndInline();
+		if (T.StartsWith(TEXT("\"")) && T.EndsWith(TEXT("\"")) && T.Len() > 1)
+		{
+			T = T.Mid(1, T.Len() - 2);
+			T.TrimStartAndEndInline();
+		}
+		return T.StartsWith(TEXT("/Game/"))
+			|| T.StartsWith(TEXT("Game/"))
+			|| T.StartsWith(TEXT("/Script/"))
+			|| T.StartsWith(TEXT("/Engine/"))
+			|| T.Contains(TEXT(":PersistentLevel."))
+			|| T.StartsWith(TEXT("PersistentLevel."));
+	}
+
+	static void SplitInlineCodeSpansFromText(const FString& Text, TArray<FInlineSegment>& OutAppend)
+	{
+		if (Text.IsEmpty())
+		{
+			return;
+		}
+		const int32 Len = Text.Len();
+		int32 Pos = 0;
+		while (Pos < Len)
+		{
+			const int32 Tick = Text.Find(TEXT("`"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Pos);
+			if (Tick == INDEX_NONE)
+			{
+				const FString Tail = Text.Mid(Pos);
+				if (!Tail.IsEmpty())
+				{
+					FInlineSegment Seg;
+					Seg.Kind = ESegmentKind::Text;
+					Seg.Text = Tail;
+					OutAppend.Add(MoveTemp(Seg));
+				}
+				break;
+			}
+			if (Tick > Pos)
+			{
+				const FString Pre = Text.Mid(Pos, Tick - Pos);
+				if (!Pre.IsEmpty())
+				{
+					FInlineSegment Seg;
+					Seg.Kind = ESegmentKind::Text;
+					Seg.Text = Pre;
+					OutAppend.Add(MoveTemp(Seg));
+				}
+			}
+
+			int32 FenceLen = 1;
+			if (Tick + 1 < Len && Text[Tick + 1] == TEXT('`'))
+			{
+				FenceLen = 2;
+			}
+			const FString Fence = FenceLen == 2 ? FString(TEXT("``")) : FString(TEXT("`"));
+			const int32 CodeStart = Tick + FenceLen;
+			const int32 EndTick = Text.Find(Fence, ESearchCase::CaseSensitive, ESearchDir::FromStart, CodeStart);
+			if (EndTick == INDEX_NONE)
+			{
+				// Unclosed code span: keep as plain text.
+				const FString Tail = Text.Mid(Tick);
+				FInlineSegment Seg;
+				Seg.Kind = ESegmentKind::Text;
+				Seg.Text = Tail;
+				OutAppend.Add(MoveTemp(Seg));
+				break;
+			}
+
+			const FString CodeText = Text.Mid(CodeStart, EndTick - CodeStart).TrimStartAndEnd();
+			FInlineSegment CodeSeg;
+			CodeSeg.Kind = ESegmentKind::Code;
+			CodeSeg.Text = CodeText;
+			if (IsLikelyUnrealTargetPath(CodeText))
+			{
+				CodeSeg.Target = CodeText;
+			}
+			OutAppend.Add(MoveTemp(CodeSeg));
+			Pos = EndTick + FenceLen;
+		}
+	}
+
+	static void ExpandTextSegmentsInlineCode(TArray<FInlineSegment>& Segs)
+	{
+		TArray<FInlineSegment> Expanded;
+		for (FInlineSegment& Seg : Segs)
+		{
+			if (Seg.Kind != ESegmentKind::Text)
+			{
+				Expanded.Add(MoveTemp(Seg));
+				continue;
+			}
+			SplitInlineCodeSpansFromText(Seg.Text, Expanded);
+		}
+		Segs = MoveTemp(Expanded);
+	}
+
+	static void SplitBoldSpansFromText(const FString& Text, TArray<FInlineSegment>& OutAppend)
+	{
+		if (Text.IsEmpty())
+		{
+			return;
+		}
+		int32 Pos = 0;
+		const int32 Len = Text.Len();
+		while (Pos < Len)
+		{
+			const int32 Open = Text.Find(TEXT("**"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Pos);
+			if (Open == INDEX_NONE)
+			{
+				const FString Tail = Text.Mid(Pos);
+				if (!Tail.IsEmpty())
+				{
+					FInlineSegment Seg;
+					Seg.Kind = ESegmentKind::Text;
+					Seg.Text = Tail;
+					OutAppend.Add(MoveTemp(Seg));
+				}
+				break;
+			}
+			if (Open > Pos)
+			{
+				const FString Pre = Text.Mid(Pos, Open - Pos);
+				if (!Pre.IsEmpty())
+				{
+					FInlineSegment Seg;
+					Seg.Kind = ESegmentKind::Text;
+					Seg.Text = Pre;
+					OutAppend.Add(MoveTemp(Seg));
+				}
+			}
+			const int32 Close = Text.Find(TEXT("**"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Open + 2);
+			if (Close == INDEX_NONE)
+			{
+				const FString Tail = Text.Mid(Open);
+				FInlineSegment Seg;
+				Seg.Kind = ESegmentKind::Text;
+				Seg.Text = Tail;
+				OutAppend.Add(MoveTemp(Seg));
+				break;
+			}
+			FInlineSegment BS;
+			BS.Kind = ESegmentKind::Bold;
+			BS.Text = Text.Mid(Open + 2, Close - (Open + 2));
+			OutAppend.Add(MoveTemp(BS));
+			Pos = Close + 2;
+		}
+	}
+
+	static void ExpandTextSegmentsBold(TArray<FInlineSegment>& Segs)
+	{
+		TArray<FInlineSegment> Expanded;
+		for (FInlineSegment& Seg : Segs)
+		{
+			if (Seg.Kind != ESegmentKind::Text)
+			{
+				Expanded.Add(MoveTemp(Seg));
+				continue;
+			}
+			SplitBoldSpansFromText(Seg.Text, Expanded);
+		}
+		Segs = MoveTemp(Expanded);
+	}
+
 	static void SplitInlineLinks(const FString& InText, TArray<FInlineSegment>& OutSegments)
 	{
 		OutSegments.Reset();
@@ -226,6 +396,8 @@ namespace UnrealAiChatMarkdownInline
 			OutSegments.Add(MoveTemp(Seg));
 			Pos = Rp + 1;
 		}
+		ExpandTextSegmentsInlineCode(OutSegments);
+		ExpandTextSegmentsBold(OutSegments);
 		ExpandTextSegmentsBareUrls(OutSegments);
 	}
 
@@ -324,6 +496,40 @@ namespace UnrealAiChatMarkdownInline
 				Wrap->AddSlot().Padding(FMargin(0.f, 0.f, 2.f, 0.f))[MakeChatHyperlinkRow(Display, Seg.Target)];
 				continue;
 			}
+			if (Seg.Kind == ESegmentKind::Code)
+			{
+				if (!Seg.Target.IsEmpty())
+				{
+					Wrap->AddSlot().Padding(FMargin(0.f, 0.f, 2.f, 0.f))
+					[
+						MakeChatHyperlinkRow(Seg.Text, Seg.Target)
+					];
+				}
+				else
+				{
+					Wrap->AddSlot()
+					[
+						SNew(STextBlock)
+							.Font(FUnrealAiEditorStyle::FontMono9())
+							.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextPrimary())
+							.AutoWrapText(true)
+							.Text(FText::FromString(Seg.Text))
+					];
+				}
+				continue;
+			}
+			if (Seg.Kind == ESegmentKind::Bold)
+			{
+				Wrap->AddSlot().Padding(FMargin(0.f, 0.f, 2.f, 0.f))
+				[
+					SNew(STextBlock)
+						.Font(FUnrealAiEditorStyle::FontBold(11))
+						.ColorAndOpacity(Color)
+						.AutoWrapText(true)
+						.Text(FText::FromString(UnrealAiStripInlineMarkdown(Seg.Text)))
+				];
+				continue;
+			}
 
 			Wrap->AddSlot()
 				[
@@ -353,6 +559,7 @@ namespace UnrealAiChatMarkdown
 		H2,
 		H3,
 		Bullet,
+		OrderedBullet,
 		TodoOpen,
 		TodoDone,
 		Plain,
@@ -362,7 +569,119 @@ namespace UnrealAiChatMarkdown
 	{
 		ELineKind Kind = ELineKind::Plain;
 		FString Text;
+		int32 OrderedIndex = 0;
 	};
+
+	static bool TryStripLeadingOrderedListIndex(FString& Line, int32& OutIndex)
+	{
+		OutIndex = 0;
+		const int32 Len = Line.Len();
+		int32 NumEnd = 0;
+		while (NumEnd < Len && FChar::IsDigit(Line[NumEnd]))
+		{
+			++NumEnd;
+		}
+		if (NumEnd == 0)
+		{
+			return false;
+		}
+		if (NumEnd >= Len || Line[NumEnd] != TEXT('.'))
+		{
+			return false;
+		}
+		int32 AfterDot = NumEnd + 1;
+		while (AfterDot < Len && FChar::IsWhitespace(Line[AfterDot]))
+		{
+			++AfterDot;
+		}
+		OutIndex = FCString::Atoi(*Line.Left(NumEnd));
+		Line = Line.Mid(AfterDot);
+		return true;
+	}
+
+	static bool ClassifyGitHubTodoLine(const FString& Trimmed, FLine& Out)
+	{
+		FString W = Trimmed;
+		int32 Ord = 0;
+		if (TryStripLeadingOrderedListIndex(W, Ord))
+		{
+			if (W.StartsWith(TEXT("[ ]"), ESearchCase::CaseSensitive))
+			{
+				Out.Kind = ELineKind::TodoOpen;
+				Out.Text = W.Mid(3).TrimStart();
+				return true;
+			}
+			if (W.StartsWith(TEXT("[x]"), ESearchCase::IgnoreCase))
+			{
+				Out.Kind = ELineKind::TodoDone;
+				Out.Text = W.Mid(3).TrimStart();
+				return true;
+			}
+		}
+
+		auto TryPrefix = [&](const TCHAR* Pfx, int32 Len, bool bDone) -> bool
+		{
+			if (Trimmed.StartsWith(Pfx, ESearchCase::CaseSensitive))
+			{
+				Out.Kind = bDone ? ELineKind::TodoDone : ELineKind::TodoOpen;
+				Out.Text = Trimmed.Mid(Len).TrimStart();
+				return true;
+			}
+			return false;
+		};
+
+		if (TryPrefix(TEXT("- [ ] "), 6, false))
+		{
+			return true;
+		}
+		if (TryPrefix(TEXT("- [x] "), 6, true))
+		{
+			return true;
+		}
+		if (TryPrefix(TEXT("- [X] "), 6, true))
+		{
+			return true;
+		}
+		if (TryPrefix(TEXT("* [ ] "), 6, false))
+		{
+			return true;
+		}
+		if (TryPrefix(TEXT("* [x] "), 6, true))
+		{
+			return true;
+		}
+		if (TryPrefix(TEXT("* [X] "), 6, true))
+		{
+			return true;
+		}
+		if (TryPrefix(TEXT("+ [ ] "), 6, false))
+		{
+			return true;
+		}
+		if (TryPrefix(TEXT("+ [x] "), 6, true))
+		{
+			return true;
+		}
+		if (TryPrefix(TEXT("+ [X] "), 6, true))
+		{
+			return true;
+		}
+
+		if (Trimmed == TEXT("- [ ]") || Trimmed == TEXT("* [ ]") || Trimmed == TEXT("+ [ ]"))
+		{
+			Out.Kind = ELineKind::TodoOpen;
+			Out.Text.Reset();
+			return true;
+		}
+		if (Trimmed == TEXT("- [x]") || Trimmed == TEXT("- [X]") || Trimmed == TEXT("* [x]") || Trimmed == TEXT("* [X]")
+			|| Trimmed == TEXT("+ [x]") || Trimmed == TEXT("+ [X]"))
+		{
+			Out.Kind = ELineKind::TodoDone;
+			Out.Text.Reset();
+			return true;
+		}
+		return false;
+	}
 
 	static FString TrimmedLine(const FString& Line)
 	{
@@ -394,37 +713,34 @@ namespace UnrealAiChatMarkdown
 			Out.Text = Trimmed.Mid(4);
 			return;
 		}
-		if (Trimmed.StartsWith(TEXT("- [ ] ")))
+		if (ClassifyGitHubTodoLine(Trimmed, Out))
 		{
-			Out.Kind = ELineKind::TodoOpen;
-			Out.Text = Trimmed.Mid(6);
 			return;
 		}
-		if (Trimmed == TEXT("- [ ]"))
 		{
-			Out.Kind = ELineKind::TodoOpen;
-			Out.Text = FString();
-			return;
+			FString OrdRest = Trimmed;
+			int32 Ord = 0;
+			if (TryStripLeadingOrderedListIndex(OrdRest, Ord))
+			{
+				Out.Kind = ELineKind::OrderedBullet;
+				Out.OrderedIndex = Ord;
+				Out.Text = OrdRest;
+				return;
+			}
 		}
-		if (Trimmed.StartsWith(TEXT("- [x] ")) || Trimmed.StartsWith(TEXT("- [X] ")))
-		{
-			Out.Kind = ELineKind::TodoDone;
-			Out.Text = Trimmed.Mid(6);
-			return;
-		}
-		if (Trimmed.StartsWith(TEXT("- [x]")) || Trimmed.StartsWith(TEXT("- [X]")))
-		{
-			Out.Kind = ELineKind::TodoDone;
-			Out.Text = Trimmed.Mid(5).TrimStart();
-			return;
-		}
-		if (Trimmed.StartsWith(TEXT("- ")) && !Trimmed.StartsWith(TEXT("- [")))
+		if (Trimmed.StartsWith(TEXT("- ")))
 		{
 			Out.Kind = ELineKind::Bullet;
 			Out.Text = Trimmed.Mid(2);
 			return;
 		}
 		if (Trimmed.StartsWith(TEXT("* ")))
+		{
+			Out.Kind = ELineKind::Bullet;
+			Out.Text = Trimmed.Mid(2);
+			return;
+		}
+		if (Trimmed.StartsWith(TEXT("+ ")))
 		{
 			Out.Kind = ELineKind::Bullet;
 			Out.Text = Trimmed.Mid(2);
@@ -512,225 +828,293 @@ namespace UnrealAiChatMarkdown
 					FUnrealAiEditorStyle::ColorMarkdownBody())
 			];
 	}
-} // namespace UnrealAiChatMarkdown
 
-static FString StripMarkdownCodeFences(FString S)
-{
-	S.TrimStartAndEndInline();
-	if (!S.StartsWith(TEXT("```")))
+	static TSharedRef<SWidget> MakeOrderedRow(const int32 OrderedN, const FString& ItemText)
 	{
-		return S;
+		const int32 N = FMath::Max(1, OrderedN);
+		return SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+				  .AutoWidth()
+				  .VAlign(VAlign_Top)
+				  .Padding(0.f, 1.f, 8.f, 0.f)
+			[
+				SNew(STextBlock)
+					.Font(BodyFont())
+					.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+					.Text(FText::FromString(FString::Printf(TEXT("%d."), N)))
+			]
+			+ SHorizontalBox::Slot()
+				  .FillWidth(1.f)
+			[
+				UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
+					ItemText,
+					BodyFont(),
+					FUnrealAiEditorStyle::ColorMarkdownBody())
+			];
 	}
-	int32 BodyStart = INDEX_NONE;
-	for (int32 c = 3; c < S.Len(); ++c)
+
+	struct FMarkdownChunk
 	{
-		if (S[c] == TEXT('\n'))
+		bool bCode = false;
+		FString Text;
+	};
+
+	static void SplitMarkdownFencedChunks(const FString& Markdown, TArray<FMarkdownChunk>& Out)
+	{
+		Out.Reset();
+		TArray<FString> Lines;
+		Markdown.ParseIntoArrayLines(Lines, false);
+		bool bInFence = false;
+		FString Acc;
+		auto FlushProse = [&]()
 		{
-			BodyStart = c + 1;
-			break;
+			FString T = Acc;
+			T.TrimStartAndEndInline();
+			if (!T.IsEmpty())
+			{
+				FMarkdownChunk C;
+				C.bCode = false;
+				C.Text = MoveTemp(T);
+				Out.Add(MoveTemp(C));
+			}
+			Acc.Reset();
+		};
+		auto FlushCode = [&]()
+		{
+			FString T = Acc;
+			T.TrimStartAndEndInline();
+			FMarkdownChunk C;
+			C.bCode = true;
+			C.Text = MoveTemp(T);
+			Out.Add(MoveTemp(C));
+			Acc.Reset();
+		};
+		for (const FString& Line : Lines)
+		{
+			if (Line.TrimStart().StartsWith(TEXT("```")))
+			{
+				if (!bInFence)
+				{
+					FlushProse();
+					bInFence = true;
+				}
+				else
+				{
+					FlushCode();
+					bInFence = false;
+				}
+				continue;
+			}
+			if (!Acc.IsEmpty())
+			{
+				Acc += LINE_TERMINATOR;
+			}
+			Acc += Line;
+		}
+		if (bInFence)
+		{
+			FlushCode();
+		}
+		else
+		{
+			FlushProse();
 		}
 	}
-	if (BodyStart == INDEX_NONE)
+
+	static void AppendStructuredMarkdownFromProse(
+		const TSharedRef<SVerticalBox>& V,
+		const FString& ProseMarkdown,
+		const bool bToolNoteMergePlainLinesWithSpace)
 	{
-		return FString();
+		if (ProseMarkdown.TrimStartAndEnd().IsEmpty())
+		{
+			return;
+		}
+		const TArray<FLine> Lines = SplitLines(ProseMarkdown);
+		int32 i = 0;
+		while (i < Lines.Num())
+		{
+			const FLine& L = Lines[i];
+			if (L.Kind == ELineKind::Blank)
+			{
+				++i;
+				continue;
+			}
+			if (L.Kind == ELineKind::Plain)
+			{
+				FString Para;
+				while (i < Lines.Num() && Lines[i].Kind == ELineKind::Plain)
+				{
+					if (!Para.IsEmpty())
+					{
+						Para += bToolNoteMergePlainLinesWithSpace ? TEXT(' ') : TEXT('\n');
+					}
+					Para += Lines[i].Text;
+					++i;
+				}
+				V->AddSlot().AutoHeight().Padding(0.f, 1.f)
+					[
+						UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
+							Para,
+							BodyFont(),
+							FUnrealAiEditorStyle::ColorMarkdownBody())
+					];
+				continue;
+			}
+
+			switch (L.Kind)
+			{
+			case ELineKind::H1:
+				V->AddSlot().AutoHeight().Padding(0.f, 6.f, 0.f, 2.f)
+					[
+						UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
+							L.Text,
+							HeadingFont(14),
+							FUnrealAiEditorStyle::ColorMarkdownHeading())
+					];
+				break;
+			case ELineKind::H2:
+				V->AddSlot().AutoHeight().Padding(0.f, 8.f, 0.f, 4.f)
+					[
+						UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
+							L.Text,
+							HeadingFont(13),
+							FUnrealAiEditorStyle::ColorMarkdownHeading())
+					];
+				break;
+			case ELineKind::H3:
+				V->AddSlot().AutoHeight().Padding(0.f, 4.f, 0.f, 2.f)
+					[
+						UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
+							L.Text,
+							HeadingFont(11),
+							FUnrealAiEditorStyle::ColorMarkdownHeading())
+					];
+				break;
+			case ELineKind::Bullet:
+				V->AddSlot().AutoHeight().Padding(4.f, 1.f, 0.f, 0.f)[MakeBulletRow(L.Text)];
+				break;
+			case ELineKind::OrderedBullet:
+				V->AddSlot().AutoHeight().Padding(4.f, 1.f, 0.f, 0.f)
+					[MakeOrderedRow(L.OrderedIndex, L.Text)];
+				break;
+			case ELineKind::TodoOpen:
+				V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(false, L.Text)];
+				break;
+			case ELineKind::TodoDone:
+				V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(true, L.Text)];
+				break;
+			default:
+				V->AddSlot().AutoHeight().Padding(0.f, 1.f)
+					[
+						UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
+							L.Text,
+							BodyFont(),
+							FUnrealAiEditorStyle::ColorMarkdownBody())
+					];
+				break;
+			}
+			++i;
+		}
 	}
-	S = S.Mid(BodyStart);
-	const int32 EndFence = S.Find(TEXT("```"), ESearchCase::IgnoreCase, ESearchDir::FromEnd);
-	if (EndFence != INDEX_NONE)
-	{
-		S.LeftInline(EndFence);
-	}
-	S.TrimStartAndEndInline();
-	return S;
-}
+} // namespace UnrealAiChatMarkdown
 
 TSharedRef<SWidget> UnrealAiBuildMarkdownChatBody(const FString& Markdown)
 {
 	using namespace UnrealAiChatMarkdown;
-	const FString Cleaned = StripMarkdownCodeFences(Markdown);
-	if (Cleaned.IsEmpty())
+	FString Md = Markdown;
+	Md.TrimStartAndEndInline();
+	if (Md.IsEmpty())
 	{
 		return SNew(SBox);
 	}
 
-	const TArray<FLine> Lines = SplitLines(Cleaned);
-	TSharedRef<SVerticalBox> V = SNew(SVerticalBox);
-	int32 i = 0;
-	while (i < Lines.Num())
+	TArray<FMarkdownChunk> Chunks;
+	SplitMarkdownFencedChunks(Md, Chunks);
+	if (Chunks.Num() == 0)
 	{
-		const FLine& L = Lines[i];
-		if (L.Kind == ELineKind::Blank)
-		{
-			++i;
-			continue;
-		}
-		if (L.Kind == ELineKind::Plain)
-		{
-			FString Para;
-			while (i < Lines.Num() && Lines[i].Kind == ELineKind::Plain)
-			{
-				if (!Para.IsEmpty())
-				{
-					Para += TEXT('\n');
-				}
-				Para += Lines[i].Text;
-				++i;
-			}
-			V->AddSlot().AutoHeight().Padding(0.f, 1.f)
-				[
-					UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
-						Para,
-						BodyFont(),
-						FUnrealAiEditorStyle::ColorMarkdownBody())
-				];
-			continue;
-		}
-
-		switch (L.Kind)
-		{
-		case ELineKind::H1:
-			V->AddSlot().AutoHeight().Padding(0.f, 6.f, 0.f, 2.f)
-				[
-					UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
-						L.Text,
-						HeadingFont(14),
-						FUnrealAiEditorStyle::ColorMarkdownHeading())
-				];
-			break;
-		case ELineKind::H2:
-			V->AddSlot().AutoHeight().Padding(0.f, 8.f, 0.f, 4.f)
-				[
-					UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
-						L.Text,
-						HeadingFont(13),
-						FUnrealAiEditorStyle::ColorMarkdownHeading())
-				];
-			break;
-		case ELineKind::H3:
-			V->AddSlot().AutoHeight().Padding(0.f, 4.f, 0.f, 2.f)
-				[
-					UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
-						L.Text,
-						HeadingFont(11),
-						FUnrealAiEditorStyle::ColorMarkdownHeading())
-				];
-			break;
-		case ELineKind::Bullet:
-			V->AddSlot().AutoHeight().Padding(4.f, 1.f, 0.f, 0.f)[MakeBulletRow(L.Text)];
-			break;
-		case ELineKind::TodoOpen:
-			V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(false, L.Text)];
-			break;
-		case ELineKind::TodoDone:
-			V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(true, L.Text)];
-			break;
-		default:
-			V->AddSlot().AutoHeight().Padding(0.f, 1.f)
-				[
-					UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
-						L.Text,
-						BodyFont(),
-						FUnrealAiEditorStyle::ColorMarkdownBody())
-				];
-			break;
-		}
-		++i;
+		return SNew(SBox);
 	}
 
+	TSharedRef<SVerticalBox> V = SNew(SVerticalBox);
+	for (const FMarkdownChunk& Ch : Chunks)
+	{
+		if (Ch.bCode)
+		{
+			if (!Ch.Text.IsEmpty())
+			{
+				V->AddSlot()
+					.AutoHeight()
+					.Padding(0.f, 4.f, 0.f, 4.f)
+					[
+						SNew(SBorder)
+							.BorderImage(FAppStyle::GetBrush(TEXT("NoBorder")))
+							.BorderBackgroundColor(FLinearColor(0.06f, 0.07f, 0.1f, 0.92f))
+							.Padding(FMargin(8.f, 6.f))
+							[
+								SNew(SMultiLineEditableTextBox)
+									.IsReadOnly(true)
+									.AutoWrapText(true)
+									.Font(FUnrealAiEditorStyle::FontMono8())
+									.Text(FText::FromString(Ch.Text))
+							]
+					];
+			}
+		}
+		else
+		{
+			AppendStructuredMarkdownFromProse(V, Ch.Text, false);
+		}
+	}
 	return V;
 }
 
 TSharedRef<SWidget> UnrealAiBuildMarkdownToolNoteBody(const FString& Markdown)
 {
 	using namespace UnrealAiChatMarkdown;
-	const FString Cleaned = StripMarkdownCodeFences(Markdown);
-	if (Cleaned.IsEmpty())
+	FString Md = Markdown;
+	Md.TrimStartAndEndInline();
+	if (Md.IsEmpty())
 	{
 		return SNew(SBox);
 	}
 
-	auto MakeBody = [&](const FString& S, const FSlateFontInfo& Font, const FSlateColor& Color)
+	TArray<FMarkdownChunk> Chunks;
+	SplitMarkdownFencedChunks(Md, Chunks);
+	if (Chunks.Num() == 0)
 	{
-		return UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(S, Font, Color);
-	};
+		return SNew(SBox);
+	}
 
-	const TArray<FLine> Lines = SplitLines(Cleaned);
 	TSharedRef<SVerticalBox> V = SNew(SVerticalBox);
-	int32 i = 0;
-	while (i < Lines.Num())
+	for (const FMarkdownChunk& Ch : Chunks)
 	{
-		const FLine& L = Lines[i];
-		if (L.Kind == ELineKind::Blank)
+		if (Ch.bCode)
 		{
-			++i;
-			continue;
-		}
-
-		if (L.Kind == ELineKind::Plain)
-		{
-			FString Para;
-			while (i < Lines.Num() && Lines[i].Kind == ELineKind::Plain)
+			if (!Ch.Text.IsEmpty())
 			{
-				if (!Para.IsEmpty())
-				{
-					Para += TEXT(" ");
-				}
-				Para += Lines[i].Text;
-				++i;
+				V->AddSlot()
+					.AutoHeight()
+					.Padding(0.f, 4.f, 0.f, 4.f)
+					[
+						SNew(SBorder)
+							.BorderImage(FAppStyle::GetBrush(TEXT("NoBorder")))
+							.BorderBackgroundColor(FLinearColor(0.06f, 0.07f, 0.1f, 0.92f))
+							.Padding(FMargin(8.f, 6.f))
+							[
+								SNew(SMultiLineEditableTextBox)
+									.IsReadOnly(true)
+									.AutoWrapText(true)
+									.Font(FUnrealAiEditorStyle::FontMono8())
+									.Text(FText::FromString(Ch.Text))
+							]
+					];
 			}
-			V->AddSlot().AutoHeight().Padding(0.f, 1.f)[MakeBody(Para, BodyFont(), FUnrealAiEditorStyle::ColorMarkdownBody())];
-			continue;
 		}
-
-		switch (L.Kind)
+		else
 		{
-		case ELineKind::H1:
-			V->AddSlot().AutoHeight().Padding(0.f, 6.f, 0.f, 2.f)
-				[
-					MakeBody(L.Text, HeadingFont(14), FUnrealAiEditorStyle::ColorMarkdownHeading())
-				];
-			break;
-		case ELineKind::H2:
-			V->AddSlot().AutoHeight().Padding(0.f, 8.f, 0.f, 4.f)
-				[
-					MakeBody(L.Text, HeadingFont(13), FUnrealAiEditorStyle::ColorMarkdownHeading())
-				];
-			break;
-		case ELineKind::H3:
-			V->AddSlot().AutoHeight().Padding(0.f, 4.f, 0.f, 2.f)
-				[
-					MakeBody(L.Text, HeadingFont(11), FUnrealAiEditorStyle::ColorMarkdownHeading())
-				];
-			break;
-		case ELineKind::Bullet:
-			V->AddSlot().AutoHeight().Padding(4.f, 1.f, 0.f, 0.f)
-				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0.f, 1.f, 6.f, 0.f)
-					[
-						SNew(STextBlock)
-							.Font(BodyFont())
-							.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.65f, 1.f)))
-							.Text(FText::FromString(TEXT("\x2022")))
-					]
-					+ SHorizontalBox::Slot().FillWidth(1.f)
-					[
-						MakeBody(L.Text, BodyFont(), FUnrealAiEditorStyle::ColorMarkdownBody())
-					]
-				];
-			break;
-		case ELineKind::TodoOpen:
-			V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(false, L.Text)];
-			break;
-		case ELineKind::TodoDone:
-			V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(true, L.Text)];
-			break;
-		default:
-			V->AddSlot().AutoHeight().Padding(0.f, 1.f)[MakeBody(L.Text, BodyFont(), FUnrealAiEditorStyle::ColorMarkdownBody())];
-			break;
+			AppendStructuredMarkdownFromProse(V, Ch.Text, true);
 		}
-
-		++i;
 	}
 	return V;
 }

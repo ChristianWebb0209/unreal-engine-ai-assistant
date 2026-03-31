@@ -6,12 +6,13 @@
 #include "UnrealAiEditorTabIds.h"
 #include "Context/UnrealAiContextDragDrop.h"
 #include "Context/UnrealAiProjectId.h"
+#include "Context/UnrealAiStartupOpsStatus.h"
 #include "Retrieval/IUnrealAiRetrievalService.h"
 #include "Widgets/SChatComposer.h"
+#include "Widgets/UnrealAiChatUiHelpers.h"
 #include "Widgets/SChatHeader.h"
 #include "Widgets/SChatMessageList.h"
 #include "Widgets/UnrealAiChatTranscript.h"
-#include "Widgets/UnrealAiChatUiHelpers.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Backend/UnrealAiBackendRegistry.h"
 #include "DesktopPlatformModule.h"
@@ -99,31 +100,36 @@ void SUnrealAiEditorChatTab::Construct(const FArguments& InArgs)
 					.MessageList(MessageListWidget)
 					.Session(Session)
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 3.f))
+			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(6.f, 4.f, 6.f, 4.f))
 			[
-				SNew(STextBlock)
-					.Font(FUnrealAiEditorStyle::FontCaption())
-					.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
-					.Text_Lambda([this]()
-					{
-						if (!BackendRegistry.IsValid() || !BackendRegistry->GetRetrievalService())
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+					.FillWidth(1.f)
+					.VAlign(VAlign_Center)
+					.Padding(FMargin(0.f, 0.f, 10.f, 0.f))
+				[
+					SNew(STextBlock)
+						.Font(FUnrealAiEditorStyle::FontCaption())
+						.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+						.AutoWrapText(true)
+						.Text_Lambda([this]()
 						{
-							return FText::FromString(TEXT("Retrieval: unavailable"));
-						}
-						const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
-						const FUnrealAiRetrievalProjectStatus Status = BackendRegistry->GetRetrievalService()->GetProjectStatus(ProjectId);
-						if (!Status.bEnabled)
+							const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+							return FText::FromString(UnrealAiStartupOpsStatus::BuildCompactLine(BackendRegistry, ProjectId));
+						})
+				]
+				+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+						.Font(FUnrealAiEditorStyle::FontCaption())
+						.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextFooter())
+						.Text_Lambda([]()
 						{
-							return FText::FromString(TEXT("Retrieval: disabled"));
-						}
-						const FString BusySuffix = Status.bBusy ? TEXT(" (updating...)") : FString();
-						return FText::FromString(FString::Printf(
-							TEXT("Retrieval: %s%s | files=%d chunks=%d"),
-							*Status.StateText,
-							*BusySuffix,
-							Status.FilesIndexed,
-							Status.ChunksIndexed));
-					})
+							return UnrealAiChatUi_GetComposerFooterVersionText();
+						})
+				]
 			]
 		];
 

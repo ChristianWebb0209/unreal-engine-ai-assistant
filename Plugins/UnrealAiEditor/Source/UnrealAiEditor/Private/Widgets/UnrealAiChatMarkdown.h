@@ -4,7 +4,10 @@
 
 #include "Widgets/SWidget.h"
 
-/** Build Slate body for assistant chat: headings, bullets, GitHub-style task list items. */
+/**
+ * Build Slate body for assistant chat: fenced ``` code blocks (mono panel), headings, bullets, ordered lists,
+ * GitHub-style task lists (- / * / + / 1. variants), **bold**, links, inline code.
+ */
 TSharedRef<SWidget> UnrealAiBuildMarkdownChatBody(const FString& Markdown);
 
 /** Remove common inline markdown tokens for plain display. */

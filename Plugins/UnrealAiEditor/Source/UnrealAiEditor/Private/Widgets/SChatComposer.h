@@ -34,7 +34,6 @@ private:
 	FReply OnSendOrStopClicked();
 	FReply OnSendClicked();
 	FReply OnAttachScreenshotClicked();
-	FText GetFooterText() const;
 
 	void OnModelSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type SelectInfo);
 	void RestoreModelComboSelection();

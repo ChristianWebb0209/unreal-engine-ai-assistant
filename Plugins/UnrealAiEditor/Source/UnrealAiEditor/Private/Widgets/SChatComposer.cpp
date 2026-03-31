@@ -25,8 +25,6 @@
 #include "Context/UnrealAiProjectId.h"
 #include "Composer/UnrealAiComposerMentionIndex.h"
 #include "Composer/UnrealAiComposerPromptResolver.h"
-#include "Interfaces/IPluginManager.h"
-#include "PluginDescriptor.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -39,7 +37,6 @@
 #include "Input/Events.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
-#include "Misc/EngineVersion.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Framework/Application/SlateApplication.h"
@@ -426,7 +423,6 @@ void SChatComposer::Construct(const FArguments& InArgs)
 {
 	static const FMargin PadChipsSlot(4.f, 2.f);
 	static const FMargin PadMentionSlot(4.f, 0.f);
-	static const FMargin PadFooterSlot(6.f, 4.f);
 	BackendRegistry = InArgs._BackendRegistry;
 	MessageList = InArgs._MessageList;
 	Session = InArgs._Session;
@@ -602,34 +598,6 @@ void SChatComposer::Construct(const FArguments& InArgs)
 						]
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(8.f, 2.f, 8.f, 2.f))
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
-				[
-					SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
-						.IsChecked_Lambda([]()
-						{
-							return FUnrealAiEditorModule::IsEditorFocusEnabled()
-								? ECheckBoxState::Checked
-								: ECheckBoxState::Unchecked;
-						})
-						.OnCheckStateChanged_Lambda([](ECheckBoxState S)
-						{
-							FUnrealAiEditorModule::SetEditorFocusEnabled(S == ECheckBoxState::Checked);
-						})
-						.ToolTipText(LOCTEXT(
-							"EditorFocusComposerTip",
-							"When on, the agent may follow along in the editor (optional navigation). Tools that must open an editor still open. Stored in plugin settings."))
-				]
-				+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-						.Font(FUnrealAiEditorStyle::FontCaption())
-						.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
-						.Text(LOCTEXT("EditorFocusComposerLbl", "Editor focus"))
-				]
-			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(4.f)
 			[
 				SNew(SHorizontalBox)
@@ -730,13 +698,34 @@ void SChatComposer::Construct(const FArguments& InArgs)
 							"Capture the active level viewport to PNG (max ~1280px on the long side for speed) and attach it to context."))
 						.OnClicked(this, &SChatComposer::OnAttachScreenshotClicked)
 				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(PadFooterSlot)
-			[
-				SNew(STextBlock)
-					.Font(FUnrealAiEditorStyle::FontCaption())
-					.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextFooter())
-					.Text(this, &SChatComposer::GetFooterText)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(10.f, 0.f, 2.f, 0.f))
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 6.f, 0.f))
+					[
+						SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
+							.IsChecked_Lambda([]()
+							{
+								return FUnrealAiEditorModule::IsEditorFocusEnabled()
+									? ECheckBoxState::Checked
+									: ECheckBoxState::Unchecked;
+							})
+							.OnCheckStateChanged_Lambda([](ECheckBoxState S)
+							{
+								FUnrealAiEditorModule::SetEditorFocusEnabled(S == ECheckBoxState::Checked);
+							})
+							.ToolTipText(LOCTEXT(
+								"EditorFocusComposerTip",
+								"When on, the agent may follow along in the editor (optional navigation). Tools that must open an editor still open. Stored in plugin settings."))
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+							.Font(FUnrealAiEditorStyle::FontCaption())
+							.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+							.Text(LOCTEXT("EditorFocusComposerLbl", "Editor focus"))
+					]
+				]
 			]
 		];
 
@@ -1819,18 +1808,6 @@ FReply SChatComposer::OnRemoveAttachment(int32 Index)
 	return FReply::Handled();
 }
 
-FText SChatComposer::GetFooterText() const
-{
-	FString PluginVer = TEXT("dev");
-	if (TSharedPtr<IPlugin> P = IPluginManager::Get().FindPlugin(TEXT("UnrealAiEditor")); P.IsValid())
-	{
-		PluginVer = P->GetDescriptor().VersionName;
-	}
-	const FString EngineLabel = FEngineVersion::Current().ToString();
-	return FText::FromString(
-		FString::Printf(TEXT("Unreal AI Editor %s · %s"), *PluginVer, *EngineLabel));
-}
-
 FReply SChatComposer::OnSendClicked()
 {
 	if (!BackendRegistry.IsValid() || !MessageList.IsValid() || !InputBox.IsValid() || !Session.IsValid())
@@ -1883,7 +1860,7 @@ FReply SChatComposer::OnSendClicked()
 		Ctx->RefreshEditorSnapshotFromEngine();
 	}
 
-	MessageList->AddUserMessage(Prompt);
+	MessageList->AddUserMessage(Prompt, AgentMode);
 
 	FUnrealAiAgentTurnRequest Req;
 	Req.ProjectId = ProjectId;

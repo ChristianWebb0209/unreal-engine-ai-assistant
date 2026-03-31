@@ -5,8 +5,8 @@
 #include "UnrealAiEditorSettings.h"
 #include "Backend/FUnrealAiUsageTracker.h"
 #include "Context/UnrealAiProjectId.h"
+#include "Context/UnrealAiStartupOpsStatus.h"
 #include "Retrieval/IUnrealAiRetrievalService.h"
-#include "Retrieval/UnrealAiRetrievalTypes.h"
 #include "Backend/IUnrealAiModelConnector.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Backend/UnrealAiBackendRegistry.h"
@@ -22,7 +22,6 @@
 #include "Serialization/JsonWriter.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
-#include "HAL/PlatformTime.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
 #include "Styling/CoreStyle.h"
@@ -46,76 +45,6 @@
 #include "Widgets/SUnrealAiLocalJsonInspectorPanel.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
-
-namespace UnrealAiVectorDbOverviewUi
-{
-	static FString FormatOverviewText(const FUnrealAiRetrievalVectorDbOverview& O)
-	{
-		FString S;
-		S += TEXT("Local vector index — overview\n\n");
-		S += TEXT(
-			"What is indexed: UTF-8 text for whitelisted extensions under the chosen root preset, optional Asset Registry "
-			"metadata shards (virtual paths), Blueprint-derived lines, and optionally memory chunks. Chat transcripts are not embedded here.\n");
-		S += TEXT("At query time: embed the query → cosine Top-K in SQLite → lexical fallback when needed.\n\n");
-
-		S += FString::Printf(TEXT("Retrieval enabled in settings: %s\n"), O.bRetrievalEnabledInSettings ? TEXT("yes") : TEXT("no"));
-		S += FString::Printf(TEXT("Root preset: %s\n"), *O.RootPresetLabel);
-		S += FString::Printf(
-			TEXT("Indexed extensions (%d): %s\n"),
-			O.IndexedExtensionCount,
-			O.IndexedExtensionsPreview.IsEmpty() ? TEXT("(none)") : *O.IndexedExtensionsPreview);
-		S += FString::Printf(TEXT("Asset Registry corpus: %s\n"), O.bAssetRegistryCorpusEnabled ? TEXT("on") : TEXT("off"));
-		S += FString::Printf(TEXT("Memory chunks in index: %s\n"), O.bMemoryCorpusEnabled ? TEXT("on") : TEXT("off"));
-		if (O.bBlueprintCapCustom)
-		{
-			S += FString::Printf(TEXT("Blueprint feature cap: %d\n"), O.BlueprintMaxFeatureRecords);
-		}
-		else
-		{
-			S += TEXT("Blueprint feature cap: default (extractor internal limit)\n");
-		}
-		S += LINE_TERMINATOR;
-
-		if (!O.bStoreAvailable)
-		{
-			S += FString::Printf(
-				TEXT("Index store: unavailable (%s)\n"),
-				O.StoreError.IsEmpty() ? TEXT("unknown error") : *O.StoreError);
-			return S;
-		}
-
-		S += TEXT("Index store: available\n");
-		S += FString::Printf(TEXT("SQLite: %s\n"), *O.IndexDbPath);
-		S += FString::Printf(TEXT("Manifest: %s\n"), *O.ManifestPath);
-		S += FString::Printf(TEXT("Status: %s\n"), *O.ManifestStatus);
-		if (!O.ManifestEmbeddingModel.IsEmpty())
-		{
-			S += FString::Printf(TEXT("Embedding model (manifest): %s\n"), *O.ManifestEmbeddingModel);
-		}
-		S += FString::Printf(TEXT("Migration state: %s\n"), *O.MigrationState);
-		S += FString::Printf(TEXT("Rebuild in progress: %s\n"), O.bIndexBusy ? TEXT("yes") : TEXT("no"));
-		S += FString::Printf(TEXT("Sources (rows) in DB: %d\n"), O.FilesIndexed);
-		S += FString::Printf(TEXT("Chunks in DB: %d\n"), O.ChunksIndexed);
-		if (O.LastFullScanUtc > FDateTime::MinValue())
-		{
-			S += FString::Printf(TEXT("Last full scan (UTC): %s\n"), *O.LastFullScanUtc.ToIso8601());
-		}
-		S += FString::Printf(TEXT("SQLite integrity check: %s\n"), O.bIntegrityOk ? TEXT("ok") : TEXT("failed"));
-		if (!O.bIntegrityOk && !O.IntegrityError.IsEmpty())
-		{
-			S += FString::Printf(TEXT("Integrity detail: %s\n"), *O.IntegrityError);
-		}
-		if (O.TopSourcesByChunkCount.Num() > 0)
-		{
-			S += TEXT("\nTop sources by chunk count:\n");
-			for (const TPair<FString, int32>& P : O.TopSourcesByChunkCount)
-			{
-				S += FString::Printf(TEXT("  %d  %s\n"), P.Value, *P.Key);
-			}
-		}
-		return S;
-	}
-}
 
 namespace UnrealAiSettingsTemplate
 {
@@ -172,7 +101,8 @@ namespace UnrealAiSettingsTemplate
 		"\t\"agent\": {\n"
 		"\t\t\"useSubagents\": true,\n"
 		"\t\t\"codeTypePreference\": \"auto\",\n"
-		"\t\t\"autoConfirmDestructive\": true\n"
+		"\t\t\"autoConfirmDestructive\": true,\n"
+		"\t\t\"enablePieTools\": false\n"
 		"\t},\n"
 		"\t\"ui\": {\n"
 		"\t\t\"editorFocus\": false\n"
@@ -563,7 +493,9 @@ namespace
 void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 {
 	BackendRegistry = InArgs._BackendRegistry;
-	StatusText = LOCTEXT("StatusIdle", "");
+	StatusText = FText::FromString(UnrealAiStartupOpsStatus::BuildCompactLine(
+		BackendRegistry,
+		UnrealAiProjectId::GetCurrentProjectId()));
 
 	CompanyPresetOptions.Add(MakeShared<FString>(TEXT("custom")));
 	CompanyPresetOptions.Add(MakeShared<FString>(TEXT("openrouter")));
@@ -674,25 +606,6 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 									{
 										return ActiveSettingsSegmentIndex == 3 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 									})
-									.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
-									{
-										if (S == ECheckBoxState::Checked)
-										{
-											OnSettingsSegmentClicked(3);
-										}
-									})
-									.Content()
-									[
-										SNew(STextBlock).Text(LOCTEXT("SettingsVectorDb", "Vector DB"))
-									]
-							]
-							+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 6.f, 0.f))
-							[
-								SNew(SCheckBox).Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-									.IsChecked_Lambda([this]()
-									{
-										return ActiveSettingsSegmentIndex == 4 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-									})
 									.ToolTipText(LOCTEXT(
 										"SettingsContextTip",
 										"Inspect per-chat context.json / conversation.json and related local thread artifacts."))
@@ -700,7 +613,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 									{
 										if (S == ECheckBoxState::Checked)
 										{
-											OnSettingsSegmentClicked(4);
+											OnSettingsSegmentClicked(3);
 										}
 									})
 									.Content()
@@ -713,7 +626,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 								SNew(SCheckBox).Style(FAppStyle::Get(), "ToggleButtonCheckbox")
 									.IsChecked_Lambda([this]()
 									{
-										return ActiveSettingsSegmentIndex == 5 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+										return ActiveSettingsSegmentIndex == 4 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 									})
 									.ToolTipText(LOCTEXT(
 										"SettingsProjectIndexTip",
@@ -722,7 +635,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 									{
 										if (S == ECheckBoxState::Checked)
 										{
-											OnSettingsSegmentClicked(5);
+											OnSettingsSegmentClicked(4);
 										}
 									})
 									.Content()
@@ -927,6 +840,33 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 															"When on, destructive tools that require confirm default to confirmed so the model is not slowed by a retry. Turn off only if you want strict manual confirmation in tool args."))
 												]
 											]
+											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
+											[
+												SNew(SHorizontalBox)
+												+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+												[
+													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
+														.IsChecked_Lambda([]()
+														{
+															return FUnrealAiEditorModule::IsPieToolsEnabled()
+																? ECheckBoxState::Checked
+																: ECheckBoxState::Unchecked;
+														})
+														.OnCheckStateChanged_Lambda([](ECheckBoxState S)
+														{
+															FUnrealAiEditorModule::SetPieToolsEnabled(S == ECheckBoxState::Checked);
+														})
+												]
+												+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+												[
+													SNew(STextBlock)
+														.AutoWrapText(true)
+														.WrapTextAt(520.f)
+														.Text(LOCTEXT(
+															"EnablePieToolsHelp",
+															"Runtime / PIE tools: when off (default), the agent avoids starting/stopping PIE and related runtime diagnostics, and PIE tool results are not fed back into context. Turn on only when you want the agent to perform runtime checks in a live PIE session."))
+												]
+											]
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
 											[
 												SNew(STextBlock)
@@ -964,12 +904,12 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 											[
 												SNew(SExpandableArea)
 													.InitiallyCollapsed(true)
-													.AreaTitle(LOCTEXT("SecRetrieval", "Retrieval (local vector index)"))
+													.AreaTitle(LOCTEXT("SecRetrieval", "Retrieval"))
 													.HeaderContent()
 													[
 														SNew(STextBlock)
 															.Font(FUnrealAiEditorStyle::FontSectionHeading())
-															.Text(LOCTEXT("SecRetrieval", "Retrieval (local vector index)"))
+															.Text(LOCTEXT("SecRetrieval", "Retrieval"))
 													]
 													.BodyContent()
 													[
@@ -1515,14 +1455,19 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 8.f, 0.f, 8.f))
 							[
 								SNew(SHorizontalBox)
-								+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+								+ SHorizontalBox::Slot().FillWidth(1.f).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 								[
-									SAssignNew(MemorySearchBox, SEditableTextBox)
-										.HintText(LOCTEXT("MemorySearchHint", "Search memory title/description/tags"))
-										.OnTextChanged_Lambda([this](const FText&)
-										{
-											RebuildMemoryListUi();
-										})
+									SNew(SBox)
+									.WidthOverride(420.f)
+									[
+										SAssignNew(MemorySearchBox, SEditableTextBox)
+											.MinDesiredWidth(420.f)
+											.HintText(LOCTEXT("MemorySearchHint", "Search memory name, description, tags, or body text"))
+											.OnTextChanged_Lambda([this](const FText&)
+											{
+												RebuildMemoryListUi();
+											})
+									]
 								]
 								+ SHorizontalBox::Slot().AutoWidth()
 								[
@@ -1547,82 +1492,37 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 									SNew(SVerticalBox)
 									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 6.f))
 									[
+										SNew(STextBlock).Text(LOCTEXT("MemoryOpenNameLabel", "Name"))
+									]
+									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 6.f))
+									[
 										SAssignNew(MemorySelectedTitleBox, SEditableTextBox).IsReadOnly(true)
+									]
+									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 6.f))
+									[
+										SNew(STextBlock).Text(LOCTEXT("MemoryOpenTagsLabel", "Tags"))
+									]
+									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 6.f))
+									[
+										SAssignNew(MemorySelectedTagsBox, SEditableTextBox).IsReadOnly(true)
+									]
+									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 6.f))
+									[
+										SNew(STextBlock).Text(LOCTEXT("MemoryOpenDescriptionLabel", "Description"))
 									]
 									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 6.f))
 									[
 										SAssignNew(MemorySelectedDescriptionBox, SEditableTextBox).IsReadOnly(true)
 									]
-									+ SVerticalBox::Slot().FillHeight(1.f)
+									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 6.f))
 									[
-										SAssignNew(MemorySelectedBodyBox, SEditableTextBox).IsReadOnly(true)
-									]
-								]
-							]
-						]
-						+ SWidgetSwitcher::Slot()
-						[
-							SNew(SVerticalBox)
-							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
-							[
-								SNew(STextBlock)
-									.AutoWrapText(true)
-									.Text(LOCTEXT(
-										"VectorDbOverviewHelp",
-										"Read-only snapshot of the local vector index: what the indexer is configured to ingest, on-disk paths, "
-										"chunk/source counts, integrity, and top indexed sources. Tune ingestion under Configuration → Retrieval."))
-							]
-							+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
-							[
-								SNew(SHorizontalBox)
-								+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
-								[
-									SNew(SButton)
-										.Text(LOCTEXT("VectorDbOverviewRefresh", "Refresh overview"))
-										.OnClicked(this, &SUnrealAiEditorSettingsTab::OnVectorDbOverviewRefreshClicked)
-								]
-							]
-							+ SVerticalBox::Slot().FillHeight(1.f)
-							[
-								SNew(SSplitter)
-								.Orientation(Orient_Horizontal)
-								+ SSplitter::Slot()
-								.Value(0.38f)
-								[
-									SNew(SVerticalBox)
-									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
-									[
-										SAssignNew(VectorDbGraphSearchBox, SEditableTextBox)
-											.HintText(LOCTEXT("VectorDbGraphSearchHint", "Search source paths (top-N nodes)…"))
-											.Font(FUnrealAiEditorStyle::FontBodySmall())
-											.OnTextChanged_Lambda([this](const FText& T)
-											{
-												RebuildVectorDbTopGraphNodesUi(T.ToString());
-											})
+										SNew(STextBlock).Text(LOCTEXT("MemoryOpenBodyLabel", "Body"))
 									]
 									+ SVerticalBox::Slot().FillHeight(1.f)
 									[
-										SNew(SScrollBox)
-										+ SScrollBox::Slot()
-										[
-											SAssignNew(VectorDbTopSourcesVBox, SVerticalBox)
-										]
-									]
-								]
-								+ SSplitter::Slot()
-								.Value(0.62f)
-								[
-									SNew(SVerticalBox)
-									+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 8.f))
-									[
-										SNew(STextBlock)
+										SAssignNew(MemorySelectedBodyBox, SMultiLineEditableTextBox)
+											.IsReadOnly(true)
 											.AutoWrapText(true)
-											.Font(FUnrealAiEditorStyle::FontSectionHeading())
-											.Text(LOCTEXT("VectorDbDrilldownLbl", "Selected source drill-down"))
-									]
-									+ SVerticalBox::Slot().FillHeight(1.f)
-									[
-										SAssignNew(VectorDbSourceInspectorPanel, SUnrealAiLocalJsonInspectorPanel)
 									]
 								]
 							]
@@ -1853,16 +1753,6 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 void SUnrealAiEditorSettingsTab::TickSlowUiRefresh()
 {
 	RefreshUsageHeaderText();
-	if (ActiveSettingsSegmentIndex == 3)
-	{
-		const double Now = FPlatformTime::Seconds();
-		if (Now - LastVectorDbOverviewPollSeconds >= 3.0)
-		{
-			LastVectorDbOverviewPollSeconds = Now;
-			RefreshVectorDbTopGraphUi();
-			RefreshVectorDbOverviewUi();
-		}
-	}
 }
 
 FReply SUnrealAiEditorSettingsTab::OnSettingsSegmentClicked(const int32 Index)
@@ -1882,12 +1772,6 @@ FReply SUnrealAiEditorSettingsTab::OnSettingsSegmentClicked(const int32 Index)
 	}
 	else if (Index == 3)
 	{
-		LastVectorDbOverviewPollSeconds = 0.0;
-		RefreshVectorDbTopGraphUi();
-		RefreshVectorDbOverviewUi();
-	}
-	else if (Index == 4)
-	{
 		RebuildContextThreadListUi();
 		RebuildContextLocalFilesUi();
 		if (!SelectedContextThreadIdDigitsWithHyphens.IsEmpty())
@@ -1895,7 +1779,7 @@ FReply SUnrealAiEditorSettingsTab::OnSettingsSegmentClicked(const int32 Index)
 			LoadSelectedContextJson();
 		}
 	}
-	else if (Index == 5)
+	else if (Index == 4)
 	{
 		RebuildProjectIndexThreadListUi();
 		if (!SelectedProjectIndexThreadIdDigitsWithHyphens.IsEmpty())
@@ -2412,198 +2296,6 @@ void SUnrealAiEditorSettingsTab::LoadSelectedProjectIndexPlanDraftJson()
 	ProjectIndexInspectorPanel->SetInspectorText(Json);
 }
 
-FReply SUnrealAiEditorSettingsTab::OnVectorDbOverviewRefreshClicked()
-{
-	RefreshVectorDbOverviewUi();
-	RefreshVectorDbTopGraphUi();
-	return FReply::Handled();
-}
-
-void SUnrealAiEditorSettingsTab::RefreshVectorDbOverviewUi()
-{
-	if (!VectorDbOverviewBlock.IsValid())
-	{
-		return;
-	}
-	if (!BackendRegistry.IsValid() || !BackendRegistry->GetRetrievalService())
-	{
-		VectorDbOverviewBlock->SetText(LOCTEXT("VectorDbOverviewNoService", "Retrieval service is not available."));
-		return;
-	}
-	FUnrealAiRetrievalVectorDbOverview Overview;
-	FString Err;
-	if (!BackendRegistry->GetRetrievalService()->GetVectorDbOverview(UnrealAiProjectId::GetCurrentProjectId(), Overview, Err))
-	{
-		VectorDbOverviewBlock->SetText(FText::FromString(FString::Printf(TEXT("Could not load overview: %s"), *Err)));
-		return;
-	}
-	VectorDbOverviewBlock->SetText(FText::FromString(UnrealAiVectorDbOverviewUi::FormatOverviewText(Overview)));
-}
-
-void SUnrealAiEditorSettingsTab::RefreshVectorDbTopGraphUi()
-{
-	VectorDbTopSources.Reset();
-	if (!BackendRegistry.IsValid() || !BackendRegistry->GetRetrievalService())
-	{
-		if (VectorDbTopSourcesVBox.IsValid())
-		{
-			VectorDbTopSourcesVBox->ClearChildren();
-			VectorDbTopSourcesVBox->AddSlot().AutoHeight()
-			[
-				SNew(STextBlock)
-					.Font(FUnrealAiEditorStyle::FontBodySmall())
-					.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
-					.Text(LOCTEXT("VectorDbTopGraphNoService", "Retrieval service is not available."))
-			];
-		}
-		return;
-	}
-
-	FString Err;
-	const int32 TopN = 16;
-	const int32 SamplePerSource = 3;
-	if (!BackendRegistry->GetRetrievalService()->GetVectorDbTopGraphData(
-			UnrealAiProjectId::GetCurrentProjectId(),
-			TopN,
-			SamplePerSource,
-			VectorDbTopSources,
-			Err))
-	{
-		if (VectorDbTopSourcesVBox.IsValid())
-		{
-			VectorDbTopSourcesVBox->ClearChildren();
-			VectorDbTopSourcesVBox->AddSlot().AutoHeight()
-			[
-				SNew(STextBlock)
-					.Font(FUnrealAiEditorStyle::FontBodySmall())
-					.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
-					.Text(FText::FromString(FString::Printf(TEXT("Could not load vector top graph: %s"), *Err)))
-			];
-		}
-		return;
-	}
-
-	RebuildVectorDbTopGraphNodesUi(VectorDbLastGraphSearch);
-}
-
-void SUnrealAiEditorSettingsTab::RebuildVectorDbTopGraphNodesUi(const FString& SearchText)
-{
-	VectorDbLastGraphSearch = SearchText;
-	if (!VectorDbTopSourcesVBox.IsValid())
-	{
-		return;
-	}
-	VectorDbTopSourcesVBox->ClearChildren();
-
-	const FString Needle = SearchText.ToLower();
-
-	TArray<const FUnrealAiVectorDbTopSourceRow*> Filtered;
-	for (const FUnrealAiVectorDbTopSourceRow& Row : VectorDbTopSources)
-	{
-		if (Needle.IsEmpty())
-		{
-			Filtered.Add(&Row);
-			continue;
-		}
-		const FString SourceLower = Row.SourcePath.ToLower();
-		const bool bMatchPath = SourceLower.Contains(Needle);
-		const bool bMatchThread = !Row.ThreadIdHint.IsEmpty() && Row.ThreadIdHint.ToLower().Contains(Needle);
-		if (bMatchPath || bMatchThread)
-		{
-			Filtered.Add(&Row);
-		}
-	}
-
-	bool bSelectedFound = false;
-	for (const FUnrealAiVectorDbTopSourceRow* RowPtr : Filtered)
-	{
-		if (RowPtr->SourcePath.Equals(VectorDbSelectedSourcePath, ESearchCase::CaseSensitive))
-		{
-			bSelectedFound = true;
-			break;
-		}
-	}
-	if (!bSelectedFound)
-	{
-		VectorDbSelectedSourcePath = Filtered.Num() > 0 ? Filtered[0]->SourcePath : FString();
-	}
-
-	for (const FUnrealAiVectorDbTopSourceRow* RowPtr : Filtered)
-	{
-		const FUnrealAiVectorDbTopSourceRow& Row = *RowPtr;
-		const bool bSelected = Row.SourcePath.Equals(VectorDbSelectedSourcePath, ESearchCase::CaseSensitive);
-		const FString Short = Row.SourcePath.Len() > 70 ? (Row.SourcePath.Left(67) + TEXT("…")) : Row.SourcePath;
-		const FString ThreadSuffix = Row.ThreadIdHint.IsEmpty() ? TEXT("") : FString::Printf(TEXT("  [thread:%s]"), *Row.ThreadIdHint);
-
-		VectorDbTopSourcesVBox->AddSlot().AutoHeight().Padding(0.f, 2.f)
-		[
-			SNew(SButton)
-				.Text(FText::FromString(Short + TEXT("  (") + FString::FromInt(Row.ChunkCount) + TEXT(")") + ThreadSuffix))
-				.OnClicked_Lambda([this, SourcePath = Row.SourcePath]()
-					{
-						VectorDbSelectedSourcePath = SourcePath;
-						UpdateVectorDbSourceInspectorPanel();
-						return FReply::Handled();
-					})
-				.ButtonColorAndOpacity(bSelected ? FUnrealAiEditorStyle::ColorAccent() : FUnrealAiEditorStyle::ColorTextPrimary())
-		];
-	}
-
-	UpdateVectorDbSourceInspectorPanel();
-}
-
-void SUnrealAiEditorSettingsTab::UpdateVectorDbSourceInspectorPanel()
-{
-	if (!VectorDbSourceInspectorPanel.IsValid())
-	{
-		return;
-	}
-
-	if (VectorDbSelectedSourcePath.IsEmpty() || VectorDbTopSources.Num() == 0)
-	{
-		VectorDbSourceInspectorPanel->SetInspectorText(TEXT("(no source selected)"));
-		return;
-	}
-
-	const FUnrealAiVectorDbTopSourceRow* Selected = nullptr;
-	for (const FUnrealAiVectorDbTopSourceRow& Row : VectorDbTopSources)
-	{
-		if (Row.SourcePath.Equals(VectorDbSelectedSourcePath, ESearchCase::CaseSensitive))
-		{
-			Selected = &Row;
-			break;
-		}
-	}
-	if (!Selected)
-	{
-		VectorDbSourceInspectorPanel->SetInspectorText(TEXT("(selected source not found)"));
-		return;
-	}
-
-	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
-	Root->SetStringField(TEXT("source_path"), Selected->SourcePath);
-	Root->SetNumberField(TEXT("chunk_count"), Selected->ChunkCount);
-	if (!Selected->ThreadIdHint.IsEmpty())
-	{
-		Root->SetStringField(TEXT("thread_id_hint"), Selected->ThreadIdHint);
-	}
-	TArray<TSharedPtr<FJsonValue>> Samples;
-	for (const FUnrealAiVectorDbTopChunkRow& C : Selected->ChunkSamples)
-	{
-		TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-		Obj->SetStringField(TEXT("chunk_id"), C.ChunkId);
-		Obj->SetStringField(TEXT("chunk_text"), C.ChunkText);
-		Samples.Add(MakeShared<FJsonValueObject>(Obj));
-	}
-	Root->SetArrayField(TEXT("chunk_samples"), Samples);
-
-	FString Out;
-	const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> W =
-		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Out);
-	FJsonSerializer::Serialize(Root.ToSharedRef(), W);
-	VectorDbSourceInspectorPanel->SetInspectorText(Out);
-}
-
 FReply SUnrealAiEditorSettingsTab::OnChatHistoryRefreshClicked()
 {
 	RebuildChatHistoryListUi();
@@ -3009,22 +2701,22 @@ FReply SUnrealAiEditorSettingsTab::OnRetrievalRebuildNowClicked()
 		return FReply::Handled();
 	}
 	BackendRegistry->GetRetrievalService()->RequestRebuild(UnrealAiProjectId::GetCurrentProjectId());
-	StatusText = LOCTEXT("RetrievalRebuildQueued", "Queued retrieval index rebuild.");
-	if (ActiveSettingsSegmentIndex == 3)
-	{
-		RefreshVectorDbOverviewUi();
-	}
+	StatusText = FText::FromString(
+		FString::Printf(
+			TEXT("Queued retrieval index rebuild. %s"),
+			*UnrealAiStartupOpsStatus::BuildCompactLine(BackendRegistry, UnrealAiProjectId::GetCurrentProjectId())));
 	return FReply::Handled();
 }
 
 void SUnrealAiEditorSettingsTab::SelectMemoryById(const FString& MemoryId)
 {
 	SelectedMemoryId = MemoryId;
-	if (!MemorySelectedTitleBox.IsValid() || !MemorySelectedDescriptionBox.IsValid() || !MemorySelectedBodyBox.IsValid())
+	if (!MemorySelectedTitleBox.IsValid() || !MemorySelectedTagsBox.IsValid() || !MemorySelectedDescriptionBox.IsValid() || !MemorySelectedBodyBox.IsValid())
 	{
 		return;
 	}
 	MemorySelectedTitleBox->SetText(FText::GetEmpty());
+	MemorySelectedTagsBox->SetText(FText::GetEmpty());
 	MemorySelectedDescriptionBox->SetText(FText::GetEmpty());
 	MemorySelectedBodyBox->SetText(FText::GetEmpty());
 	if (!BackendRegistry.IsValid())
@@ -3042,6 +2734,7 @@ void SUnrealAiEditorSettingsTab::SelectMemoryById(const FString& MemoryId)
 		return;
 	}
 	MemorySelectedTitleBox->SetText(FText::FromString(Record.Title));
+	MemorySelectedTagsBox->SetText(FText::FromString(Record.Tags.Num() > 0 ? FString::Join(Record.Tags, TEXT(", ")) : TEXT("(none)")));
 	MemorySelectedDescriptionBox->SetText(FText::FromString(Record.Description));
 	MemorySelectedBodyBox->SetText(FText::FromString(Record.Body));
 }
@@ -3084,22 +2777,66 @@ void SUnrealAiEditorSettingsTab::RebuildMemoryListUi()
 	}
 	TArray<FUnrealAiMemoryIndexRow> Rows;
 	MemoryService->ListMemories(Rows);
-	const FString Search = MemorySearchBox.IsValid() ? MemorySearchBox->GetText().ToString().ToLower() : FString();
+	const FString SearchRaw = MemorySearchBox.IsValid() ? MemorySearchBox->GetText().ToString().ToLower() : FString();
+	TArray<FString> SearchTerms;
+	FString SearchNormalized = SearchRaw;
+	SearchNormalized.ReplaceInline(TEXT(","), TEXT(" "));
+	SearchNormalized.ParseIntoArray(SearchTerms, TEXT(" "), true);
+	for (int32 Index = SearchTerms.Num() - 1; Index >= 0; --Index)
+	{
+		SearchTerms[Index].TrimStartAndEndInline();
+		if (SearchTerms[Index].IsEmpty())
+		{
+			SearchTerms.RemoveAt(Index, 1, EAllowShrinking::No);
+		}
+	}
 	for (const FUnrealAiMemoryIndexRow& Row : Rows)
 	{
-		const FString Hay = (Row.Title + TEXT(" ") + Row.Description + TEXT(" ") + FString::Join(Row.Tags, TEXT(" "))).ToLower();
-		if (!Search.IsEmpty() && !Hay.Contains(Search))
+		FString BodyText;
+		if (SearchTerms.Num() > 0)
+		{
+			FUnrealAiMemoryRecord FullRecord;
+			if (MemoryService->GetMemory(Row.Id, FullRecord))
+			{
+				BodyText = FullRecord.Body;
+			}
+		}
+		const FString Hay = (Row.Title + TEXT(" ") + Row.Description + TEXT(" ") + FString::Join(Row.Tags, TEXT(" ")) + TEXT(" ") + BodyText).ToLower();
+		bool bMatches = true;
+		for (const FString& Term : SearchTerms)
+		{
+			if (!Hay.Contains(Term))
+			{
+				bMatches = false;
+				break;
+			}
+		}
+		if (!bMatches)
 		{
 			continue;
 		}
 		const FString Id = Row.Id;
-		const FString Label = FString::Printf(TEXT("%s  [%.2f]"), *Row.Title, Row.Confidence);
+		const FString TitleLine = FString::Printf(TEXT("%s  [%.2f]"), *Row.Title, Row.Confidence);
+		const FString DescriptionLine = Row.Description.IsEmpty() ? TEXT("(no description)") : Row.Description;
+		const FString TagsLine = FString::Printf(TEXT("Tags: %s"), Row.Tags.Num() > 0 ? *FString::Join(Row.Tags, TEXT(", ")) : TEXT("(none)"));
 		MemoryListVBox->AddSlot().AutoHeight().Padding(FMargin(0.f, 2.f))
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 			[
-				SNew(STextBlock).Text(FText::FromString(Label))
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(STextBlock).Text(FText::FromString(TitleLine))
+				]
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(STextBlock).Text(FText::FromString(TagsLine))
+				]
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(STextBlock).Text(FText::FromString(DescriptionLine))
+				]
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
 			[
@@ -4132,6 +3869,7 @@ bool SUnrealAiEditorSettingsTab::BuildJsonFromUi(FString& OutJson, FString& OutE
 		AgentObj->SetBoolField(TEXT("useSubagents"), FUnrealAiEditorModule::IsSubagentsEnabled());
 		AgentObj->SetStringField(TEXT("codeTypePreference"), FUnrealAiEditorModule::GetAgentCodeTypePreference());
 		AgentObj->SetBoolField(TEXT("autoConfirmDestructive"), FUnrealAiEditorModule::IsAutoConfirmDestructiveEnabled());
+		AgentObj->SetBoolField(TEXT("enablePieTools"), FUnrealAiEditorModule::IsPieToolsEnabled());
 		Root->SetObjectField(TEXT("agent"), AgentObj);
 	}
 

@@ -269,6 +269,12 @@ void FUnrealAiChatRunSink::OnHarnessProgressLog(const FString& Line)
 	{
 		return;
 	}
+	const FString LowerLine = Line.ToLower();
+	if (LowerLine.Contains(TEXT("background query ran")))
+	{
+		// Keep this only in file logs/harness traces, not the visible chat transcript.
+		return;
+	}
 	Transcript->AppendRunEvent(Line);
 }
 
@@ -279,8 +285,16 @@ void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMess
 		return;
 	}
 
-	Transcript->SetRunProgress(bSuccess ? TEXT("Run completed") : TEXT("Run failed"));
-	Transcript->AppendRunEvent(bSuccess ? TEXT("Run finished successfully.") : FString::Printf(TEXT("Run finished with error: %s"), *ErrorMessage));
+	if (!bSuccess)
+	{
+		Transcript->SetRunProgress(TEXT("Run failed"));
+		Transcript->AppendRunEvent(FString::Printf(TEXT("Run finished with error: %s"), *ErrorMessage));
+	}
+	else
+	{
+		// Successful completion should not add a visible "run completed" chat line.
+		Transcript->ClearRunProgress();
+	}
 	Transcript->EndRun(bSuccess, ErrorMessage);
 
 	// Always strip the token from visible assistant output if present;

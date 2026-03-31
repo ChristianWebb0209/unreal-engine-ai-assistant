@@ -7,6 +7,8 @@
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
 
+#include "Context/AgentContextTypes.h"
+
 struct FUnrealAiConversationMessage;
 
 class FUnrealAiChatTranscript;
@@ -27,7 +29,7 @@ public:
 
 	TSharedPtr<FUnrealAiChatTranscript> GetTranscript() const { return Transcript; }
 
-	FGuid AddUserMessage(const FString& Text);
+	FGuid AddUserMessage(const FString& Text, EUnrealAiAgentMode SentMode);
 	void ClearTranscript();
 
 	/** Replace transcript from disk (conversation.json) and rebuild the list. */

@@ -13,7 +13,6 @@ class SVerticalBox;
 class STextBlock;
 class SWidgetSwitcher;
 class SUnrealAiLocalJsonInspectorPanel;
-struct FUnrealAiVectorDbTopSourceRow;
 
 class SUnrealAiEditorSettingsTab final : public SCompoundWidget
 {
@@ -25,7 +24,7 @@ public:
 	void Construct(const FArguments& InArgs);
 	virtual ~SUnrealAiEditorSettingsTab() override;
 
-	/** Usage line + optional Vector DB panel refresh (slow ticker). */
+	/** Usage line refresh (slow ticker). */
 	void TickSlowUiRefresh();
 
 private:
@@ -92,8 +91,6 @@ private:
 	void RefreshProviderDropdownSelection();
 
 	FReply OnSettingsSegmentClicked(int32 Index);
-	FReply OnVectorDbOverviewRefreshClicked();
-	void RefreshVectorDbOverviewUi();
 	FReply OnChatHistoryRefreshClicked();
 	void RebuildChatHistoryListUi();
 	void SelectChatHistoryThread(const FString& ThreadIdDigitsWithHyphens);
@@ -152,40 +149,27 @@ private:
 	TSharedPtr<SVerticalBox> MemoryListVBox;
 	TSharedPtr<SEditableTextBox> MemorySearchBox;
 	TSharedPtr<SEditableTextBox> MemorySelectedTitleBox;
+	TSharedPtr<SEditableTextBox> MemorySelectedTagsBox;
 	TSharedPtr<SEditableTextBox> MemorySelectedDescriptionBox;
-	TSharedPtr<SEditableTextBox> MemorySelectedBodyBox;
+	TSharedPtr<SMultiLineEditableTextBox> MemorySelectedBodyBox;
 	TSharedPtr<SEditableTextBox> MemoryMaxItemsBox;
 	TSharedPtr<SEditableTextBox> MemoryMinConfidenceBox;
 	TSharedPtr<SEditableTextBox> MemoryRetentionDaysBox;
 	TSharedPtr<STextBlock> MemoryGenerationStatusBlock;
 	TSharedPtr<STextBlock> UsageSummaryBlock;
-	TSharedPtr<STextBlock> VectorDbOverviewBlock;
 
-	// Segment 3: Vector DB top-N graph UI (nodes + drill-down)
-	TSharedPtr<SEditableTextBox> VectorDbGraphSearchBox;
-	TSharedPtr<SVerticalBox> VectorDbTopSourcesVBox;
-	TSharedPtr<SUnrealAiLocalJsonInspectorPanel> VectorDbSourceInspectorPanel;
-	TArray<FUnrealAiVectorDbTopSourceRow> VectorDbTopSources;
-	FString VectorDbSelectedSourcePath;
-	FString VectorDbLastGraphSearch;
-
-	void RefreshVectorDbTopGraphUi();
-	void UpdateVectorDbSourceInspectorPanel();
-	void RebuildVectorDbTopGraphNodesUi(const FString& SearchText);
-
-	// Segment 4: Context inspector (readable context.json + chat thread info)
+	// Segment 3: Context inspector (readable context.json + chat thread info)
 	TSharedPtr<SVerticalBox> ContextThreadListVBox;
 	TSharedPtr<SVerticalBox> ContextLocalFilesVBox;
 	TSharedPtr<SUnrealAiLocalJsonInspectorPanel> ContextInspectorPanel;
 	FString SelectedContextThreadIdDigitsWithHyphens;
 
-	// Segment 5: threads_index.json + per-thread drill-down
+	// Segment 4: threads_index.json + per-thread drill-down
 	TSharedPtr<SVerticalBox> ProjectIndexThreadListVBox;
 	TSharedPtr<SUnrealAiLocalJsonInspectorPanel> ProjectIndexInspectorPanel;
 	FString SelectedProjectIndexThreadIdDigitsWithHyphens;
 
 	int32 ActiveSettingsSegmentIndex = 0;
-	double LastVectorDbOverviewPollSeconds = 0.0;
 
 	TArray<TSharedPtr<FString>> CompanyPresetOptions;
 	TArray<TSharedPtr<FString>> CodeTypePreferenceOptions;

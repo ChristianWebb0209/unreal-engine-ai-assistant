@@ -4,6 +4,7 @@
 #include "Math/Color.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Styling/AppStyle.h"
+#include "Styling/StyleColors.h"
 #include "Styling/SlateStyleRegistry.h"
 #include "Brushes/SlateImageBrush.h"
 #if WITH_EDITOR
@@ -14,15 +15,16 @@ TSharedPtr<FSlateStyleSet> FUnrealAiEditorStyle::StyleSet = nullptr;
 
 namespace UnrealAiEditorBubbleColors
 {
-	/** User bubble fill — slightly warm charcoal (vs. flat #1e1e1e) for separation from assistant lane. */
 	static FLinearColor UserBubbleFill()
 	{
-		return FLinearColor(FColor(0x26, 0x23, 0x21, 0xff));
+		// Match the editor's brighter panel tone used for assistant surfaces.
+		// This avoids the user bubble appearing too dark under some dark themes.
+		return FStyleColors::Panel.GetSpecifiedColor();
 	}
 
 	static FLinearColor AssistantBubbleFill()
 	{
-		return FLinearColor(0.092f, 0.098f, 0.114f, 1.f);
+		return FStyleColors::Panel.GetSpecifiedColor();
 	}
 } // namespace UnrealAiEditorBubbleColors
 
@@ -39,37 +41,37 @@ void FUnrealAiEditorStyle::Initialize()
 
 	FSlateStyleSet* Style = StyleSet.Get();
 
-	Style->Set("UnrealAiEditor.PanelBackground", new FSlateColorBrush(FLinearColor(0.118f, 0.118f, 0.118f, 1.f)));
-	Style->Set("UnrealAiEditor.Elevated", new FSlateColorBrush(FLinearColor(0.145f, 0.145f, 0.145f, 1.f)));
-	Style->Set("UnrealAiEditor.BorderSubtle", new FSlateColorBrush(FLinearColor(0.235f, 0.235f, 0.235f, 1.f)));
+	Style->Set("UnrealAiEditor.PanelBackground", new FSlateColorBrush(FStyleColors::Panel.GetSpecifiedColor()));
+	Style->Set("UnrealAiEditor.Elevated", new FSlateColorBrush(FStyleColors::Header.GetSpecifiedColor()));
+	Style->Set("UnrealAiEditor.BorderSubtle", new FSlateColorBrush(FStyleColors::DropdownOutline.GetSpecifiedColor()));
 	Style->Set("UnrealAiEditor.ToolPending", new FSlateColorBrush(FLinearColor(0.23f, 0.18f, 0.0f, 0.35f)));
 	Style->Set("UnrealAiEditor.ToolSuccess", new FSlateColorBrush(FLinearColor(0.06f, 0.24f, 0.12f, 0.45f)));
 	Style->Set("UnrealAiEditor.ToolError", new FSlateColorBrush(FLinearColor(0.24f, 0.08f, 0.08f, 0.45f)));
 	// Todo plan card: muted forest (distinct from user taupe and assistant gray).
 	Style->Set("UnrealAiEditor.TodoPlanPanel", new FSlateColorBrush(FLinearColor(0.11f, 0.16f, 0.13f, 1.f)));
-	Style->Set("UnrealAiEditor.AssistantLane", new FSlateColorBrush(FLinearColor(0.14f, 0.16f, 0.2f, 0.55f)));
+	Style->Set("UnrealAiEditor.AssistantLane", new FSlateColorBrush(FStyleColors::Header.GetSpecifiedColor()));
 	Style->Set("UnrealAiEditor.DebugNav", new FSlateColorBrush(FLinearColor(0.10f, 0.13f, 0.12f, 1.f)));
 	Style->Set("UnrealAiEditor.DebugInspect", new FSlateColorBrush(FLinearColor(0.09f, 0.11f, 0.14f, 1.f)));
 	// Chat renderer containers: rounded surfaces for notices and run progress (no inline colors in widgets).
 	Style->Set(
 		"UnrealAiEditor.ChatRunProgress",
-		new FSlateRoundedBoxBrush(FLinearColor(0.145f, 0.145f, 0.145f, 0.62f), 8.f));
+		new FSlateRoundedBoxBrush(FStyleColors::Recessed.GetSpecifiedColor(), 8.f));
 	Style->Set(
 		"UnrealAiEditor.ChatNoticeInfo",
-		new FSlateRoundedBoxBrush(FLinearColor(0.118f, 0.118f, 0.118f, 0.92f), 8.f));
+		new FSlateRoundedBoxBrush(FStyleColors::Panel.GetSpecifiedColor(), 8.f));
 	Style->Set(
 		"UnrealAiEditor.ChatNoticeError",
-		new FSlateRoundedBoxBrush(FLinearColor(0.24f, 0.08f, 0.08f, 0.38f), 8.f));
+		new FSlateRoundedBoxBrush(FLinearColor(0.24f, 0.08f, 0.08f, 0.3f), 8.f));
 	Style->Set(
 		"UnrealAiEditor.ChatNoticeCancelled",
-		new FSlateRoundedBoxBrush(FLinearColor(0.23f, 0.18f, 0.0f, 0.34f), 8.f));
+		new FSlateRoundedBoxBrush(FLinearColor(0.23f, 0.18f, 0.0f, 0.28f), 8.f));
 	// Tool call cards: neutral shell + code wells (rounded; aligns with dark editor panels, not #000).
 	Style->Set(
 		"UnrealAiEditor.ToolCallCardOuter",
-		new FSlateRoundedBoxBrush(FLinearColor(0.13f, 0.14f, 0.165f, 1.f), 8.f));
+		new FSlateRoundedBoxBrush(FStyleColors::Header.GetSpecifiedColor(), 8.f));
 	Style->Set(
 		"UnrealAiEditor.ToolCallCodeWell",
-		new FSlateRoundedBoxBrush(FLinearColor(0.105f, 0.11f, 0.128f, 1.f), 4.f));
+		new FSlateRoundedBoxBrush(FStyleColors::Recessed.GetSpecifiedColor(), 4.f));
 	ApplyChatBubbleColorsFromSettings();
 
 	// Agent Chat branding: engine SVG under Content/Editor/Slate (avoids missing FAppStyle "Icons.*" names on some versions).
@@ -149,7 +151,7 @@ const FSlateBrush* FUnrealAiEditorStyle::GetAgentChatTabIconBrush()
 
 FSlateColor FUnrealAiEditorStyle::ColorBackgroundCanvas()
 {
-	return FSlateColor(FLinearColor(0.118f, 0.118f, 0.118f, 1.f));
+	return FSlateColor(FStyleColors::Panel.GetSpecifiedColor());
 }
 
 FSlateColor FUnrealAiEditorStyle::ColorTextPrimary()
@@ -242,12 +244,12 @@ FLinearColor FUnrealAiEditorStyle::LinearColorChatHeaderStrip()
 
 FLinearColor FUnrealAiEditorStyle::LinearColorToolCallCardInset()
 {
-	return FLinearColor(0.118f, 0.124f, 0.142f, 1.f);
+	return FStyleColors::Panel.GetSpecifiedColor();
 }
 
 FLinearColor FUnrealAiEditorStyle::LinearColorToolCallCodeWell()
 {
-	return FLinearColor(0.102f, 0.108f, 0.125f, 1.f);
+	return FStyleColors::Recessed.GetSpecifiedColor();
 }
 
 FName FUnrealAiEditorStyle::CheckboxStyleName()

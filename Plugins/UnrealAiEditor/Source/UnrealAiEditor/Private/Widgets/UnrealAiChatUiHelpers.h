@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Internationalization/Text.h"
 
 class FUnrealAiBackendRegistry;
 class SChatMessageList;
@@ -23,3 +24,6 @@ void UnrealAiChatUi_LoadPersistedThreadIntoUi(
 	TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry,
 	TSharedPtr<FUnrealAiChatUiSession> Session,
 	TSharedPtr<SChatMessageList> MessageList);
+
+/** Plugin version + engine label for chat chrome (e.g. "Unreal AI Editor 1.0 · 5.7..."). */
+FText UnrealAiChatUi_GetComposerFooterVersionText();
