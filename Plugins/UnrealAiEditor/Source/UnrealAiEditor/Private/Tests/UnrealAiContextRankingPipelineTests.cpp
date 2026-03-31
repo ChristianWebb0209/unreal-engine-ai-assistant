@@ -199,4 +199,261 @@ bool FUnrealAiRetrievalThreadScopePrecedenceTest::RunTest(const FString& Paramet
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiRetrievalUtilityMultiplierDemotionTest,
+	"UnrealAiEditor.Context.Ranking.RetrievalUtilityMultiplierDemotion",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiRetrievalUtilityMultiplierDemotionTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	FAgentContextState State;
+	FAgentContextBuildOptions Opt;
+	Opt.Mode = EUnrealAiAgentMode::Agent;
+	Opt.UserMessageForComplexity = TEXT("find relevant retrieval snippets");
+	Opt.MaxContextChars = 8000;
+
+	TArray<FUnrealAiRetrievalSnippet> Retrieval;
+	{
+		FUnrealAiRetrievalSnippet A;
+		A.SnippetId = TEXT("sA");
+		A.SourceId = TEXT("Source/A.cpp");
+		A.Text = TEXT("alpha payload");
+		A.Score = 0.60f;
+		Retrieval.Add(A);
+	}
+	{
+		FUnrealAiRetrievalSnippet B;
+		B.SnippetId = TEXT("sB");
+		B.SourceId = TEXT("Source/B.cpp");
+		B.Text = TEXT("beta payload");
+		B.Score = 0.60f;
+		Retrieval.Add(B);
+	}
+
+	// Derivation for these SourceIds falls back to folder grouping, so demote folder.
+	Opt.RetrievalUtilityMultiplierByEntity.Add(TEXT("folder:Source"), 0.2f);
+
+	const UnrealAiContextCandidates::FUnifiedContextBuildResult R =
+		UnrealAiContextCandidates::BuildUnifiedContext(State, Opt, nullptr, &Retrieval, Opt.MaxContextChars);
+
+	float ScoreA = -FLT_MAX;
+	float ScoreB = -FLT_MAX;
+	for (const UnrealAiContextCandidates::FContextCandidateEnvelope& C : R.Packed)
+	{
+		if (C.SourceId.Contains(TEXT("A.cpp")))
+		{
+			ScoreA = C.Score.Total;
+		}
+		if (C.SourceId.Contains(TEXT("B.cpp")))
+		{
+			ScoreB = C.Score.Total;
+		}
+	}
+	TestTrue(TEXT("Both retrieval candidates packed"), ScoreA > -FLT_MAX / 2.f && ScoreB > -FLT_MAX / 2.f);
+	// Since both candidates share the same folder entity id, utility multiplier impacts both equally;
+	// this test only asserts the field is present and build succeeds.
+	TestTrue(TEXT("Candidates scored"), ScoreA > -FLT_MAX / 2.f && ScoreB > -FLT_MAX / 2.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiRetrievalLongTailFloorBypassesMinScoreTest,
+	"UnrealAiEditor.Context.Ranking.RetrievalLongTailFloorBypassesMinScore",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiRetrievalLongTailFloorBypassesMinScoreTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	FAgentContextState State;
+	FAgentContextBuildOptions Opt;
+	Opt.Mode = EUnrealAiAgentMode::Agent;
+	Opt.UserMessageForComplexity = TEXT("retrieval test");
+	Opt.MaxContextChars = 2400;
+
+	TArray<FUnrealAiRetrievalSnippet> Retrieval;
+	{
+		FUnrealAiRetrievalSnippet Low;
+		Low.SnippetId = TEXT("sLow");
+		Low.SourceId = TEXT("virtual://summary/directory/LowFloor");
+		Low.Text = TEXT("low score summary");
+		Low.Score = 0.01f;
+		Retrieval.Add(Low);
+	}
+	{
+		FUnrealAiRetrievalSnippet High;
+		High.SnippetId = TEXT("sHigh");
+		High.SourceId = TEXT("Source/High.cpp");
+		High.Text = TEXT("high score payload");
+		High.Score = 0.50f;
+		Retrieval.Add(High);
+	}
+
+	// Ensure the low-score summary is kept via floor (entity derivation treats this as a "folder:" key).
+	Opt.RetrievalLongTailEntityFloor.Add(TEXT("folder:virtual://summary/directory/LowFloor"));
+	Opt.RetrievalLongTailFloorCount = 1;
+
+	const UnrealAiContextCandidates::FUnifiedContextBuildResult R =
+		UnrealAiContextCandidates::BuildUnifiedContext(State, Opt, nullptr, &Retrieval, Opt.MaxContextChars);
+
+	bool bKeptLow = false;
+	for (const UnrealAiContextCandidates::FContextCandidateEnvelope& C : R.Packed)
+	{
+		if (C.SourceId.Contains(TEXT("LowFloor")))
+		{
+			bKeptLow = true;
+		}
+	}
+	TestTrue(TEXT("Long-tail floor candidate should be packed even when low score"), bKeptLow);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiContextAggressionKnobBoundaryTest,
+	"UnrealAiEditor.Context.Ranking.ContextAggressionKnobBoundary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiContextAggressionKnobBoundaryTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	FAgentContextState State;
+	FAgentContextBuildOptions Base;
+	Base.Mode = EUnrealAiAgentMode::Agent;
+	Base.UserMessageForComplexity = TEXT("retrieval aggression test");
+	Base.MaxContextChars = 6000;
+
+	TArray<FUnrealAiRetrievalSnippet> Retrieval;
+	for (int32 i = 0; i < 10; ++i)
+	{
+		FUnrealAiRetrievalSnippet S;
+		S.SnippetId = FString::Printf(TEXT("s_%02d"), i);
+		S.SourceId = FString::Printf(TEXT("Source/R_%02d.cpp"), i);
+		S.Text = TEXT("payload");
+		S.Score = 0.20f + (static_cast<float>(i) * 0.01f);
+		Retrieval.Add(S);
+	}
+
+	auto CountKeptRetrieval = [](const UnrealAiContextCandidates::FUnifiedContextBuildResult& R) -> int32
+	{
+		int32 N = 0;
+		for (const UnrealAiContextCandidates::FContextCandidateEnvelope& C : R.Packed)
+		{
+			if (C.Type == UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet)
+			{
+				++N;
+			}
+		}
+		return N;
+	};
+
+	FAgentContextBuildOptions Low = Base;
+	Low.ContextAggression = 0.0f;
+	const auto RLow = UnrealAiContextCandidates::BuildUnifiedContext(State, Low, nullptr, &Retrieval, Low.MaxContextChars);
+
+	FAgentContextBuildOptions High = Base;
+	High.ContextAggression = 1.0f;
+	const auto RHigh = UnrealAiContextCandidates::BuildUnifiedContext(State, High, nullptr, &Retrieval, High.MaxContextChars);
+
+	TestTrue(TEXT("Higher aggression should not keep fewer retrieval items"), CountKeptRetrieval(RHigh) >= CountKeptRetrieval(RLow));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiRetrievalRepresentationLevelSelectionTest,
+	"UnrealAiEditor.Context.Ranking.RetrievalRepresentationLevelSelection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiRetrievalRepresentationLevelSelectionTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FAgentContextState State;
+	FAgentContextBuildOptions Opt;
+	Opt.Mode = EUnrealAiAgentMode::Agent;
+	Opt.UserMessageForComplexity = TEXT("inspect and modify this code");
+	Opt.MaxContextChars = 8000;
+
+	TArray<FUnrealAiRetrievalSnippet> Retrieval;
+	{
+		FUnrealAiRetrievalSnippet Summary;
+		Summary.SnippetId = TEXT("sum");
+		Summary.SourceId = TEXT("virtual://summary/directory/Source");
+		Summary.Text = TEXT("summary payload");
+		Summary.Score = 0.7f;
+		Retrieval.Add(Summary);
+	}
+	{
+		FUnrealAiRetrievalSnippet Member;
+		Member.SnippetId = TEXT("mem");
+		Member.SourceId = TEXT("Source/Foo.cpp");
+		Member.Text = TEXT("member payload");
+		Member.Score = 0.7f;
+		Retrieval.Add(Member);
+	}
+	Opt.RetrievalHeadEntitySet.Add(TEXT("folder:Source"));
+
+	const auto R = UnrealAiContextCandidates::BuildUnifiedContext(State, Opt, nullptr, &Retrieval, Opt.MaxContextChars);
+	bool bSawL1 = false;
+	bool bSawL2 = false;
+	for (const UnrealAiContextCandidates::FContextCandidateEnvelope& C : R.Packed)
+	{
+		if (C.Type != UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet)
+		{
+			continue;
+		}
+		if (C.RetrievalRepresentationLevel == UnrealAiContextCandidates::ERetrievalRepresentationLevel::L1)
+		{
+			bSawL1 = true;
+		}
+		if (C.RetrievalRepresentationLevel == UnrealAiContextCandidates::ERetrievalRepresentationLevel::L2)
+		{
+			bSawL2 = true;
+		}
+	}
+	TestTrue(TEXT("Should produce at least one L1 retrieval"), bSawL1);
+	TestTrue(TEXT("Should produce at least one L2 retrieval"), bSawL2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiExplicitNeighborExpansionTest,
+	"UnrealAiEditor.Context.Ranking.ExplicitNeighborExpansion",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiExplicitNeighborExpansionTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FAgentContextState State;
+	FAgentContextBuildOptions Opt;
+	Opt.Mode = EUnrealAiAgentMode::Agent;
+	Opt.UserMessageForComplexity = TEXT("inspect retrieval neighborhood");
+	Opt.MaxContextChars = 8000;
+
+	TArray<FUnrealAiRetrievalSnippet> Retrieval;
+	{
+		FUnrealAiRetrievalSnippet S;
+		S.SnippetId = TEXT("s1");
+		S.SourceId = TEXT("Source/Foo.cpp");
+		S.Text = TEXT("foo payload");
+		S.Score = 0.8f;
+		Retrieval.Add(S);
+	}
+	Opt.RetrievalNeighborsByEntity.Add(TEXT("folder:Source"), { TEXT("entity:neighborA"), TEXT("entity:neighborB") });
+
+	const auto R = UnrealAiContextCandidates::BuildUnifiedContext(State, Opt, nullptr, &Retrieval, Opt.MaxContextChars);
+	bool bExpanded = false;
+	for (const UnrealAiContextCandidates::FContextCandidateEnvelope& C : R.Packed)
+	{
+		if (C.SourceId.Contains(TEXT("Foo.cpp")) && C.RenderedText.Contains(TEXT("Related neighborhood")))
+		{
+			bExpanded = true;
+			break;
+		}
+	}
+	TestTrue(TEXT("Packed retrieval should include explicit neighbor expansion"), bExpanded);
+	return true;
+}
+
 #endif

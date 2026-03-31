@@ -105,4 +105,24 @@ bool FUnrealAiRetrievalMaxFilesCapTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiRetrievalContextAggressionSettingsParseTest,
+	"UnrealAiEditor.Retrieval.ContextAggressionSettingsParse",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiRetrievalContextAggressionSettingsParseTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FUnrealAiPersistenceStub Persist;
+	FUnrealAiModelProfileRegistry Profiles(&Persist);
+	FUnrealAiRetrievalService Retrieval(&Persist, &Profiles, nullptr);
+
+	const FString SettingsJson = TEXT("{\"retrieval\":{\"enabled\":true,\"embeddingModel\":\"text-embedding-3-small\",\"contextAggression\":0.91}}");
+	TestTrue(TEXT("Save settings json"), Persist.SaveSettingsJson(SettingsJson));
+
+	const FUnrealAiRetrievalSettings Settings = Retrieval.LoadSettings();
+	TestTrue(TEXT("Context aggression parsed"), FMath::IsNearlyEqual(Settings.ContextAggression, 0.91f, 0.001f));
+	return true;
+}
+
 #endif
