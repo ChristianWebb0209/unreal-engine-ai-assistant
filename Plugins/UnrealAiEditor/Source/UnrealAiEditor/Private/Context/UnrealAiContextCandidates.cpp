@@ -5,6 +5,7 @@
 #include "Context/UnrealAiEditorContextQueries.h"
 #include "Memory/IUnrealAiMemoryService.h"
 #include "Misc/EngineVersion.h"
+#include "Misc/Paths.h"
 #include "Retrieval/UnrealAiRetrievalTypes.h"
 #include "UnrealAiEditorModule.h"
 
@@ -155,6 +156,106 @@ namespace UnrealAiContextCandidates
 				return FString();
 			}
 			return SourceId.Mid(LastColon + 1);
+		}
+
+		static FString ExtractSummaryFolderKey(const FString& SourceId)
+		{
+			if (SourceId.StartsWith(TEXT("virtual://summary/directory")))
+			{
+				return SourceId.RightChop(FCString::Strlen(TEXT("virtual://summary/directory")));
+			}
+			if (SourceId.StartsWith(TEXT("virtual://summary/asset_family")))
+			{
+				FString Tail = SourceId.RightChop(FCString::Strlen(TEXT("virtual://summary/asset_family")));
+				int32 Slash = INDEX_NONE;
+				if (Tail.FindChar(TEXT('/'), Slash) && Slash > 0)
+				{
+					return Tail.Left(Slash);
+				}
+				return Tail;
+			}
+			return FString();
+		}
+
+		static FString BuildEquivalenceClassIdFromName(const FString& RawName)
+		{
+			FString Name = RawName.ToLower();
+			Name.ReplaceInline(TEXT("."), TEXT("_"));
+			Name.ReplaceInline(TEXT("-"), TEXT("_"));
+
+			const TArray<FString> Prefixes = { TEXT("bp_"), TEXT("mi_"), TEXT("m_"), TEXT("sm_"), TEXT("sk_"), TEXT("t_") };
+			for (const FString& Prefix : Prefixes)
+			{
+				if (Name.StartsWith(Prefix))
+				{
+					Name = Name.RightChop(Prefix.Len());
+					break;
+				}
+			}
+
+			const TArray<FString> Suffixes = { TEXT("_c"), TEXT("_inst"), TEXT("_instance"), TEXT("_mat"), TEXT("_mesh"), TEXT("_lod0"), TEXT("_lod1") };
+			for (const FString& Suffix : Suffixes)
+			{
+				if (Name.EndsWith(Suffix))
+				{
+					Name.LeftChopInline(Suffix.Len());
+					break;
+				}
+			}
+
+			if (Name.IsEmpty())
+			{
+				return TEXT("name:unknown");
+			}
+			return FString::Printf(TEXT("name:%s"), *Name);
+		}
+
+		static FString DeriveRetrievalEntityIdFromSourceId(const FString& SourceId)
+		{
+			if (SourceId.IsEmpty())
+			{
+				return TEXT("entity:unknown");
+			}
+
+			if (SourceId.StartsWith(TEXT("virtual://asset_registry/")))
+			{
+				return TEXT("asset_registry:shard");
+			}
+			if (SourceId.StartsWith(TEXT("memory:")))
+			{
+				return TEXT("memory:record");
+			}
+
+			FString Normalized = SourceId;
+			Normalized.ReplaceInline(TEXT("\\"), TEXT("/"));
+
+			if (Normalized.StartsWith(TEXT("/Game/")) || Normalized.StartsWith(TEXT("/Engine/")))
+			{
+				FString PackagePart = Normalized;
+				int32 DotIndex = INDEX_NONE;
+				if (PackagePart.FindChar(TEXT('.'), DotIndex))
+				{
+					PackagePart = PackagePart.Left(DotIndex);
+				}
+				int32 LastSlash = INDEX_NONE;
+				if (PackagePart.FindLastChar(TEXT('/'), LastSlash) && LastSlash > 0)
+				{
+					const FString Folder = PackagePart.Left(LastSlash);
+					const FString Basename = PackagePart.Mid(LastSlash + 1);
+					return FString::Printf(TEXT("asset_family:%s:%s"), *Folder, *BuildEquivalenceClassIdFromName(Basename));
+				}
+				return FString::Printf(TEXT("asset:%s"), *PackagePart);
+			}
+
+			if (Normalized.StartsWith(TEXT("/")) || Normalized.Contains(TEXT("/")))
+			{
+				const FString Directory = FPaths::GetPath(Normalized);
+				return Directory.IsEmpty()
+					? FString::Printf(TEXT("file:%s"), *Normalized)
+					: FString::Printf(TEXT("folder:%s"), *Directory);
+			}
+
+			return FString::Printf(TEXT("source:%s"), *Normalized);
 		}
 	}
 
@@ -361,20 +462,60 @@ namespace UnrealAiContextCandidates
 
 		if (RetrievalSnippets)
 		{
+			const FString IntentLower = Options.UserMessageForComplexity.ToLower();
+			const bool bIntentAllowsL2 = IntentLower.Contains(TEXT("inspect"))
+				|| IntentLower.Contains(TEXT("verify"))
+				|| IntentLower.Contains(TEXT("modify"))
+				|| IntentLower.Contains(TEXT("edit"))
+				|| IntentLower.Contains(TEXT("code"))
+				|| IntentLower.Contains(TEXT("blueprint"));
 			for (const FUnrealAiRetrievalSnippet& Snippet : *RetrievalSnippets)
 			{
 				FContextCandidateEnvelope E;
 				E.Type = UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet;
 				E.SourceId = Snippet.SourceId.IsEmpty() ? Snippet.SnippetId : Snippet.SourceId;
+				E.EntityId = DeriveRetrievalEntityIdFromSourceId(E.SourceId);
 				E.Payload = Snippet.Text;
-				E.Features.VectorSimilarity = FMath::Max(0.f, Snippet.Score);
+				float UtilityMultiplier = 1.0f;
+				if (const float* FoundMultiplier = Options.RetrievalUtilityMultiplierByEntity.Find(E.EntityId))
+				{
+					UtilityMultiplier = FMath::Clamp(*FoundMultiplier, 0.0f, 1.0f);
+				}
+				E.Features.UtilityMultiplier = UtilityMultiplier;
+				E.Features.VectorSimilarity = FMath::Max(0.f, Snippet.Score) * UtilityMultiplier;
+				E.bRetrievalLongTailFloorCandidate = Options.RetrievalLongTailEntityFloor.Contains(E.EntityId);
+				const bool bInHeadSet = Options.RetrievalHeadEntitySet.Contains(E.EntityId);
+				if (E.SourceId.StartsWith(TEXT("virtual://summary/")))
+				{
+					E.RetrievalRepresentationLevel = bInHeadSet
+						? ERetrievalRepresentationLevel::L1
+						: ERetrievalRepresentationLevel::L0;
+				}
+				else
+				{
+					E.RetrievalRepresentationLevel = (bInHeadSet && bIntentAllowsL2)
+						? ERetrievalRepresentationLevel::L2
+						: ERetrievalRepresentationLevel::L1;
+				}
 				if (!Snippet.ThreadId.IsEmpty() && !Options.ThreadIdForMemory.IsEmpty())
 				{
 					E.Features.ThreadScope = Snippet.ThreadId == Options.ThreadIdForMemory
 						? UnrealAiContextRankingPolicy::RetrievalInThreadScopeBoost
 						: UnrealAiContextRankingPolicy::RetrievalCrossThreadPenalty;
 				}
-				E.RenderedText = FString::Printf(TEXT("Retrieved context: %s\n%s"), *E.SourceId, *Snippet.Text);
+				FString PayloadForLevel = Snippet.Text;
+				if (E.RetrievalRepresentationLevel == ERetrievalRepresentationLevel::L0 && PayloadForLevel.Len() > 260)
+				{
+					PayloadForLevel = PayloadForLevel.Left(260) + TEXT(" …");
+				}
+				else if (E.RetrievalRepresentationLevel == ERetrievalRepresentationLevel::L1 && PayloadForLevel.Len() > 1200)
+				{
+					PayloadForLevel = PayloadForLevel.Left(1200) + TEXT(" …");
+				}
+				const TCHAR* LevelLabel = E.RetrievalRepresentationLevel == ERetrievalRepresentationLevel::L0
+					? TEXT("L0")
+					: (E.RetrievalRepresentationLevel == ERetrievalRepresentationLevel::L1 ? TEXT("L1") : TEXT("L2"));
+				E.RenderedText = FString::Printf(TEXT("Retrieved context (%s): %s\n%s"), LevelLabel, *E.SourceId, *PayloadForLevel);
 				E.TokenCostEstimate = EstimateTokens(E.RenderedText);
 				OutCandidates.Add(MoveTemp(E));
 			}
@@ -469,6 +610,63 @@ namespace UnrealAiContextCandidates
 		const FAgentContextBuildOptions& Options,
 		FUnifiedContextBuildResult& OutResult)
 	{
+		auto ApplyRelationNeighborhoodCompression = [&Candidates, &Options](FContextCandidateEnvelope& InOutCandidate)
+		{
+			if (InOutCandidate.Type != UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet)
+			{
+				return;
+			}
+			if (InOutCandidate.RetrievalRepresentationLevel == ERetrievalRepresentationLevel::L0)
+			{
+				return;
+			}
+			if (InOutCandidate.Features.VectorSimilarity < 0.45f)
+			{
+				return;
+			}
+
+			TArray<FString> Neighbors;
+			if (!InOutCandidate.EntityId.IsEmpty())
+			{
+				if (const TArray<FString>* ExplicitNeighbors = Options.RetrievalNeighborsByEntity.Find(InOutCandidate.EntityId))
+				{
+					Neighbors = *ExplicitNeighbors;
+				}
+			}
+
+			if (Neighbors.Num() == 0)
+			{
+				const FString FolderKey = ExtractSummaryFolderKey(InOutCandidate.SourceId);
+				if (FolderKey.IsEmpty())
+				{
+					return;
+				}
+				const int32 MaxNeighbors = 8;
+				for (const FContextCandidateEnvelope& C : Candidates)
+				{
+					if (&C == &InOutCandidate || C.Type != UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet)
+					{
+						continue;
+					}
+					if (C.SourceId.Contains(FolderKey))
+					{
+						Neighbors.Add(C.SourceId);
+						if (Neighbors.Num() >= MaxNeighbors)
+						{
+							break;
+						}
+					}
+				}
+			}
+			if (Neighbors.Num() == 0)
+			{
+				return;
+			}
+			InOutCandidate.RenderedText += TEXT("\nRelated neighborhood (R=1, capped): ");
+			InOutCandidate.RenderedText += FString::Join(Neighbors, TEXT(", "));
+			InOutCandidate.TokenCostEstimate = EstimateTokens(InOutCandidate.RenderedText);
+		};
+
 		const int32 UserCharCount = Options.UserMessageForComplexity.Len();
 		const int32 UserTokenCount = BuildUserTokens(Options.UserMessageForComplexity).Num();
 		const bool bShortPrompt =
@@ -476,6 +674,12 @@ namespace UnrealAiContextCandidates
 			&& (UserTokenCount <= UnrealAiContextRankingPolicy::ShortPromptUserTokenThreshold
 				|| UserCharCount <= UnrealAiContextRankingPolicy::ShortPromptCharThreshold);
 		const UnrealAiContextRankingPolicy::FPerTypeBudgetCaps PerTypeCaps = UnrealAiContextRankingPolicy::GetPerTypeBudgetCaps();
+		const float Agg = FMath::Clamp(Options.ContextAggression, 0.f, 1.f);
+		const float SoftFillFraction = FMath::Lerp(0.4f, 0.8f, Agg);
+		const int32 AggressiveMaxPacked = FMath::RoundToInt(FMath::Lerp(16.0f, 48.0f, Agg));
+		const float MinMemoryScoreGate = FMath::Lerp(10.0f, 6.0f, Agg);
+		const float MinRetrievalScoreGate = FMath::Lerp(8.0f, 4.0f, Agg);
+		const int32 RetrievalCapAggressive = FMath::RoundToInt(FMath::Lerp(4.0f, 8.0f, Agg));
 		OutResult.PromptCharCount = UserCharCount;
 		OutResult.PromptTokenCount = UserTokenCount;
 		OutResult.bShortPrompt = bShortPrompt;
@@ -484,8 +688,8 @@ namespace UnrealAiContextCandidates
 			BudgetChars,
 			FMath::Max(
 				UnrealAiContextRankingPolicy::MinSoftBudgetChars,
-				static_cast<int32>(static_cast<float>(BudgetChars) * UnrealAiContextRankingPolicy::SoftContextFillFraction)));
-		OutResult.MaxPackedCandidatesApplied = UnrealAiContextRankingPolicy::MaxPackedCandidatesSoft;
+				static_cast<int32>(static_cast<float>(BudgetChars) * SoftFillFraction)));
+		OutResult.MaxPackedCandidatesApplied = AggressiveMaxPacked;
 
 		TArray<int32> Idx;
 		Idx.Reserve(Candidates.Num());
@@ -505,6 +709,7 @@ namespace UnrealAiContextCandidates
 		bPacked.Init(false, Candidates.Num());
 		TMap<UnrealAiContextRankingPolicy::ECandidateType, int32> Counts;
 		int32 UsedChars = 0;
+		int32 LongTailFloorKept = 0;
 
 		auto TryPackIdx = [&](const int32 Index, const TCHAR* DropReasonIfAny) -> bool
 		{
@@ -518,12 +723,20 @@ namespace UnrealAiContextCandidates
 				return false;
 			}
 			int32 Cap = UnrealAiContextRankingPolicy::GetPerTypeCap(C.Type);
+			if (C.Type == UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet)
+			{
+				Cap = RetrievalCapAggressive;
+			}
 			if (bShortPrompt && C.Type == UnrealAiContextRankingPolicy::ECandidateType::MemorySnippet)
 			{
 				Cap = PerTypeCaps.MaxMemorySnippetShortPrompt;
 			}
 			const int32 Cur = Counts.FindRef(C.Type);
-			if (Cap > 0 && Cur >= Cap)
+			const bool bAllowLongTailCapBypass =
+				(C.Type == UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet)
+				&& C.bRetrievalLongTailFloorCandidate
+				&& LongTailFloorKept < Options.RetrievalLongTailFloorCount;
+			if (Cap > 0 && Cur >= Cap && !bAllowLongTailCapBypass)
 			{
 				C.bDropped = true;
 				C.DropReason = TEXT("pack:per_type_cap");
@@ -540,6 +753,25 @@ namespace UnrealAiContextCandidates
 			Counts.Add(C.Type, Cur + 1);
 			OutResult.Packed.Add(C);
 			bPacked[Index] = true;
+			if (C.Type == UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet && C.bRetrievalLongTailFloorCandidate)
+			{
+				++LongTailFloorKept;
+			}
+			if (C.Type == UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet)
+			{
+				if (C.RetrievalRepresentationLevel == ERetrievalRepresentationLevel::L0)
+				{
+					++OutResult.PackedRetrievalL0Count;
+				}
+				else if (C.RetrievalRepresentationLevel == ERetrievalRepresentationLevel::L1)
+				{
+					++OutResult.PackedRetrievalL1Count;
+				}
+				else
+				{
+					++OutResult.PackedRetrievalL2Count;
+				}
+			}
 			return true;
 		};
 
@@ -668,12 +900,20 @@ namespace UnrealAiContextCandidates
 				continue;
 			}
 			int32 Cap = UnrealAiContextRankingPolicy::GetPerTypeCap(C.Type);
+			if (C.Type == UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet)
+			{
+				Cap = RetrievalCapAggressive;
+			}
 			if (bShortPrompt && C.Type == UnrealAiContextRankingPolicy::ECandidateType::MemorySnippet)
 			{
 				Cap = PerTypeCaps.MaxMemorySnippetShortPrompt;
 			}
 			const int32 Cur = Counts.FindRef(C.Type);
-			if (Cap > 0 && Cur >= Cap)
+			const bool bAllowLongTailCapBypass =
+				(C.Type == UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet)
+				&& C.bRetrievalLongTailFloorCandidate
+				&& LongTailFloorKept < Options.RetrievalLongTailFloorCount;
+			if (Cap > 0 && Cur >= Cap && !bAllowLongTailCapBypass)
 			{
 				C.bDropped = true;
 				C.DropReason = TEXT("pack:per_type_cap");
@@ -693,14 +933,15 @@ namespace UnrealAiContextCandidates
 				continue;
 			}
 			if (C.Type == UnrealAiContextRankingPolicy::ECandidateType::MemorySnippet
-				&& C.Score.Total < UnrealAiContextRankingPolicy::MinMemoryCandidateScoreToPack)
+				&& C.Score.Total < MinMemoryScoreGate)
 			{
 				C.bDropped = true;
 				C.DropReason = TEXT("pack:memory_min_score");
 				continue;
 			}
 			if (C.Type == UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet
-				&& C.Score.Total < UnrealAiContextRankingPolicy::MinRetrievalCandidateScoreToPack)
+				&& C.Score.Total < MinRetrievalScoreGate
+				&& !(C.bRetrievalLongTailFloorCandidate && LongTailFloorKept < Options.RetrievalLongTailFloorCount))
 			{
 				C.bDropped = true;
 				C.DropReason = TEXT("pack:retrieval_min_score");
@@ -708,7 +949,27 @@ namespace UnrealAiContextCandidates
 			}
 			UsedChars += CandidateChars;
 			Counts.Add(C.Type, Cur + 1);
+			ApplyRelationNeighborhoodCompression(C);
 			OutResult.Packed.Add(C);
+			if (C.Type == UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet && C.bRetrievalLongTailFloorCandidate)
+			{
+				++LongTailFloorKept;
+			}
+			if (C.Type == UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet)
+			{
+				if (C.RetrievalRepresentationLevel == ERetrievalRepresentationLevel::L0)
+				{
+					++OutResult.PackedRetrievalL0Count;
+				}
+				else if (C.RetrievalRepresentationLevel == ERetrievalRepresentationLevel::L1)
+				{
+					++OutResult.PackedRetrievalL1Count;
+				}
+				else
+				{
+					++OutResult.PackedRetrievalL2Count;
+				}
+			}
 		}
 
 		for (const FContextCandidateEnvelope& C : Candidates)
@@ -751,6 +1012,43 @@ namespace UnrealAiContextCandidates
 			R.Dropped.Num(),
 			BudgetChars,
 			R.ContextBlock.Len()));
+		{
+			int32 PackedRetrievalSummary = 0;
+			int32 PackedRetrievalMember = 0;
+			int32 PackedRetrievalLongTailFloor = 0;
+			float UtilityMultiplierSum = 0.0f;
+			int32 UtilityMultiplierCount = 0;
+			for (const FContextCandidateEnvelope& P : R.Packed)
+			{
+				if (P.Type != UnrealAiContextRankingPolicy::ECandidateType::RetrievalSnippet)
+				{
+					continue;
+				}
+				if (P.SourceId.StartsWith(TEXT("virtual://summary/")))
+				{
+					++PackedRetrievalSummary;
+				}
+				else
+				{
+					++PackedRetrievalMember;
+				}
+				if (P.bRetrievalLongTailFloorCandidate)
+				{
+					++PackedRetrievalLongTailFloor;
+				}
+				UtilityMultiplierSum += P.Features.UtilityMultiplier;
+				++UtilityMultiplierCount;
+			}
+			const float UtilityMultiplierAvg = UtilityMultiplierCount > 0
+				? (UtilityMultiplierSum / static_cast<float>(UtilityMultiplierCount))
+				: 0.0f;
+			R.TraceLines.Add(FString::Printf(
+				TEXT("[Ranker] retrieval_packed summary=%d member=%d long_tail_floor=%d utility_mult_avg=%.2f"),
+				PackedRetrievalSummary,
+				PackedRetrievalMember,
+				PackedRetrievalLongTailFloor,
+				UtilityMultiplierAvg));
+		}
 		for (const FContextCandidateEnvelope& P : R.Packed)
 		{
 			R.TraceLines.Add(FString::Printf(TEXT("[Ranker][keep] type=%s score=%.2f tokens=%d src=%s"),

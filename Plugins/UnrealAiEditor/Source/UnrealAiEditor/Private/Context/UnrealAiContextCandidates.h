@@ -8,6 +8,13 @@ struct FUnrealAiRetrievalSnippet;
 
 namespace UnrealAiContextCandidates
 {
+	enum class ERetrievalRepresentationLevel : uint8
+	{
+		L0 = 0,
+		L1 = 1,
+		L2 = 2,
+	};
+
 	struct FFeatures
 	{
 		float MentionHit = 0.f;
@@ -20,6 +27,7 @@ namespace UnrealAiContextCandidates
 		float Frequency = 0.f;
 		float VectorSimilarity = 0.f;
 		float ThreadScope = 0.f;
+		float UtilityMultiplier = 1.f;
 	};
 
 	struct FScoreBreakdown
@@ -42,6 +50,8 @@ namespace UnrealAiContextCandidates
 	{
 		UnrealAiContextRankingPolicy::ECandidateType Type = UnrealAiContextRankingPolicy::ECandidateType::EditorSnapshotField;
 		FString SourceId;
+		// Stable grouping id for retrieval/utility instrumentation (phase 0).
+		FString EntityId;
 		FString Payload;
 		FString RenderedText;
 		int32 TokenCostEstimate = 0;
@@ -50,6 +60,8 @@ namespace UnrealAiContextCandidates
 		bool bDropped = false;
 		FString DropReason;
 		bool bImageLikeAttachment = false;
+		bool bRetrievalLongTailFloorCandidate = false;
+		ERetrievalRepresentationLevel RetrievalRepresentationLevel = ERetrievalRepresentationLevel::L0;
 	};
 
 	struct FUnifiedContextBuildResult
@@ -67,6 +79,9 @@ namespace UnrealAiContextCandidates
 		int32 MemorySnippetCapApplied = 0;
 		int32 SoftBudgetCharsApplied = 0;
 		int32 MaxPackedCandidatesApplied = 0;
+		int32 PackedRetrievalL0Count = 0;
+		int32 PackedRetrievalL1Count = 0;
+		int32 PackedRetrievalL2Count = 0;
 	};
 
 	void CollectCandidates(

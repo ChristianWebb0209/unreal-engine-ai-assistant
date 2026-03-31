@@ -191,6 +191,18 @@ struct FAgentContextBuildOptions
 	FString ThreadIdForMemory;
 	/** Stable key for this LLM turn/round retrieval prefetch request. */
 	FString RetrievalTurnKey;
+	/** Optional per-entity multipliers for retrieval relevance scaling (phase 2). */
+	TMap<FString, float> RetrievalUtilityMultiplierByEntity;
+	/** Optional long-tail floor entity ids that should survive aggressive demotion. */
+	TSet<FString> RetrievalLongTailEntityFloor;
+	/** Deterministic high-utility head entities used to promote retrieval representation. */
+	TSet<FString> RetrievalHeadEntitySet;
+	/** Optional explicit adjacency list used for bounded neighborhood expansion. */
+	TMap<FString, TArray<FString>> RetrievalNeighborsByEntity;
+	/** Max number of retrieval long-tail floor entities to force through ranking gates. */
+	int32 RetrievalLongTailFloorCount = 0;
+	/** Context aggression scalar [0,1] controlling fill/caps/gates (0.5 = current default behavior). */
+	float ContextAggression = 0.5f;
 	/** From model profile: if false, image-like attachments are stripped when building context. */
 	bool bModelSupportsImages = true;
 	/** Optional call-site label for decision log attribution (for example: request_build, harness_dump_run_started). */
