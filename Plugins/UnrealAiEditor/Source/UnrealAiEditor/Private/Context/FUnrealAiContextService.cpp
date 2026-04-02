@@ -69,6 +69,43 @@ namespace UnrealAiCtxTodoPriv
 	}
 }
 
+namespace UnrealAiCtxMutationPriv
+{
+	static bool IsLikelySceneOrContentMutationTool(const FString& ToolName)
+	{
+		const FString T = ToolName.ToLower();
+		if (T.StartsWith(TEXT("actor_"))
+			|| T.StartsWith(TEXT("viewport_camera_"))
+			|| T.StartsWith(TEXT("asset_"))
+			|| T.StartsWith(TEXT("blueprint_apply_"))
+			|| T == TEXT("blueprint_compile")
+			|| T.StartsWith(TEXT("content_browser_sync_")))
+		{
+			return true;
+		}
+		return false;
+	}
+
+	static bool ShouldRequestMutationTriggeredRebuild(
+		TMap<FString, FDateTime>& LastRebuildByProject,
+		const FString& ProjectId,
+		const FDateTime NowUtc)
+	{
+		constexpr int32 CooldownSeconds = 20;
+		FDateTime& Last = LastRebuildByProject.FindOrAdd(ProjectId);
+		if (Last != FDateTime::MinValue())
+		{
+			const FTimespan Delta = NowUtc - Last;
+			if (Delta.GetTotalSeconds() < static_cast<double>(CooldownSeconds))
+			{
+				return false;
+			}
+		}
+		Last = NowUtc;
+		return true;
+	}
+}
+
 FUnrealAiContextService::FUnrealAiContextService(
 	IUnrealAiPersistence* InPersistence,
 	IUnrealAiMemoryService* InMemoryService,
@@ -238,6 +275,20 @@ void FUnrealAiContextService::RecordToolResult(
 	S->ToolResults.Add(MoveTemp(E));
 	RegisterActionReferencesFromToolResult(ActiveProjectId, SessionKey(ActiveProjectId, ActiveThreadId), Result);
 	ScheduleSave(ActiveProjectId, ActiveThreadId);
+	const FString Tool = ToolName.ToString();
+	if (UnrealAiCtxMutationPriv::IsLikelySceneOrContentMutationTool(Tool))
+	{
+		// Keep context snapshot fresh after scene/content mutations so follow-up turns can ground to latest state.
+		RefreshEditorSnapshotFromEngine();
+		if (RetrievalService
+			&& UnrealAiCtxMutationPriv::ShouldRequestMutationTriggeredRebuild(
+				LastMutationTriggeredRetrievalRebuildUtcByProject,
+				ActiveProjectId,
+				FDateTime::UtcNow()))
+		{
+			RetrievalService->RequestRebuild(ActiveProjectId);
+		}
+	}
 }
 
 void FUnrealAiContextService::SetActiveTodoPlan(const FString& PlanJson)

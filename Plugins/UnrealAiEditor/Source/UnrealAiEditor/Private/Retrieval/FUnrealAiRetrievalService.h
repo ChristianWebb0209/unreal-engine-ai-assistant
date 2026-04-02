@@ -44,6 +44,7 @@ private:
 		int32 ChunkOverlap,
 		TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
 	void CollectBlueprintFeatureChunks(const FUnrealAiRetrievalSettings& Settings, TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
+	void CollectSceneActorChunks(const FUnrealAiRetrievalSettings& Settings, TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
 	void GatherAssetRegistryShardTexts(const FUnrealAiRetrievalSettings& Settings, TArray<TPair<FString, FString>>& OutVirtualPathAndFullText) const;
 	void CollectMemoryChunks(const FUnrealAiRetrievalSettings& Settings, TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
 	void CollectDirectorySummaryChunks(const TMap<FString, FString>& SourceHashesByPath, TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;

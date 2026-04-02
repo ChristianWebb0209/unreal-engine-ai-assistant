@@ -121,6 +121,8 @@ private:
 	TMap<FString, TMap<FString, TSet<FString>>> LastPackedCanonicalRefsBySessionByEntity;
 	/** Durable project-global retrieval utility/head state. */
 	TMap<FString, FProjectRetrievalState> RetrievalStateByProject;
+	/** Per-project throttle window for mutation-triggered retrieval rebuild requests. */
+	TMap<FString, FDateTime> LastMutationTriggeredRetrievalRebuildUtcByProject;
 	FString ActiveProjectId;
 	FString ActiveThreadId;
 	TSet<FString> PendingSaveKeys;

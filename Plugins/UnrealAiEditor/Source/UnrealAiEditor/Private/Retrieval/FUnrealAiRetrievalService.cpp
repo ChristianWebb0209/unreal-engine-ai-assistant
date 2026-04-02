@@ -23,6 +23,9 @@
 
 #if WITH_EDITOR
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Editor.h"
+#include "EngineUtils.h"
+#include "GameFramework/Actor.h"
 #include "Modules/ModuleManager.h"
 #endif
 
@@ -1086,6 +1089,91 @@ void FUnrealAiRetrievalService::CollectBlueprintFeatureChunks(
 	}
 }
 
+void FUnrealAiRetrievalService::CollectSceneActorChunks(
+	const FUnrealAiRetrievalSettings& Settings,
+	TArray<FUnrealAiVectorChunkRow>& OutChunks) const
+{
+#if WITH_EDITOR
+	FString SceneSourcePath;
+	FString SceneText;
+	auto GatherScene = [&SceneSourcePath, &SceneText]()
+	{
+		if (!GEditor)
+		{
+			return;
+		}
+		UWorld* World = GEditor->GetEditorWorldContext().World();
+		if (!World)
+		{
+			return;
+		}
+		const FString WorldPackage = World->GetOutermost() ? World->GetOutermost()->GetName() : TEXT("UnknownWorld");
+		SceneSourcePath = FString::Printf(TEXT("virtual://scene/%s"), *WorldPackage);
+		constexpr int32 MaxActors = 4000;
+		int32 Count = 0;
+		TStringBuilder<8192> B;
+		B.Appendf(TEXT("scene_world=%s\n"), *WorldPackage);
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (Count >= MaxActors)
+			{
+				break;
+			}
+			AActor* A = *It;
+			if (!A)
+			{
+				continue;
+			}
+			const FVector L = A->GetActorLocation();
+			B.Appendf(
+				TEXT("actor label=%s class=%s path=%s loc=(%.1f,%.1f,%.1f)\n"),
+				*A->GetActorLabel(),
+				*A->GetClass()->GetName(),
+				*A->GetPathName(),
+				L.X,
+				L.Y,
+				L.Z);
+			++Count;
+		}
+		B.Appendf(TEXT("scene_actor_count=%d\n"), Count);
+		SceneText = B.ToString();
+	};
+
+	if (IsInGameThread())
+	{
+		GatherScene();
+	}
+	else
+	{
+		FEvent* Done = FPlatformProcess::GetSynchEventFromPool(false);
+		AsyncTask(ENamedThreads::GameThread, [&GatherScene, Done]()
+		{
+			GatherScene();
+			if (Done)
+			{
+				Done->Trigger();
+			}
+		});
+		if (Done)
+		{
+			Done->Wait();
+			FPlatformProcess::ReturnSynchEventToPool(Done);
+		}
+	}
+
+	if (SceneSourcePath.IsEmpty() || SceneText.IsEmpty())
+	{
+		return;
+	}
+	int32 ChunkChars = Settings.ChunkChars;
+	int32 ChunkOv = Settings.ChunkOverlap;
+	ClampChunkParams(ChunkChars, ChunkOv);
+	TArray<FUnrealAiVectorChunkRow> SceneChunks;
+	ChunkFileText(SceneSourcePath, SceneText, ChunkChars, ChunkOv, SceneChunks);
+	OutChunks.Append(MoveTemp(SceneChunks));
+#endif
+}
+
 void FUnrealAiRetrievalService::GatherAssetRegistryShardTexts(
 	const FUnrealAiRetrievalSettings& Settings,
 	TArray<TPair<FString, FString>>& OutVirtualPathAndFullText) const
@@ -1480,6 +1568,24 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 				++ChangedFiles;
 				TArray<FUnrealAiVectorChunkRow>& Arr = ChangedChunksBySource.FindOrAdd(Row.SourcePath);
 				Arr.Add(MoveTemp(Row));
+			}
+		}
+	}
+	{
+		TArray<FUnrealAiVectorChunkRow> SceneChunks;
+		CollectSceneActorChunks(Settings, SceneChunks);
+		for (FUnrealAiVectorChunkRow& Row : SceneChunks)
+		{
+			const FString SourceHash = Row.ContentHash;
+			NewSourceHashes.Add(Row.SourcePath, SourceHash);
+			RemovedSources.Remove(Row.SourcePath);
+			const FString* ExistingHash = ExistingSourceHashes.Find(Row.SourcePath);
+			const bool bChanged = !ExistingHash || *ExistingHash != SourceHash;
+			if (bChanged)
+			{
+				++ChangedFiles;
+				TArray<FUnrealAiVectorChunkRow>& Rows = ChangedChunksBySource.FindOrAdd(Row.SourcePath);
+				Rows.Add(MoveTemp(Row));
 			}
 		}
 	}
