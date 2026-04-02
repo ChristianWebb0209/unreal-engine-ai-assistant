@@ -62,6 +62,12 @@ DECLARE_MULTICAST_DELEGATE_TwoParams(FUnrealAiChatThinkingDeltaDelegate, const F
 /** Human-readable duration for step timers (e.g. "45s", "2m 3s"). */
 FString UnrealAiFormatStepDurationForUi(double Seconds);
 
+/**
+ * Remove `<chat-name: ...>` tokens from InOutText (supports repeats).
+ * Returns true if any token was removed. OutChatName receives the last non-empty parsed short name.
+ */
+bool UnrealAiStripChatNameTagsFromText(FString& InOutText, FString& OutChatName);
+
 /** Mutable transcript for the chat UI; updated by FUnrealAiChatRunSink. */
 class FUnrealAiChatTranscript : public TSharedFromThis<FUnrealAiChatTranscript>
 {

@@ -18,6 +18,7 @@
 #include "Tools/UnrealAiToolDispatch_BuildPackaging.h"
 #include "Tools/UnrealAiToolDispatch_ExtraFeatures.h"
 #include "Tools/UnrealAiToolDispatch_GenericAssets.h"
+#include "Tools/UnrealAiToolDispatch_SettingsProperties.h"
 #include "Tools/UnrealAiToolJson.h"
 
 #include "Backend/UnrealAiBackendRegistry.h"
@@ -91,6 +92,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_EditorSetMode(A);
 	}
+	if (ToolId == TEXT("editor_get_mode"))
+	{
+		return UnrealAiDispatch_EditorGetMode(A);
+	}
 
 	if (ToolId == TEXT("actor_destroy"))
 	{
@@ -132,9 +137,21 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_ActorSetTransform(A);
 	}
+	if (ToolId == TEXT("actor_get_visibility"))
+	{
+		return UnrealAiDispatch_ActorGetVisibility(A);
+	}
 	if (ToolId == TEXT("actor_set_visibility"))
 	{
 		return UnrealAiDispatch_ActorSetVisibility(A);
+	}
+	if (ToolId == TEXT("entity_get_property"))
+	{
+		return UnrealAiDispatch_EntityGetProperty(A);
+	}
+	if (ToolId == TEXT("entity_set_property"))
+	{
+		return UnrealAiDispatch_EntitySetProperty(A);
 	}
 	if (ToolId == TEXT("actor_blueprint_toggle_visibility"))
 	{
@@ -192,6 +209,18 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	if (ToolId == TEXT("viewport_set_view_mode"))
 	{
 		return UnrealAiDispatch_ViewportSetViewMode(A);
+	}
+	if (ToolId == TEXT("viewport_get_view_mode"))
+	{
+		return UnrealAiDispatch_ViewportGetViewMode(A);
+	}
+	if (ToolId == TEXT("settings_get"))
+	{
+		return UnrealAiDispatch_SettingsGet(A);
+	}
+	if (ToolId == TEXT("settings_set"))
+	{
+		return UnrealAiDispatch_SettingsSet(A);
 	}
 
 	if (ToolId == TEXT("project_file_read_text"))
@@ -267,9 +296,17 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_MaterialInstanceSetScalarParameter(A);
 	}
+	if (ToolId == TEXT("material_instance_get_scalar_parameter"))
+	{
+		return UnrealAiDispatch_MaterialInstanceGetScalarParameter(A);
+	}
 	if (ToolId == TEXT("material_instance_set_vector_parameter"))
 	{
 		return UnrealAiDispatch_MaterialInstanceSetVectorParameter(A);
+	}
+	if (ToolId == TEXT("material_instance_get_vector_parameter"))
+	{
+		return UnrealAiDispatch_MaterialInstanceGetVectorParameter(A);
 	}
 
 	if (ToolId == TEXT("asset_delete"))

@@ -41,6 +41,72 @@ bool UnrealAiIsAllowedProjectRelativePath(const FString& RelativePath, FString& 
 	return true;
 }
 
+bool UnrealAiValidateAgentWritableProjectRelativePath(
+	const FString& RelativePath,
+	const bool bConfirmProjectCritical,
+	FString& OutError)
+{
+	FString N = RelativePath;
+	NormalizeSlashes(N);
+	if (N.IsEmpty())
+	{
+		OutError = TEXT("Path is empty");
+		return false;
+	}
+	if (HasDangerousSegment(N))
+	{
+		OutError = TEXT("Path contains invalid segments");
+		return false;
+	}
+	if (!FPaths::IsRelative(N))
+	{
+		OutError = TEXT("Path must be relative to the project directory (no absolute paths)");
+		return false;
+	}
+
+	static const FString HarnessPrefix = TEXT("harness_step/");
+	if (N.StartsWith(HarnessPrefix, ESearchCase::IgnoreCase))
+	{
+		OutError = FString();
+		return true;
+	}
+
+	const FString Lower = N.ToLower();
+	auto BlockedDev = [&Lower]() -> bool
+	{
+		return Lower.StartsWith(TEXT("binaries/"))
+			|| Lower.StartsWith(TEXT("intermediate/"))
+			|| Lower.StartsWith(TEXT("deriveddatacache/"));
+	};
+	if (BlockedDev())
+	{
+		OutError = TEXT(
+			"Writes under Binaries/, Intermediate/, or DerivedDataCache/ are blocked. Close the editor and rebuild from your IDE or build script.");
+		return false;
+	}
+
+	static const FString SafeRoot = TEXT("saved/unrealaieditoragent");
+	const bool bUnderSafeRoot = Lower.StartsWith(SafeRoot)
+		&& (Lower.Len() == SafeRoot.Len() || Lower[SafeRoot.Len()] == TEXT('/'));
+	if (bUnderSafeRoot)
+	{
+		OutError = FString();
+		return true;
+	}
+
+	if (bConfirmProjectCritical)
+	{
+		OutError = FString();
+		return true;
+	}
+
+	OutError = FString::Printf(
+		TEXT("Agent file writes outside Saved/UnrealAiEditorAgent/ require confirm_project_critical:true (path was '%s'). "
+			 "Prefer drafts under Saved/UnrealAiEditorAgent/ to avoid touching build-critical project files."),
+		*N);
+	return false;
+}
+
 bool UnrealAiResolveProjectFilePath(const FString& RelativePath, FString& OutAbsolute, FString& OutError)
 {
 	FString N = RelativePath;

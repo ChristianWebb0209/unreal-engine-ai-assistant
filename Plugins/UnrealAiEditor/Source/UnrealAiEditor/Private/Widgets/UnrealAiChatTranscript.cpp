@@ -7,6 +7,61 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
+bool UnrealAiStripChatNameTagsFromText(FString& InOutText, FString& OutChatName)
+{
+	OutChatName.Reset();
+	bool bFoundAny = false;
+	int32 SearchFrom = 0;
+
+	while (true)
+	{
+		const int32 TagStart = InOutText.Find(TEXT("<chat-name"), ESearchCase::IgnoreCase, ESearchDir::FromStart, SearchFrom);
+		if (TagStart < 0)
+		{
+			break;
+		}
+		const int32 TagEnd = InOutText.Find(TEXT(">"), ESearchCase::CaseSensitive, ESearchDir::FromStart, TagStart);
+		if (TagEnd < 0 || TagEnd <= TagStart)
+		{
+			break;
+		}
+
+		const int32 TagLen = (TagEnd - TagStart) + 1;
+		const FString Tag = InOutText.Mid(TagStart, TagLen);
+
+		FString LocalName;
+		const int32 Colon = Tag.Find(TEXT(":"));
+		if (Colon >= 0)
+		{
+			FString Inner = Tag.Mid(Colon + 1);
+			Inner.TrimStartAndEndInline();
+			if (Inner.EndsWith(TEXT(">")))
+			{
+				Inner.LeftInline(Inner.Len() - 1);
+				Inner.TrimStartAndEndInline();
+			}
+			if (Inner.Len() >= 2 &&
+				((Inner.StartsWith(TEXT("\"")) && Inner.EndsWith(TEXT("\""))) ||
+				 (Inner.StartsWith(TEXT("'")) && Inner.EndsWith(TEXT("'")))))
+			{
+				Inner = Inner.Mid(1, Inner.Len() - 2);
+				Inner.TrimStartAndEndInline();
+			}
+			LocalName = Inner;
+		}
+
+		InOutText.RemoveAt(TagStart, TagLen);
+		bFoundAny = true;
+		if (!LocalName.IsEmpty())
+		{
+			OutChatName = LocalName;
+		}
+		SearchFrom = TagStart;
+	}
+
+	return bFoundAny;
+}
+
 FString UnrealAiFormatStepDurationForUi(const double Sec)
 {
 	if (Sec < 0.0)
@@ -269,7 +324,11 @@ FGuid FUnrealAiChatTranscript::AddUserMessage(const FString& Text, FGuid Desired
 	const FGuid NewId = DesiredId.IsValid() ? DesiredId : FGuid::NewGuid();
 	B.Id = NewId;
 	B.Kind = EUnrealAiChatBlockKind::User;
-	B.UserText = Text;
+	FString DisplayText = Text;
+	FString UnusedChatName;
+	UnrealAiStripChatNameTagsFromText(DisplayText, UnusedChatName);
+	DisplayText.TrimStartAndEndInline();
+	B.UserText = MoveTemp(DisplayText);
 	B.bHarnessSystemUser = IsHarnessInjectedUserText(Text);
 	if (!B.bHarnessSystemUser && SentMode)
 	{
@@ -710,7 +769,10 @@ void FUnrealAiChatTranscript::HydrateFromConversationMessages(const TArray<FUnre
 				FUnrealAiChatBlock B;
 				B.Id = FGuid::NewGuid();
 				B.Kind = EUnrealAiChatBlockKind::Assistant;
-				B.AssistantText = M.Content;
+				FString Body = M.Content;
+				FString UnusedName;
+				UnrealAiStripChatNameTagsFromText(Body, UnusedName);
+				B.AssistantText = MoveTemp(Body);
 				Blocks.Add(MoveTemp(B));
 			}
 			for (const FUnrealAiToolCallSpec& Tc : M.ToolCalls)

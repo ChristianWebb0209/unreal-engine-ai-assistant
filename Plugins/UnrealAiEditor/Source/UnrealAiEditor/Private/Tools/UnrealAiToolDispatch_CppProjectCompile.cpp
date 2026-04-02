@@ -3,6 +3,8 @@
 #include "Tools/UnrealAiToolJson.h"
 
 #include "HAL/PlatformProcess.h"
+#include "Misc/Parse.h"
+#include "CoreGlobals.h"
 #include "Misc/Paths.h"
 
 namespace UnrealAiCppCompilePriv
@@ -38,6 +40,20 @@ namespace UnrealAiCppCompilePriv
 FUnrealAiToolInvocationResult UnrealAiDispatch_CppProjectCompile(const TSharedPtr<FJsonObject>& Args)
 {
 #if PLATFORM_WINDOWS
+	const bool bUnattendedCli = FParse::Param(FCommandLine::Get(), TEXT("unattended"));
+	bool bConfirmExternalRebuild = false;
+	if (Args.IsValid())
+	{
+		Args->TryGetBoolField(TEXT("confirm_external_rebuild"), bConfirmExternalRebuild);
+	}
+	if (!bUnattendedCli && !GIsAutomationTesting && !bConfirmExternalRebuild)
+	{
+		return UnrealAiToolJson::Error(
+			TEXT("cpp_project_compile is blocked in interactive editor sessions unless confirm_external_rebuild:true is set "
+				 "(external Build.bat can desync Live Coding and loaded modules). Prefer closing the editor and running "
+				 "your build script, or use -unattended / automation for CI-style builds."));
+	}
+
 	const FString ProjectPath = FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath());
 	if (ProjectPath.IsEmpty())
 	{

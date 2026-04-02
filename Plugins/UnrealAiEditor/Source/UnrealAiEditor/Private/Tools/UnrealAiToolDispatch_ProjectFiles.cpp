@@ -10,6 +10,24 @@
 
 namespace UnrealAiProjectFileDispatchPriv
 {
+	static bool SaveStringToFileAtomically(const FString& Content, const FString& AbsPath, FString& OutErr)
+	{
+		const FString Temp = AbsPath + TEXT(".unreal_ai_write_tmp");
+		IFileManager::Get().Delete(*Temp, false, true, true);
+		if (!FFileHelper::SaveStringToFile(Content, *Temp))
+		{
+			OutErr = TEXT("Failed to write temp file");
+			return false;
+		}
+		if (!IFileManager::Get().Move(*AbsPath, *Temp, true, true, true, true))
+		{
+			OutErr = TEXT("Failed to finalize write (atomic replace)");
+			IFileManager::Get().Delete(*Temp, false, true, true);
+			return false;
+		}
+		return true;
+	}
+
 	/** Prefer the real `.uproject` path (project-relative); fallback to a config file if unavailable. */
 	static FString DefaultRelativePathForReadText()
 	{
@@ -103,8 +121,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileWriteText(const TShare
 			|| Rel.IsEmpty())
 		{
 			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
-			SuggestedArgs->SetStringField(TEXT("relative_path"), TEXT("Config/DefaultEngine.ini"));
-			SuggestedArgs->SetStringField(TEXT("content"), TEXT("// Written by UnrealAiEditor"));
+			SuggestedArgs->SetStringField(TEXT("relative_path"), TEXT("Saved/UnrealAiEditorAgent/example.txt"));
+			SuggestedArgs->SetStringField(TEXT("content"), TEXT("// Draft file — safe default location for agent writes"));
 			SuggestedArgs->SetBoolField(TEXT("confirm"), true);
 			return UnrealAiToolJson::ErrorWithSuggestedCall(
 				TEXT("relative_path is required (alias: file_path)."),
@@ -114,6 +132,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileWriteText(const TShare
 	}
 	Args->TryGetStringField(TEXT("content"), Content);
 	Args->TryGetBoolField(TEXT("confirm"), bConfirm);
+	bool bConfirmProjectCritical = false;
+	Args->TryGetBoolField(TEXT("confirm_project_critical"), bConfirmProjectCritical);
 	if (!bConfirm)
 	{
 		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
@@ -125,6 +145,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileWriteText(const TShare
 			TEXT("project_file_write_text"),
 			SuggestedArgs);
 	}
+	FString PolicyErr;
+	if (!UnrealAiValidateAgentWritableProjectRelativePath(Rel, bConfirmProjectCritical, PolicyErr))
+	{
+		return UnrealAiToolJson::Error(PolicyErr);
+	}
 	FString Abs;
 	FString Err;
 	if (!UnrealAiResolveProjectFilePath(Rel, Abs, Err))
@@ -133,9 +158,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileWriteText(const TShare
 	}
 	const FString Dir = FPaths::GetPath(Abs);
 	IFileManager::Get().MakeDirectory(*Dir, true);
-	if (!FFileHelper::SaveStringToFile(Content, *Abs))
+	FString AtomErr;
+	if (!UnrealAiProjectFileDispatchPriv::SaveStringToFileAtomically(Content, Abs, AtomErr))
 	{
-		return UnrealAiToolJson::Error(TEXT("Failed to write file"));
+		return UnrealAiToolJson::Error(AtomErr);
 	}
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
@@ -188,6 +214,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileMove(const TSharedPtr<
 		}
 	}
 	Args->TryGetBoolField(TEXT("confirm"), bConfirm);
+	bool bConfirmProjectCritical = false;
+	Args->TryGetBoolField(TEXT("confirm_project_critical"), bConfirmProjectCritical);
 	if (!bConfirm)
 	{
 		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
@@ -201,6 +229,18 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ProjectFileMove(const TSharedPtr<
 			SuggestedArgs);
 	}
 	Args->TryGetBoolField(TEXT("replace_existing"), bReplace);
+
+	{
+		FString PolicyErr;
+		if (!UnrealAiValidateAgentWritableProjectRelativePath(FromRel, bConfirmProjectCritical, PolicyErr))
+		{
+			return UnrealAiToolJson::Error(PolicyErr);
+		}
+		if (!UnrealAiValidateAgentWritableProjectRelativePath(ToRel, bConfirmProjectCritical, PolicyErr))
+		{
+			return UnrealAiToolJson::Error(PolicyErr);
+		}
+	}
 
 	FString FromAbs;
 	FString ToAbs;

@@ -1,10 +1,13 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Tools/UnrealAiToolDispatch.h"
+#include "Tools/UnrealAiToolProjectPathAllowlist.h"
 #include "Tools/UnrealAiAssetFactoryResolver.h"
 #include "Tools/UnrealAiToolJson.h"
+#include "Dom/JsonValue.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonReader.h"
 #include "Engine/Blueprint.h"
@@ -837,6 +840,157 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FUnrealAiTodoPlanContractTest,
 	"UnrealAiEditor.Tools.TodoPlanContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiGenericSettingsPropertiesContractTest,
+	"UnrealAiEditor.Tools.GenericSettingsPropertiesContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiGenericSettingsPropertiesContractTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	TestTrue(TEXT("Runs on game thread"), IsInGameThread());
+
+	{
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("settings_get"),
+			MakeShared<FJsonObject>(),
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("settings_get missing required fields: bOk"), R.bOk);
+	}
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("scope"), TEXT("editor"));
+		Args->SetStringField(TEXT("key"), TEXT("editor_focus"));
+		// UE Json strings implement TryGetBool (via ToBool); use a JSON array so the value is the wrong shape.
+		Args->SetArrayField(TEXT("value"), TArray<TSharedPtr<FJsonValue>>());
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("settings_set"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("settings_set editor_focus wrong type: bOk"), R.bOk);
+	}
+
+	{
+		TSharedPtr<FJsonObject> SetArgs = MakeShared<FJsonObject>();
+		SetArgs->SetStringField(TEXT("scope"), TEXT("editor"));
+		SetArgs->SetStringField(TEXT("key"), TEXT("editor_focus"));
+		SetArgs->SetBoolField(TEXT("value"), true);
+		const FUnrealAiToolInvocationResult SetR = UnrealAiDispatchTool(
+			TEXT("settings_set"),
+			SetArgs,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestTrue(TEXT("settings_set editor_focus bool value: bOk"), SetR.bOk);
+
+		TSharedPtr<FJsonObject> GetArgs = MakeShared<FJsonObject>();
+		GetArgs->SetStringField(TEXT("scope"), TEXT("editor"));
+		GetArgs->SetStringField(TEXT("key"), TEXT("editor_focus"));
+		const FUnrealAiToolInvocationResult GetR = UnrealAiDispatchTool(
+			TEXT("settings_get"),
+			GetArgs,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestTrue(TEXT("settings_get editor_focus: bOk"), GetR.bOk);
+	}
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("entity_type"), TEXT("actor"));
+		Args->SetStringField(TEXT("entity_ref"), TEXT("/Game/Maps/NoMap.NoMap:PersistentLevel.NoActor"));
+		Args->SetStringField(TEXT("property"), TEXT("hidden_in_editor"));
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("entity_get_property"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("entity_get_property invalid actor path returns error"), R.bOk);
+	}
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("scope"), TEXT("project"));
+		Args->SetStringField(TEXT("key"), TEXT("/Script/Engine.Engine:GameEngineClassName"));
+		Args->SetStringField(TEXT("value"), TEXT("/Script/Engine.GameEngine"));
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("settings_set"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("settings_set project scope: denied without allowlist"), R.bOk);
+		TestTrue(
+			TEXT("settings_set project scope: error explains allowlist"),
+			R.ErrorMessage.Contains(TEXT("allowlist")) || R.ContentForModel.Contains(TEXT("allowlist")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiProjectFileWritePolicyTest,
+	"UnrealAiEditor.Tools.ProjectFileWritePolicy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiProjectFileWritePolicyTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	TestTrue(TEXT("Runs on game thread"), IsInGameThread());
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("relative_path"), FPaths::GetCleanFilename(FPaths::GetProjectFilePath()));
+		Args->SetStringField(TEXT("content"), TEXT("automated policy probe — should not be written"));
+		Args->SetBoolField(TEXT("confirm"), true);
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("project_file_write_text"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("project_file_write_text .uproject without critical confirm: bOk"), R.bOk);
+		TestTrue(
+			TEXT("project_file_write_text: gate message"),
+			R.ErrorMessage.Contains(TEXT("confirm_project_critical")) || R.ContentForModel.Contains(TEXT("confirm_project_critical")));
+	}
+
+	{
+		const FString Rel = TEXT("Saved/UnrealAiEditorAgent/_automation_write_policy_probe.txt");
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("relative_path"), Rel);
+		Args->SetStringField(TEXT("content"), TEXT("ok"));
+		Args->SetBoolField(TEXT("confirm"), true);
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("project_file_write_text"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestTrue(TEXT("project_file_write_text under agent safe root: bOk"), R.bOk);
+		FString Abs;
+		FString Err;
+		TestTrue(TEXT("resolve automation probe path"), UnrealAiResolveProjectFilePath(Rel, Abs, Err));
+		IFileManager::Get().Delete(*Abs, false, true, true);
+	}
+
+	return true;
+}
 
 bool FUnrealAiTodoPlanContractTest::RunTest(const FString& Parameters)
 {

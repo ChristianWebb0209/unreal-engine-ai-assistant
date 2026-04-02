@@ -8,5 +8,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetSavePackages(const TSharedPt
 FUnrealAiToolInvocationResult UnrealAiDispatch_AssetRename(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_AssetGetMetadata(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialGetUsageSummary(const TSharedPtr<FJsonObject>& Args);
+FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceGetScalarParameter(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetScalarParameter(const TSharedPtr<FJsonObject>& Args);
+FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceGetVectorParameter(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetVectorParameter(const TSharedPtr<FJsonObject>& Args);

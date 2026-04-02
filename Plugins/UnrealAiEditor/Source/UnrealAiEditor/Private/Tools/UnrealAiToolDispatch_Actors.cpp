@@ -492,6 +492,30 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorSetTransform(const TSharedPt
 	return UnrealAiToolJson::Ok(O);
 }
 
+FUnrealAiToolInvocationResult UnrealAiDispatch_ActorGetVisibility(const TSharedPtr<FJsonObject>& Args)
+{
+	FString ActorPath;
+	if (!Args->TryGetStringField(TEXT("actor_path"), ActorPath) || ActorPath.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("actor_path is required"));
+	}
+	UWorld* World = UnrealAiGetEditorWorld();
+	AActor* A = UnrealAiResolveActorInWorld(World, ActorPath);
+	if (!A)
+	{
+		return UnrealAiToolJson::Error(TEXT("Actor not found"));
+	}
+
+	const bool bHidden = A->IsTemporarilyHiddenInEditor(false);
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetBoolField(TEXT("ok"), true);
+	O->SetStringField(TEXT("actor_path"), A->GetPathName());
+	O->SetBoolField(TEXT("hidden"), bHidden);
+	O->SetBoolField(TEXT("visible"), !bHidden);
+	O->SetStringField(TEXT("property_key"), TEXT("hidden_in_editor"));
+	return UnrealAiToolJson::Ok(O);
+}
+
 FUnrealAiToolInvocationResult UnrealAiDispatch_ActorSetVisibility(const TSharedPtr<FJsonObject>& Args)
 {
 	FString ActorPath;
@@ -512,6 +536,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorSetVisibility(const TSharedP
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetBoolField(TEXT("hidden"), bHidden);
+	O->SetStringField(TEXT("property_key"), TEXT("hidden_in_editor"));
 	return UnrealAiToolJson::Ok(O);
 }
 

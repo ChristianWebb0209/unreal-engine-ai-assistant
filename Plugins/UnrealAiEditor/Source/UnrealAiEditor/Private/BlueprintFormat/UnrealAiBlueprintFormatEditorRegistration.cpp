@@ -7,10 +7,11 @@
 #include "Engine/Blueprint.h"
 #include "HAL/IConsoleManager.h"
 #include "Styling/AppStyle.h"
-#include "Subsystems/AssetEditorSubsystem.h"
 #include "ToolMenu.h"
 #include "ToolMenus.h"
 #include "ToolMenuEntry.h"
+
+#include "BlueprintFormat/UnrealAiBlueprintGraphFocusSelection.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiBlueprintFormatEditorRegistration"
 
@@ -61,37 +62,67 @@ void UnrealAiBlueprintFormatEditorExtendBlueprintToolbar()
 		}
 		FToolMenuSection& Section = Toolbar->FindOrAddSection(TEXT("UnrealAiBlueprintFormat"));
 		Section.AddEntry(FToolMenuEntry::InitToolBarButton(
-			"UnrealAiFormatBlueprintSelection",
-			FUIAction(FExecuteAction::CreateLambda([]()
-			{
-				if (!GEditor)
+			TEXT("UnrealAiFormatBlueprintUbergraph"),
+			FUIAction(
+				FExecuteAction::CreateLambda([]()
 				{
-					return;
-				}
-				UAssetEditorSubsystem* Subsys = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
-				if (!Subsys)
-				{
-					return;
-				}
-				const TArray<UObject*> Assets = Subsys->GetAllEditedAssets();
-				for (UObject* A : Assets)
-				{
-					if (UBlueprint* BP = Cast<UBlueprint>(A))
+					UBlueprint* BP = nullptr;
+					UEdGraph* Graph = nullptr;
+					int32 Count = 0;
+					if (!UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count) || !BP || !Graph)
 					{
-						TSharedPtr<FJsonObject> J = MakeShared<FJsonObject>();
-						J->SetStringField(TEXT("blueprint_path"), BP->GetPathName());
-						const FUnrealAiToolInvocationResult R = UnrealAiDispatch_BlueprintFormatSelection(J);
-						if (!R.bOk)
-						{
-							UE_LOG(LogTemp, Warning, TEXT("Unreal AI format selection: %s"), *R.ErrorMessage);
-						}
 						return;
 					}
-				}
-				UE_LOG(LogTemp, Warning, TEXT("Unreal AI format selection: no Blueprint asset editor is open."));
-			})),
+					TSharedPtr<FJsonObject> J = MakeShared<FJsonObject>();
+					J->SetStringField(TEXT("blueprint_path"), BP->GetPathName());
+					J->SetStringField(TEXT("graph_name"), Graph->GetName());
+					const FUnrealAiToolInvocationResult R = UnrealAiDispatch_BlueprintFormatGraph(J);
+					if (!R.bOk)
+					{
+						UE_LOG(LogTemp, Warning, TEXT("Unreal AI format blueprint (ubergraph): %s"), *R.ErrorMessage);
+					}
+				}),
+				FCanExecuteAction::CreateLambda([]()
+				{
+					UBlueprint* BP = nullptr;
+					UEdGraph* Graph = nullptr;
+					int32 Count = 0;
+					return UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count);
+				})),
+			LOCTEXT("FmtBlueprintBtn", "AI: Format Blueprint"),
+			LOCTEXT("FmtBlueprintTip", "Run bundled layout on the Blueprint Ubergraph (Event Graph). Requires Event Graph to be focused."),
+			FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("LevelEditor.GameSettings"))));
+
+		Section.AddEntry(FToolMenuEntry::InitToolBarButton(
+			TEXT("UnrealAiFormatBlueprintSelection"),
+			FUIAction(
+				FExecuteAction::CreateLambda([]()
+				{
+					UBlueprint* BP = nullptr;
+					UEdGraph* Graph = nullptr;
+					int32 Count = 0;
+					if (!UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count) || !BP || !Graph || Count <= 0)
+					{
+						return;
+					}
+					TSharedPtr<FJsonObject> J = MakeShared<FJsonObject>();
+					J->SetStringField(TEXT("blueprint_path"), BP->GetPathName());
+					J->SetStringField(TEXT("graph_name"), Graph->GetName());
+					const FUnrealAiToolInvocationResult R = UnrealAiDispatch_BlueprintFormatSelection(J);
+					if (!R.bOk)
+					{
+						UE_LOG(LogTemp, Warning, TEXT("Unreal AI format selection (ubergraph): %s"), *R.ErrorMessage);
+					}
+				}),
+				FCanExecuteAction::CreateLambda([]()
+				{
+					UBlueprint* BP = nullptr;
+					UEdGraph* Graph = nullptr;
+					int32 Count = 0;
+					return UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count) && Count > 0;
+				})),
 			LOCTEXT("FmtSelBtn", "AI: Format selection"),
-			LOCTEXT("FmtSelTip", "Run bundled layout on the current Blueprint graph selection (editor must be open)."),
+			LOCTEXT("FmtSelTip", "Run bundled layout on the Blueprint Ubergraph selection. Requires Event Graph to be focused and at least one node selected."),
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("LevelEditor.GameSettings"))));
 		break;
 	}

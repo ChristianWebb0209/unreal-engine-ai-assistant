@@ -6,65 +6,6 @@
 #include "Backend/IUnrealAiPersistence.h"
 #include "Widgets/UnrealAiPlanDraftPersist.h"
 
-static bool TryStripChatNameTokenFromText(FString& InOutText, FString& OutChatName)
-{
-	OutChatName.Reset();
-	bool bFoundAny = false;
-	int32 SearchFrom = 0;
-
-	while (true)
-	{
-		const int32 TagStart = InOutText.Find(TEXT("<chat-name"), ESearchCase::IgnoreCase, ESearchDir::FromStart, SearchFrom);
-		if (TagStart < 0)
-		{
-			break;
-		}
-		const int32 TagEnd = InOutText.Find(TEXT(">"), ESearchCase::CaseSensitive, ESearchDir::FromStart, TagStart);
-		if (TagEnd < 0 || TagEnd <= TagStart)
-		{
-			break;
-		}
-
-		const int32 TagLen = (TagEnd - TagStart) + 1;
-		const FString Tag = InOutText.Mid(TagStart, TagLen);
-
-		FString LocalName;
-		const int32 Colon = Tag.Find(TEXT(":"));
-		if (Colon >= 0)
-		{
-			FString Inner = Tag.Mid(Colon + 1);
-			Inner.TrimStartAndEndInline();
-			// Drop trailing '>' if it remains inside the captured inner string.
-			if (Inner.EndsWith(TEXT(">")))
-			{
-				Inner.LeftInline(Inner.Len() - 1);
-				Inner.TrimStartAndEndInline();
-			}
-			// Strip optional quotes.
-			if (Inner.Len() >= 2 &&
-				((Inner.StartsWith(TEXT("\"")) && Inner.EndsWith(TEXT("\""))) ||
-				 (Inner.StartsWith(TEXT("'")) && Inner.EndsWith(TEXT("'")))))
-			{
-				Inner = Inner.Mid(1, Inner.Len() - 2);
-				Inner.TrimStartAndEndInline();
-			}
-			LocalName = Inner;
-		}
-
-		InOutText.RemoveAt(TagStart, TagLen);
-		bFoundAny = true;
-		if (!LocalName.IsEmpty())
-		{
-			OutChatName = LocalName;
-		}
-		SearchFrom = TagStart; // continue from removal point
-	}
-
-	// Return whether we stripped any token. OutChatName may still be empty if the model
-	// produced an invalid/empty name.
-	return bFoundAny;
-}
-
 FUnrealAiChatRunSink::FUnrealAiChatRunSink(
 	TSharedPtr<FUnrealAiChatTranscript> InTranscript,
 	TSharedPtr<FUnrealAiChatUiSession> InSession,
@@ -314,37 +255,66 @@ void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMess
 	}
 	Transcript->EndRun(bSuccess, ErrorMessage);
 
-	// Always strip the token from visible assistant output if present;
-	// rename UI once when ChatName is still empty (independent of persistence success).
-	bool bModifiedAnyAssistantText = false;
+	// Strip chat-name tokens from any user-visible block (assistant, merged thinking subline, user).
+	// Reasoning streams often carry `<chat-name: ...>` even when assistant text does not.
+	bool bModifiedAnyVisibleText = false;
 	FString ExtractedName;
 
 	for (int32 i = Transcript->Blocks.Num() - 1; i >= 0; --i)
 	{
 		FUnrealAiChatBlock& B = Transcript->Blocks[i];
-		if (B.Kind != EUnrealAiChatBlockKind::Assistant || B.AssistantText.IsEmpty())
-		{
-			continue;
-		}
-
 		FString LocalName;
-		FString LocalText = B.AssistantText;
-		if (TryStripChatNameTokenFromText(LocalText, LocalName))
+
+		if (B.Kind == EUnrealAiChatBlockKind::Assistant && !B.AssistantText.IsEmpty())
 		{
-			B.AssistantText = LocalText;
-			B.AssistantText.TrimStartAndEndInline();
-			bModifiedAnyAssistantText = true;
-			ExtractedName = LocalName;
-			break;
+			FString LocalText = B.AssistantText;
+			if (UnrealAiStripChatNameTagsFromText(LocalText, LocalName))
+			{
+				B.AssistantText = LocalText;
+				B.AssistantText.TrimStartAndEndInline();
+				bModifiedAnyVisibleText = true;
+				if (!LocalName.IsEmpty() && ExtractedName.IsEmpty())
+				{
+					ExtractedName = LocalName;
+				}
+			}
+		}
+		else if (B.Kind == EUnrealAiChatBlockKind::Thinking && !B.ThinkingText.IsEmpty())
+		{
+			FString LocalText = B.ThinkingText;
+			if (UnrealAiStripChatNameTagsFromText(LocalText, LocalName))
+			{
+				B.ThinkingText = LocalText;
+				B.ThinkingText.TrimStartAndEndInline();
+				bModifiedAnyVisibleText = true;
+				if (!LocalName.IsEmpty() && ExtractedName.IsEmpty())
+				{
+					ExtractedName = LocalName;
+				}
+			}
+		}
+		else if (B.Kind == EUnrealAiChatBlockKind::User && !B.UserText.IsEmpty())
+		{
+			FString LocalText = B.UserText;
+			if (UnrealAiStripChatNameTagsFromText(LocalText, LocalName))
+			{
+				B.UserText = LocalText;
+				B.UserText.TrimStartAndEndInline();
+				bModifiedAnyVisibleText = true;
+				if (!LocalName.IsEmpty() && ExtractedName.IsEmpty())
+				{
+					ExtractedName = LocalName;
+				}
+			}
 		}
 	}
 
-	if (bModifiedAnyAssistantText)
+	if (bModifiedAnyVisibleText)
 	{
 		Transcript->OnStructuralChange.Broadcast();
 	}
 
-	if (!Session.IsValid() || !Session->ChatName.IsEmpty() || !bModifiedAnyAssistantText)
+	if (!Session.IsValid() || !Session->ChatName.IsEmpty() || !bModifiedAnyVisibleText)
 	{
 		return;
 	}

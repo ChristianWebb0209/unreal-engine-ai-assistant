@@ -276,11 +276,64 @@
       "status": "research"
     },
     {
+      "tool_id": "actor_get_visibility",
+      "summary": "Read whether an actor is currently hidden in the editor.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "visibility",
+        "read",
+        "property"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 49,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "actor",
+          "property",
+          "visibility",
+          "hidden",
+          "read"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "AActor::IsTemporarilyHiddenInEditor",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
       "tool_id": "actor_set_visibility",
       "summary": "Toggle actor visibility.",
       "category": "world_actors",
       "tags": [
-        "actor"
+        "actor",
+        "visibility",
+        "property",
+        "write"
       ],
       "tier": "standard",
       "modes": {
@@ -318,6 +371,14 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
+      "tool_surface": {
+        "domain_tags": [
+          "actor",
+          "property",
+          "visibility",
+          "hidden"
+        ]
+      },
       "status": "research"
     },
     {
@@ -1893,12 +1954,57 @@
       "status": "research"
     },
     {
+      "tool_id": "editor_get_mode",
+      "summary": "Read the current active editor mode.",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "editor",
+        "mode",
+        "read",
+        "setting"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 41,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "editor",
+          "mode",
+          "setting",
+          "read"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FEditorModeTools",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
       "tool_id": "editor_set_mode",
       "summary": "Switch editor mode (Place, Landscape, ... allow-listed).",
       "category": "editor_ui_navigation",
       "tags": [
         "editor",
-        "mode"
+        "mode",
+        "setting",
+        "write"
       ],
       "tier": "standard",
       "modes": {
@@ -1929,6 +2035,13 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
+      "tool_surface": {
+        "domain_tags": [
+          "editor",
+          "mode",
+          "setting"
+        ]
+      },
       "status": "research"
     },
     {
@@ -1977,6 +2090,271 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/UEditorEngine"
       ],
+      "status": "research"
+    },
+    {
+      "tool_id": "entity_get_property",
+      "summary": "Read a single allowlisted property from an entity (currently actor-focused). Prefer this for generic property reads when key-based access is requested.",
+      "category": "properties_settings",
+      "tags": [
+        "entity",
+        "property",
+        "read",
+        "actor"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 59,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "entity",
+          "property",
+          "actor",
+          "visibility",
+          "hidden"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "entity_type": {
+            "type": "string",
+            "enum": [
+              "actor"
+            ]
+          },
+          "entity_ref": {
+            "type": "string",
+            "description": "Entity identifier. For actor, pass full world actor path."
+          },
+          "property": {
+            "type": "string",
+            "enum": [
+              "hidden_in_editor",
+              "visible",
+              "visibility"
+            ]
+          }
+        },
+        "required": [
+          "entity_type",
+          "entity_ref",
+          "property"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "Actor/editor property read adapters",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "entity_set_property",
+      "summary": "Set a single allowlisted property on an entity (currently actor-focused). Prefer this for key-based property writes when exact property names are known.",
+      "category": "properties_settings",
+      "tags": [
+        "entity",
+        "property",
+        "write",
+        "actor"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 58,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "entity",
+          "property",
+          "actor",
+          "visibility",
+          "hidden"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "entity_type": {
+            "type": "string",
+            "enum": [
+              "actor"
+            ]
+          },
+          "entity_ref": {
+            "type": "string",
+            "description": "Entity identifier. For actor, pass full world actor path."
+          },
+          "property": {
+            "type": "string",
+            "enum": [
+              "hidden_in_editor",
+              "visible"
+            ]
+          },
+          "value": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entity_type",
+          "entity_ref",
+          "property",
+          "value"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "Actor/editor property write adapters",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "settings_get",
+      "summary": "Read one allowlisted setting from viewport/editor/project scope using scope+key.",
+      "category": "properties_settings",
+      "tags": [
+        "settings",
+        "read",
+        "editor",
+        "viewport",
+        "project"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 61,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "settings",
+          "editor",
+          "viewport",
+          "project",
+          "mode",
+          "view_mode"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "viewport",
+              "editor",
+              "project"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "description": "Allowlisted key by scope (examples: viewport.view_mode, editor.mode, editor.editor_focus, /Script/Section:Key for project)."
+          }
+        },
+        "required": [
+          "scope",
+          "key"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FEditorViewportClient / module settings / ini read",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "settings_set",
+      "summary": "Write one allowlisted setting in viewport/editor/project scope using scope+key+value. Project scope (/Script/...) writes DefaultEngine.ini only for keys explicitly approved in UnrealAiProjectIniSettingsAllowlist.cpp (default: none).",
+      "category": "properties_settings",
+      "tags": [
+        "settings",
+        "write",
+        "editor",
+        "viewport",
+        "project"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 60,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "settings",
+          "editor",
+          "viewport",
+          "project",
+          "mode",
+          "view_mode"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "viewport",
+              "editor",
+              "project"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "description": "Allowlisted key by scope (examples: view_mode, mode, editor_focus, auto_confirm_destructive, stream_llm_chat, or /Script/Section:Key for project)."
+          },
+          "value": {
+            "description": "Typed value expected by key (bool/string/number)."
+          }
+        },
+        "required": [
+          "scope",
+          "key",
+          "value"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "FEditorViewportClient / module settings / ini write",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
       "status": "research"
     },
     {
@@ -2226,6 +2604,49 @@
       "status": "research"
     },
     {
+      "tool_id": "material_instance_get_scalar_parameter",
+      "summary": "Read one scalar parameter value from a Material Instance.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 49,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string"
+          },
+          "parameter_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_path",
+          "parameter_name"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UMaterialInstance parameter read APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
       "tool_id": "material_instance_set_scalar_parameter",
       "summary": "Set one scalar parameter on a Material Instance (write). material_path must be a UMaterialInstanceConstant object path, not a base UMaterial. If the path is a base Material, open it in the editor (asset_open_editor), duplicate to an MI, then retry with the MI path. For read-only usage intel, use material_get_usage_summary.",
       "category": "materials_rendering",
@@ -2270,6 +2691,49 @@
       "failure_modes": [
         "Base Material path: use asset_open_editor on the Material, duplicate to MI, then pass the MI path."
       ],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
+      "tool_id": "material_instance_get_vector_parameter",
+      "summary": "Read one vector parameter value from a Material Instance.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 48,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string"
+          },
+          "parameter_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_path",
+          "parameter_name"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UMaterialInstance parameter read APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
       "doc_links": [],
       "status": "research"
     },
@@ -2724,7 +3188,7 @@
     },
     {
       "tool_id": "project_file_write_text",
-      "summary": "Write a text file anywhere under the project directory (same path rules as project_file_read_text, including `harness_step/` for headed harness turn artifacts beside `run.jsonl`; destructive—confirm in headed runs unless auto-run env is set).",
+      "summary": "Write a text file under the project. Default safe location: Saved/UnrealAiEditorAgent/ (no extra flag). Writes elsewhere require confirm:true and confirm_project_critical:true. Always blocked: Binaries/, Intermediate/, DerivedDataCache/. Uses atomic replace. harness_step/ unchanged for harness turns.",
       "category": "project_files_search",
       "tags": [
         "filesystem"
@@ -2757,6 +3221,10 @@
           "confirm": {
             "type": "boolean"
           },
+          "confirm_project_critical": {
+            "type": "boolean",
+            "description": "Must be true to write outside Saved/UnrealAiEditorAgent/ (e.g. Config/, Source/, .uproject)."
+          },
           "focused": {
             "type": "boolean",
             "description": "After success, open the written file in the configured source IDE (best-effort)."
@@ -2769,7 +3237,7 @@
       },
       "side_effects": "disk",
       "permission": "destructive",
-      "ue_entry_points": "FFileHelper::SaveStringToFile",
+      "ue_entry_points": "FFileHelper atomic write (temp + IFileManager::Move)",
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
@@ -2777,7 +3245,7 @@
     },
     {
       "tool_id": "project_file_move",
-      "summary": "Move or rename a file under the project directory (on-disk paths; use asset_rename for /Game assets). Creates destination parent folders. Set confirm:true (auto-filled when AI destructive auto-confirm is on). Use replace_existing:true to overwrite an existing destination file.",
+      "summary": "Move or rename under the project. Source and destination must both be under Saved/UnrealAiEditorAgent/ unless confirm_project_critical:true. Binaries/, Intermediate/, DerivedDataCache/ blocked. confirm:true required.",
       "category": "project_files_search",
       "tags": [
         "filesystem",
@@ -2812,6 +3280,10 @@
           },
           "confirm": {
             "type": "boolean"
+          },
+          "confirm_project_critical": {
+            "type": "boolean",
+            "description": "True if either path is outside Saved/UnrealAiEditorAgent/."
           }
         },
         "required": [
@@ -2829,7 +3301,7 @@
     },
     {
       "tool_id": "cpp_project_compile",
-      "summary": "Compile the game/editor target via Engine Build.bat (Windows). Returns structured error and warning lines plus raw_log_tail. Slow; use after C++ edits to validate before finishing. Default target is <ProjectName>Editor derived from the .uproject basename.",
+      "summary": "Compile via Engine Build.bat (Windows). Blocked in normal interactive editor unless confirm_external_rebuild:true, or editor was started with -unattended, or running under automation. Prefer closing the editor and building from a script. Returns messages and raw_log_tail.",
       "category": "project_files_search",
       "tags": [
         "native",
@@ -2862,6 +3334,10 @@
           "configuration": {
             "type": "string",
             "description": "Default Development."
+          },
+          "confirm_external_rebuild": {
+            "type": "boolean",
+            "description": "Must be true when the editor is interactive (not -unattended / not automation) so the user explicitly accepts an external UBT process."
           }
         },
         "required": []
@@ -3805,12 +4281,57 @@
       "status": "research"
     },
     {
+      "tool_id": "viewport_get_view_mode",
+      "summary": "Read the current editor viewport rendering mode.",
+      "category": "viewport_camera",
+      "tags": [
+        "viewport",
+        "rendering",
+        "read",
+        "setting"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 46,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "view",
+          "mode",
+          "rendering",
+          "viewport"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FEditorViewportClient view mode APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "research"
+    },
+    {
       "tool_id": "viewport_set_view_mode",
       "summary": "Switch editor viewport rendering mode (Lit, Wireframe, Unlit, …). Does not require actor selection or viewport framing—call this tool directly when the user asks to change view mode.",
       "category": "viewport_camera",
       "tags": [
         "viewport",
-        "rendering"
+        "rendering",
+        "setting",
+        "write"
       ],
       "tier": "standard",
       "modes": {
@@ -3912,7 +4433,7 @@
     },
     {
       "tool_id": "asset_create",
-      "summary": "Create a new asset under /Game via IAssetTools (asset_class path + optional factory_class). Use for Blueprint assets/materials/sounds/etc. `{}` is invalid: `package_path`, `asset_name`, and `asset_class` are required on first attempt. Keep package_path under /Game. For Character/Pawn gameplay, create a Blueprint asset (/Script/Engine.Blueprint) then set parent_class via blueprint_apply_ir create_if_missing flow.",
+      "summary": "Create a new asset under /Game via IAssetTools (asset_class path + optional factory_class). Use for Blueprint assets/materials/sounds/etc. `{}` is invalid: `package_path`, `asset_name`, and `asset_class` are required on first attempt. Never call this tool until those fields are concrete (prefer values from context/discovery/history). Keep package_path under /Game. For Character/Pawn gameplay, create a Blueprint asset (/Script/Engine.Blueprint) then set parent_class via blueprint_apply_ir create_if_missing flow.",
       "category": "assets_content",
       "tags": [
         "asset",

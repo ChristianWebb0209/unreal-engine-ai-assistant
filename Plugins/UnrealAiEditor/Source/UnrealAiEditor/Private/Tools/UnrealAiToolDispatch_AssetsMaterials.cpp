@@ -438,6 +438,49 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialGetUsageSummary(const TSh
 	return UnrealAiToolJson::Ok(O);
 }
 
+FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceGetScalarParameter(const TSharedPtr<FJsonObject>& Args)
+{
+	FString MaterialPath;
+	FString Param;
+	if (!Args->TryGetStringField(TEXT("material_path"), MaterialPath) || MaterialPath.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("object_path"), MaterialPath);
+		if (MaterialPath.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("path"), MaterialPath);
+		}
+	}
+	if (!Args->TryGetStringField(TEXT("parameter_name"), Param) || Param.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("param"), Param);
+	}
+	if (MaterialPath.IsEmpty() || Param.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("material_path and parameter_name are required"));
+	}
+
+	UnrealAiToolDispatchArgRepair::NormalizeAssetLikeObjectPath(MaterialPath);
+	UMaterialInstanceConstant* MI = LoadObject<UMaterialInstanceConstant>(nullptr, *MaterialPath);
+	if (!MI)
+	{
+		return UnrealAiToolJson::Error(TEXT("Could not load UMaterialInstanceConstant at material_path"));
+	}
+
+	float Value = 0.f;
+	const bool bFound = MI->GetScalarParameterValue(FMaterialParameterInfo(FName(*Param)), Value);
+	if (!bFound)
+	{
+		return UnrealAiToolJson::Error(TEXT("Scalar parameter not found on material instance"));
+	}
+
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetBoolField(TEXT("ok"), true);
+	O->SetStringField(TEXT("material_path"), MaterialPath);
+	O->SetStringField(TEXT("parameter_name"), Param);
+	O->SetNumberField(TEXT("value"), static_cast<double>(Value));
+	return UnrealAiToolJson::Ok(O);
+}
+
 FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetScalarParameter(const TSharedPtr<FJsonObject>& Args)
 {
 	FString MaterialPath;
@@ -482,6 +525,55 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetScalarParamete
 	MI->PostEditChange();
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
+	return UnrealAiToolJson::Ok(O);
+}
+
+FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceGetVectorParameter(const TSharedPtr<FJsonObject>& Args)
+{
+	FString MaterialPath;
+	FString Param;
+	if (!Args->TryGetStringField(TEXT("material_path"), MaterialPath) || MaterialPath.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("object_path"), MaterialPath);
+		if (MaterialPath.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("path"), MaterialPath);
+		}
+	}
+	if (!Args->TryGetStringField(TEXT("parameter_name"), Param) || Param.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("param"), Param);
+	}
+	if (MaterialPath.IsEmpty() || Param.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("material_path and parameter_name are required"));
+	}
+
+	UnrealAiToolDispatchArgRepair::NormalizeAssetLikeObjectPath(MaterialPath);
+	UMaterialInstanceConstant* MI = LoadObject<UMaterialInstanceConstant>(nullptr, *MaterialPath);
+	if (!MI)
+	{
+		return UnrealAiToolJson::Error(TEXT("Could not load UMaterialInstanceConstant at material_path"));
+	}
+
+	FLinearColor Value = FLinearColor::Transparent;
+	const bool bFound = MI->GetVectorParameterValue(FMaterialParameterInfo(FName(*Param)), Value);
+	if (!bFound)
+	{
+		return UnrealAiToolJson::Error(TEXT("Vector parameter not found on material instance"));
+	}
+
+	TSharedPtr<FJsonObject> ValueObj = MakeShared<FJsonObject>();
+	ValueObj->SetNumberField(TEXT("r"), static_cast<double>(Value.R));
+	ValueObj->SetNumberField(TEXT("g"), static_cast<double>(Value.G));
+	ValueObj->SetNumberField(TEXT("b"), static_cast<double>(Value.B));
+	ValueObj->SetNumberField(TEXT("a"), static_cast<double>(Value.A));
+
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetBoolField(TEXT("ok"), true);
+	O->SetStringField(TEXT("material_path"), MaterialPath);
+	O->SetStringField(TEXT("parameter_name"), Param);
+	O->SetObjectField(TEXT("value"), ValueObj);
 	return UnrealAiToolJson::Ok(O);
 }
 

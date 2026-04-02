@@ -183,6 +183,27 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_EditorSetSelection(const TSharedP
 	return UnrealAiToolJson::Ok(O);
 }
 
+FUnrealAiToolInvocationResult UnrealAiDispatch_EditorGetMode(const TSharedPtr<FJsonObject>& Args)
+{
+	(void)Args;
+	FEditorModeTools& ModeTools = GLevelEditorModeTools();
+	FString ModeId = TEXT("place");
+	if (ModeTools.IsModeActive(FBuiltinEditorModes::EM_Landscape))
+	{
+		ModeId = TEXT("landscape");
+	}
+	else if (ModeTools.IsModeActive(FBuiltinEditorModes::EM_Foliage))
+	{
+		ModeId = TEXT("foliage");
+	}
+
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetBoolField(TEXT("ok"), true);
+	O->SetStringField(TEXT("mode_id"), ModeId);
+	O->SetStringField(TEXT("setting_key"), TEXT("mode"));
+	return UnrealAiToolJson::Ok(O);
+}
+
 FUnrealAiToolInvocationResult UnrealAiDispatch_EditorSetMode(const TSharedPtr<FJsonObject>& Args)
 {
 	FString ModeId;
@@ -208,5 +229,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_EditorSetMode(const TSharedPtr<FJ
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("activated_mode_id"), ModeId);
+	O->SetStringField(TEXT("setting_key"), TEXT("mode"));
 	return UnrealAiToolJson::Ok(O);
 }

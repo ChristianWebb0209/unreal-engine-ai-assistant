@@ -6,4 +6,5 @@
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_EditorGetSelection(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_EditorSetSelection(const TSharedPtr<FJsonObject>& Args);
+FUnrealAiToolInvocationResult UnrealAiDispatch_EditorGetMode(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_EditorSetMode(const TSharedPtr<FJsonObject>& Args);

@@ -407,6 +407,44 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportCaptureDelayed(const TSha
 	return UnrealAiDispatch_ViewportCapturePng(Args);
 }
 
+FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportGetViewMode(const TSharedPtr<FJsonObject>& Args)
+{
+	(void)Args;
+	FEditorViewportClient* VC = GetVc();
+	if (!VC)
+	{
+		return UnrealAiToolJson::Error(TEXT("No active editor viewport"));
+	}
+
+	const EViewModeIndex Index = VC->GetViewMode();
+	FString ViewMode = TEXT("lit");
+	switch (Index)
+	{
+	case VMI_Unlit:
+		ViewMode = TEXT("unlit");
+		break;
+	case VMI_Wireframe:
+		ViewMode = TEXT("wireframe");
+		break;
+	case VMI_LightComplexity:
+		ViewMode = TEXT("light_complexity");
+		break;
+	case VMI_VisualizeBuffer:
+		ViewMode = TEXT("visualize_buffer");
+		break;
+	default:
+		ViewMode = TEXT("lit");
+		break;
+	}
+
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetBoolField(TEXT("ok"), true);
+	O->SetStringField(TEXT("view_mode"), ViewMode);
+	O->SetNumberField(TEXT("view_mode_index"), static_cast<double>(Index));
+	O->SetStringField(TEXT("setting_key"), TEXT("view_mode"));
+	return UnrealAiToolJson::Ok(O);
+}
+
 FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportSetViewMode(const TSharedPtr<FJsonObject>& Args)
 {
 	FEditorViewportClient* VC = GetVc();
@@ -445,5 +483,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportSetViewMode(const TShared
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("view_mode"), Mode);
+	O->SetStringField(TEXT("setting_key"), TEXT("view_mode"));
 	return UnrealAiToolJson::Ok(O);
 }
