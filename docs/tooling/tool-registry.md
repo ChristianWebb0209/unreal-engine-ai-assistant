@@ -53,7 +53,7 @@ Every tool below follows this schema (suitable for export to JSON for OpenAI/Ant
 | **`threading`** | Typically **game thread** for editor mutation. |
 | **`failure_modes`** | User-visible errors. |
 | **`doc_links`** | Epic doc URLs (API / guides). |
-| **`status`** | `research` \| `designed` \| `implemented` \| `future` \| `banned_v1`. |
+| **`status`** | Authoritative values and meanings: [`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) `meta.status_legend` (`implemented`, `future`, `designed`, `deprecated`). The per-tool **status** cells in the tables below are not auto-synced—prefer the JSON for each `tool_id`. |
 
 **Ask mode:** Only tools with `permission: read` (and optionally explicit read-only context tools).  
 **Agent / Plan:** Full catalog subject to profile **allow-lists**.
@@ -1028,28 +1028,30 @@ These are the first implementation wave. Each row is expanded in its domain sect
 
 | Field | Value |
 |-------|--------|
-| **summary** | Execute a **allow-listed** `UEngine::Exec` console command. |
-| **parameters** | `command` (from enum table), `args`. |
-| **returns** | `success`, `output` (if captured). |
-| **side_effects** | varies |
+| **summary** | Default: **`command`** is an **allow-list key** mapped to a fixed `GEngine->Exec` line in `UnrealAiToolDispatch_Console.cpp` (`stat_fps`, `stat_unit`, `stat_gpu`, `r_vsync` + **`args`** `0`/`1`, `viewmode_lit` / `viewmode_unlit` / `viewmode_wireframe`). Optional **legacy wide exec**: Editor Settings `Console command: legacy wide exec` or `UNREAL_AI_CONSOLE_COMMAND_LEGACY_EXEC=1` — then `command` is a raw console line (with optional `args` appended); still blocks quit/exit/shader rebuild/crash substrings. |
+| **parameters** | `command` (required), `args` (optional; required for `r_vsync`). |
+| **returns** | JSON: `ok`, `executed` (allow-list mode), or `command` + `legacy_wide_exec` (legacy). |
+| **side_effects** | Engine/editor console side effects of the executed line. |
 | **permission** | `exec` |
-| **ue_entry_points** | `GEngine->Exec`; static table mapping safe commands (`stat fps`, `r.SetRes` gated). **Never pass raw user strings.** |
+| **ue_entry_points** | `GEngine->Exec` |
 | **threading** | Game thread. |
-| **failure_modes** | Unknown command. |
+| **failure_modes** | Unknown key (default mode); invalid args for `r_vsync`; blocked legacy substring. |
 | **doc_links** | [Console commands](https://dev.epicgames.com/documentation/en-us/unreal-engine/console-commands-in-unreal-engine) |
-| **status** | `research` |
+| **status** | See `UnrealAiToolCatalog.json` (`implemented`). |
 
 ---
 
-## Banned or out-of-scope for v1
+## Intentionally absent tool shapes (no catalog stubs)
 
-| `tool_id` | Reason |
-|-----------|--------|
-| `arbitrary_process_spawn` | Security — **banned** unless explicit enterprise build + user opt-in. |
-| `arbitrary_network_fetch` | Only user-configured LLM endpoints per PRD — **banned** as generic tool. |
-| `raw_user_exec_string` | **banned** — replace with `console_command` allow-list. |
-| `arbitrary_python_eval` | **banned** for default product. |
-| `delete_system_files` | **banned** — all paths project-scoped. |
+These capabilities are **not** exposed as tools in `UnrealAiToolCatalog.json` (older placeholder entries were removed):
+
+| Capability | Approach instead |
+|------------|------------------|
+| Generic HTTP / arbitrary URL fetch | Use the plugin’s configured LLM/embedding transports only — not an agent-callable `fetch(url)`. |
+| Spawn arbitrary OS processes | Not on the default tool surface (high abuse risk). |
+| Raw `UEngine::Exec` / user shell string | Default: **allow-list keys only**. Unchecked strings only if **legacy wide exec** is explicitly enabled (settings/env). |
+| Arbitrary Python | Not on the default product surface. |
+| Delete arbitrary paths (e.g. outside project) | **`asset_delete`**, **`project_file_*`**, and other **project-scoped** mutations only. |
 
 ---
 

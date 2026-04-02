@@ -278,7 +278,9 @@ Described in [`docs/context/vector-db-implementation-plan.md`](docs/context/vect
 
 3. **Launch Unreal Editor** (after a successful build):
 
-   `"<Engine>\Engine\Binaries\Win64\UnrealEditor.exe" "%CD%\blank.uproject"`
+   `"<Engine>\Engine\Binaries\Win64\UnrealEditor.exe" "%CD%\<YourProject>.uproject"`
+
+   (`build-editor.ps1` finds the single `*.uproject` at the repo root; set `UE_REPO_UPROJECT` in `.env` if you have more than one or use a custom manifest path—see `scripts/Resolve-RepoUProject.ps1`.)
 
 From **Cursor** or VS Code, use the integrated terminal for the same commands.
 
@@ -297,7 +299,7 @@ Compress-Archive -Path 'Plugins\UnrealAiEditor' -DestinationPath 'dist\UnrealAiE
 
 **Agent / harness iteration (prompts, tools, tests):** read [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](docs/tooling/AGENT_HARNESS_HANDOFF.md) — one file for scripts, file map, and when to report bigger issues or tool catalog changes.
 
-The repo includes a minimal **`Source/Blank`** runtime module so Unreal Build Tool can compile the C++ plugin alongside the blank game target.
+The repo includes the UE **First Person BP** sample (Blueprint-only game, copied from the engine `Templates/TP_FirstPersonBP` folder—the same files the New Project wizard uses). The **UnrealAiEditor** plugin remains C++; `build-editor.ps1` builds **`<ProjectName>Editor`** for whatever `*.uproject` lives at the repo root so native plugins compile. Open that `.uproject` normally—the plugin lives in `Plugins/UnrealAiEditor/` beside the project (no copy step).
 
 ## What you get (high level)
 
@@ -309,13 +311,13 @@ The repo includes a minimal **`Source/Blank`** runtime module so Unreal Build To
 
 ## Repository layout
 
-- **Unreal project at repo root:** `blank.uproject`, `Config/`, `Content/`, **`Source/Blank/`**, **`Plugins/UnrealAiEditor/`** — open `blank.uproject` to develop and test the plugin.
+- **Unreal project at repo root:** one `*.uproject`, `Config/`, `Content/`, minimal **`Source/*.Target.cs`** (UBT/VS only; no game C++ module), **`Plugins/UnrealAiEditor/`** — open the root `.uproject` to develop and test the plugin (upstream sample is `TP_FirstPerson.uproject`; rename or replace it for your fork if you like, or set `UE_REPO_UPROJECT`).
 
 ## MVP architecture (summary)
 
 - **No server and no product backend** — core functionality ships in the **Unreal editor plugin** (UI, tools, persistence, orchestration).
 - **Network:** user-configured **HTTPS to third-party LLM APIs** only (e.g. OpenRouter, Anthropic, OpenAI). Optional **localhost** tooling (e.g. MCP) runs **inside or beside the editor**, not a remote product API.
-- **No vector / semantic index in v1** — context via tools, Asset Registry, and deterministic search.
+- **Optional local vector retrieval** (off by default): when enabled, project/Memory text can be embedded into a local SQLite-backed index and surfaced as `retrieval_snippet` candidates alongside deterministic context. When disabled, behavior matches pre-retrieval assembly (tools, Asset Registry, deterministic search). See [`docs/context/context-management.md`](docs/context/context-management.md) and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md).
 
 ## Maintainer docs
 
