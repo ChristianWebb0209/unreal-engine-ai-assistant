@@ -274,6 +274,8 @@ Described in [`docs/context/vector-db-implementation-plan.md`](docs/context/vect
    - **Custom engine:** `$env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\build-editor.ps1 -Headless`
    - **Clean rebuild (close editor first):** `.\build-editor.ps1 -Restart -Headless`
 
+   **Agent tools vs. rebuilds:** Unreal will still run its own compile if game/plugin binaries are missing or incompatible with the target receipt—nothing in the plugin can remove that. The `cpp_project_compile` tool is **blocked** inside a normal interactive editor session unless the model passes `confirm_external_rebuild:true` (or the editor is `-unattended` / under automation), because spawning `Build.bat` beside a live editor commonly desynchronizes Live Coding and loaded modules. Prefer closing the editor and using `build-editor.ps1`. File writes from the agent default to **`Saved/UnrealAiEditorAgent/`**; touching `Config/`, `Source/`, or the `.uproject` requires **`confirm_project_critical:true`** in addition to `confirm:true`.
+
 3. **Launch Unreal Editor** (after a successful build):
 
    `"<Engine>\Engine\Binaries\Win64\UnrealEditor.exe" "%CD%\blank.uproject"`

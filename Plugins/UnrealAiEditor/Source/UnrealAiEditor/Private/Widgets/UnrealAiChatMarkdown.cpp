@@ -488,7 +488,7 @@ namespace UnrealAiChatMarkdownInline
 		SplitInlineLinks(LineText, Segs);
 
 		TSharedRef<SWrapBox> Wrap = SNew(SWrapBox)
-			.UseAllottedWidth(true);
+			.UseAllottedSize(true);
 		for (const FInlineSegment& Seg : Segs)
 		{
 			if (Seg.Kind == ESegmentKind::Link && !Seg.Target.IsEmpty())
