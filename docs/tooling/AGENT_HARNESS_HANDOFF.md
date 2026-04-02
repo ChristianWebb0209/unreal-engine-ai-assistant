@@ -87,7 +87,7 @@ From Output Log:
 ---
 ## Commands & scripts cheat sheet
 
-- Build BlankEditor + plugin:
+- Build `<ProjectName>Editor` for the repo-root `.uproject` (default sample compiles plugin; see `scripts/Resolve-RepoUProject.ps1`):
   - `.\build-editor.ps1 -Headless`
   - If DLL lock issue: `.\build-editor.ps1 -Restart -Headless`
 - Headless CI:

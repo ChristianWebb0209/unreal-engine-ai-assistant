@@ -1,13 +1,13 @@
 # Policy: version only plugin sources under Plugins/UnrealAiEditor plus repo docs/scripts/tests/README.
-# Never commit engine outputs, local game project trees (Blank), or sibling plugins in Plugins/.
+# Never commit engine outputs, local sample UE project at repo root, or sibling plugins in Plugins/.
 
-# --- Repo root (Blank / UE project — local only) ---
+# --- Repo root (sample UE project / engine outputs — local only) ---
 /.vs/
 /.vsconfig
 /agent-and-tool-requirements.md
 /Binaries/
-/blank.sln
-/blank.uproject
+# Root .uproject (sample may be TP_FirstPerson.uproject or your own) — create from engine Templates or keep local copy.
+/*.uproject
 /Config/
 /Content/
 /DerivedDataCache/

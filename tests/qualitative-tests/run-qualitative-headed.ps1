@@ -132,6 +132,7 @@ $Script:BatchEndBrief = $null
 $RepoRootForEnv = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $RepoRootForEnv 'scripts\Import-RepoDotenv.ps1')
 Import-RepoDotenv -RepoRoot $RepoRootForEnv
+. (Join-Path $RepoRootForEnv 'scripts\Resolve-RepoUProject.ps1')
 . (Join-Path $RepoRootForEnv 'scripts\Set-UnrealAiHeadedToolPackDefaults.ps1')
 
 # Prompt assembly is single-path now; clear any old override to avoid stale telemetry/mode drift.
@@ -145,15 +146,14 @@ if ($null -eq (Get-Item -Path 'Env:UNREAL_AI_LOG_LLM_REQUESTS' -ErrorAction Sile
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = $RepoRootForEnv
 }
-if (-not (Test-Path (Join-Path $ProjectRoot 'blank.uproject'))) {
-    Write-Error "Could not locate blank.uproject under ProjectRoot=$ProjectRoot"
-}
+$RepoUProject = Resolve-RepoUProject -RepoRoot $ProjectRoot
+$UProject = $RepoUProject.FullPath
+$RepoUProjectBaseName = $RepoUProject.BaseName
 if ([string]::IsNullOrWhiteSpace($EngineRoot)) {
     $EngineRoot = if ($env:UE_ENGINE_ROOT) { $env:UE_ENGINE_ROOT } else { 'C:\Program Files\Epic Games\UE_5.7' }
 }
 
 $EditorExe = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor.exe'
-$UProject = Join-Path $ProjectRoot 'blank.uproject'
 if (-not (Test-Path $EditorExe)) {
     Write-Error "UnrealEditor.exe not found: $EditorExe (set UE_ENGINE_ROOT or pass -EngineRoot)."
 }
@@ -512,13 +512,22 @@ function Stop-UnrealEditorProcessTree {
 }
 
 function Get-UnrealProjectPrimaryLogPath {
-    param([string]$ProjectRootPath)
+    param(
+        [string]$ProjectRootPath,
+        [string]$UProjectBaseName = ''
+    )
     $logsDir = Join-Path $ProjectRootPath 'Saved\Logs'
     if (-not (Test-Path -LiteralPath $logsDir)) {
         return $null
     }
-    $uproject = Get-ChildItem -LiteralPath $ProjectRootPath -Filter '*.uproject' -File -ErrorAction SilentlyContinue | Select-Object -First 1
-    $base = if ($uproject) { $uproject.BaseName } else { 'blank' }
+    $base = [string]$UProjectBaseName
+    if ([string]::IsNullOrWhiteSpace($base)) {
+        $uproject = Get-ChildItem -LiteralPath $ProjectRootPath -Filter '*.uproject' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        $base = if ($uproject) { $uproject.BaseName } else { '' }
+    }
+    if ([string]::IsNullOrWhiteSpace($base)) {
+        $base = 'UnrealProject'
+    }
     $primary = Join-Path $logsDir ("{0}.log" -f $base)
     if (Test-Path -LiteralPath $primary) {
         return $primary
@@ -539,7 +548,8 @@ function Save-UnrealEditorSessionLogs {
     param(
         [string]$ProjectRootPath,
         [string]$DestinationDir,
-        [string]$DestFileName = 'editor_console_saved.log'
+        [string]$DestFileName = 'editor_console_saved.log',
+        [string]$UProjectBaseName = ''
     )
     if ([string]::IsNullOrWhiteSpace($DestinationDir)) {
         return
@@ -547,7 +557,7 @@ function Save-UnrealEditorSessionLogs {
     if (-not (Test-Path -LiteralPath $DestinationDir)) {
         New-Item -ItemType Directory -Force -Path $DestinationDir | Out-Null
     }
-    $src = Get-UnrealProjectPrimaryLogPath -ProjectRootPath $ProjectRootPath
+    $src = Get-UnrealProjectPrimaryLogPath -ProjectRootPath $ProjectRootPath -UProjectBaseName $UProjectBaseName
     if (-not $src) {
         Write-Warning ("Save-UnrealEditorSessionLogs: no Saved\Logs\*.log under {0}" -f $ProjectRootPath)
         return
@@ -599,15 +609,19 @@ function Stop-UnrealEditorConsoleTee {
 function Start-UnrealProjectLogMirrorJob {
     param(
         [string]$ProjectRootPath,
-        [string]$DestinationPath
+        [string]$DestinationPath,
+        [string]$UProjectBaseName = ''
     )
-    return Start-Job -ArgumentList @($ProjectRootPath, $DestinationPath) -ScriptBlock {
-        param([string]$Root, [string]$Dest)
-        function Get-PrimaryLogPath([string]$Pr) {
+    return Start-Job -ArgumentList @($ProjectRootPath, $DestinationPath, $UProjectBaseName) -ScriptBlock {
+        param([string]$Root, [string]$Dest, [string]$LogBase)
+        function Get-PrimaryLogPath([string]$Pr, [string]$BaseName) {
             $logsDir = Join-Path $Pr 'Saved\Logs'
             if (-not (Test-Path -LiteralPath $logsDir)) { return $null }
-            $u = Get-ChildItem -LiteralPath $Pr -Filter '*.uproject' -File -ErrorAction SilentlyContinue | Select-Object -First 1
-            $b = if ($u) { $u.BaseName } else { 'blank' }
+            $b = [string]$BaseName
+            if ([string]::IsNullOrWhiteSpace($b)) {
+                $u = Get-ChildItem -LiteralPath $Pr -Filter '*.uproject' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                $b = if ($u) { $u.BaseName } else { 'UnrealProject' }
+            }
             $p1 = Join-Path $logsDir ("{0}.log" -f $b)
             if (Test-Path -LiteralPath $p1) { return $p1 }
             $nw = Get-ChildItem -LiteralPath $logsDir -Filter '*.log' -File -ErrorAction SilentlyContinue |
@@ -617,7 +631,7 @@ function Start-UnrealProjectLogMirrorJob {
         }
         $logPath = $null
         for ($i = 0; $i -lt 600; $i++) {
-            $logPath = Get-PrimaryLogPath $Root
+            $logPath = Get-PrimaryLogPath $Root $LogBase
             if ($null -ne $logPath) { break }
             Start-Sleep -Milliseconds 200
         }
@@ -800,7 +814,7 @@ UE_LOG: use the Unreal log window and see editor_unreal_project_log_live*.log + 
         }
         catch { }
         Write-Host ("Logging: Unreal -log console enabled (no stream redirect). Mirroring Saved/Logs -> {0}" -f $mirrorPath) -ForegroundColor DarkCyan
-        $mirrorJob = Start-UnrealProjectLogMirrorJob -ProjectRootPath $ProjectRoot -DestinationPath $mirrorPath
+        $mirrorJob = Start-UnrealProjectLogMirrorJob -ProjectRootPath $ProjectRoot -DestinationPath $mirrorPath -UProjectBaseName $RepoUProjectBaseName
     }
     else {
         Write-Warning 'Invoke-HeadedEditorDynamic: SessionLogDir empty — no mirror file; editor still launched with -log.'
@@ -852,12 +866,15 @@ UE_LOG: use the Unreal log window and see editor_unreal_project_log_live*.log + 
     if ($LiveProjectLogToHost) {
         Write-Host 'Live log: streaming project Saved/Logs *.log -> this PowerShell window (Unreal -log window is unchanged).' -ForegroundColor DarkCyan
         $tailJob = Start-Job -ScriptBlock {
-            param([string]$Root)
-            function Get-PrimaryLogPath([string]$ProjectRootPath) {
+            param([string]$Root, [string]$LogBase)
+            function Get-PrimaryLogPath([string]$ProjectRootPath, [string]$BaseName) {
                 $logsDir = Join-Path $ProjectRootPath 'Saved\Logs'
                 if (-not (Test-Path -LiteralPath $logsDir)) { return $null }
-                $uproject = Get-ChildItem -LiteralPath $ProjectRootPath -Filter '*.uproject' -File -ErrorAction SilentlyContinue | Select-Object -First 1
-                $base = if ($uproject) { $uproject.BaseName } else { 'blank' }
+                $base = [string]$BaseName
+                if ([string]::IsNullOrWhiteSpace($base)) {
+                    $uproject = Get-ChildItem -LiteralPath $ProjectRootPath -Filter '*.uproject' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                    $base = if ($uproject) { $uproject.BaseName } else { 'UnrealProject' }
+                }
                 $primary = Join-Path $logsDir ("{0}.log" -f $base)
                 if (Test-Path -LiteralPath $primary) { return $primary }
                 $newest = Get-ChildItem -LiteralPath $logsDir -Filter '*.log' -File -ErrorAction SilentlyContinue |
@@ -867,7 +884,7 @@ UE_LOG: use the Unreal log window and see editor_unreal_project_log_live*.log + 
             }
             $logPath = $null
             for ($i = 0; $i -lt 600; $i++) {
-                $logPath = Get-PrimaryLogPath -ProjectRootPath $Root
+                $logPath = Get-PrimaryLogPath -ProjectRootPath $Root -BaseName $LogBase
                 if ($null -ne $logPath) { break }
                 Start-Sleep -Milliseconds 200
             }
@@ -876,7 +893,7 @@ UE_LOG: use the Unreal log window and see editor_unreal_project_log_live*.log + 
                 return
             }
             Get-Content -LiteralPath $logPath -Wait -Tail 40 -Encoding UTF8
-        } -ArgumentList $ProjectRoot
+        } -ArgumentList @($ProjectRoot, $RepoUProjectBaseName)
     }
 
     try {
@@ -994,7 +1011,7 @@ UE_LOG: use the Unreal log window and see editor_unreal_project_log_live*.log + 
             } else {
                 ('editor_console_saved{0}.log' -f $SessionLogFileSuffix)
             }
-            Save-UnrealEditorSessionLogs -ProjectRootPath $ProjectRoot -DestinationDir $SessionLogDir -DestFileName $logName
+            Save-UnrealEditorSessionLogs -ProjectRootPath $ProjectRoot -DestinationDir $SessionLogDir -DestFileName $logName -UProjectBaseName $RepoUProjectBaseName
         }
 
         $exitCode = if ($p.HasExited) { [int]$p.ExitCode } else { -1003 }

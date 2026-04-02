@@ -1,7 +1,8 @@
 #requires -Version 5.1
 <#
-  Build the BlankEditor target (includes UnrealAiEditor plugin), then launch the editor
-  unless -Headless or --headless is set.
+  Build the editor target for the UE project at the repository root (<ProjectName>Editor), then launch the editor
+  unless -Headless or --headless is set. The .uproject file is resolved automatically (see scripts/Resolve-RepoUProject.ps1);
+  set UE_REPO_UPROJECT if multiple manifests exist at the repo root or you use a custom path.
 
   PowerShell requires & to invoke .bat files with arguments — a bare quoted path is not a command.
 
@@ -55,12 +56,15 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'scripts\Import-RepoDotenv.ps1')
 Import-RepoDotenv -RepoRoot $PSScriptRoot
+. (Join-Path $PSScriptRoot 'scripts\Resolve-RepoUProject.ps1')
 if ([string]::IsNullOrWhiteSpace($EngineRoot)) {
     $EngineRoot = if ($env:UE_ENGINE_ROOT) { $env:UE_ENGINE_ROOT } else { 'C:\Program Files\Epic Games\UE_5.7' }
 }
 
 $ProjectRoot = $PSScriptRoot
-$UProject = Join-Path $ProjectRoot 'blank.uproject'
+$ResolvedUProject = Resolve-RepoUProject -RepoRoot $ProjectRoot
+$UProject = $ResolvedUProject.FullPath
+$EditorTarget = $ResolvedUProject.EditorTarget
 
 if (-not ('UnrealWindowFocus' -as [type])) {
     Add-Type -TypeDefinition @"
@@ -143,8 +147,8 @@ if ($Restart) {
     }
 }
 
-Write-Host "Building BlankEditor (Development | Win64)..." -ForegroundColor Cyan
-& $BuildBat BlankEditor Win64 Development "-project=$UProject" -waitmutex -NoHotReloadFromIDE
+Write-Host "Building $EditorTarget (Development | Win64)..." -ForegroundColor Cyan
+& $BuildBat $EditorTarget Win64 Development "-project=$UProject" -waitmutex -NoHotReloadFromIDE
 $BuildExit = $LASTEXITCODE
 if ($BuildExit -ne 0) {
     exit $BuildExit

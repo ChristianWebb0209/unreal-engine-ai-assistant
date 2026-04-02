@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
   Loads KEY=VALUE pairs from a .env file into the current process environment.
-  Intended keys: UE_ENGINE_ROOT, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL (see .env.example).
+  Intended keys: UE_ENGINE_ROOT, optional UE_REPO_UPROJECT, OPENAI_* (see .env.example).
 
   - Lines starting with # or empty lines are skipped.
   - Optional leading "export " is stripped.
