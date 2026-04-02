@@ -224,12 +224,32 @@ See the long view caption in `architecture.dsl` and [`docs/context/vector-db-imp
 
 </details>
 
+### Vector context unified
+
+<details>
+<summary><strong>Vector context unified</strong></summary>
+
+**Unified vector-context graph** (single diagram): both **file-system vector context** and **scene/editor context** converge through one candidate ranking + packing pipeline.
+
+- **File-system side**: retrieval index lifecycle and corpora (filesystem text, Asset Registry shards, Blueprint features, optional memory), embedding adapter, SQLite vector store + manifest.
+- **Scene side**: deterministic live anchors from editor snapshot (selection, Content Browser focus, open editors) entering the same candidate flow.
+- **Merge point**: candidate collection, scoring, and budget packing with utility/head/tail behavior and representation levels (L0/L1/L2).
+- **Output and diagnostics**: formatted context + persisted context JSON + decision logs.
+
+[Open full-size SVG](docs/architecture-maps/vector-context-unified.svg)
+
+[![Vector context unified](docs/architecture-maps/vector-context-unified.svg)](docs/architecture-maps/vector-context-unified.svg)
+
+</details>
+
 ### Vector db query sequence
 
 <details>
 <summary><strong>Vector db query sequence</strong></summary>
 
-_No `BEGIN_README_MAP vector-db-query-sequence` block in `architecture.dsl` yet; diagram only._
+**Per-LLM-round query path**: harness may **prefetch** retrieval; **`BuildContextWindow`** consumes **TryConsumePrefetch** or **Query**; **embed** query when needed (BYOK **HTTPS**); **SQLite** cosine Top-K with **lexical fallback**; snippets feed the same **context ranker** as other candidate types.
+
+Described in [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 2.1 table (`vector-db-query-sequence`) and retrieval sections of [`docs/context/context-management.md`](docs/context/context-management.md).
 
 [Open full-size SVG](docs/architecture-maps/vector-db-query-sequence.svg)
 
