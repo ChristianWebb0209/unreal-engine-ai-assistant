@@ -18,7 +18,8 @@ private:
 	bool EmbedOne_OnGameThread(
 		const FString& ModelId,
 		const FUnrealAiEmbeddingRequest& Request,
-		FUnrealAiEmbeddingResponse& OutResponse);
+		FUnrealAiEmbeddingResponse& OutResponse,
+		bool bCallerThreadPumpsHttp = false);
 
 	FUnrealAiModelProfileRegistry* Profiles = nullptr;
 };

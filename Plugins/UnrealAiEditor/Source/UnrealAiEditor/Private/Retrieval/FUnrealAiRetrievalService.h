@@ -55,7 +55,6 @@ private:
 	FUnrealAiModelProfileRegistry* Profiles = nullptr;
 	IUnrealAiMemoryService* MemoryService = nullptr;
 	TUniquePtr<IUnrealAiEmbeddingProvider> EmbeddingProvider;
-	mutable FCriticalSection IndexStateMutex;
 	TSet<FString> IndexBuildsInFlight;
 	mutable FCriticalSection StoreCacheMutex;
 	mutable TMap<FString, TUniquePtr<FUnrealAiVectorIndexStore>> CachedStoresByProject;

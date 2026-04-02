@@ -50,6 +50,11 @@ FUnrealAiVectorIndexStore* FUnrealAiRetrievalService::GetOrCreateStore(const FSt
 		return nullptr;
 	}
 	FScopeLock Lock(&StoreCacheMutex);
+	if (IndexBuildsInFlight.Contains(ProjectId))
+	{
+		OutError = TEXT("Vector index rebuild in progress.");
+		return nullptr;
+	}
 	TUniquePtr<FUnrealAiVectorIndexStore>& StorePtr = CachedStoresByProject.FindOrAdd(ProjectId);
 	if (!StorePtr.IsValid())
 	{
@@ -57,6 +62,19 @@ FUnrealAiVectorIndexStore* FUnrealAiRetrievalService::GetOrCreateStore(const FSt
 	}
 	if (!StorePtr->Initialize(OutError))
 	{
+		CachedStoresByProject.Remove(ProjectId);
+		{
+			FUnrealAiVectorIndexStore Scratch(ProjectId);
+			FUnrealAiVectorManifest M;
+			if (!Scratch.LoadManifest(M))
+			{
+				M = FUnrealAiVectorManifest();
+				M.ProjectId = ProjectId;
+			}
+			M.Status = TEXT("error");
+			M.VectorDbOpenRetryNotBeforeUtc = FDateTime::UtcNow() + FTimespan::FromMinutes(15);
+			Scratch.SaveManifest(M);
+		}
 		return nullptr;
 	}
 	return StorePtr.Get();
@@ -256,6 +274,15 @@ FUnrealAiRetrievalProjectStatus FUnrealAiRetrievalService::GetProjectStatus(cons
 		Status.StateText = TEXT("no_project");
 		return Status;
 	}
+	{
+		FScopeLock Lock(&StoreCacheMutex);
+		if (IndexBuildsInFlight.Contains(ProjectId))
+		{
+			Status.bBusy = true;
+			Status.StateText = TEXT("indexing");
+			return Status;
+		}
+	}
 	FString StoreError;
 	FUnrealAiVectorIndexStore* Store = GetOrCreateStore(ProjectId, StoreError);
 	if (!Store)
@@ -270,7 +297,7 @@ FUnrealAiRetrievalProjectStatus FUnrealAiRetrievalService::GetProjectStatus(cons
 		return Status;
 	}
 	{
-		FScopeLock Lock(&IndexStateMutex);
+		FScopeLock Lock(&StoreCacheMutex);
 		Status.bBusy = IndexBuildsInFlight.Contains(ProjectId);
 	}
 	if (!Status.bBusy && Manifest.Status.Equals(TEXT("indexing"), ESearchCase::IgnoreCase))
@@ -528,7 +555,7 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 	const bool bHasManifest = Store->LoadManifest(Manifest);
 	bool bBusy = false;
 	{
-		FScopeLock Lock(&IndexStateMutex);
+		FScopeLock Lock(&StoreCacheMutex);
 		bBusy = IndexBuildsInFlight.Contains(Query.ProjectId);
 	}
 	if (bHasManifest && !bBusy && Manifest.Status.Equals(TEXT("indexing"), ESearchCase::IgnoreCase))
@@ -976,12 +1003,28 @@ void FUnrealAiRetrievalService::EnsureBackgroundIndexBuild(const FString& Projec
 		return;
 	}
 	{
-		FScopeLock Lock(&IndexStateMutex);
+		FUnrealAiVectorIndexStore CooldownProbe(ProjectId);
+		FUnrealAiVectorManifest ProbeManifest;
+		if (CooldownProbe.LoadManifest(ProbeManifest)
+			&& ProbeManifest.VectorDbOpenRetryNotBeforeUtc > FDateTime::UtcNow())
+		{
+			UE_LOG(
+				LogTemp,
+				Log,
+				TEXT("Retrieval index rebuild skipped: vector DB cooldown active until %s (project_id=%s)"),
+				*ProbeManifest.VectorDbOpenRetryNotBeforeUtc.ToIso8601(),
+				*ProjectId);
+			return;
+		}
+	}
+	{
+		FScopeLock Lock(&StoreCacheMutex);
 		if (IndexBuildsInFlight.Contains(ProjectId))
 		{
 			return;
 		}
 		IndexBuildsInFlight.Add(ProjectId);
+		CachedStoresByProject.Remove(ProjectId);
 	}
 	Async(EAsyncExecution::ThreadPool, [this, ProjectId, Settings]()
 	{
@@ -997,6 +1040,7 @@ void FUnrealAiRetrievalService::EnsureBackgroundIndexBuild(const FString& Projec
 				Manifest.ProjectId = ProjectId;
 			}
 			Manifest.Status = TEXT("error");
+			Manifest.VectorDbOpenRetryNotBeforeUtc = FDateTime::UtcNow() + FTimespan::FromMinutes(15);
 			Store.SaveManifest(Manifest);
 			TArray<FUnrealAiRetrievalDiagnosticsRow> Empty;
 			UnrealAiRetrievalDiagnostics::WriteIndexDiagnostics(
@@ -1006,7 +1050,17 @@ void FUnrealAiRetrievalService::EnsureBackgroundIndexBuild(const FString& Projec
 				Manifest.ChunksIndexed,
 				Empty);
 		}
-		FScopeLock Lock(&IndexStateMutex);
+		else
+		{
+			FUnrealAiVectorIndexStore Store(ProjectId);
+			FUnrealAiVectorManifest Manifest;
+			if (Store.LoadManifest(Manifest))
+			{
+				Manifest.VectorDbOpenRetryNotBeforeUtc = FDateTime::MinValue();
+				Store.SaveManifest(Manifest);
+			}
+		}
+		FScopeLock Lock(&StoreCacheMutex);
 		IndexBuildsInFlight.Remove(ProjectId);
 	});
 }
@@ -1714,6 +1768,7 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 		{
 			FUnrealAiEmbeddingRequest Req;
 			Req.InputText = Chunk.Text.Left(6000);
+			Req.bBackgroundIndexer = true;
 			FUnrealAiEmbeddingResponse Resp;
 			if (!EmbeddingProvider.IsValid() || !EmbeddingProvider->EmbedOne(Settings.EmbeddingModel, Req, Resp))
 			{

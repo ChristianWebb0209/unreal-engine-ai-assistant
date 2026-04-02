@@ -21,7 +21,9 @@
 #include "Selection.h"
 #endif
 
+#include "Async/Async.h"
 #include "Containers/Ticker.h"
+#include "Misc/App.h"
 #include "Context/UnrealAiActiveTodoSummary.h"
 #include "Dom/JsonObject.h"
 #include "Misc/Paths.h"
@@ -729,13 +731,43 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 		}
 		if (!bUsedAsyncPrefetch && EffectiveOptions.RetrievalTurnKey.IsEmpty())
 		{
-			UnrealAiRetrievalObservability::EmitQueryStart(RetrievalQuery);
-			RetrievalResult = RetrievalService->Query(RetrievalQuery);
-			UnrealAiRetrievalObservability::EmitQueryEnd(RetrievalQuery, RetrievalResult);
-			Result.UserVisibleMessages.Add(
-				UnrealAiProjectTreeSampler::BuildFooterLine(Working.ProjectTreeSummary)
-				+ TEXT(" | retrieval=query_sync snippets=")
-				+ FString::FromInt(RetrievalResult.Snippets.Num()));
+#if WITH_EDITOR
+			const bool bNonBlockingGtRetrieval = IsInGameThread() && !FApp::IsUnattended();
+#else
+			const bool bNonBlockingGtRetrieval = false;
+#endif
+			if (bNonBlockingGtRetrieval)
+			{
+				Result.Warnings.Add(
+					TEXT("Retrieval was not applied on this frame (editor stays responsive). "
+						 "Use Agent Chat (prefetch) for embedded snippets, or trigger another context build after retrieval prefetch completes."));
+				if (bVerbose)
+				{
+					AddTraceLine(TEXT("Retrieval: skipped synchronous Query on game thread; queued background Query (results not merged this frame)"));
+				}
+				IUnrealAiRetrievalService* Rs = RetrievalService;
+				const FUnrealAiRetrievalQuery QCopy = RetrievalQuery;
+				Async(EAsyncExecution::ThreadPool, [Rs, QCopy]()
+				{
+					if (Rs)
+					{
+						UnrealAiRetrievalObservability::EmitQueryStart(QCopy);
+						const FUnrealAiRetrievalQueryResult BgResult = Rs->Query(QCopy);
+						UnrealAiRetrievalObservability::EmitQueryEnd(QCopy, BgResult);
+						(void)BgResult;
+					}
+				});
+			}
+			else
+			{
+				UnrealAiRetrievalObservability::EmitQueryStart(RetrievalQuery);
+				RetrievalResult = RetrievalService->Query(RetrievalQuery);
+				UnrealAiRetrievalObservability::EmitQueryEnd(RetrievalQuery, RetrievalResult);
+				Result.UserVisibleMessages.Add(
+					UnrealAiProjectTreeSampler::BuildFooterLine(Working.ProjectTreeSummary)
+					+ TEXT(" | retrieval=query_sync snippets=")
+					+ FString::FromInt(RetrievalResult.Snippets.Num()));
+			}
 		}
 		RetrievalSnippets = RetrievalResult.Snippets;
 		for (const FString& Warning : RetrievalResult.Warnings)

@@ -24,6 +24,8 @@ struct FUnrealAiVectorManifest
 	FString Status = TEXT("stale");
 	FString MigrationState = TEXT("none");
 	FDateTime LastIncrementalScanUtc = FDateTime::MinValue();
+	/** When set in the future, automatic index rebuild / aggressive open retries back off until this time. */
+	FDateTime VectorDbOpenRetryNotBeforeUtc = FDateTime::MinValue();
 };
 
 class FUnrealAiVectorIndexStore

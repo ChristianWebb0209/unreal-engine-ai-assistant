@@ -1,12 +1,15 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Misc/Guid.h"
 #include "Misc/Paths.h"
 
 #include "Backend/FUnrealAiPersistenceStub.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Retrieval/FUnrealAiRetrievalService.h"
+#include "Retrieval/IUnrealAiEmbeddingProvider.h"
 #include "Retrieval/UnrealAiRetrievalIndexConfig.h"
+#include "Retrieval/UnrealAiVectorIndexStore.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FUnrealAiRetrievalDisabledFallbackTest,
@@ -122,6 +125,44 @@ bool FUnrealAiRetrievalContextAggressionSettingsParseTest::RunTest(const FString
 
 	const FUnrealAiRetrievalSettings Settings = Retrieval.LoadSettings();
 	TestTrue(TEXT("Context aggression parsed"), FMath::IsNearlyEqual(Settings.ContextAggression, 0.91f, 0.001f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiRetrievalEmbeddingRequestDefaultsTest,
+	"UnrealAiEditor.Retrieval.EmbeddingRequestDefaults",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiRetrievalEmbeddingRequestDefaultsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	const FUnrealAiEmbeddingRequest R;
+	TestFalse(TEXT("bBackgroundIndexer defaults false"), R.bBackgroundIndexer);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiRetrievalVectorManifestCooldownRoundTripTest,
+	"UnrealAiEditor.Retrieval.VectorManifestCooldownRoundTrip",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiRetrievalVectorManifestCooldownRoundTripTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	const FString ProjectKey = FString::Printf(TEXT("autotest_%s"), *FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens));
+	FUnrealAiVectorIndexStore Store(ProjectKey);
+	FUnrealAiVectorManifest Written;
+	Written.ProjectId = ProjectKey;
+	Written.Status = TEXT("error");
+	Written.VectorDbOpenRetryNotBeforeUtc = FDateTime::UtcNow() + FTimespan::FromMinutes(5);
+	TestTrue(TEXT("save manifest with cooldown"), Store.SaveManifest(Written));
+	FUnrealAiVectorManifest Read;
+	TestTrue(TEXT("load manifest"), Store.LoadManifest(Read));
+	TestEqual(TEXT("status round-trip"), Read.Status, Written.Status);
+	TestTrue(TEXT("cooldown persisted and in future"), Read.VectorDbOpenRetryNotBeforeUtc > FDateTime::UtcNow());
+	TestTrue(
+		TEXT("cooldown ~5m ahead"),
+		(Read.VectorDbOpenRetryNotBeforeUtc - FDateTime::UtcNow()).GetTotalMinutes() >= 4.0);
 	return true;
 }
 

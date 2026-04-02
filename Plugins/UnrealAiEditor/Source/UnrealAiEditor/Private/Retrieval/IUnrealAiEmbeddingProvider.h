@@ -5,6 +5,8 @@
 struct FUnrealAiEmbeddingRequest
 {
 	FString InputText;
+	/** When true (indexer only), HTTP + wait run on the caller thread with HttpManager polling — never marshals to the game thread. */
+	bool bBackgroundIndexer = false;
 };
 
 struct FUnrealAiEmbeddingResponse

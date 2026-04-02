@@ -72,6 +72,26 @@ namespace
 		}
 		return Event->Wait(0u);
 	}
+
+	/** Background indexer: HTTP was started on this thread — pump HttpManager here until complete. */
+	static bool WaitEmbeddingPollHttpOnCallerThread(FEvent* Event, uint32 WaitMs)
+	{
+		if (!Event)
+		{
+			return false;
+		}
+		const double DeadlineSec = FPlatformTime::Seconds() + static_cast<double>(WaitMs) / 1000.0;
+		while (FPlatformTime::Seconds() < DeadlineSec)
+		{
+			if (Event->Wait(0u))
+			{
+				return true;
+			}
+			FHttpModule::Get().GetHttpManager().Tick(0.f);
+			FPlatformProcess::SleepNoStats(0.001f);
+		}
+		return Event->Wait(0u);
+	}
 }
 
 FOpenAiCompatibleEmbeddingProvider::FOpenAiCompatibleEmbeddingProvider(FUnrealAiModelProfileRegistry* InProfiles)
@@ -84,6 +104,12 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne(
 	const FUnrealAiEmbeddingRequest& Request,
 	FUnrealAiEmbeddingResponse& OutResponse)
 {
+	// Vector index rebuild runs on the thread pool; never route bulk HTTP through the game thread.
+	if (Request.bBackgroundIndexer)
+	{
+		return EmbedOne_OnGameThread(ModelId, Request, OutResponse, true);
+	}
+
 	if (!IsInGameThread())
 	{
 		const TSharedPtr<FEmbedGameThreadSync> Sync = MakeShared<FEmbedGameThreadSync>();
@@ -118,7 +144,7 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne(
 				}
 			} AlwaysSignal{Sync};
 
-			Outcome->bOk = EmbedOne_OnGameThread(ModelIdCopy, RequestCopy, *GameThreadResponse);
+			Outcome->bOk = EmbedOne_OnGameThread(ModelIdCopy, RequestCopy, *GameThreadResponse, false);
 		});
 
 		// If Wait times out, the calling thread must not return Sync->DoneEvent to the pool while the
@@ -134,13 +160,14 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne(
 		return Outcome->bOk;
 	}
 
-	return EmbedOne_OnGameThread(ModelId, Request, OutResponse);
+	return EmbedOne_OnGameThread(ModelId, Request, OutResponse, false);
 }
 
 bool FOpenAiCompatibleEmbeddingProvider::EmbedOne_OnGameThread(
 	const FString& ModelId,
 	const FUnrealAiEmbeddingRequest& Request,
-	FUnrealAiEmbeddingResponse& OutResponse)
+	FUnrealAiEmbeddingResponse& OutResponse,
+	const bool bCallerThreadPumpsHttp)
 {
 	if (!Profiles)
 	{
@@ -239,7 +266,9 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne_OnGameThread(
 	const double StartSeconds = FPlatformTime::Seconds();
 	// Keep wait margin small so timeout paths return quickly to lexical fallback.
 	const uint32 WaitMs = static_cast<uint32>(FMath::Max(1000.0f, (TimeoutSec * 1000.0f) + 100.0f));
-	const bool bSignaled = WaitForEventWhilePumpingHttpAndGameThread(DoneEvent, WaitMs);
+	const bool bSignaled = bCallerThreadPumpsHttp
+		? WaitEmbeddingPollHttpOnCallerThread(DoneEvent, WaitMs)
+		: WaitForEventWhilePumpingHttpAndGameThread(DoneEvent, WaitMs);
 	const double ElapsedMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
 	UE_LOG(
 		LogTemp,

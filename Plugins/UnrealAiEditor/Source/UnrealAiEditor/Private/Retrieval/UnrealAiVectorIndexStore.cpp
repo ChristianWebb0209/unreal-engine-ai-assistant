@@ -74,7 +74,7 @@ bool FUnrealAiVectorIndexStore::OpenDb(FString& OutError)
 		return true;
 	}
 	const FString DbPath = GetIndexDbPath();
-	constexpr int32 MaxAttempts = 12;
+	constexpr int32 MaxAttempts = 6;
 	for (int32 Attempt = 1; Attempt <= MaxAttempts; ++Attempt)
 	{
 		Db = new FSQLiteDatabase();
@@ -90,10 +90,16 @@ bool FUnrealAiVectorIndexStore::OpenDb(FString& OutError)
 		CloseDb();
 		if (Attempt < MaxAttempts)
 		{
-			// Transient file lock/io contention is common during editor startup; retry briefly.
-			FPlatformProcess::Sleep(0.05f * Attempt);
+			const float BackoffSec = FMath::Min(0.5f, 0.05f * FMath::Pow(2.f, static_cast<float>(Attempt)));
+			FPlatformProcess::Sleep(BackoffSec);
 		}
 	}
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("UnrealAi vector SQLite: failed to open DB after %d attempts (path=%s). See manifest vector_db_open_retry_not_before_utc for cooldown."),
+		MaxAttempts,
+		*DbPath);
 	OutError = FString::Printf(TEXT("Failed to open SQLite DB at %s after retries."), *DbPath);
 	return false;
 }
@@ -758,6 +764,11 @@ bool FUnrealAiVectorIndexStore::LoadManifest(FUnrealAiVectorManifest& OutManifes
 	{
 		FDateTime::ParseIso8601(*DateStr, OutManifest.LastIncrementalScanUtc);
 	}
+	FString RetryIso;
+	if (Root->TryGetStringField(TEXT("vector_db_open_retry_not_before_utc"), RetryIso))
+	{
+		FDateTime::ParseIso8601(*RetryIso, OutManifest.VectorDbOpenRetryNotBeforeUtc);
+	}
 	return true;
 }
 
@@ -774,6 +785,10 @@ bool FUnrealAiVectorIndexStore::SaveManifest(const FUnrealAiVectorManifest& Mani
 	Root->SetNumberField(TEXT("pending_dirty_count"), Manifest.PendingDirtyCount);
 	Root->SetStringField(TEXT("status"), Manifest.Status);
 	Root->SetStringField(TEXT("migration_state"), Manifest.MigrationState);
+	if (Manifest.VectorDbOpenRetryNotBeforeUtc != FDateTime::MinValue())
+	{
+		Root->SetStringField(TEXT("vector_db_open_retry_not_before_utc"), Manifest.VectorDbOpenRetryNotBeforeUtc.ToIso8601());
+	}
 	FString Json;
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Json);
 	if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))

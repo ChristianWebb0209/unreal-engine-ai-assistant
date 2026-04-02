@@ -2562,53 +2562,66 @@ void FUnrealAiEditorModule::TryKickoffStartupDiscoveryAndIndexing(
 	}
 	bStartupDiscoveryBootstrapTriggered = true;
 
-	const FProjectTreeSummary& Summary = UnrealAiProjectTreeSampler::GetOrRefreshProjectSummary(
-		ProjectId,
-		true,
-		TEXT("startup_bootstrap"));
-	const FString DiscoveryDetail = UnrealAiBackgroundOpsLog::BuildDetailJson(
-		TEXT("startup_project_tree_refresh"),
-		TEXT("ok"),
-		ProjectId,
-		TEXT(""),
-		Summary.LastQueryDurationMs,
-		[&Summary](const TSharedPtr<FJsonObject>& O)
+	const TWeakPtr<FUnrealAiBackendRegistry> WeakReg = Reg;
+	const FString ProjectIdCopy(ProjectId);
+	FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([WeakReg, ProjectIdCopy](float /*DeltaTime*/) -> bool
 		{
-			O->SetStringField(TEXT("status"), Summary.LastQueryStatus);
-			O->SetNumberField(TEXT("top_folder_count"), Summary.TopLevelFolders.Num());
-		});
-	UnrealAiBackgroundOpsLog::EmitLogLine(
-		TEXT("startup_project_tree_refresh"),
-		TEXT("ok"),
-		Summary.LastQueryDurationMs,
-		DiscoveryDetail);
+			const TSharedPtr<FUnrealAiBackendRegistry> RegStrong = WeakReg.Pin();
+			if (!RegStrong.IsValid())
+			{
+				return false;
+			}
+			const FProjectTreeSummary& Summary = UnrealAiProjectTreeSampler::GetOrRefreshProjectSummary(
+				ProjectIdCopy,
+				true,
+				TEXT("startup_bootstrap"));
+			const FString DiscoveryDetail = UnrealAiBackgroundOpsLog::BuildDetailJson(
+				TEXT("startup_project_tree_refresh"),
+				TEXT("ok"),
+				ProjectIdCopy,
+				TEXT(""),
+				Summary.LastQueryDurationMs,
+				[&Summary](const TSharedPtr<FJsonObject>& O)
+				{
+					O->SetStringField(TEXT("status"), Summary.LastQueryStatus);
+					O->SetNumberField(TEXT("top_folder_count"), Summary.TopLevelFolders.Num());
+				});
+			UnrealAiBackgroundOpsLog::EmitLogLine(
+				TEXT("startup_project_tree_refresh"),
+				TEXT("ok"),
+				Summary.LastQueryDurationMs,
+				DiscoveryDetail);
 
-	IUnrealAiRetrievalService* Retrieval = Reg->GetRetrievalService();
-	if (!Retrieval)
-	{
-		return;
-	}
-	const FUnrealAiRetrievalSettings RetrievalSettings = Retrieval->LoadSettings();
-	if (!RetrievalSettings.bEnabled || !RetrievalSettings.bAutoIndexOnProjectOpen)
-	{
-		return;
-	}
-	Retrieval->RequestRebuild(ProjectId);
-	const FString RetrievalDetail = UnrealAiBackgroundOpsLog::BuildDetailJson(
-		TEXT("startup_retrieval_rebuild"),
-		TEXT("queued"),
-		ProjectId,
-		TEXT(""),
-		0.0,
-		[](const TSharedPtr<FJsonObject>& O)
-		{
-			O->SetStringField(TEXT("reason"), TEXT("autoIndexOnProjectOpen"));
-		});
-	UnrealAiBackgroundOpsLog::EmitLogLine(
-		TEXT("startup_retrieval_rebuild"),
-		TEXT("queued"),
-		0.0,
-		RetrievalDetail);
+			IUnrealAiRetrievalService* Retrieval = RegStrong->GetRetrievalService();
+			if (!Retrieval)
+			{
+				return false;
+			}
+			const FUnrealAiRetrievalSettings RetrievalSettings = Retrieval->LoadSettings();
+			if (!RetrievalSettings.bEnabled || !RetrievalSettings.bAutoIndexOnProjectOpen)
+			{
+				return false;
+			}
+			Retrieval->RequestRebuild(ProjectIdCopy);
+			const FString RetrievalDetail = UnrealAiBackgroundOpsLog::BuildDetailJson(
+				TEXT("startup_retrieval_rebuild"),
+				TEXT("queued"),
+				ProjectIdCopy,
+				TEXT(""),
+				0.0,
+				[](const TSharedPtr<FJsonObject>& O)
+				{
+					O->SetStringField(TEXT("reason"), TEXT("autoIndexOnProjectOpen"));
+				});
+			UnrealAiBackgroundOpsLog::EmitLogLine(
+				TEXT("startup_retrieval_rebuild"),
+				TEXT("queued"),
+				0.0,
+				RetrievalDetail);
+			return false;
+		}),
+		0.15f);
 }
 
 void FUnrealAiEditorModule::RegisterSaveOpenChatsOnExit()
