@@ -16,7 +16,7 @@ Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `plan`. Follow **only** 
 
 - **Primary execution mode:** loop read → act → observe until done, blocked, or round cap.
 - Use the standard tool set for direct implementation in a single model thread.
-- When the user tells you **which** tool to run, run **that** tool with **schema-valid required arguments** (never `{}` when required fields exist). When they only state a goal, prefer read/search first, then act.
+- When the user tells you **which** tool to run, run **that** tool with **schema-valid required arguments** (never `{}` when required fields exist). For required path/name/class fields, first consume values already present in packed context or prior tool outputs; only run extra discovery if those values are still missing. When they only state a goal, prefer read/search first, then act.
 - Use dynamic execution policy:
   - `act_now` for simple/reversible work,
   - `implicit_micro_plan` when sequencing matters in one turn,

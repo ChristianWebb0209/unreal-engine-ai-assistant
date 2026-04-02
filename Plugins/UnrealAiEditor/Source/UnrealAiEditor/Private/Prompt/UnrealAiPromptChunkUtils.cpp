@@ -63,20 +63,20 @@ namespace UnrealAiPromptChunkUtilsPriv
 		if (P == TEXT("cpp_only"))
 		{
 			return TEXT(
-				"**Code-type preference: cpp_only** — Prefer C++ changes via `project_file_read_text` / `project_file_write_text` and related project file tools. Do not call `blueprint_apply_ir`. After native edits, run `cpp_project_compile` and iterate on compiler output until clean (or clearly blocked) before finishing.");
+				"**Code-type preference: cpp_only** — Prefer C++ changes via `project_file_read_text` / `project_file_write_text` (drafts under `Saved/UnrealAiEditorAgent/` by default; `confirm_project_critical:true` for `Source/`, `Config/`, `.uproject`). Do not call `blueprint_apply_ir`. After native edits, prefer a closed-editor build (`build-editor.ps1`); `cpp_project_compile` in an open editor requires `confirm_external_rebuild:true` plus compiler output until clean.");
 		}
 		if (P == TEXT("blueprint_first"))
 		{
 			return TEXT(
-				"**Code-type preference: blueprint_first** — Default to Blueprint graphs and `/Game` assets when either approach could work; fall back to C++ when Blueprint or tools are insufficient. Always compile: `blueprint_compile` for Blueprints, `cpp_project_compile` after substantive C++ edits.");
+				"**Code-type preference: blueprint_first** — Default to Blueprint graphs and `/Game` assets when either approach could work; fall back to C++ when Blueprint or tools are insufficient. Always compile: `blueprint_compile` for Blueprints; after substantive C++ use a closed-editor build when possible, or `cpp_project_compile` with `confirm_external_rebuild:true` if the editor is interactive.");
 		}
 		if (P == TEXT("cpp_first"))
 		{
 			return TEXT(
-				"**Code-type preference: cpp_first** — Default to C++ in `Source/` when either approach could work; use Blueprints where clearly better (UMG layout, rapid iteration the user asked for in BP). After C++ edits, run `cpp_project_compile` and fix errors before finishing.");
+				"**Code-type preference: cpp_first** — Default to C++ in `Source/` when either approach could work; use Blueprints where clearly better (UMG layout, rapid iteration the user asked for in BP). After C++ edits, prefer closed-editor rebuilds; interactive `cpp_project_compile` needs `confirm_external_rebuild:true`.");
 		}
 		return TEXT(
-			"**Code-type preference: auto** — Choose Blueprint vs C++ from task fit and project signals. After Blueprint graph edits run `blueprint_compile`. After meaningful C++ edits run `cpp_project_compile`. Prefer `project_file_move` for fast on-disk renames; use `asset_rename` for `/Game` object paths.");
+			"**Code-type preference: auto** — Choose Blueprint vs C++ from task fit and project signals. After Blueprint graph edits run `blueprint_compile`. After meaningful C++ edits prefer closed-editor builds or `cpp_project_compile` with `confirm_external_rebuild:true` when the editor is open. Prefer drafts in `Saved/UnrealAiEditorAgent/`; use `confirm_project_critical:true` for other paths. Prefer `project_file_move` with the same rules; use `asset_rename` for `/Game` object paths.");
 	}
 } // namespace UnrealAiPromptChunkUtilsPriv
 

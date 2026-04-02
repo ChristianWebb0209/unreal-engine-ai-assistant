@@ -375,6 +375,11 @@ namespace UnrealAiAgentHarnessPriv
 		return TEXT("Config/DefaultEngine.ini");
 	}
 
+	static FString DefaultAssetCreatePackagePath()
+	{
+		return TEXT("/Game/Blueprints");
+	}
+
 	static void TryExtractBlueprintPathFromToolResult(const FString& ToolName, const FString& ToolContent, FString& OutPath)
 	{
 		TSharedPtr<FJsonObject> Root;
@@ -467,6 +472,127 @@ namespace UnrealAiAgentHarnessPriv
 		return FString();
 	}
 
+	static void TryExtractAssetCreateHintsFromToolResult(
+		const FString& ToolName,
+		const FString& ToolContent,
+		FString& OutPackagePath,
+		FString& OutAssetClass)
+	{
+		auto AcceptPackage = [&](const FString& In) -> bool
+		{
+			FString P = In;
+			P.TrimStartAndEndInline();
+			if (P.StartsWith(TEXT("/Game")))
+			{
+				OutPackagePath = P;
+				return true;
+			}
+			return false;
+		};
+		auto AcceptClass = [&](const FString& In) -> bool
+		{
+			FString C = In;
+			C.TrimStartAndEndInline();
+			if (!C.IsEmpty())
+			{
+				OutAssetClass = C;
+				return true;
+			}
+			return false;
+		};
+		TSharedPtr<FJsonObject> Root;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ToolContent);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			return;
+		}
+		if (ToolName == TEXT("asset_create"))
+		{
+			FString ObjPath;
+			if (Root->TryGetStringField(TEXT("object_path"), ObjPath))
+			{
+				int32 Dot = INDEX_NONE;
+				const FString Pkg = ObjPath.FindChar(TEXT('.'), Dot) ? ObjPath.Left(Dot) : ObjPath;
+				AcceptPackage(Pkg);
+			}
+			return;
+		}
+		if (ToolName == TEXT("asset_index_fuzzy_search"))
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Matches = nullptr;
+			if (!Root->TryGetArrayField(TEXT("matches"), Matches) || !Matches)
+			{
+				return;
+			}
+			for (const TSharedPtr<FJsonValue>& V : *Matches)
+			{
+				const TSharedPtr<FJsonObject>* O = nullptr;
+				if (!V.IsValid() || !V->TryGetObject(O) || !O || !(*O).IsValid())
+				{
+					continue;
+				}
+				FString ObjPath;
+				(*O)->TryGetStringField(TEXT("object_path"), ObjPath);
+				int32 Dot = INDEX_NONE;
+				const FString Pkg = ObjPath.FindChar(TEXT('.'), Dot) ? ObjPath.Left(Dot) : ObjPath;
+				if (AcceptPackage(Pkg))
+				{
+					break;
+				}
+			}
+		}
+		if (ToolName == TEXT("asset_registry_query"))
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Assets = nullptr;
+			if (!Root->TryGetArrayField(TEXT("assets"), Assets) || !Assets)
+			{
+				return;
+			}
+			for (const TSharedPtr<FJsonValue>& V : *Assets)
+			{
+				const TSharedPtr<FJsonObject>* O = nullptr;
+				if (!V.IsValid() || !V->TryGetObject(O) || !O || !(*O).IsValid())
+				{
+					continue;
+				}
+				FString ObjPath;
+				(*O)->TryGetStringField(TEXT("object_path"), ObjPath);
+				FString ClassPath;
+				(*O)->TryGetStringField(TEXT("class_path"), ClassPath);
+				int32 Dot = INDEX_NONE;
+				const FString Pkg = ObjPath.FindChar(TEXT('.'), Dot) ? ObjPath.Left(Dot) : ObjPath;
+				AcceptPackage(Pkg);
+				AcceptClass(ClassPath);
+				if (!OutPackagePath.IsEmpty() && !OutAssetClass.IsEmpty())
+				{
+					break;
+				}
+			}
+		}
+	}
+
+	static void FindRecentAssetCreateHintsFromContextState(
+		const FAgentContextState* State,
+		FString& OutPackagePath,
+		FString& OutAssetClass)
+	{
+		OutPackagePath.Reset();
+		OutAssetClass.Reset();
+		if (!State)
+		{
+			return;
+		}
+		for (int32 i = State->ToolResults.Num() - 1; i >= 0; --i)
+		{
+			const FToolContextEntry& E = State->ToolResults[i];
+			TryExtractAssetCreateHintsFromToolResult(E.ToolName, E.TruncatedResult, OutPackagePath, OutAssetClass);
+			if (!OutPackagePath.IsEmpty() && !OutAssetClass.IsEmpty())
+			{
+				return;
+			}
+		}
+	}
+
 	static void TryAutoFillDispatchArgsFromContext(
 		const FString& InvokeName,
 		FString& InOutInvokeArgs,
@@ -479,7 +605,8 @@ namespace UnrealAiAgentHarnessPriv
 			return;
 		}
 		if (InvokeName != TEXT("blueprint_get_graph_summary") && InvokeName != TEXT("blueprint_export_ir")
-			&& InvokeName != TEXT("project_file_read_text"))
+			&& InvokeName != TEXT("project_file_read_text")
+			&& InvokeName != TEXT("asset_create"))
 		{
 			return;
 		}
@@ -530,6 +657,45 @@ namespace UnrealAiAgentHarnessPriv
 						ArgsObj->SetStringField(TEXT("blueprint_path"), Resolved);
 					}
 				}
+			}
+		}
+		if (InvokeName == TEXT("asset_create"))
+		{
+			FString PackagePath;
+			const bool bHasPackagePath =
+				(ArgsObj->TryGetStringField(TEXT("package_path"), PackagePath) || ArgsObj->TryGetStringField(TEXT("path"), PackagePath))
+				&& !PackagePath.TrimStartAndEnd().IsEmpty();
+			FString AssetClass;
+			const bool bHasAssetClass =
+				(ArgsObj->TryGetStringField(TEXT("asset_class"), AssetClass) || ArgsObj->TryGetStringField(TEXT("class_path"), AssetClass))
+				&& !AssetClass.TrimStartAndEnd().IsEmpty();
+			FString AssetName;
+			const bool bHasAssetName =
+				(ArgsObj->TryGetStringField(TEXT("asset_name"), AssetName) || ArgsObj->TryGetStringField(TEXT("name"), AssetName))
+				&& !AssetName.TrimStartAndEnd().IsEmpty();
+
+			FString HintPackagePath;
+			FString HintClassPath;
+			const FAgentContextState* State = ContextService->GetState(ProjectId, ThreadId);
+			FindRecentAssetCreateHintsFromContextState(State, HintPackagePath, HintClassPath);
+
+			if (!bHasPackagePath)
+			{
+				ArgsObj->SetStringField(
+					TEXT("package_path"),
+					!HintPackagePath.IsEmpty() ? HintPackagePath : DefaultAssetCreatePackagePath());
+			}
+			if (!bHasAssetClass)
+			{
+				ArgsObj->SetStringField(
+					TEXT("asset_class"),
+					!HintClassPath.IsEmpty() ? HintClassPath : TEXT("/Script/Engine.Blueprint"));
+			}
+			if (!bHasAssetName)
+			{
+				ArgsObj->SetStringField(
+					TEXT("asset_name"),
+					FString::Printf(TEXT("NewAsset_%lld"), static_cast<long long>(FDateTime::UtcNow().ToUnixTimestamp())));
 			}
 		}
 		FString Out;
