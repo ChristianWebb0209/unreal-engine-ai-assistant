@@ -1,56 +1,51 @@
-actor_attach_to|world_actors|Attach child actor to parent.|write|research|ask=False|agent=True
-actor_destroy|world_actors|Destroy an actor in the editor world.|destructive|research|ask=False|agent=True
-actor_find_by_label|world_actors|Find actors by label or tag.|read|research|ask=True|agent=True
-actor_get_transform|world_actors|Read actor transform and mobility.|read|research|ask=True|agent=True
-actor_set_transform|world_actors|Set actor transform.|write|research|ask=False|agent=True
-actor_set_visibility|world_actors|Toggle actor visibility.|write|research|ask=False|agent=True
-actor_spawn_from_class|world_actors|Spawn an actor in the editor world.|write|research|ask=False|agent=True
+actor_attach_to|world_actors|Attach child actor to parent.|write|implemented|ask=False|agent=True
+actor_destroy|world_actors|Destroy an actor in the editor world.|destructive|implemented|ask=False|agent=True
+actor_find_by_label|world_actors|Find actors by label or tag.|read|implemented|ask=True|agent=True
+actor_get_transform|world_actors|Read actor transform and mobility.|read|implemented|ask=True|agent=True
+actor_set_transform|world_actors|Set actor transform.|write|implemented|ask=False|agent=True
+actor_set_visibility|world_actors|Toggle actor visibility.|write|implemented|ask=False|agent=True
+actor_spawn_from_class|world_actors|Spawn an actor in the editor world.|write|implemented|ask=False|agent=True
 animation_blueprint_get_graph_summary|animation_sequencer|Summarize AnimBlueprint graphs.|read|future|ask=True|agent=True
-arbitrary_network_fetch|banned|Banned: generic network fetch.|exec|banned_v1|ask=False|agent=True
-arbitrary_process_spawn|banned|Banned: spawn arbitrary OS processes.|exec|banned_v1|ask=False|agent=True
-arbitrary_python_eval|banned|Banned: arbitrary Python execution.|exec|banned_v1|ask=False|agent=True
-asset_delete|assets_content|Delete assets.|destructive|research|ask=False|agent=True
-asset_duplicate|assets_content|Duplicate asset to new path.|write|research|ask=False|agent=True
-asset_get_metadata|assets_content|Read asset metadata and dependencies summary.|read|research|ask=True|agent=True
+asset_delete|assets_content|Delete assets.|destructive|implemented|ask=False|agent=True
+asset_duplicate|assets_content|Duplicate asset to new path.|write|implemented|ask=False|agent=True
+asset_get_metadata|assets_content|Read asset metadata and dependencies summary.|read|implemented|ask=True|agent=True
 asset_import|assets_content|Import files via automated import pipeline.|write|future|ask=False|agent=True
-asset_open_editor|editor_ui_navigation|Open an asset in its native editor.|write|research|ask=False|agent=True
-asset_registry_query|assets_content|Query Asset Registry for assets.|read|research|ask=True|agent=True
-asset_rename|assets_content|Rename/move asset and optionally fix references.|destructive|research|ask=False|agent=True
-asset_save_packages|assets_content|Save dirty packages.|write|research|ask=False|agent=True
+asset_open_editor|editor_ui_navigation|Open an asset in its native editor.|write|implemented|ask=False|agent=True
+asset_registry_query|assets_content|Query Asset Registry for assets.|read|implemented|ask=True|agent=True
+asset_rename|assets_content|Rename/move asset and optionally fix references.|destructive|implemented|ask=False|agent=True
+asset_save_packages|assets_content|Save dirty packages.|write|implemented|ask=False|agent=True
 audio_component_preview|audio_metasounds|Preview sound in editor.|write|future|ask=False|agent=True
 blueprint_add_variable|blueprints|Add member variable to Blueprint.|write|future|ask=False|agent=True
-blueprint_compile|blueprints|Compile a Blueprint and return diagnostics.|write|research|ask=False|agent=True
-blueprint_get_graph_summary|blueprints|Export bounded summary of a Blueprint graph.|read|research|ask=True|agent=True
-blueprint_open_graph_tab|blueprints|Open Blueprint editor focused on a graph.|write|research|ask=False|agent=True
+blueprint_compile|blueprints|Compile a Blueprint and return diagnostics.|write|implemented|ask=False|agent=True
+blueprint_get_graph_summary|blueprints|Export bounded summary of a Blueprint graph.|read|implemented|ask=True|agent=True
+blueprint_open_graph_tab|blueprints|Open Blueprint editor focused on a graph.|write|implemented|ask=False|agent=True
 collision_trace_editor_world|physics_collision|Line/sphere trace in editor world.|read|future|ask=True|agent=True
-console_command|console_exec|Execute allow-listed console command.|exec|research|ask=False|agent=True
-content_browser_navigate_folder|editor_ui_navigation|Navigate Content Browser to a folder.|write|research|ask=False|agent=True
-content_browser_sync_asset|editor_ui_navigation|Focus Content Browser on an asset or folder.|write|research|ask=False|agent=True
+console_command|console_exec|Allow-list console keys (stat_fps, r_vsync+args, viewmode_*); legacy wide exec opt-in via settings/env.|exec|implemented|ask=False|agent=True
+content_browser_navigate_folder|editor_ui_navigation|Navigate Content Browser to a folder.|write|implemented|ask=False|agent=True
+content_browser_sync_asset|editor_ui_navigation|Focus Content Browser on an asset or folder.|write|implemented|ask=False|agent=True
 cook_content_for_platform|build_packaging|Cook content for a platform (UAT).|exec|future|ask=False|agent=True
-delete_system_files|banned|Banned: paths outside project scope.|destructive|banned_v1|ask=False|agent=True
-editor_get_selection|selection_framing|List currently selected actors.|read|research|ask=True|agent=True
-editor_set_mode|editor_ui_navigation|Switch editor mode (Place, Landscape, ... allow-listed).|write|research|ask=False|agent=True
-editor_set_selection|selection_framing|Replace editor selection with specified actors.|write|research|ask=False|agent=True
-editor_state_snapshot_read|diagnostics_logs|Deterministic editor/world snapshot JSON.|read|research|ask=True|agent=True
-engine_message_log_read|diagnostics_logs|Read recent Message Log / log tail.|read|research|ask=True|agent=True
+editor_get_selection|selection_framing|List currently selected actors.|read|implemented|ask=True|agent=True
+editor_set_mode|editor_ui_navigation|Switch editor mode (Place, Landscape, ... allow-listed).|write|implemented|ask=False|agent=True
+editor_set_selection|selection_framing|Replace editor selection with specified actors.|write|implemented|ask=False|agent=True
+editor_state_snapshot_read|diagnostics_logs|Deterministic editor/world snapshot JSON.|read|implemented|ask=True|agent=True
+engine_message_log_read|diagnostics_logs|Read recent Message Log / log tail.|read|implemented|ask=True|agent=True
 foliage_paint_instances|landscape_foliage_pcg|Add foliage instances in radius.|write|future|ask=False|agent=True
-global_tab_focus|editor_ui_navigation|Bring a registered dock tab to front.|write|research|ask=False|agent=True
+global_tab_focus|editor_ui_navigation|Bring a registered dock tab to front.|write|implemented|ask=False|agent=True
 landscape_import_heightmap|landscape_foliage_pcg|Import heightmap to landscape.|write|future|ask=False|agent=True
-material_get_usage_summary|materials_rendering|List referencers for a material.|read|research|ask=True|agent=True
-material_instance_set_scalar_parameter|materials_rendering|Set scalar on material instance.|write|research|ask=False|agent=True
-material_instance_set_vector_parameter|materials_rendering|Set vector parameter on material instance.|write|research|ask=False|agent=True
-menu_command_invoke|editor_ui_navigation|Execute a pre-registered editor command ID.|exec|research|ask=False|agent=True
+material_get_usage_summary|materials_rendering|List referencers for a material.|read|implemented|ask=True|agent=True
+material_instance_set_scalar_parameter|materials_rendering|Set scalar on material instance.|write|implemented|ask=False|agent=True
+material_instance_set_vector_parameter|materials_rendering|Set vector parameter on material instance.|write|implemented|ask=False|agent=True
+menu_command_invoke|editor_ui_navigation|Execute a pre-registered editor command ID.|exec|implemented|ask=False|agent=True
 metasound_open_editor|audio_metasounds|Open MetaSound source.|write|future|ask=False|agent=True
-outliner_folder_move|world_actors|Move actors to an outliner folder.|write|research|ask=False|agent=True
+outliner_folder_move|world_actors|Move actors to an outliner folder.|write|implemented|ask=False|agent=True
 package_project|build_packaging|Full package build.|exec|future|ask=False|agent=True
 pcg_generate|landscape_foliage_pcg|Execute PCG graph in editor.|write|future|ask=False|agent=True
 physics_impulse_actor|physics_collision|Apply impulse (PIE-oriented).|write|future|ask=False|agent=True
-pie_start|pie_play|Start Play-In-Editor.|exec|research|ask=False|agent=True
-pie_status|pie_play|Return whether PIE is active.|read|research|ask=True|agent=True
-pie_stop|pie_play|Stop current PIE session.|exec|research|ask=False|agent=True
-project_file_read_text|project_files_search|Read text file under project (allow-listed paths).|read|research|ask=True|agent=True
+pie_start|pie_play|Start Play-In-Editor.|exec|implemented|ask=False|agent=True
+pie_status|pie_play|Return whether PIE is active.|read|implemented|ask=True|agent=True
+pie_stop|pie_play|Stop current PIE session.|exec|implemented|ask=False|agent=True
+project_file_read_text|project_files_search|Read text file under project (allow-listed paths).|read|implemented|ask=True|agent=True
 project_file_write_text|project_files_search|Write text file under project.|destructive|future|ask=False|agent=True
-raw_user_exec_string|banned|Banned: raw exec/console string.|exec|banned_v1|ask=False|agent=True
 render_target_readback_editor|capture_vision|Capture a UTextureRenderTarget2D to disk.|write|future|ask=False|agent=True
 sequencer_open|animation_sequencer|Open Level Sequence in Sequencer.|write|future|ask=False|agent=True
 shader_compile_wait|build_packaging|Wait for shader compile completion.|exec|future|ask=False|agent=True
@@ -58,14 +53,14 @@ source_search_symbol|project_files_search|Fuzzy grep project text files under So
 scene_fuzzy_search|world_actors|Fuzzy-search actors in the current editor level (like Cursor quick-search): matches actor labels, actor names, class names, object paths, and actor tags even when the query is approximate or slightly wrong. Use to find walls, lights, meshes, etc. without exact names.|read|implemented|ask=True|agent=True
 asset_index_fuzzy_search|assets_content|Fuzzy-search the Unreal Asset Registry index (engine-maintained indexed view of content packages). Uses the same asset data the Content Browser uses; supply path_prefix (e.g. /Game or /Game/Textures) to scope. Ranks asset names, object paths, and class paths even when spelling is approximate. Prefer this over source_search_symbol for textures, materials, meshes, and other UAssets.|read|implemented|ask=True|agent=True
 tool_audit_append|diagnostics_logs|Append line to tool audit log file.|write|designed|ask=False|agent=True
-viewport_camera_dolly|viewport_camera|Dolly or zoom the editor view.|write|research|ask=False|agent=True
-viewport_camera_get_transform|viewport_camera|Read active level editor camera transform and FOV.|read|research|ask=True|agent=True
-viewport_camera_orbit|viewport_camera|Orbit the active level editor camera around a pivot.|write|research|ask=False|agent=True
-viewport_camera_pan|viewport_camera|Pan the active editor camera.|write|research|ask=False|agent=True
-viewport_camera_pilot|viewport_camera|Pilot a CameraActor or exit pilot mode.|write|research|ask=False|agent=True
-viewport_camera_set_transform|viewport_camera|Set editor camera location and rotation.|write|research|ask=False|agent=True
-viewport_capture_delayed|capture_vision|Schedule viewport capture after N frames.|write|research|ask=False|agent=True
-viewport_capture_png|capture_vision|Capture active editor viewport to PNG on disk.|write|research|ask=False|agent=True
-viewport_frame_actors|selection_framing|Frame actors by path using bounds and FOV fit.|write|research|ask=False|agent=True
-viewport_frame_selection|selection_framing|Frame current selection in the viewport.|write|research|ask=False|agent=True
-viewport_set_view_mode|viewport_camera|Switch editor viewport rendering mode (Lit, Wireframe, ...).|write|research|ask=False|agent=True
+viewport_camera_dolly|viewport_camera|Dolly or zoom the editor view.|write|implemented|ask=False|agent=True
+viewport_camera_get_transform|viewport_camera|Read active level editor camera transform and FOV.|read|implemented|ask=True|agent=True
+viewport_camera_orbit|viewport_camera|Orbit the active level editor camera around a pivot.|write|implemented|ask=False|agent=True
+viewport_camera_pan|viewport_camera|Pan the active editor camera.|write|implemented|ask=False|agent=True
+viewport_camera_pilot|viewport_camera|Pilot a CameraActor or exit pilot mode.|write|implemented|ask=False|agent=True
+viewport_camera_set_transform|viewport_camera|Set editor camera location and rotation.|write|implemented|ask=False|agent=True
+viewport_capture_delayed|capture_vision|Schedule viewport capture after N frames.|write|implemented|ask=False|agent=True
+viewport_capture_png|capture_vision|Capture active editor viewport to PNG on disk.|write|implemented|ask=False|agent=True
+viewport_frame_actors|selection_framing|Frame actors by path using bounds and FOV fit.|write|implemented|ask=False|agent=True
+viewport_frame_selection|selection_framing|Frame current selection in the viewport.|write|implemented|ask=False|agent=True
+viewport_set_view_mode|viewport_camera|Switch editor viewport rendering mode (Lit, Wireframe, ...).|write|implemented|ask=False|agent=True

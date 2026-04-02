@@ -27,6 +27,16 @@
 #include "Misc/CoreMisc.h"
 #include "Misc/UnrealAiRuntimeDefaults.h"
 
+/**
+ * Tool router — one branch per catalog tool_id (plus compat below).
+ *
+ * Compatibility / alias ids (same handler or thin normalizer — keep in sync with docs/tooling/tool-dispatch-inventory.md):
+ * - scene_fuzzy_search.query → scene_fuzzy_search
+ * - asset_destroy → asset_delete (normalized; error suggests asset_delete)
+ * - actor_destroy → UnrealAiDispatch_ActorDestroy (distinct tool; not asset_delete)
+ *
+ * Console: see UnrealAiToolDispatch_Console.cpp (allow-list keys; optional legacy wide exec via settings/env).
+ */
 namespace UnrealAiToolDispatchInternal
 {
 	static FUnrealAiToolInvocationResult NotImplemented(const FString& ToolId, const FString& Reason = FString())

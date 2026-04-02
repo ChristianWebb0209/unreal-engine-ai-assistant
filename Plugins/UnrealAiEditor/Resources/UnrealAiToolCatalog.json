@@ -22,11 +22,15 @@
       "selection_framing",
       "viewport_camera",
       "world_actors",
-      "network",
-      "filesystem",
       "exec"
     ],
-    "tool_count": 80,
+    "tool_count": 89,
+    "status_legend": {
+      "implemented": "Dispatcher has a UE handler in UnrealAiToolDispatch*.cpp; calls may still fail with invalid args or engine state.",
+      "future": "Staged capability in catalog; implementation may be partial — verify in source.",
+      "designed": "Contract drafted; behavior may be incomplete.",
+      "deprecated": "Prefer the replacement tool_id; see docs/tooling/tool-dispatch-inventory.md."
+    },
     "tool_surface": {
       "description": "Optional per-tool overrides under tools[].tool_surface — domain_tags, centrality, worst_case_cost, requires_strict_args (tools-expansion.md). Tiered eligibility, usage prior, JSONL logging, and repair nudges are toggled in source: Plugins/UnrealAiEditor/.../Misc/UnrealAiRuntimeDefaults.h (not environment variables).",
       "runtime_defaults_header": "Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h"
@@ -89,7 +93,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "actor_destroy",
@@ -134,7 +138,7 @@
         "ok:false when actor_path matches built-in protected types (HLOD / WorldPartition helpers): choose a different actor or fix the user's mesh instead."
       ],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "actor_find_by_label",
@@ -174,7 +178,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "actor_get_transform",
@@ -213,7 +217,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "actor_set_transform",
@@ -273,7 +277,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "actor_get_visibility",
@@ -323,7 +327,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "actor_set_visibility",
@@ -379,7 +383,7 @@
           "hidden"
         ]
       },
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "actor_blueprint_toggle_visibility",
@@ -418,7 +422,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "actor_spawn_from_class",
@@ -477,7 +481,7 @@
         "Missing required args: class_path, location, and rotation are mandatory; `{}` is invalid."
       ],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "animation_blueprint_get_graph_summary",
@@ -522,103 +526,6 @@
       "status": "future"
     },
     {
-      "tool_id": "arbitrary_network_fetch",
-      "summary": "HTTP fetch helper (high risk). Call when the user requests this tool by name; use minimal args if unspecified. Handler may return not_implemented until wired.",
-      "category": "network",
-      "tags": [
-        "security",
-        "network"
-      ],
-      "tier": "experimental",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 0,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {},
-        "required": []
-      },
-      "side_effects": "exec",
-      "permission": "exec",
-      "ue_entry_points": "N/A",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "experimental"
-    },
-    {
-      "tool_id": "arbitrary_process_spawn",
-      "summary": "Spawn OS process (high risk). Call when the user names this tool; minimal args ok. Handler may return not_implemented until wired.",
-      "category": "exec",
-      "tags": [
-        "security"
-      ],
-      "tier": "experimental",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 0,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {},
-        "required": []
-      },
-      "side_effects": "exec",
-      "permission": "exec",
-      "ue_entry_points": "N/A",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "experimental"
-    },
-    {
-      "tool_id": "arbitrary_python_eval",
-      "summary": "Python eval hook (high risk). Call when the user names this tool; use `{}` if no code given. Handler may return not_implemented until wired.",
-      "category": "exec",
-      "tags": [
-        "security"
-      ],
-      "tier": "experimental",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 0,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {},
-        "required": []
-      },
-      "side_effects": "exec",
-      "permission": "exec",
-      "ue_entry_points": "N/A",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "experimental"
-    },
-    {
       "tool_id": "asset_delete",
       "summary": "Delete assets.",
       "category": "assets_content",
@@ -661,7 +568,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "asset_duplicate",
@@ -703,7 +610,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "asset_get_metadata",
@@ -741,7 +648,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "asset_import",
@@ -841,7 +748,7 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/UAssetEditorSubsystem"
       ],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "asset_registry_query",
@@ -947,7 +854,7 @@
         "Neither path_filter nor class_name: provide a bounded filter (handler rejects empty filters)."
       ],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "asset_rename",
@@ -993,7 +900,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "asset_save_packages",
@@ -1036,7 +943,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "audio_component_preview",
@@ -1185,7 +1092,7 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/blueprints-visual-scripting-in-unreal-engine"
       ],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "blueprint_apply_ir",
@@ -1415,7 +1322,7 @@
         "New asset: use create_if_missing:true or asset_create, then apply IR."
       ],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "blueprint_format_graph",
@@ -1488,7 +1395,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "blueprint_format_selection",
@@ -1557,7 +1464,7 @@
         "graph_tab_not_open"
       ],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "blueprint_get_graph_summary",
@@ -1608,7 +1515,7 @@
         "Wrong path kind: PersistentLevel actor paths are not Blueprint assets—use /Game/... object paths."
       ],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "blueprint_open_graph_tab",
@@ -1650,7 +1557,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "collision_trace_editor_world",
@@ -1716,7 +1623,7 @@
     },
     {
       "tool_id": "console_command",
-      "summary": "Execute allow-listed console command.",
+      "summary": "Run a bounded editor console exec via allow-list keys (default). command must be a key: stat_fps, stat_unit, stat_gpu (no args); r_vsync requires args \"0\" or \"1\"; viewmode_lit | viewmode_unlit | viewmode_wireframe (no args). Unsafe legacy: pass raw console text only if Editor Settings → Console command: legacy wide exec, or set UNREAL_AI_CONSOLE_COMMAND_LEGACY_EXEC=1.",
       "category": "console_exec",
       "tags": [
         "console"
@@ -1737,10 +1644,12 @@
         "additionalProperties": false,
         "properties": {
           "command": {
-            "type": "string"
+            "type": "string",
+            "description": "Allow-list key (e.g. stat_fps, r_vsync). Legacy wide-exec mode: full console line."
           },
           "args": {
-            "type": "string"
+            "type": "string",
+            "description": "Optional. For r_vsync only: \"0\" or \"1\". For legacy wide-exec: appended after command with a space."
           }
         },
         "required": [
@@ -1749,13 +1658,17 @@
       },
       "side_effects": "exec",
       "permission": "exec",
-      "ue_entry_points": "GEngine->Exec",
+      "ue_entry_points": "GEngine->Exec (allow-listed expansion in UnrealAiToolDispatch_Console.cpp)",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "Unknown command key (default mode)",
+        "r_vsync without args 0/1",
+        "Legacy mode: substring policy blocks quit/exit/shader rebuild/crash"
+      ],
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/console-commands-in-unreal-engine"
       ],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "content_browser_navigate_folder",
@@ -1793,7 +1706,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "content_browser_sync_asset",
@@ -1841,7 +1754,7 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/content-browser-in-unreal-engine"
       ],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "cook_content_for_platform",
@@ -1882,38 +1795,6 @@
       "status": "future"
     },
     {
-      "tool_id": "delete_system_files",
-      "summary": "Delete files by path (destructive). Call when the user names this tool; use `{}` if paths unspecified. Handler may enforce project scope.",
-      "category": "filesystem",
-      "tags": [
-        "security"
-      ],
-      "tier": "experimental",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 0,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {},
-        "required": []
-      },
-      "side_effects": "disk",
-      "permission": "destructive",
-      "ue_entry_points": "N/A",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "experimental"
-    },
-    {
       "tool_id": "editor_get_selection",
       "summary": "Return only the current editor selection (paths and labels); may be empty. Do not use as scene-wide discovery—use scene_fuzzy_search when the user asks to find actors in the level.",
       "category": "selection_framing",
@@ -1951,7 +1832,7 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/UEditorEngine"
       ],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "editor_get_mode",
@@ -1994,7 +1875,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "editor_set_mode",
@@ -2042,7 +1923,7 @@
           "setting"
         ]
       },
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "editor_set_selection",
@@ -2090,7 +1971,7 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/UEditorEngine"
       ],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "entity_get_property",
@@ -2157,7 +2038,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "entity_set_property",
@@ -2227,7 +2108,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "settings_get",
@@ -2289,7 +2170,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "settings_set",
@@ -2355,7 +2236,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "editor_state_snapshot_read",
@@ -2397,7 +2278,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "engine_message_log_read",
@@ -2441,7 +2322,7 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/logging-in-unreal-engine"
       ],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "foliage_paint_instances",
@@ -2522,7 +2403,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "landscape_import_heightmap",
@@ -2601,7 +2482,7 @@
         "Not found: verify material_path with asset_index_fuzzy_search; path may not exist in this project."
       ],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "material_instance_get_scalar_parameter",
@@ -2644,7 +2525,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "material_instance_set_scalar_parameter",
@@ -2692,7 +2573,7 @@
         "Base Material path: use asset_open_editor on the Material, duplicate to MI, then pass the MI path."
       ],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "material_instance_get_vector_parameter",
@@ -2735,7 +2616,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "material_instance_set_vector_parameter",
@@ -2784,7 +2665,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "menu_command_invoke",
@@ -2823,7 +2704,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "metasound_open_editor",
@@ -2906,7 +2787,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "package_project",
@@ -3068,7 +2949,7 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/play-in-editor-in-unreal-engine"
       ],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "pie_status",
@@ -3101,7 +2982,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "pie_stop",
@@ -3133,7 +3014,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "project_file_read_text",
@@ -3184,7 +3065,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "project_file_write_text",
@@ -3297,7 +3178,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "cpp_project_compile",
@@ -3325,7 +3206,7 @@
         "properties": {
           "target_name": {
             "type": "string",
-            "description": "Editor target name (e.g. BlankEditor). Default: <UProjectBasename>Editor."
+            "description": "UBT target name (usually <UProjectBasename>Editor). Blueprint-only projects still use this editor target; game code may be empty."
           },
           "platform": {
             "type": "string",
@@ -3351,39 +3232,7 @@
         "Long-running; editor may appear busy"
       ],
       "doc_links": [],
-      "status": "research"
-    },
-    {
-      "tool_id": "raw_user_exec_string",
-      "summary": "Execute a raw console/exec string (high risk). Call when the user names this tool; `{}` ok—handler may delegate or return not_implemented.",
-      "category": "exec",
-      "tags": [
-        "security"
-      ],
-      "tier": "experimental",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 0,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {},
-        "required": []
-      },
-      "side_effects": "exec",
-      "permission": "exec",
-      "ue_entry_points": "N/A",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "experimental"
+      "status": "implemented"
     },
     {
       "tool_id": "render_target_readback_editor",
@@ -3838,7 +3687,7 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
       ],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "viewport_camera_get_transform",
@@ -3876,7 +3725,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "viewport_camera_orbit",
@@ -3932,7 +3781,7 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
       ],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "viewport_camera_pan",
@@ -3986,7 +3835,7 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
       ],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "viewport_camera_pilot",
@@ -4027,7 +3876,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "viewport_camera_set_transform",
@@ -4083,7 +3932,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "viewport_capture_delayed",
@@ -4125,7 +3974,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "viewport_capture_png",
@@ -4180,7 +4029,7 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/FScreenshotRequest"
       ],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "viewport_frame_actors",
@@ -4240,7 +4089,7 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/AActor"
       ],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "viewport_frame_selection",
@@ -4278,7 +4127,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "viewport_get_view_mode",
@@ -4321,7 +4170,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "viewport_set_view_mode",
@@ -4373,7 +4222,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "research"
+      "status": "implemented"
     },
     {
       "tool_id": "agent_emit_todo_plan",

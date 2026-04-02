@@ -16,6 +16,7 @@ UUnrealAiEditorSettings::UUnrealAiEditorSettings(const FObjectInitializer& Objec
 	, BlueprintDefaultWireKnotMode(EUnrealAiBlueprintDefaultWireKnotMode::Off)
 	, PlanAutoReplanMaxAttemptsPerRun(2)
 	, bLogLlmRequestsToHarnessRunFile(true)
+	, bConsoleCommandLegacyWideExec(false)
 {
 }
 

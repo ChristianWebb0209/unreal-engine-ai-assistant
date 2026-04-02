@@ -1028,4 +1028,62 @@ bool FUnrealAiTodoPlanContractTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiConsoleCommandAllowlistTest,
+	"UnrealAiEditor.Tools.ConsoleCommandAllowlist",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiConsoleCommandAllowlistTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	TestTrue(TEXT("Runs on game thread"), IsInGameThread());
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("command"), TEXT("___not_an_allowed_console_key___"));
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("console_command"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("unknown key: bOk"), R.bOk);
+		TestTrue(TEXT("unknown key: error mentions allow"), R.ErrorMessage.Contains(TEXT("Unknown")));
+	}
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("command"), TEXT("r_vsync"));
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("console_command"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("r_vsync without args: bOk"), R.bOk);
+	}
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("command"), TEXT("stat_fps"));
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("console_command"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestTrue(TEXT("stat_fps: bOk"), R.bOk);
+		TSharedPtr<FJsonObject> O;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
+		TestTrue(TEXT("stat_fps: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+		TestTrue(TEXT("stat_fps: ok field"), O->GetBoolField(TEXT("ok")));
+		TestEqual(TEXT("stat_fps: executed"), O->GetStringField(TEXT("executed")), FString(TEXT("stat fps")));
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

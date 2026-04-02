@@ -107,4 +107,12 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Config, Category = "Harness", meta = (DisplayName = "Log LLM requests to harness run folder"))
 	bool bLogLlmRequestsToHarnessRunFile = true;
+
+	/**
+	 * When true, console_command passes the command string through to GEngine->Exec with minimal blocking (unsafe).
+	 * Default false: only allow-listed keys from UnrealAiToolDispatch_Console.cpp are executed.
+	 * Overridden when UNREAL_AI_CONSOLE_COMMAND_LEGACY_EXEC is 1/true or 0/false.
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Console command: legacy wide exec (unsafe)"))
+	bool bConsoleCommandLegacyWideExec = false;
 };
