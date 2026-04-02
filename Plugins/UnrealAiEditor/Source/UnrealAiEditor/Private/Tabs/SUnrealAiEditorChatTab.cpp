@@ -8,6 +8,7 @@
 #include "Context/UnrealAiProjectId.h"
 #include "Context/UnrealAiStartupOpsStatus.h"
 #include "Retrieval/IUnrealAiRetrievalService.h"
+#include "Retrieval/UnrealAiRetrievalTypes.h"
 #include "Widgets/SChatComposer.h"
 #include "Widgets/UnrealAiChatUiHelpers.h"
 #include "Widgets/SChatHeader.h"
@@ -30,6 +31,72 @@
 #include "Widgets/SWidget.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
+
+namespace
+{
+	/** Bottom-of-chat status: animated dots while vector index rebuild is in flight or manifest reports indexing. */
+	class SIndexingProjectFooterLabel final : public SCompoundWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SIndexingProjectFooterLabel) {}
+		SLATE_ARGUMENT(TWeakPtr<FUnrealAiBackendRegistry>, BackendRegistry)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			BackendRegistryWeak = InArgs._BackendRegistry;
+			ChildSlot
+				[
+					SAssignNew(Label, STextBlock)
+						.Font(FUnrealAiEditorStyle::FontCaption())
+						.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+						.Visibility(EVisibility::Collapsed)
+				];
+			RegisterActiveTimer(
+				0.35f,
+				FWidgetActiveTimerDelegate::CreateSP(this, &SIndexingProjectFooterLabel::TickAnimate));
+		}
+
+	private:
+		EActiveTimerReturnType TickAnimate(double /*CurrentTime*/, float /*DeltaTime*/)
+		{
+			if (!Label.IsValid())
+			{
+				return EActiveTimerReturnType::Continue;
+			}
+			const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+			bool bIndexing = false;
+			if (const TSharedPtr<FUnrealAiBackendRegistry> Reg = BackendRegistryWeak.Pin())
+			{
+				if (IUnrealAiRetrievalService* Retrieval = Reg->GetRetrievalService())
+				{
+					if (Retrieval->IsEnabledForProject(ProjectId))
+					{
+						const FUnrealAiRetrievalProjectStatus S = Retrieval->GetProjectStatus(ProjectId);
+						bIndexing = S.bBusy
+							|| S.StateText.Equals(TEXT("indexing"), ESearchCase::IgnoreCase);
+					}
+				}
+			}
+			if (!bIndexing)
+			{
+				Label->SetVisibility(EVisibility::Collapsed);
+				return EActiveTimerReturnType::Continue;
+			}
+			Label->SetVisibility(EVisibility::Visible);
+			static const TCHAR* const DotSuffix[] = { TEXT(""), TEXT("."), TEXT(".."), TEXT("...") };
+			DotPhase = (DotPhase + 1) % 4;
+			Label->SetText(FText::Format(
+				LOCTEXT("IndexingProjectFmt", "Indexing project{0}"),
+				FText::FromString(FString(DotSuffix[DotPhase]))));
+			return EActiveTimerReturnType::Continue;
+		}
+
+		TWeakPtr<FUnrealAiBackendRegistry> BackendRegistryWeak;
+		TSharedPtr<STextBlock> Label;
+		int32 DotPhase = 0;
+	};
+}
 
 namespace UnrealAiChatTabChrome
 {
@@ -99,6 +166,11 @@ void SUnrealAiEditorChatTab::Construct(const FArguments& InArgs)
 					.BackendRegistry(BackendRegistry)
 					.MessageList(MessageListWidget)
 					.Session(Session)
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(6.f, 2.f, 6.f, 0.f))
+			[
+				SNew(SIndexingProjectFooterLabel)
+					.BackendRegistry(BackendRegistry)
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(6.f, 4.f, 6.f, 4.f))
 			[
