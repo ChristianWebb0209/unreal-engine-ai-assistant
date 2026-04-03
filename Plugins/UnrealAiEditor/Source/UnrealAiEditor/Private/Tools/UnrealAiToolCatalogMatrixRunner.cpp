@@ -13,6 +13,7 @@
 
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Tools/UnrealAiToolDispatch.h"
+#include "Tools/UnrealAiToolResolver.h"
 
 namespace UnrealAiToolCatalogMatrixRunnerPriv
 {
@@ -55,6 +56,170 @@ namespace UnrealAiToolCatalogMatrixRunnerPriv
 		ContractViolations.Add(MakeShared<FJsonValueObject>(V.ToSharedRef()));
 	}
 
+	static TArray<FString> GetRequiredParameterKeys(const TSharedPtr<FJsonObject>& ToolDef)
+	{
+		TArray<FString> Required;
+		if (!ToolDef.IsValid())
+		{
+			return Required;
+		}
+		const TSharedPtr<FJsonObject>* Parameters = nullptr;
+		if (!ToolDef->TryGetObjectField(TEXT("parameters"), Parameters) || !Parameters || !(*Parameters).IsValid())
+		{
+			return Required;
+		}
+		const TArray<TSharedPtr<FJsonValue>>* RequiredArray = nullptr;
+		if (!(*Parameters)->TryGetArrayField(TEXT("required"), RequiredArray) || !RequiredArray)
+		{
+			return Required;
+		}
+		for (const TSharedPtr<FJsonValue>& Value : *RequiredArray)
+		{
+			if (Value.IsValid())
+			{
+				const FString Key = Value->AsString();
+				if (!Key.IsEmpty())
+				{
+					Required.Add(Key);
+				}
+			}
+		}
+		return Required;
+	}
+
+	static TSharedPtr<FJsonObject> GetParameterPropertiesObject(const TSharedPtr<FJsonObject>& ToolDef)
+	{
+		const TSharedPtr<FJsonObject>* Parameters = nullptr;
+		if (!ToolDef.IsValid() || !ToolDef->TryGetObjectField(TEXT("parameters"), Parameters) || !Parameters || !(*Parameters).IsValid())
+		{
+			return nullptr;
+		}
+		const TSharedPtr<FJsonObject>* Properties = nullptr;
+		if (!(*Parameters)->TryGetObjectField(TEXT("properties"), Properties) || !Properties || !(*Properties).IsValid())
+		{
+			return nullptr;
+		}
+		return *Properties;
+	}
+
+	static TSharedPtr<FJsonValue> BuildExampleJsonValueForSchema(const TSharedPtr<FJsonObject>& PropertySchema)
+	{
+		if (!PropertySchema.IsValid())
+		{
+			return MakeShared<FJsonValueString>(TEXT("<required>"));
+		}
+		const TArray<TSharedPtr<FJsonValue>>* EnumValues = nullptr;
+		if (PropertySchema->TryGetArrayField(TEXT("enum"), EnumValues) && EnumValues && EnumValues->Num() > 0)
+		{
+			return (*EnumValues)[0];
+		}
+		FString Type;
+		PropertySchema->TryGetStringField(TEXT("type"), Type);
+		Type = Type.ToLower();
+		if (Type == TEXT("string"))
+		{
+			return MakeShared<FJsonValueString>(TEXT("<required>"));
+		}
+		if (Type == TEXT("boolean"))
+		{
+			return MakeShared<FJsonValueBoolean>(false);
+		}
+		if (Type == TEXT("integer") || Type == TEXT("number"))
+		{
+			return MakeShared<FJsonValueNumber>(0);
+		}
+		if (Type == TEXT("array"))
+		{
+			TArray<TSharedPtr<FJsonValue>> Arr;
+			const TSharedPtr<FJsonObject>* Items = nullptr;
+			if (PropertySchema->TryGetObjectField(TEXT("items"), Items) && Items && (*Items).IsValid())
+			{
+				Arr.Add(BuildExampleJsonValueForSchema(*Items));
+			}
+			return MakeShared<FJsonValueArray>(Arr);
+		}
+		if (Type == TEXT("object"))
+		{
+			return MakeShared<FJsonValueObject>(MakeShared<FJsonObject>());
+		}
+		return MakeShared<FJsonValueString>(TEXT("<required>"));
+	}
+
+	/** Minimal args so the resolver can validate strict composite tools (no inference). */
+	static TSharedPtr<FJsonObject> BuildMinimalSmokeArgsForTool(const FString& ToolId, const TSharedPtr<FJsonObject>& ToolDef)
+	{
+		if (ToolId == TEXT("setting_query"))
+		{
+			TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+			A->SetStringField(TEXT("domain"), TEXT("editor_preference"));
+			A->SetStringField(TEXT("key"), TEXT("editor_focus"));
+			return A;
+		}
+		if (ToolId == TEXT("setting_apply"))
+		{
+			TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+			A->SetStringField(TEXT("domain"), TEXT("editor_preference"));
+			A->SetStringField(TEXT("key"), TEXT("editor_focus"));
+			A->SetBoolField(TEXT("value"), false);
+			return A;
+		}
+		if (ToolId == TEXT("viewport_camera_control"))
+		{
+			TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+			A->SetStringField(TEXT("operation"), TEXT("get_transform"));
+			return A;
+		}
+		if (ToolId == TEXT("viewport_capture"))
+		{
+			TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+			A->SetStringField(TEXT("capture_kind"), TEXT("immediate_png"));
+			return A;
+		}
+		if (ToolId == TEXT("viewport_frame"))
+		{
+			TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+			A->SetStringField(TEXT("target"), TEXT("selection"));
+			return A;
+		}
+		if (ToolId == TEXT("material_instance_set_parameter"))
+		{
+			TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+			A->SetStringField(TEXT("value_kind"), TEXT("vector"));
+			A->SetStringField(TEXT("material_path"), TEXT("/Game/Placeholder.Placeholder"));
+			A->SetStringField(TEXT("parameter_name"), TEXT("Param"));
+			TArray<TSharedPtr<FJsonValue>> LC;
+			LC.Add(MakeShared<FJsonValueNumber>(1.0));
+			LC.Add(MakeShared<FJsonValueNumber>(1.0));
+			LC.Add(MakeShared<FJsonValueNumber>(1.0));
+			A->SetArrayField(TEXT("linear_color"), LC);
+			return A;
+		}
+		if (ToolId == TEXT("asset_graph_query"))
+		{
+			TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+			A->SetStringField(TEXT("relation"), TEXT("referencers"));
+			A->SetStringField(TEXT("object_path"), TEXT("/Game/Placeholder.Placeholder"));
+			return A;
+		}
+
+		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+		const TArray<FString> Required = GetRequiredParameterKeys(ToolDef);
+		const TSharedPtr<FJsonObject> Properties = GetParameterPropertiesObject(ToolDef);
+		for (const FString& Key : Required)
+		{
+			const TSharedPtr<FJsonObject>* PropSchema = nullptr;
+			if (Properties.IsValid() && Properties->TryGetObjectField(Key, PropSchema) && PropSchema && (*PropSchema).IsValid())
+			{
+				Out->SetField(Key, BuildExampleJsonValueForSchema(*PropSchema));
+			}
+			else
+			{
+				Out->SetStringField(Key, TEXT("<required>"));
+			}
+		}
+		return Out;
+	}
+
 }
 
 bool UnrealAiToolCatalogMatrixRunner::RunAndWriteJson(const FString& MatrixFilter, TArray<FString>* OutViolationMessages)
@@ -79,6 +244,7 @@ bool UnrealAiToolCatalogMatrixRunner::RunAndWriteJson(const FString& MatrixFilte
 	int32 SkippedBanned = 0;
 	int32 SkippedFilter = 0;
 	int32 Invoked = 0;
+	FUnrealAiToolResolver Resolver(Cat);
 
 	Cat.ForEachTool([&](const FString& ToolId, const TSharedPtr<FJsonObject>& Def) {
 		if (!MatrixFilter.IsEmpty() && !ToolId.Contains(MatrixFilter))
@@ -103,13 +269,27 @@ bool UnrealAiToolCatalogMatrixRunner::RunAndWriteJson(const FString& MatrixFilte
 			return;
 		}
 
-		const TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		const TSharedPtr<FJsonObject> Args = BuildMinimalSmokeArgsForTool(ToolId, Def);
+		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+		Row->SetStringField(TEXT("tool_id"), ToolId);
+		Row->SetBoolField(TEXT("skipped"), false);
 
 		++Invoked;
 
 		const double T0 = FPlatformTime::Seconds();
 		UE_LOG(LogTemp, Warning, TEXT("CatalogMatrix: invoking %s (%d/%d)"), *ToolId, Invoked, Cat.GetToolCount());
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(ToolId, Args, Def, nullptr, FString(), FString());
+		FUnrealAiToolInvocationResult R;
+		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(ToolId, Args);
+		if (!Resolved.bResolved)
+		{
+			R = Resolved.FailureResult;
+		}
+		else
+		{
+			R = UnrealAiDispatchTool(Resolved.LegacyToolId, Resolved.ResolvedArguments, Resolved.LegacyToolDefinition, nullptr, FString(), FString());
+			FUnrealAiToolResolver::AttachAuditToResult(Resolved.Audit, R);
+			Row->SetStringField(TEXT("resolved_tool_id"), Resolved.LegacyToolId);
+		}
 		const double T1 = FPlatformTime::Seconds();
 		const double Ms = (T1 - T0) * 1000.0;
 		UE_LOG(LogTemp, Warning, TEXT("CatalogMatrix: done %s ok=%s duration_ms=%.3f"),
@@ -117,9 +297,6 @@ bool UnrealAiToolCatalogMatrixRunner::RunAndWriteJson(const FString& MatrixFilte
 			R.bOk ? TEXT("true") : TEXT("false"),
 			Ms);
 
-		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
-		Row->SetStringField(TEXT("tool_id"), ToolId);
-		Row->SetBoolField(TEXT("skipped"), false);
 		Row->SetNumberField(TEXT("duration_ms"), Ms);
 		Row->SetBoolField(TEXT("bOk"), R.bOk);
 		if (!R.ErrorMessage.IsEmpty())

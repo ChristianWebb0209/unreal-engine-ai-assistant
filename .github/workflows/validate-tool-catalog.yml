@@ -1,0 +1,25 @@
+name: Validate tool catalog
+
+on:
+  push:
+    paths:
+      - 'Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json'
+      - 'scripts/Validate-UnrealAiToolCatalog.ps1'
+      - '.github/workflows/validate-tool-catalog.yml'
+  pull_request:
+    paths:
+      - 'Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json'
+      - 'scripts/Validate-UnrealAiToolCatalog.ps1'
+      - '.github/workflows/validate-tool-catalog.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate UnrealAiToolCatalog.json
+        shell: pwsh
+        run: ./scripts/Validate-UnrealAiToolCatalog.ps1

@@ -28,7 +28,13 @@ public:
 	/** Find tool definition object by tool_id, or null. */
 	TSharedPtr<FJsonObject> FindToolDefinition(const FString& ToolId) const;
 
+	/** Resolver contract version advertised in catalog meta, or a safe fallback. */
+	FString GetResolverContractVersion() const;
+
 	int32 GetToolCount() const { return ToolById.Num(); }
+
+	/** Return all tool ids in deterministic sorted order. */
+	void GetAllToolIds(TArray<FString>& OutToolIds) const;
 
 	/** Invoke Fn for each tool in deterministic order (sorted by tool_id). */
 	void ForEachTool(TFunctionRef<void(const FString& ToolId, const TSharedPtr<FJsonObject>& Definition)> Fn) const;

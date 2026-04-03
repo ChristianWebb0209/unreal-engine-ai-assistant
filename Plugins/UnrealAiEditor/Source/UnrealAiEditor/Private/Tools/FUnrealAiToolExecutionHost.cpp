@@ -5,6 +5,7 @@
 #include "Tools/UnrealAiToolDispatch.h"
 #include "Tools/UnrealAiToolFocus.h"
 #include "Tools/UnrealAiToolInvocationArgs.h"
+#include "Tools/UnrealAiToolResolver.h"
 
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -55,14 +56,26 @@ FUnrealAiToolInvocationResult FUnrealAiToolExecutionHost::InvokeTool(
 		}
 	}
 	UnrealAiConsumeFocusedFlag(Args);
-	const TSharedPtr<FJsonObject> Entry = Catalog.FindToolDefinition(ToolName);
-	FUnrealAiToolInvocationResult Result =
-		UnrealAiDispatchTool(ToolName, Args, Entry, Registry, SessionProjectId, SessionThreadId);
+	FUnrealAiToolResolver Resolver(Catalog);
+	const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(ToolName, Args);
+	if (!Resolved.bResolved)
+	{
+		return Resolved.FailureResult;
+	}
+
+	FUnrealAiToolInvocationResult Result = UnrealAiDispatchTool(
+		Resolved.LegacyToolId,
+		Resolved.ResolvedArguments,
+		Resolved.LegacyToolDefinition,
+		Registry,
+		SessionProjectId,
+		SessionThreadId);
+	FUnrealAiToolResolver::AttachAuditToResult(Resolved.Audit, Result);
 	// When Editor focus is enabled, automatically open/foreground relevant editors after successful
 	// blueprint/asset/content tools (models rarely pass focused:true). Explicit focused:false opts out.
 	if (Result.bOk && FUnrealAiEditorModule::IsEditorFocusEnabled() && !bSuppressEditorFollow)
 	{
-		UnrealAiApplyPostToolEditorFocus(ToolName, Args, Result);
+		UnrealAiApplyPostToolEditorFocus(Resolved.LegacyToolId, Resolved.ResolvedArguments, Result);
 	}
 	return Result;
 }

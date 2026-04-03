@@ -135,11 +135,39 @@ TSharedPtr<FJsonObject> FUnrealAiToolCatalog::FindToolDefinition(const FString& 
 	return nullptr;
 }
 
+FString FUnrealAiToolCatalog::GetResolverContractVersion() const
+{
+	const TSharedPtr<FJsonObject>* Meta = nullptr;
+	if (!Root.IsValid() || !Root->TryGetObjectField(TEXT("meta"), Meta) || !Meta || !(*Meta).IsValid())
+	{
+		return TEXT("1.0.0");
+	}
+
+	const TSharedPtr<FJsonObject>* ResolverContract = nullptr;
+	if (!(*Meta)->TryGetObjectField(TEXT("resolver_contract"), ResolverContract) || !ResolverContract || !(*ResolverContract).IsValid())
+	{
+		return TEXT("1.0.0");
+	}
+
+	FString Version;
+	if (!(*ResolverContract)->TryGetStringField(TEXT("version"), Version) || Version.IsEmpty())
+	{
+		return TEXT("1.0.0");
+	}
+	return Version;
+}
+
+void FUnrealAiToolCatalog::GetAllToolIds(TArray<FString>& OutToolIds) const
+{
+	OutToolIds.Reset();
+	ToolById.GetKeys(OutToolIds);
+	OutToolIds.Sort();
+}
+
 void FUnrealAiToolCatalog::ForEachTool(TFunctionRef<void(const FString& ToolId, const TSharedPtr<FJsonObject>& Definition)> Fn) const
 {
 	TArray<FString> Keys;
-	ToolById.GetKeys(Keys);
-	Keys.Sort();
+	GetAllToolIds(Keys);
 	for (const FString& Key : Keys)
 	{
 		const TSharedPtr<FJsonObject>* Def = ToolById.Find(Key);
@@ -172,8 +200,7 @@ void FUnrealAiToolCatalog::ForEachEnabledToolForMode(
 		}
 	}
 	TArray<FString> Keys;
-	ToolById.GetKeys(Keys);
-	Keys.Sort();
+	GetAllToolIds(Keys);
 	for (const FString& Key : Keys)
 	{
 		const TSharedPtr<FJsonObject>* ObjPtr = ToolById.Find(Key);

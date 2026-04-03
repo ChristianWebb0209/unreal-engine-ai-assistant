@@ -1,8 +1,8 @@
 {
   "meta": {
     "catalog_version": "1.1.0",
-    "ue_target": "5.5+",
-    "schema_ref": "plugin:UnrealAiEditor/Resources/UnrealAiToolCatalog.json (single embedded catalog, no separate schema file)",
+    "ue_target": "5.7+",
+    "schema_ref": "plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json validated by scripts/Validate-UnrealAiToolCatalog.ps1; agent contracts: docs/planning/deterministic-tool-contracts.md",
     "generated_at": "2026-03-20T23:38:27+00:00",
     "categories": [
       "animation_sequencer",
@@ -22,9 +22,44 @@
       "selection_framing",
       "viewport_camera",
       "world_actors",
-      "exec"
+      "exec",
+      "settings_properties"
     ],
-    "tool_count": 89,
+    "tool_count": 99,
+    "retrieval_index": {
+      "bm25_document_formula": "tool_id + summary + category + tags + tool_surface.domain_tags",
+      "indexed_fields": [
+        "tool_id",
+        "summary",
+        "category",
+        "tags",
+        "tool_surface.domain_tags"
+      ],
+      "not_indexed_fields": [
+        "parameters",
+        "failure_modes",
+        "ue_entry_points",
+        "routing"
+      ],
+      "query_shaper_alignment": "Summaries and tags should mirror the query shaper's domain vocabulary so top-K retrieval can keep the tool roster compact."
+    },
+    "optimization": {
+      "tiered_appendix_char_budget": 900,
+      "tool_surface_budget_chars": 12000,
+      "additional_properties_false": "All newly added family tools publish strict argument schemas and rely on the resolver for legacy alias repair.",
+      "avoid_schema_aliases": "Expose one canonical key per concept in the catalog; compatibility aliases belong in the resolver.",
+      "core_pack_discipline": "Keep core-pack entries small and high-frequency; prefer top-K retrieval for the long tail."
+    },
+    "naming_patterns": {
+      "query_get": "Use *_query or *_get for read-only discovery tools.",
+      "set_apply": "Use *_set or *_apply for state changes when the operation behaves like a property write.",
+      "search_fuzzy": "Use search/fuzzy tool ids for project or scene discovery before precise writes.",
+      "viewport_prefix": "Viewport families consolidate camera, frame, and capture operations under shared prefixes.",
+      "project_file_prefix": "Project-file tools continue to use project_file_* for project-scoped disk I/O.",
+      "console_escape": "Console access stays behind console_command and never expands into arbitrary shell execution.",
+      "settings_envelope": "setting_query and setting_apply use a domain/key envelope and resolve to legacy settings_get/settings_set today.",
+      "imperative_verbs": "Use imperative verbs for one-shot actions such as compile, open, save, start, and stop."
+    },
     "status_legend": {
       "implemented": "Dispatcher has a UE handler in UnrealAiToolDispatch*.cpp; calls may still fail with invalid args or engine state.",
       "future": "Staged capability in catalog; implementation may be partial — verify in source.",
@@ -34,6 +69,11 @@
     "tool_surface": {
       "description": "Optional per-tool overrides under tools[].tool_surface — domain_tags, centrality, worst_case_cost, requires_strict_args (tools-expansion.md). Tiered eligibility, usage prior, JSONL logging, and repair nudges are toggled in source: Plugins/UnrealAiEditor/.../Misc/UnrealAiRuntimeDefaults.h (not environment variables).",
       "runtime_defaults_header": "Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h"
+    },
+    "resolver_contract": {
+      "version": "2.1.0",
+      "architecture_doc": "docs/planning/new-tools-schema/resolver-architecture.md",
+      "notes": "No resolver inference for operation/capture_kind/target/value_kind; explicit catalog required fields only. No Levenshtein tool_id autocorrect (suggestions only). Alias table + path canonicalization only. Validates before dispatch; resolver_audit on results."
     },
     "invocation": {
       "focused_flag": "Optional JSON field \"focused\": true on supported tools. Stripped before handlers; after a successful run the editor opens or foregrounds the related Blueprint, asset, Content Browser selection, or project source file in the IDE. Tools list this property explicitly where the catalog schema is strict (additionalProperties: false)."
@@ -2869,9 +2909,231 @@
       "status": "implemented"
     },
     {
+      "tool_id": "setting_query",
+      "summary": "Read one allowlisted setting using the domain/key settings envelope. Prefer this over settings_get; the resolver maps the envelope to the legacy settings backend today.",
+      "category": "settings_properties",
+      "tags": [
+        "settings",
+        "read",
+        "editor",
+        "viewport",
+        "project",
+        "envelope"
+      ],
+      "tier": "standard",
+      "naming_family": "settings",
+      "paired_tool_id": "setting_apply",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 66,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "settings",
+          "editor",
+          "viewport",
+          "project",
+          "plugin",
+          "cvar"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "type": "string",
+            "enum": [
+              "editor_preference",
+              "project_setting",
+              "cvar",
+              "viewport_session",
+              "plugin_setting",
+              "map_world_settings"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "description": "Allowlisted setting key inside the chosen domain."
+          },
+          "scope": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "project_path": {
+                "type": "string"
+              },
+              "plugin_id": {
+                "type": "string"
+              },
+              "map_path": {
+                "type": "string"
+              },
+              "viewport_id": {
+                "type": "string"
+              }
+            }
+          },
+          "value_kind": {
+            "type": "string",
+            "enum": [
+              "bool",
+              "int",
+              "float",
+              "string",
+              "enum",
+              "linear_color",
+              "vector"
+            ]
+          }
+        },
+        "required": [
+          "domain",
+          "key"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_singleton",
+        "legacy_targets": [
+          {
+            "tool_id": "settings_get"
+          }
+        ],
+        "resolver_notes": "Resolver maps the settings envelope to the current scope+key settings_get contract until the domain registry lands."
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FEditorViewportClient / module settings / ini read",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "setting_apply",
+      "summary": "Write one allowlisted setting using the domain/key settings envelope. Prefer this over settings_set; the resolver maps the envelope to the legacy settings backend today.",
+      "category": "settings_properties",
+      "tags": [
+        "settings",
+        "write",
+        "editor",
+        "viewport",
+        "project",
+        "envelope"
+      ],
+      "tier": "standard",
+      "naming_family": "settings",
+      "paired_tool_id": "setting_query",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 65,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "settings",
+          "editor",
+          "viewport",
+          "project",
+          "plugin",
+          "cvar"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "type": "string",
+            "enum": [
+              "editor_preference",
+              "project_setting",
+              "cvar",
+              "viewport_session",
+              "plugin_setting",
+              "map_world_settings"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "description": "Allowlisted setting key inside the chosen domain."
+          },
+          "scope": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "project_path": {
+                "type": "string"
+              },
+              "plugin_id": {
+                "type": "string"
+              },
+              "map_path": {
+                "type": "string"
+              },
+              "viewport_id": {
+                "type": "string"
+              }
+            }
+          },
+          "value_kind": {
+            "type": "string",
+            "enum": [
+              "bool",
+              "int",
+              "float",
+              "string",
+              "enum",
+              "linear_color",
+              "vector"
+            ]
+          },
+          "value": {},
+          "confirm": {
+            "type": "boolean"
+          },
+          "dry_run": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "domain",
+          "key",
+          "value"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_singleton",
+        "legacy_targets": [
+          {
+            "tool_id": "settings_set"
+          }
+        ],
+        "resolver_notes": "Resolver maps the settings envelope to the current scope+key settings_set contract until the domain registry lands."
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "FEditorViewportClient / module settings / ini write",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
       "tool_id": "settings_get",
-      "summary": "Read one allowlisted setting from viewport/editor/project scope using scope+key.",
-      "category": "properties_settings",
+      "summary": "Compatibility-only legacy settings reader. Prefer setting_query for model-facing retrieval and resolver-based repair.",
+      "category": "settings_properties",
       "tags": [
         "settings",
         "read",
@@ -2881,9 +3143,9 @@
       ],
       "tier": "standard",
       "modes": {
-        "ask": true,
-        "agent": true,
-        "plan": true
+        "ask": false,
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 61,
@@ -2928,12 +3190,12 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "settings_set",
-      "summary": "Write one allowlisted setting in viewport/editor/project scope using scope+key+value. Project scope (/Script/...) writes DefaultEngine.ini only for keys explicitly approved in UnrealAiProjectIniSettingsAllowlist.cpp (default: none).",
-      "category": "properties_settings",
+      "summary": "Compatibility-only legacy settings writer. Prefer setting_apply for model-facing retrieval and resolver-based repair.",
+      "category": "settings_properties",
       "tags": [
         "settings",
         "write",
@@ -2944,8 +3206,8 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "agent": true,
-        "plan": true
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 60,
@@ -2994,7 +3256,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "editor_state_snapshot_read",
@@ -3286,8 +3548,98 @@
       "status": "implemented"
     },
     {
+      "tool_id": "material_instance_set_parameter",
+      "summary": "Set a scalar or vector parameter on a Material Instance. You must pass value_kind (scalar|vector) explicitly with material_path and parameter_name; include value or linear_color per branch. No silent value_kind inference.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "parameter",
+        "write",
+        "scalar",
+        "vector",
+        "value_kind"
+      ],
+      "tier": "standard",
+      "naming_family": "composite",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 52,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "material",
+          "material instance",
+          "parameter",
+          "scalar",
+          "vector"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "value_kind": {
+            "type": "string",
+            "enum": [
+              "scalar",
+              "vector"
+            ]
+          },
+          "material_path": {
+            "type": "string"
+          },
+          "parameter_name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          },
+          "linear_color": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "value_kind",
+          "material_path",
+          "parameter_name"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_family",
+        "legacy_targets": [
+          {
+            "tool_id": "material_instance_set_scalar_parameter"
+          },
+          {
+            "tool_id": "material_instance_set_vector_parameter"
+          }
+        ],
+        "resolver_notes": "Resolver branches on value_kind and projects only the fields accepted by the legacy scalar/vector handler."
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "UMaterialInstance editing APIs",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Base Material path: use asset_open_editor on the Material, duplicate to MI, then pass the MI path."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
       "tool_id": "material_instance_set_scalar_parameter",
-      "summary": "Set one scalar parameter on a Material Instance (write). material_path must be a UMaterialInstanceConstant object path, not a base UMaterial. If the path is a base Material, open it in the editor (asset_open_editor), duplicate to an MI, then retry with the MI path. For read-only usage intel, use material_get_usage_summary.",
+      "summary": "Compatibility-only scalar branch for Material Instance parameter writes. Prefer material_instance_set_parameter with value_kind=scalar.",
       "category": "materials_rendering",
       "tags": [
         "material"
@@ -3295,8 +3647,8 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "agent": true,
-        "plan": true
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 48,
@@ -3331,7 +3683,7 @@
         "Base Material path: use asset_open_editor on the Material, duplicate to MI, then pass the MI path."
       ],
       "doc_links": [],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "material_instance_get_vector_parameter",
@@ -3378,7 +3730,7 @@
     },
     {
       "tool_id": "material_instance_set_vector_parameter",
-      "summary": "Set a vector parameter on a Material Instance (write). material_path must resolve to a UMaterialInstanceConstant, not a base Material; duplicate or create an MI first if needed.",
+      "summary": "Compatibility-only vector branch for Material Instance parameter writes. Prefer material_instance_set_parameter with value_kind=vector.",
       "category": "materials_rendering",
       "tags": [
         "material"
@@ -3386,8 +3738,8 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "agent": true,
-        "plan": true
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 47,
@@ -3423,7 +3775,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "menu_command_invoke",
@@ -4399,8 +4751,172 @@
       "status": "designed"
     },
     {
+      "tool_id": "viewport_camera_control",
+      "summary": "Unified viewport camera tool. Required: operation (dolly|orbit|pan|pilot|get_transform|set_transform) — explicit; no inference from payload shape. Prefer over branch-specific viewport_camera_* tools.",
+      "category": "viewport_camera",
+      "tags": [
+        "viewport",
+        "camera",
+        "orbit",
+        "pan",
+        "dolly",
+        "pilot",
+        "operation"
+      ],
+      "tier": "tier1_mvp",
+      "naming_family": "composite",
+      "paired_tool_id": "viewport_camera_get_transform",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 92,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "viewport",
+          "camera",
+          "transform",
+          "orbit",
+          "pilot",
+          "frame"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "dolly",
+              "orbit",
+              "pan",
+              "pilot",
+              "get_transform",
+              "set_transform"
+            ]
+          },
+          "dolly_units": {
+            "type": "number"
+          },
+          "fov_delta": {
+            "type": "number"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "dolly",
+              "fov"
+            ]
+          },
+          "pivot": {
+            "type": "string"
+          },
+          "yaw_deg": {
+            "type": "number"
+          },
+          "pitch_deg": {
+            "type": "number"
+          },
+          "radius": {
+            "type": "number"
+          },
+          "relative": {
+            "type": "boolean"
+          },
+          "delta": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "space": {
+            "type": "string",
+            "enum": [
+              "world",
+              "camera"
+            ]
+          },
+          "actor_path": {
+            "type": "string"
+          },
+          "unpilot": {
+            "type": "boolean"
+          },
+          "viewport_index": {
+            "type": "integer"
+          },
+          "location": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "rotation": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "b_snap": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_family",
+        "legacy_targets": [
+          {
+            "tool_id": "viewport_camera_dolly"
+          },
+          {
+            "tool_id": "viewport_camera_orbit"
+          },
+          {
+            "tool_id": "viewport_camera_pan"
+          },
+          {
+            "tool_id": "viewport_camera_pilot"
+          },
+          {
+            "tool_id": "viewport_camera_get_transform"
+          },
+          {
+            "tool_id": "viewport_camera_set_transform"
+          }
+        ],
+        "resolver_notes": "Resolver branches on operation and projects only the fields accepted by the chosen viewport camera handler."
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "FEditorViewportClient camera APIs",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Missing or invalid operation returns a suggested_correct_call with the canonical operation field.",
+        "Use get_transform before set_transform if the current camera state may be stale."
+      ],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
+      ],
+      "status": "implemented"
+    },
+    {
       "tool_id": "viewport_camera_dolly",
-      "summary": "Dolly or zoom the editor view.",
+      "summary": "Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=dolly.",
       "category": "viewport_camera",
       "tags": [
         "viewport",
@@ -4409,8 +4925,8 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": false,
-        "agent": true,
-        "plan": true
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 86,
@@ -4445,11 +4961,11 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
       ],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "viewport_camera_get_transform",
-      "summary": "Read active level editor camera transform and FOV.",
+      "summary": "Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=get_transform.",
       "category": "viewport_camera",
       "tags": [
         "viewport",
@@ -4458,9 +4974,9 @@
       ],
       "tier": "standard",
       "modes": {
-        "ask": true,
-        "agent": true,
-        "plan": true
+        "ask": false,
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 72,
@@ -4483,11 +4999,11 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "viewport_camera_orbit",
-      "summary": "Orbit the active level editor camera around a pivot.",
+      "summary": "Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=orbit.",
       "category": "viewport_camera",
       "tags": [
         "viewport",
@@ -4497,8 +5013,8 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": false,
-        "agent": true,
-        "plan": true
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 88,
@@ -4539,11 +5055,11 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
       ],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "viewport_camera_pan",
-      "summary": "Pan the active editor camera.",
+      "summary": "Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=pan.",
       "category": "viewport_camera",
       "tags": [
         "viewport",
@@ -4552,8 +5068,8 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": false,
-        "agent": true,
-        "plan": true
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 87,
@@ -4593,11 +5109,11 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
       ],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "viewport_camera_pilot",
-      "summary": "Pilot a CameraActor or exit pilot mode.",
+      "summary": "Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=pilot.",
       "category": "viewport_camera",
       "tags": [
         "viewport",
@@ -4607,8 +5123,8 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "agent": true,
-        "plan": true
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 48,
@@ -4634,11 +5150,11 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "viewport_camera_set_transform",
-      "summary": "Set editor camera location and rotation.",
+      "summary": "Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=set_transform.",
       "category": "viewport_camera",
       "tags": [
         "viewport",
@@ -4647,8 +5163,8 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "agent": true,
-        "plan": true
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 55,
@@ -4690,11 +5206,93 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
+      "status": "deprecated"
+    },
+    {
+      "tool_id": "viewport_capture",
+      "summary": "Capture the editor viewport. Required: capture_kind immediate_png or after_frames (explicit; no inference). Prefer over legacy viewport_capture_* split tools.",
+      "category": "capture_vision",
+      "tags": [
+        "viewport",
+        "capture",
+        "vision",
+        "screenshot",
+        "capture_kind"
+      ],
+      "tier": "tier1_mvp",
+      "naming_family": "composite",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 91,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "viewport",
+          "capture",
+          "screenshot",
+          "vision",
+          "png"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "capture_kind": {
+            "type": "string",
+            "enum": [
+              "immediate_png",
+              "after_frames"
+            ]
+          },
+          "filename_slug": {
+            "type": "string"
+          },
+          "delay_frames": {
+            "type": "integer"
+          },
+          "resolution_scale": {
+            "type": "number"
+          },
+          "include_ui": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "capture_kind"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_family",
+        "legacy_targets": [
+          {
+            "tool_id": "viewport_capture_png"
+          },
+          {
+            "tool_id": "viewport_capture_delayed"
+          }
+        ],
+        "resolver_notes": "Resolver branches on capture_kind and projects only the fields accepted by the chosen viewport capture handler."
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "FTSTicker + FScreenshotRequest",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Missing or invalid capture_kind returns a suggested_correct_call with the canonical capture_kind field."
+      ],
+      "doc_links": [],
       "status": "implemented"
     },
     {
       "tool_id": "viewport_capture_delayed",
-      "summary": "Schedule viewport capture after N frames.",
+      "summary": "Compatibility-only viewport capture branch. Prefer viewport_capture with capture_kind=after_frames.",
       "category": "capture_vision",
       "tags": [
         "viewport",
@@ -4703,8 +5301,8 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "agent": true,
-        "plan": true
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 60,
@@ -4732,11 +5330,11 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "viewport_capture_png",
-      "summary": "Capture active editor viewport to PNG on disk.",
+      "summary": "Compatibility-only viewport capture branch. Prefer viewport_capture with capture_kind=immediate_png.",
       "category": "capture_vision",
       "tags": [
         "viewport",
@@ -4746,8 +5344,8 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": false,
-        "agent": true,
-        "plan": true
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 90,
@@ -4787,11 +5385,99 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/FScreenshotRequest"
       ],
+      "status": "deprecated"
+    },
+    {
+      "tool_id": "viewport_frame",
+      "summary": "Frame the viewport on selection or explicit actors. Required: target selection or actors (explicit; no inference). Prefer over split viewport_frame_* tools.",
+      "category": "selection_framing",
+      "tags": [
+        "viewport",
+        "frame",
+        "selection",
+        "actors",
+        "target"
+      ],
+      "tier": "tier1_mvp",
+      "naming_family": "composite",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 89,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "viewport",
+          "frame",
+          "selection",
+          "actor bounds",
+          "focus"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "type": "string",
+            "enum": [
+              "selection",
+              "actors"
+            ]
+          },
+          "actor_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "margin_scale": {
+            "type": "number"
+          },
+          "pitch_bias": {
+            "type": "number"
+          },
+          "yaw_bias": {
+            "type": "number"
+          },
+          "orthographic": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_family",
+        "legacy_targets": [
+          {
+            "tool_id": "viewport_frame_actors"
+          },
+          {
+            "tool_id": "viewport_frame_selection"
+          }
+        ],
+        "resolver_notes": "Resolver branches on target and projects only the fields accepted by the chosen viewport frame handler."
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "AActor::GetComponentsBoundingBox; FEditorViewportClient",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Missing or invalid target returns a suggested_correct_call with the canonical target field."
+      ],
+      "doc_links": [],
       "status": "implemented"
     },
     {
       "tool_id": "viewport_frame_actors",
-      "summary": "Frame specific level actors by `actor_paths` (bounds + FOV fit). Each path must be a full world actor path (typically includes `PersistentLevel` as a segment plus a concrete actor name after it). Never pass `PersistentLevel` alone or other level-instance tokens as the only path—discover actors with `scene_fuzzy_search` or `editor_get_selection` first. To frame the current selection without paths, use `viewport_frame_selection`.",
+      "summary": "Compatibility-only viewport frame branch. Prefer viewport_frame with target=actors.",
       "category": "selection_framing",
       "tags": [
         "viewport",
@@ -4800,8 +5486,8 @@
       "tier": "tier1_mvp",
       "modes": {
         "ask": false,
-        "agent": true,
-        "plan": true
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 85,
@@ -4847,11 +5533,11 @@
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/AActor"
       ],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "viewport_frame_selection",
-      "summary": "Frame the current editor selection in the viewport (no actor_paths required). Use when actors are already selected; use viewport_frame_actors when you have explicit paths.",
+      "summary": "Compatibility-only viewport frame branch. Prefer viewport_frame with target=selection.",
       "category": "selection_framing",
       "tags": [
         "viewport",
@@ -4860,8 +5546,8 @@
       "tier": "standard",
       "modes": {
         "ask": false,
-        "agent": true,
-        "plan": true
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 65,
@@ -4885,7 +5571,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "viewport_get_view_mode",
@@ -5198,8 +5884,82 @@
       "status": "implemented"
     },
     {
+      "tool_id": "asset_graph_query",
+      "summary": "Read Asset Registry graph relations for one asset. Required: relation (referencers|dependencies) and object_path. Prefer over split referencers/dependencies tools.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "read",
+        "dependencies",
+        "referencers",
+        "graph",
+        "relation"
+      ],
+      "tier": "standard",
+      "naming_family": "composite",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 76,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "asset",
+          "dependency graph",
+          "referencers",
+          "dependencies",
+          "asset registry"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "relation": {
+            "type": "string",
+            "enum": [
+              "referencers",
+              "dependencies"
+            ]
+          },
+          "object_path": {
+            "type": "string",
+            "description": "Full asset object path copied from discovery tools such as asset_index_fuzzy_search or asset_registry_query."
+          }
+        },
+        "required": [
+          "relation",
+          "object_path"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_family",
+        "legacy_targets": [
+          {
+            "tool_id": "asset_find_referencers"
+          },
+          {
+            "tool_id": "asset_get_dependencies"
+          }
+        ],
+        "resolver_notes": "Resolver branches on relation and projects only object_path to the chosen Asset Registry graph handler."
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IAssetRegistry::GetReferencers / GetDependencies",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
       "tool_id": "asset_find_referencers",
-      "summary": "List Asset Registry referencers for an asset identifier. Pass object_path copied from a prior discovery tool (asset_index_fuzzy_search, asset_registry_query, etc.)—do not invent /Game paths.",
+      "summary": "Compatibility-only asset graph branch. Prefer asset_graph_query with relation=referencers.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -5208,9 +5968,9 @@
       ],
       "tier": "standard",
       "modes": {
-        "ask": true,
-        "agent": true,
-        "plan": true
+        "ask": false,
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 74,
@@ -5236,11 +5996,11 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "asset_get_dependencies",
-      "summary": "List Asset Registry direct dependencies for an asset.",
+      "summary": "Compatibility-only asset graph branch. Prefer asset_graph_query with relation=dependencies.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -5249,9 +6009,9 @@
       ],
       "tier": "standard",
       "modes": {
-        "ask": true,
-        "agent": true,
-        "plan": true
+        "ask": false,
+        "agent": false,
+        "plan": false
       },
       "context_selector": {
         "priority": 73,
@@ -5277,7 +6037,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "implemented"
+      "status": "deprecated"
     },
     {
       "tool_id": "level_sequence_create_asset",

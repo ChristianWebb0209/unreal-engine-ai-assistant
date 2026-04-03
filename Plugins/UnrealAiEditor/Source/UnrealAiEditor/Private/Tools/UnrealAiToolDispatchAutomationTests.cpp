@@ -6,7 +6,9 @@
 #include "Tools/UnrealAiToolDispatch.h"
 #include "Tools/UnrealAiToolProjectPathAllowlist.h"
 #include "Tools/UnrealAiAssetFactoryResolver.h"
+#include "Tools/UnrealAiToolCatalog.h"
 #include "Tools/UnrealAiToolJson.h"
+#include "Tools/UnrealAiToolResolver.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonReader.h"
@@ -114,6 +116,111 @@ bool FUnrealAiToolDispatchEditorSmokeTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("editor_get_selection: has count"), O->HasField(TEXT("count")));
 		TestTrue(TEXT("editor_get_selection: has actor_paths"), O->HasField(TEXT("actor_paths")));
 		TestTrue(TEXT("editor_get_selection: has labels"), O->HasField(TEXT("labels")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiToolResolverCompositeRoutingTest,
+	"UnrealAiEditor.Tools.ResolverCompositeRouting",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiToolResolverCompositeRoutingTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	FUnrealAiToolCatalog Catalog;
+	TestTrue(TEXT("catalog loads"), Catalog.LoadFromPlugin());
+	TestTrue(TEXT("catalog reports loaded"), Catalog.IsLoaded());
+	TestEqual(TEXT("resolver contract version"), Catalog.GetResolverContractVersion(), FString(TEXT("2.1.0")));
+
+	FUnrealAiToolResolver Resolver(Catalog);
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("domain"), TEXT("editor_preference"));
+		Args->SetStringField(TEXT("key"), TEXT("editor_focus"));
+
+		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("setting_query"), Args);
+		TestTrue(TEXT("setting_query resolves"), Resolved.bResolved);
+		TestEqual(TEXT("setting_query legacy tool"), Resolved.LegacyToolId, FString(TEXT("settings_get")));
+		FString Scope;
+		TestTrue(TEXT("setting_query maps domain to scope"), Resolved.ResolvedArguments->TryGetStringField(TEXT("scope"), Scope));
+		TestEqual(TEXT("setting_query scope value"), Scope, FString(TEXT("editor")));
+	}
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("value_kind"), TEXT("vector"));
+		Args->SetStringField(TEXT("path"), TEXT("/Game/MI_Test.MI_Test"));
+		Args->SetStringField(TEXT("parameter_name"), TEXT("Tint"));
+		TArray<TSharedPtr<FJsonValue>> LinearColor;
+		LinearColor.Add(MakeShared<FJsonValueNumber>(1.0));
+		LinearColor.Add(MakeShared<FJsonValueNumber>(0.5));
+		LinearColor.Add(MakeShared<FJsonValueNumber>(0.25));
+		Args->SetArrayField(TEXT("linear_color"), LinearColor);
+
+		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("material_instance_set_parameter"), Args);
+		TestTrue(TEXT("material_instance_set_parameter resolves"), Resolved.bResolved);
+		TestEqual(TEXT("material_instance_set_parameter legacy tool"), Resolved.LegacyToolId, FString(TEXT("material_instance_set_vector_parameter")));
+		FString MaterialPath;
+		TestTrue(TEXT("material path canonicalized"), Resolved.ResolvedArguments->TryGetStringField(TEXT("material_path"), MaterialPath));
+		TestEqual(TEXT("material path preserved"), MaterialPath, FString(TEXT("/Game/MI_Test.MI_Test")));
+	}
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("object_path"), TEXT("/Game/Foo.Bar"));
+		Args->SetStringField(TEXT("relation"), TEXT("dependencies"));
+
+		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("asset_graph_query"), Args);
+		TestTrue(TEXT("asset_graph_query resolves"), Resolved.bResolved);
+		TestEqual(TEXT("asset_graph_query legacy tool"), Resolved.LegacyToolId, FString(TEXT("asset_get_dependencies")));
+	}
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("operation"), TEXT("pan"));
+		Args->SetStringField(TEXT("delta"), TEXT("not-an-array"));
+
+		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("viewport_camera_control"), Args);
+		TestFalse(TEXT("viewport_camera_control invalid delta shape fails"), Resolved.bResolved);
+
+		TSharedPtr<FJsonObject> Payload;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Resolved.FailureResult.ContentForModel);
+		TestTrue(TEXT("viewport_camera_control failure payload parses"), FJsonSerializer::Deserialize(Reader, Payload) && Payload.IsValid());
+		TestEqual(TEXT("viewport_camera_control validation error code"), Payload->GetStringField(TEXT("error")), FString(TEXT("validation_failed")));
+		TestTrue(TEXT("viewport_camera_control validation issues present"), Payload->HasField(TEXT("validation_errors")));
+	}
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("material_path"), TEXT("/Game/M.MI"));
+		Args->SetStringField(TEXT("parameter_name"), TEXT("Tint"));
+		TArray<TSharedPtr<FJsonValue>> LinearColor;
+		LinearColor.Add(MakeShared<FJsonValueNumber>(1.0));
+		LinearColor.Add(MakeShared<FJsonValueNumber>(0.0));
+		LinearColor.Add(MakeShared<FJsonValueNumber>(0.0));
+		Args->SetArrayField(TEXT("linear_color"), LinearColor);
+		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("material_instance_set_parameter"), Args);
+		TestFalse(TEXT("material_instance_set_parameter missing value_kind fails"), Resolved.bResolved);
+	}
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("operation"), TEXT("get_transform"));
+		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("viewport_camera_control"), Args);
+		TestTrue(TEXT("viewport_camera_control explicit operation resolves"), Resolved.bResolved);
+		TestEqual(TEXT("viewport_camera_control get_transform legacy"), Resolved.LegacyToolId, FString(TEXT("viewport_camera_get_transform")));
+	}
+
+	{
+		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("viewport_cmera_control"), MakeShared<FJsonObject>());
+		TestFalse(TEXT("ambiguous typo without args should fail"), Resolved.bResolved);
+		TestTrue(
+			TEXT("unknown tool typo includes suggestion"),
+			Resolved.FailureResult.ErrorMessage.Contains(TEXT("viewport_camera_control")) || Resolved.FailureResult.ContentForModel.Contains(TEXT("viewport_camera_control")));
 	}
 
 	return true;
