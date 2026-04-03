@@ -1,6 +1,6 @@
 # Tool dispatch inventory
 
-Single reference for **compat tool ids** and where handlers live. Catalog definitions: [`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json). Router: [`UnrealAiToolDispatch.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tools/UnrealAiToolDispatch.cpp) and `UnrealAiToolDispatch_*.cpp`.
+Single reference for **compat tool ids** and where handlers live. Catalog definitions: [`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json). Router: [`UnrealAiToolDispatch.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tools/UnrealAiToolDispatch.cpp) and `UnrealAiToolDispatch_*.cpp`. **Blueprint arbitrary graph ops:** [`UnrealAiToolDispatch_BlueprintGraphPatch.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tools/UnrealAiToolDispatch_BlueprintGraphPatch.cpp) (`blueprint_graph_patch`, `blueprint_graph_list_pins`).
 
 ## Compatibility / alias `tool_id`s
 

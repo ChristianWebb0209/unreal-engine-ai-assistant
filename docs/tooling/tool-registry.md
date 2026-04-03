@@ -676,7 +676,7 @@ These are the first implementation wave. Each row is expanded in its domain sect
 
 | Field | Value |
 |-------|--------|
-| **summary** | Lossy JSON export of a script graph (`nodes`, `links`, `defaults`) for round-trip with `blueprint_apply_ir`. |
+| **summary** | Lossy JSON export of a script graph (`nodes`, `links`, `defaults`) for planning edits with **`blueprint_apply_ir`** and/or **`blueprint_graph_patch`**. Unknown/custom nodes may include **`k2_class`** + **`node_guid`** for pin introspection and patching. |
 | **parameters** | `blueprint_path`, optional `graph_name`. |
 | **returns** | `ir` object; `event_tick` and `event_begin_play` ops for matching `UK2Node_Event` nodes. |
 | **side_effects** | none |
@@ -691,6 +691,31 @@ These are the first implementation wave. Each row is expanded in its domain sect
 | **returns** | `merge_policy_used`, `layout_scope_used`, `anchors_reused[]`, `merge_warnings[]`, `layout_applied`, `formatter_hint` (if layout skipped). |
 | **side_effects** | asset; compile at end of apply. |
 | **permission** | `write` |
+| **status** | `implemented` |
+
+### `blueprint_graph_patch`
+
+| Field | Value |
+|-------|--------|
+| **summary** | Structured **`ops[]`** on a **`/Game`** script graph: **`create_node`**, **`create_comment`** (`member_node_refs` + reflow like IR), **`connect`**, **`break_link`**, **`splice_on_link`** (insert on one exec edge), **`set_pin_default`**, **`add_variable`**, **`remove_node`**, **`move_node`**. Optional **`auto_layout`** (default **true**), **`layout_scope`** `patched_nodes` \| **`full_graph`**, **`layout_mode`**, **`wire_knots`**—same formatter stack as **`blueprint_apply_ir`**. **`compile`** default true. |
+| **parameters** | Full JSON Schema **`oneOf`** per op in [`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json). **`patch_id`** is batch-local; disk nodes use **`guid:`** from export or **`applied[].node_guid`**. |
+| **returns** | Success: `ok`, `applied[]`, `blueprint_status`, `compiled`, **`auto_layout`**, **`layout_scope`**, **`layout_applied`**, **`layout_nodes_positioned`**, **`formatter_available`**. Partial failure: `patch_errors`, `errors[]`, `applied_partial[]`. |
+| **side_effects** | asset; layout; compile (optional) |
+| **permission** | `write` |
+| **ue_entry_points** | `UBlueprint`, `UEdGraph`, `UEdGraphSchema_K2`, `FUnrealBlueprintGraphFormatService`, `UnrealBlueprintCommentReflow`, `FBlueprintEditorUtils`, `FKismetEditorUtilities::CompileBlueprint` |
+| **threading** | game thread |
+| **failure_modes** | `/Game` policy; invalid `k2_class`; connect/break/splice pin errors; partial application. |
+| **status** | `implemented` |
+
+### `blueprint_graph_list_pins`
+
+| Field | Value |
+|-------|--------|
+| **summary** | Read-only **`pins[]`** for one graph node: pin **`name`**, **`direction`**, **`category`**, optional **`default_value`**. |
+| **parameters** | `blueprint_path`, optional `graph_name`, and **`node_ref` _or_ `guid`** (real graph GUID from export / patch output—not an ephemeral **`patch_id`** from another call). |
+| **returns** | `ok`, `node_guid`, `k2_class`, `pins[]`. |
+| **side_effects** | none |
+| **permission** | `read` |
 | **status** | `implemented` |
 
 ### `blueprint_format_graph`

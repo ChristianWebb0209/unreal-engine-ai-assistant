@@ -34,6 +34,7 @@ Index of all `docs/` files: [docs/README.md](../README.md)
 Use real API credentials from Unreal AI Editor settings.
 
 - **Primary:** `.\tests\qualitative-tests\run-qualitative-headed.ps1` (suite JSON under `tests/qualitative-tests/`; outputs under `tests/qualitative-tests/runs/`)
+- **Blueprint 10-turn curriculum + maintainer loop:** [`BLUEPRINT_CURRICULUM_AGENT_LOOP.md`](BLUEPRINT_CURRICULUM_AGENT_LOOP.md) — headed suite `blueprint-creation-curriculum-v1`, classify/analyze/graduate workflow; run `.\build-editor.ps1 -AutomationTests -Headless` before long headed batches after C++ changes
 - **Ad hoc:** `UnrealAi.RunAgentTurn <MessageFilePath> [ThreadGuid] [agent|ask|plan] [OutputDir]` — optional **`dumpcontext`** as the 5th argument for context window dumps next to `run.jsonl`
 
 Artifacts: `Saved/UnrealAiEditor/HarnessRuns/<timestamp>/run.jsonl` (batch runs also mirror under `tests/qualitative-tests/runs/` per suite).
@@ -105,7 +106,8 @@ From Output Log:
 | System prompt chunks | `Plugins/UnrealAiEditor/prompts/chunks/` |
 | Tool definitions | `Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json` |
 | Tool implementation | `Plugins/UnrealAiEditor/Source/.../Tools/UnrealAiToolDispatch*.cpp` |
-| Long-running headed suites | `tests/qualitative-tests/` (`run-qualitative-headed.ps1`, suite JSON, `runs/` outputs) |
+| Long-running headed suites | `tests/qualitative-tests/` (`run-qualitative-headed.ps1`, suite JSON, `runs/` outputs); see [`tests/qualitative-tests/README.md`](../tests/qualitative-tests/README.md) |
+| Blueprint curriculum iteration (agents) | [`BLUEPRINT_CURRICULUM_AGENT_LOOP.md`](BLUEPRINT_CURRICULUM_AGENT_LOOP.md) |
 | Domain coverage matrix | `tests/domain_coverage_matrix.md` |
 | Qualitative turn template | `tests/qualitative_turn_review_template.md` |
 

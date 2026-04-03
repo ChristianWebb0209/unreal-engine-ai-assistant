@@ -91,8 +91,8 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
             }
 
             retrievalService = container "Retrieval Service (Optional)" "Local vector index: embedding-first query (cosine Top-K in SQLite),\nlexical fallback; index builds are whitelist- and cap-driven (BYOK embeddings)." "C++" "RetrievalSection" {
-                indexManager = component "Index lifecycle + orchestration" "BuildOrRebuildIndexNow: corpora, embeddings,\nincremental upsert, manifest/diagnostics." "FUnrealAiRetrievalService" "RetrievalSection"
-                indexPolicy = component "Index policy + filesystem crawl" "indexedExtensions whitelist; rootPreset (minimal/standard/extended);\nmax files/chunks/embeds; chunk size/overlap; embedding batch throttle." "UnrealAiRetrievalIndexConfig" "RetrievalSection"
+                indexManager = component "Index lifecycle + orchestration" "BuildOrRebuildIndexNow: corpora, embeddings,\nphased waves (P0 project Source through P4 virtual), SQLite UpsertIncremental\nafter each wave; RemovedSources applied once at end; optional P0 time-budget\nmid-wave flush; manifest/diagnostics." "FUnrealAiRetrievalService" "RetrievalSection"
+                indexPolicy = component "Index policy + filesystem crawl" "indexedExtensions whitelist; rootPreset (minimal/standard/extended);\nmax files/chunks/embeds; chunk size/overlap; embedding batch throttle;\nGetIndexBuildWaveForSource (wave buckets aligned with build-priority sort)." "UnrealAiRetrievalIndexConfig" "RetrievalSection"
                 corpusFs = component "Filesystem text corpus" "Scans configured roots; whitelisted extensions only,\nopened as UTF-8 text (no raw binary asset reads)." "FUnrealAiRetrievalService" "RetrievalSection"
                 corpusAr = component "Asset Registry metadata corpus" "Deterministic synthetic shards under virtual://asset_registry/* from FAssetData\n(names, classes, paths); caps + optional /Engine." "GatherAssetRegistryShardTexts" "RetrievalSection"
                 corpusBp = component "Blueprint feature corpus" "Blueprint assets via registry-derived feature lines; extractor cap from settings." "UnrealAiBlueprintFeatureExtractor" "RetrievalSection"
@@ -310,7 +310,7 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
             autoLayout lr
         }
 
-        container plugin "vector-db-end-to-end" "Optional local vector index (settings-driven whitelist, root presets, caps).\nCorpora: filesystem text, Asset Registry shards, Blueprint features,\noptional memory chunks. SQLite + manifest; BYOK embeddings; merged into context ranker.\nDoes not index raw binary assets or full chat transcripts." {
+        container plugin "vector-db-end-to-end" "Optional local vector index (settings-driven whitelist, root presets, caps).\nCorpora: filesystem text, Asset Registry shards, Blueprint features,\noptional memory chunks. SQLite + manifest; BYOK embeddings; phased wave commits\nfor faster time-to-first-hit; merged into context ranker.\nDoes not index raw binary assets or full chat transcripts." {
             include plugin.retrievalService
             include plugin.embeddingProvider
             include plugin.contextService
@@ -323,7 +323,7 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
             autoLayout tb
         }
 
-        component plugin.retrievalService "vector-db-index-build" "Index rebuild (corpus rationale).\nPolicy from plugin_settings: whitelist extensions, root preset (minimal/standard/extended),\nper-rebuild caps/throttle to bound API, CPU, and disk.\nFilesystem corpus: UTF-8 text for allow-listed paths only; binary Content not read as strings.\nAsset Registry: deterministic metadata shards (path, class, package) without .uasset bytes.\nBlueprint corpus: registry-derived feature lines.\nMemory corpus: optional, default-off (tagged memory stays primary).\nChat history is out of scope: `conversation.json` already feeds the harness; duplicating it in the index adds cost and overlap." {
+        component plugin.retrievalService "vector-db-index-build" "Index rebuild (corpus rationale).\nPolicy from plugin_settings: whitelist extensions, root preset (minimal/standard/extended),\nper-rebuild caps/throttle to bound API, CPU, and disk.\nBuild commits in priority waves (project Source, plugin Source, Config+docs, Content, virtual);\nafter each wave chunks persist via UpsertIncremental; deletions deferred to final transaction;\noptional indexFirstWaveTimeBudgetSeconds for early P0 commits.\nFilesystem corpus: UTF-8 text for allow-listed paths only; binary Content not read as strings.\nAsset Registry: deterministic metadata shards (path, class, package) without .uasset bytes.\nBlueprint corpus: registry-derived feature lines.\nMemory corpus: optional, default-off (tagged memory stays primary).\nChat history is out of scope: `conversation.json` already feeds the harness; duplicating it in the index adds cost and overlap." {
             include *
             include plugin.embeddingProvider
             include localData.settingsJson
@@ -484,7 +484,7 @@ BEGIN_README_MAP tool-surface-sequence
 **Dynamic** diagram views cannot attach to arbitrary components at software-system scope, so the **full** internal wiring appears in **Tool surface graph**; this diagram is the **stage-to-stage** story aligned with the view description on `tool-surface-sequence` in `architecture.dsl`.
 END_README_MAP
 BEGIN_README_MAP retrieval-components
-**Optional retrieval service** internals: **index lifecycle** (`BuildOrRebuildIndexNow`), **policy** (whitelist extensions, root presets, caps, throttles), **corpora** (filesystem text, Asset Registry shards, Blueprint features, optional memory chunks), **embedding** path, **SQLite** store + manifest, **query** engine (cosine Top-K, lexical fallback), and **model compatibility** guard.
+**Optional retrieval service** internals: **index lifecycle** (`BuildOrRebuildIndexNow`) with **phased embedding/commits** (waves P0-P4 aligned with `UnrealAiRetrievalIndexConfig` priority), **policy** (whitelist extensions, root presets, caps, throttles, wave bucket helper), **corpora** (filesystem text, Asset Registry shards, Blueprint features, optional memory chunks), **embedding** path, **SQLite** store + manifest (`UpsertIncremental` per wave; removals after all waves), **query** engine (cosine Top-K, lexical fallback once rows exist), and **model compatibility** guard.
 
 Retrieval is **off by default**; when disabled, behavior must match pre-retrieval deterministic context ([`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 3). See also **Vector DB** views below for end-to-end and query sequences.
 END_README_MAP
@@ -506,12 +506,14 @@ END_README_MAP
 BEGIN_README_MAP vector-db-end-to-end
 **Container-level end-to-end** optional vector story: **Retrieval Service** + **Embedding Provider** + **Context Service** + **Harness** + **Memory** (optional corpus feed) + on-disk **SQLite** + **manifest** + **LLM provider** for `/embeddings` + **Unreal Editor** for Asset Registry and Blueprint-derived corpora.
 
+Index builds use **phased wave commits** to SQLite (priority corpora first; deferred deletions) so context can retrieve partial results earlier when enabled.
+
 Aligns with [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 2.1 (visual architecture diagrams) and section 2.2 (what is indexed vs excludedâ€”no full chat dump, no raw binary `.uasset` bytes).
 END_README_MAP
 BEGIN_README_MAP vector-db-index-build
-**Index rebuild** rationale: settings-driven **whitelist** and **root presets** bound CPU, disk, and **BYOK embedding** API cost. **Filesystem** corpus reads UTF-8 text for allow-listed extensions only; **Asset Registry** adds deterministic metadata shards; **Blueprint** corpus uses feature lines, not raw assets; **memory** chunks into the index are **optional** and default-off so **tagged memory** stays primary.
+**Index rebuild** rationale: settings-driven **whitelist** and **root presets** bound CPU, disk, and **BYOK embedding** API cost. **Phased commits** write high-priority corpus (e.g. project `Source/`) to SQLite before lower-priority waves finish, improving time-to-first-retrieval; **manifest** tracks wave progress when enabled. **Filesystem** corpus reads UTF-8 text for allow-listed extensions only; **Asset Registry** adds deterministic metadata shards; **Blueprint** corpus uses feature lines, not raw assets; **memory** chunks into the index are **optional** and default-off so **tagged memory** stays primary.
 
-See the long view caption in `architecture.dsl` and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) sections 2.2â€“2.3.
+See the long view caption in `architecture.dsl` and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) sections 2.2â€“2.3 and phased indexing notes.
 END_README_MAP
 BEGIN_README_MAP vector-db-query-sequence
 **Per-LLM-round query path**: harness may **prefetch** retrieval; **`BuildContextWindow`** consumes **TryConsumePrefetch** or **Query**; **embed** query when needed (BYOK **HTTPS**); **SQLite** cosine Top-K with **lexical fallback**; snippets feed the same **context ranker** as other candidate types.
