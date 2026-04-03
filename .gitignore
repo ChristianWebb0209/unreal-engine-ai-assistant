@@ -87,6 +87,9 @@ Thumbs.db
 # Optional local scratch (untracked copies of scripts, experiments)
 /local/
 
+# DeerFlow removed from repo; ignore any leftover empty folder if Windows holds a lock on deer-flow\docker
+/deer-flow/
+
 # Python
 **/__pycache__/
 
