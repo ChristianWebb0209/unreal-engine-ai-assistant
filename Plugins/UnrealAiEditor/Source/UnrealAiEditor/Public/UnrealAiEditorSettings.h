@@ -91,7 +91,7 @@ public:
 
 	/** Used when blueprint_apply_ir / blueprint_format_graph omit layout_mode. */
 	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Blueprint layout: default strategy"))
-	EUnrealAiBlueprintDefaultLayoutStrategy BlueprintDefaultLayoutStrategy = EUnrealAiBlueprintDefaultLayoutStrategy::SingleRow;
+	EUnrealAiBlueprintDefaultLayoutStrategy BlueprintDefaultLayoutStrategy = EUnrealAiBlueprintDefaultLayoutStrategy::MultiStrand;
 
 	/** Used when blueprint_apply_ir / blueprint_format_graph omit wire_knots. */
 	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Blueprint layout: data wire knots"))
@@ -100,6 +100,16 @@ public:
 	/** Maximum supplemental planner (replan) HTTP turns per plan executor run; 0 disables replanning. */
 	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (ClampMin = "0", ClampMax = "8"))
 	int32 PlanAutoReplanMaxAttemptsPerRun = 2;
+
+	/**
+	 * Folder name segments used when filtering /Game/... package paths for **preferred create path** inference
+	 * (project tree sampler + context blurb + asset_create default package_path for Blueprints).
+	 * If a path contains `/Segment/`, ends with `/Segment`, or equals `/Game/Segment`, it is excluded from counts
+	 * so sandbox/test content (e.g. qualitative harness output) does not outvote real game folders.
+	 * Default includes UnrealAiHarness; add more (e.g. temp sandbox names) or clear to disable filtering.
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Exclude folders from preferred content-path inference"))
+	TArray<FString> AgentContentPathExcludeFromPreferredInference;
 
 	/**
 	 * Headed harness only: append each outbound LLM payload (messages + tools + model) to llm_requests.jsonl beside run.jsonl.

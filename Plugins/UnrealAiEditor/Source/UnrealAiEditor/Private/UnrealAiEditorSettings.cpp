@@ -12,12 +12,13 @@ UUnrealAiEditorSettings::UUnrealAiEditorSettings(const FObjectInitializer& Objec
 	, bAutoContinuePlanSteps(true)
 	, bPlanAutoReplan(true)
 	, BlueprintCommentsMode(EUnrealAiBlueprintCommentsMode::Minimal)
-	, BlueprintDefaultLayoutStrategy(EUnrealAiBlueprintDefaultLayoutStrategy::SingleRow)
+	, BlueprintDefaultLayoutStrategy(EUnrealAiBlueprintDefaultLayoutStrategy::MultiStrand)
 	, BlueprintDefaultWireKnotMode(EUnrealAiBlueprintDefaultWireKnotMode::Off)
 	, PlanAutoReplanMaxAttemptsPerRun(2)
 	, bLogLlmRequestsToHarnessRunFile(true)
 	, bConsoleCommandLegacyWideExec(false)
 {
+	AgentContentPathExcludeFromPreferredInference.Add(TEXT("UnrealAiHarness"));
 }
 
 FName UUnrealAiEditorSettings::GetCategoryName() const
