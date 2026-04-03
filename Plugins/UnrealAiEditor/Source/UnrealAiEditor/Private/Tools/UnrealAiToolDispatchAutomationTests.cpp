@@ -12,6 +12,8 @@
 #include "Serialization/JsonReader.h"
 #include "Engine/Blueprint.h"
 #include "Engine/StaticMesh.h"
+#include "Tools/UnrealAiToolDispatch_BlueprintTools.h"
+#include "EdGraphSchema_K2.h"
 
 /**
  * Contract tests for tool JSON helpers (no Editor / world required).
@@ -112,6 +114,90 @@ bool FUnrealAiToolDispatchEditorSmokeTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("editor_get_selection: has count"), O->HasField(TEXT("count")));
 		TestTrue(TEXT("editor_get_selection: has actor_paths"), O->HasField(TEXT("actor_paths")));
 		TestTrue(TEXT("editor_get_selection: has labels"), O->HasField(TEXT("labels")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiBlueprintPinTypeParseTest,
+	"UnrealAiEditor.Tools.BlueprintPinTypeParse",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiBlueprintPinTypeParseTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FEdGraphPinType IntTy;
+	TestTrue(TEXT("int32"), UnrealAiBlueprintTools_TryParsePinTypeFromString(TEXT("int32"), IntTy));
+	TestTrue(TEXT("int category"), IntTy.PinCategory == UEdGraphSchema_K2::PC_Int);
+
+	FEdGraphPinType BadTy;
+	TestFalse(TEXT("unknown token"), UnrealAiBlueprintTools_TryParsePinTypeFromString(TEXT("not_a_real_type_xyz_q"), BadTy));
+
+	FEdGraphPinType Legacy = UnrealAiBlueprintTools_ParsePinTypeFromString(TEXT("not_a_real_type_xyz_q"));
+	TestTrue(TEXT("legacy boolean fallback"), Legacy.PinCategory == UEdGraphSchema_K2::PC_Boolean);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiBlueprintGraphPatchContractTest,
+	"UnrealAiEditor.Tools.BlueprintGraphPatchContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiBlueprintGraphPatchContractTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	TestTrue(TEXT("Runs on game thread (tool dispatch requirement)"), IsInGameThread());
+
+	// blueprint_graph_patch requires blueprint_path and ops
+	{
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_graph_patch"),
+			MakeShared<FJsonObject>(),
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_graph_patch empty args: bOk"), R.bOk);
+		TSharedPtr<FJsonObject> O;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
+		TestTrue(TEXT("blueprint_graph_patch empty args: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+		TestFalse(TEXT("blueprint_graph_patch empty args: ok field"), O->GetBoolField(TEXT("ok")));
+		TestTrue(TEXT("blueprint_graph_patch empty args: error present"), O->HasTypedField<EJson::String>(TEXT("error")));
+	}
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Nonexistent/XP.XP"));
+		Args->SetArrayField(TEXT("ops"), TArray<TSharedPtr<FJsonValue>>());
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_graph_patch"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_graph_patch empty ops: bOk"), R.bOk);
+		TSharedPtr<FJsonObject> O;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
+		TestTrue(TEXT("blueprint_graph_patch empty ops: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+		TestTrue(TEXT("blueprint_graph_patch empty ops: error"), O->HasTypedField<EJson::String>(TEXT("error")));
+	}
+
+	{
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_graph_list_pins"),
+			MakeShared<FJsonObject>(),
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_graph_list_pins empty args: bOk"), R.bOk);
+		TSharedPtr<FJsonObject> O;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
+		TestTrue(TEXT("blueprint_graph_list_pins empty args: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+		TestFalse(TEXT("blueprint_graph_list_pins empty args: ok"), O->GetBoolField(TEXT("ok")));
 	}
 
 	return true;
@@ -442,6 +528,74 @@ bool FUnrealAiBlueprintApplyIrContractTest::RunTest(const FString& Parameters)
 		FString Status;
 		TestTrue(TEXT("blueprint_apply_ir invalid merge_policy: status"), O->TryGetStringField(TEXT("status"), Status));
 		TestEqual(TEXT("blueprint_apply_ir invalid merge_policy: status value"), Status, FString(TEXT("invalid_ir")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiBlueprintSetComponentDefaultContractTest,
+	"UnrealAiEditor.Tools.BlueprintSetComponentDefaultContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiBlueprintSetComponentDefaultContractTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	TestTrue(TEXT("Runs on game thread (tool dispatch requirement)"), IsInGameThread());
+
+	// Missing blueprint_path: suggested_correct_call to blueprint_set_component_default.
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("component"), TEXT("CharacterMovement"));
+		Args->SetStringField(TEXT("property"), TEXT("JumpZVelocity"));
+		Args->SetNumberField(TEXT("value"), 1200.0);
+
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_set_component_default"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_set_component_default missing blueprint_path: bOk"), R.bOk);
+		TSharedPtr<FJsonObject> O;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
+		TestTrue(TEXT("blueprint_set_component_default missing blueprint_path: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+		TestTrue(TEXT("blueprint_set_component_default missing blueprint_path: has suggested_correct_call"), O->HasField(TEXT("suggested_correct_call")));
+	}
+
+	// Missing component.
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
+		Args->SetStringField(TEXT("property"), TEXT("JumpZVelocity"));
+		Args->SetNumberField(TEXT("value"), 1200.0);
+
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_set_component_default"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_set_component_default missing component: bOk"), R.bOk);
+	}
+
+	// Missing value.
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
+		Args->SetStringField(TEXT("component"), TEXT("CharacterMovement"));
+		Args->SetStringField(TEXT("property"), TEXT("JumpZVelocity"));
+
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_set_component_default"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_set_component_default missing value: bOk"), R.bOk);
 	}
 
 	return true;

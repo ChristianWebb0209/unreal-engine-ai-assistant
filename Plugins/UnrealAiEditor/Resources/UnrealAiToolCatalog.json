@@ -250,17 +250,23 @@
           },
           "location": {
             "type": "array",
-            "items": { "type": "number" },
+            "items": {
+              "type": "number"
+            },
             "description": "Optional when transform omitted: [x,y,z] applied with current rotation/scale."
           },
           "rotation": {
             "type": "array",
-            "items": { "type": "number" },
+            "items": {
+              "type": "number"
+            },
             "description": "Optional when transform omitted: [pitch,yaw,roll] with current location/scale."
           },
           "scale": {
             "type": "array",
-            "items": { "type": "number" },
+            "items": {
+              "type": "number"
+            },
             "description": "Optional when transform omitted: [x,y,z] scale with current location/rotation."
           },
           "teleport_physics": {
@@ -819,8 +825,12 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "key": { "type": "string" },
-                "value": { "type": "string" }
+                "key": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
               },
               "required": [
                 "key",
@@ -1048,7 +1058,7 @@
     },
     {
       "tool_id": "blueprint_compile",
-      "summary": "Compile a Blueprint and return diagnostics. Use this after blueprint_apply_ir or graph edits to validate/fix compile state; do not use as a graph discovery tool (use blueprint_get_graph_summary or blueprint_export_ir for read-only inspection). Use format_graphs to run in-process graph layout on script graphs before compile when graphs should be laid out.",
+      "summary": "Compile a Blueprint and return diagnostics. Use after blueprint_graph_patch, blueprint_apply_ir, or other graph edits to validate/fix compile state; not for graph discovery (use blueprint_get_graph_summary or blueprint_export_ir). Use format_graphs to run in-process graph layout on script graphs before compile when graphs should be laid out.",
       "category": "blueprints",
       "tags": [
         "blueprint"
@@ -1095,8 +1105,756 @@
       "status": "implemented"
     },
     {
+      "tool_id": "blueprint_graph_patch",
+      "summary": "Primary UE 5.7 graph mutator: ops[] on blueprint_path (/Game) and graph_name. create_node (UK2Node), create_comment (boxes + member_node_refs), connect, break_link (splice/reroute), splice_on_link (break + wire through insert_patch_id), set_pin_default, add_variable, remove_node, move_node. auto_layout defaults true with layout_scope patched_nodes (only nodes created this batch); layout_scope full_graph reformats entire script graph; layout_mode / wire_knots match blueprint_apply_ir. Insert-between flow: create_node middle → break_link or splice_on_link → connect data pins as needed, all in one ops[]. Response adds layout_applied, layout_nodes_positioned, formatter_available.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "graph",
+        "write",
+        "k2"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 74,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Blueprint asset object path under /Game only (e.g. /Game/Folder/MyBP.MyBP)."
+          },
+          "graph_name": {
+            "type": "string",
+            "description": "Script graph to edit (default: EventGraph). Use export/summary to list function or macro graphs."
+          },
+          "compile": {
+            "type": "boolean",
+            "description": "When true (default), recompile the Blueprint after ops. For full compiler_messages[], follow with blueprint_compile."
+          },
+          "auto_layout": {
+            "type": "boolean",
+            "description": "When true (default), run bundled graph layout after ops succeed. Set false to preserve manual node positions for this patch."
+          },
+          "layout_scope": {
+            "type": "string",
+            "enum": [
+              "patched_nodes",
+              "full_graph"
+            ],
+            "description": "patched_nodes: layout only nodes created in this patch (create_node/create_comment). full_graph: LayoutEntireGraph on the script graph—use only when an explicit reformat is intended."
+          },
+          "layout_mode": {
+            "type": "string",
+            "enum": [
+              "single_row",
+              "multi_strand"
+            ],
+            "description": "Optional; omit to use project default (Plugins → Unreal AI Editor)."
+          },
+          "wire_knots": {
+            "type": "string",
+            "enum": [
+              "off",
+              "light",
+              "aggressive"
+            ],
+            "description": "Optional data-wire knot pass; omit for project default."
+          },
+          "ops": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Ordered operations. NodeRef for connect/break_link/splice: patch_id from this batch, guid:uuid, or bare node_guid from blueprint_export_ir. `self` is not a graph node—use blueprint_graph_list_pins for VariableSet Target pins.",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "create_node"
+                      ]
+                    },
+                    "patch_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Local id for NodeRef in connect/set_pin_default within this ops list (e.g. n1)."
+                    },
+                    "k2_class": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "UK2Node class object path, e.g. /Script/BlueprintGraph.K2Node_IfThenElse, K2Node_CallFunction, K2Node_CustomEvent (user-defined events: set event_name or custom_event.name), K2Node_Event (built-in/override: requires event_override), K2Node_VariableGet, K2Node_VariableSet, K2Node_DynamicCast."
+                    },
+                    "event_name": {
+                      "type": "string",
+                      "description": "For K2Node_CustomEvent: function name (also custom_event_name or custom_event.name or name)."
+                    },
+                    "custom_event_name": {
+                      "type": "string",
+                      "description": "Alias of event_name for K2Node_CustomEvent."
+                    },
+                    "custom_event": {
+                      "type": "object",
+                      "description": "For K2Node_CustomEvent: { \"name\": \"MyEvent\" } or event_name inside.",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "event_name": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "Optional display/identifier; for K2Node_CustomEvent used as event name if event_name empty."
+                    },
+                    "x": {
+                      "type": "number",
+                      "description": "Editor graph X position (pixels)."
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "class_path": {
+                      "type": "string",
+                      "description": "For K2Node_CallFunction: owning UClass of the UFunction (e.g. /Script/Engine.KismetSystemLibrary). Use with function_name at the top level, or use call_function { class_path, function_name } instead."
+                    },
+                    "function_name": {
+                      "type": "string",
+                      "description": "For K2Node_CallFunction: UFunction short name (e.g. PrintString). Required with class_path unless call_function object is used."
+                    },
+                    "call_function": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "class_path": {
+                          "type": "string",
+                          "description": "Owning UClass of the UFunction (e.g. /Script/Engine.KismetSystemLibrary)."
+                        },
+                        "function_name": {
+                          "type": "string",
+                          "description": "UFunction short name (e.g. PrintString)."
+                        }
+                      },
+                      "required": [
+                        "class_path",
+                        "function_name"
+                      ]
+                    },
+                    "event_override": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "function_name": {
+                          "type": "string",
+                          "description": "Event or function name on outer class (e.g. ReceiveBeginPlay)."
+                        },
+                        "outer_class_path": {
+                          "type": "string",
+                          "description": "Class that declares the member (e.g. /Script/Engine.Actor)."
+                        }
+                      },
+                      "required": [
+                        "function_name",
+                        "outer_class_path"
+                      ]
+                    },
+                    "variable_name": {
+                      "type": "string",
+                      "description": "Blueprint member name for K2Node_VariableGet / K2Node_VariableSet."
+                    },
+                    "cast_target_class": {
+                      "type": "string",
+                      "description": "Target UClass path for K2Node_DynamicCast."
+                    },
+                    "dynamic_cast": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "class_path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "class_path"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "patch_id",
+                    "k2_class"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "add_variable"
+                      ]
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "Member variable name."
+                    },
+                    "variable_name": {
+                      "type": "string",
+                      "description": "Alias for name."
+                    },
+                    "member_name": {
+                      "type": "string",
+                      "description": "Alias for name."
+                    },
+                    "type": {
+                      "description": "Member pin type: string token (int, float, bool, byte, int64, name, text, vector, rotator, or /Script/... /Game/... class or struct path) or object { category or pin_category, optional subcategory, class_path or subcategory_object for object/struct }.",
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "minProperties": 1
+                        }
+                      ]
+                    },
+                    "variable_type": {
+                      "description": "Alias of type (string or object).",
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "minProperties": 1
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "op"
+                  ],
+                  "oneOf": [
+                    {
+                      "required": [
+                        "name",
+                        "type"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "name",
+                        "variable_type"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "variable_name",
+                        "type"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "variable_name",
+                        "variable_type"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "member_name",
+                        "type"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "member_name",
+                        "variable_type"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "connect"
+                      ]
+                    },
+                    "from": {
+                      "type": "string",
+                      "description": "Source NodeRef.Pin: patchId.pinName, export node_guid.pinName (bare UUID allowed), or guid:uuid.pinName. Pin aliases: Execute/Exec/Execution, True→Then, False→Else, inputObject→Target on many nodes, returnValue→ReturnValue."
+                    },
+                    "to": {
+                      "type": "string",
+                      "description": "Target NodeRef.Pin; same as from. Do not use `self` as a node id."
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "from",
+                    "to"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "set_pin_default"
+                      ]
+                    },
+                    "ref": {
+                      "type": "string",
+                      "description": "Combined NodeRef.Pin (patch id or guid:uuid)."
+                    },
+                    "node_ref": {
+                      "type": "string",
+                      "description": "Alias of ref: same NodeRef.Pin string (guid.pin or patchId.pin)."
+                    },
+                    "patch_id": {
+                      "type": "string"
+                    },
+                    "node_guid": {
+                      "type": "string",
+                      "description": "Graph node id; plain UUID or guid: prefix accepted."
+                    },
+                    "pin": {
+                      "type": "string"
+                    },
+                    "pin_name": {
+                      "type": "string",
+                      "description": "Alias of pin."
+                    },
+                    "value": {
+                      "type": "string",
+                      "description": "Default string as editor expects for this pin category."
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "value"
+                  ],
+                  "oneOf": [
+                    {
+                      "required": [
+                        "ref"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "node_ref"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "patch_id",
+                        "pin"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "patch_id",
+                        "pin_name"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "node_guid",
+                        "pin"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "node_guid",
+                        "pin_name"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "remove_node"
+                      ]
+                    },
+                    "patch_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "node_guid": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "op"
+                  ],
+                  "oneOf": [
+                    {
+                      "required": [
+                        "patch_id"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "node_guid"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "move_node"
+                      ]
+                    },
+                    "patch_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "node_guid": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "op"
+                  ],
+                  "oneOf": [
+                    {
+                      "required": [
+                        "patch_id"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "node_guid"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "break_link"
+                      ]
+                    },
+                    "from": {
+                      "type": "string",
+                      "description": "NodeRef.Pin of one end of an existing link."
+                    },
+                    "to": {
+                      "type": "string",
+                      "description": "NodeRef.Pin of the other end."
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "from",
+                    "to"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "splice_on_link"
+                      ]
+                    },
+                    "from": {
+                      "type": "string",
+                      "description": "Upstream pin (typically exec out e.g. .Then). Alias: link_from if from is omitted."
+                    },
+                    "to": {
+                      "type": "string",
+                      "description": "Downstream pin (typically exec in e.g. .Execute). Alias: link_to if to is omitted."
+                    },
+                    "link_from": {
+                      "type": "string",
+                      "description": "Alias of from for splice_on_link / break_link / connect."
+                    },
+                    "link_to": {
+                      "type": "string",
+                      "description": "Alias of to for splice_on_link / break_link / connect."
+                    },
+                    "insert_patch_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "patch_id of a node created earlier in this ops list."
+                    },
+                    "insert_input_pin": {
+                      "type": "string",
+                      "description": "Defaults to Execute."
+                    },
+                    "insert_output_pin": {
+                      "type": "string",
+                      "description": "Defaults to Then."
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "from",
+                    "to",
+                    "insert_patch_id"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "create_comment"
+                      ]
+                    },
+                    "patch_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "title": {
+                      "type": "string",
+                      "description": "Comment title (alias: name)."
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "width": {
+                      "type": "number"
+                    },
+                    "height": {
+                      "type": "number"
+                    },
+                    "member_node_refs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Node ids (patch_id or guid:uuid) to bound after layout—no .Pin suffix."
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "patch_id"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "blueprint_path",
+          "ops"
+        ]
+      },
+      "side_effects": "compile",
+      "permission": "write",
+      "ue_entry_points": "UBlueprint; UEdGraph; UEdGraphSchema_K2; FUnrealBlueprintGraphFormatService; UnrealBlueprintCommentReflow; FKismetEditorUtilities::CompileBlueprint",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Non-/Game blueprint_path rejected.",
+        "Unknown op or invalid fields per op (see parameters schema).",
+        "k2_class missing or not a UK2Node; symbol not found for call_function.",
+        "Connection rejected (pin types/direction); inspect pins with blueprint_graph_list_pins.",
+        "break_link: pins not directly linked.",
+        "splice_on_link: insert_patch_id missing, wrong exec pins, or reconnect fails after break.",
+        "Partial ops: status patch_errors, errors[], applied_partial[].",
+        "Compile errors after patch: follow with blueprint_compile for structured diagnostics."
+      ],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/blueprints-visual-scripting-in-unreal-engine"
+      ],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "blueprint_graph_list_pins",
+      "summary": "Read-only: pins[] (name, direction, category, optional default_value). Needs blueprint_path and node_ref OR guid (real graph GUID). Does not resolve patch_id strings from other tool calls.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "graph",
+        "read",
+        "pins"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 73,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Blueprint under /Game."
+          },
+          "graph_name": {
+            "type": "string",
+            "description": "Defaults to EventGraph."
+          },
+          "node_ref": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Graph node GUID as in blueprint_export_ir node_guid, or guid:{uuid}. Must exist on the saved graph."
+          },
+          "guid": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Alias for node_ref."
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ],
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "node_ref"
+                ]
+              },
+              {
+                "required": [
+                  "guid"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UBlueprint; UEdGraphNode::Pins",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Blueprint or graph not found.",
+        "node_ref not a valid GUID or node absent from graph.",
+        "patch_id from a prior blueprint_graph_patch cannot target this read-only tool—use node_guid from disk."
+      ],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/blueprints-visual-scripting-in-unreal-engine"
+      ],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "blueprint_set_component_default",
+      "summary": "Set one reflected property on a named Actor component on the Blueprint class default (CDO), then compile. Use for gameplay tuning that lives on component defaults (e.g. CharacterMovement.JumpZVelocity) instead of asset_apply_properties on the UBlueprint asset object. Requires blueprint_path under /Game, component name (e.g. CharacterMovement), property name (e.g. JumpZVelocity), and value (number/bool/string per property type). Does not replace blueprint_graph_patch / blueprint_apply_ir for EventGraph logic.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "defaults",
+        "component"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 52,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "description": "Blueprint asset object path under /Game (e.g. /Game/Blueprints/MyCharacter.MyCharacter)."
+          },
+          "component": {
+            "type": "string",
+            "description": "Component name on the class default, e.g. CharacterMovement (matches ACharacter movement component)."
+          },
+          "property": {
+            "type": "string",
+            "description": "Property name on the component class (e.g. JumpZVelocity)."
+          },
+          "value": {
+            "description": "JSON value: number for floats/ints, bool, or string (enums, names, ExportText for exotic types)."
+          }
+        },
+        "required": [
+          "blueprint_path",
+          "component",
+          "property",
+          "value"
+        ]
+      },
+      "side_effects": "compile",
+      "permission": "write",
+      "ue_entry_points": "AActor CDO component property write, FKismetEditorUtilities::CompileBlueprint",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Blueprint generated class is not an Actor (only Actor-based BPs have instanced component defaults on CDO).",
+        "component not found on class default, or property not editable on component instance."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
       "tool_id": "blueprint_apply_ir",
-      "summary": "Apply compact Blueprint IR and materialize/wire EventGraph nodes. Primary tool for gameplay logic (overlap, timers, variables, calls). blueprint_path must be an object_path from asset_index_fuzzy_search or asset_registry_query results—never a guessed name when multiple assets matched. Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Minimal valid shape: blueprint_path + nodes[] + links[] where each node has node_id/op and each link has from/to pin refs. Optional layout_mode (single_row|multi_strand) and wire_knots (off|light|aggressive) override project defaults when auto_layout runs. graph_comment nodes support name, width, height, member_node_ids for comment boxes. blueprint_path must be a Blueprint asset path (/Game/...Asset.Asset), never a level actor/world path. Not for UMG Designer layout.",
+      "summary": "Optional compact Blueprint IR DSL: materialize/wire EventGraph nodes for supported op types (overlap, timers, variables, calls, etc.). Prefer blueprint_graph_patch for arbitrary UK2Node types or when IR ops/merge_policy are awkward; use this when the compact op set matches. blueprint_path must be an object_path from asset_index_fuzzy_search or asset_registry_query—never a guessed name when multiple assets matched. Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Minimal shape: blueprint_path + nodes[] + links[]. Optional layout_mode (single_row|multi_strand) and wire_knots override defaults when auto_layout runs. blueprint_path must be a Blueprint asset path (/Game/...Asset.Asset), not a level actor path. Not for UMG Designer layout.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -4346,7 +5104,7 @@
     },
     {
       "tool_id": "asset_export_properties",
-      "summary": "Read/export editable UObject properties under /Game as JSON (reflection). Read-only inspector used to understand current values before applying a delta with asset_apply_properties.",
+      "summary": "Read/export editable UObject properties under /Game as JSON (reflection). For a Blueprint asset, keys are properties on the UBlueprint editor object—not inherited component defaults on the generated class (e.g. CharacterMovement.JumpZVelocity). For those, use blueprint_set_component_default. Read-only inspector before asset_apply_properties on the same object_path.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -4389,7 +5147,7 @@
     },
     {
       "tool_id": "asset_apply_properties",
-      "summary": "Write/apply JSON property deltas to an asset under /Game (reflection / ImportText). Mutation tool: use after a concrete object_path is known and prefer dry_run before irreversible edits. `{}` is invalid: object_path + properties are required. Materials do not have Text/UMG fields—if you see status material_text_property_confusion, use in-world text (TextRenderActor/UMG) instead of inventing Text on Material assets.",
+      "summary": "Write/apply flat JSON property deltas on the loaded asset UObject under /Game (reflection / ImportText)—top-level keys only, no nested component objects. For Blueprint assets this targets the UBlueprint object, not class-default component properties (use blueprint_set_component_default for e.g. CharacterMovement.JumpZVelocity). Mutation tool: use after a concrete object_path is known; prefer dry_run before irreversible edits. `{}` is invalid: object_path + properties are required. Materials do not have Text/UMG fields—if you see status material_text_property_confusion, use in-world text (TextRenderActor/UMG) instead of inventing Text on Material assets.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -4433,7 +5191,8 @@
       "threading": "game_thread",
       "failure_modes": [
         "status material_text_property_confusion: property keys look like Text/widget fields on a Material/MaterialInstance; follow suggested_correct_call or use level text actors.",
-        "status apply_errors: unknown or non-editable property names—use asset_export_properties first to list valid keys."
+        "status apply_errors: unknown or non-editable property names—use asset_export_properties first to list valid keys for this object_path (Blueprint: UBlueprint fields only; not component CDO defaults).",
+        "Nested JSON under properties (e.g. CharacterMovement: { JumpZVelocity }) is not supported—use blueprint_set_component_default for component class defaults on Actor Blueprints."
       ],
       "doc_links": [],
       "status": "implemented"
@@ -4566,7 +5325,7 @@
     },
     {
       "tool_id": "blueprint_export_ir",
-      "summary": "Read-only: export Blueprint graph IR for an existing Blueprint asset path. `blueprint_path` is required and should come from prior discovery output (asset_index_fuzzy_search / asset_registry_query object_path), not a guessed name. Use before blueprint_apply_ir when patching logic.",
+      "summary": "Read-only: export Blueprint graph IR for an existing Blueprint asset path. blueprint_path must come from discovery (asset_index_fuzzy_search / asset_registry_query object_path). Unknown node kinds include k2_class and node_guid for round-tripping with blueprint_graph_patch and blueprint_graph_list_pins. Use before blueprint_graph_patch or blueprint_apply_ir when planning edits.",
       "category": "blueprints",
       "tags": [
         "blueprint",

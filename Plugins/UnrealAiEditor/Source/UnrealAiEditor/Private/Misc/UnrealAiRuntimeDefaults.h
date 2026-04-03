@@ -40,7 +40,8 @@ namespace UnrealAiRuntimeDefaults
 	// --- UnrealAiTurnLlmRequestBuilder (headed harness historically used core + extras for smaller payloads) ---
 	inline constexpr bool ToolPackRestrictToCore = true;
 	inline const TCHAR* ToolPackExtraCommaSeparated =
-		TEXT("asset_create,asset_registry_query,blueprint_compile,blueprint_apply_ir,blueprint_get_graph_summary,blueprint_open_graph_tab,"
+		TEXT("asset_create,asset_registry_query,blueprint_compile,blueprint_set_component_default,blueprint_apply_ir,blueprint_graph_patch,blueprint_graph_list_pins,"
+			 "blueprint_export_ir,blueprint_get_graph_summary,blueprint_open_graph_tab,"
 			 "blueprint_add_variable,audio_component_preview,project_file_read_text,project_file_write_text,project_file_move,"
 			 "cpp_project_compile,actor_spawn_from_class,console_command");
 	inline constexpr bool ToolSurfaceUseDispatch = true; // false = native full schema per tool in tools[]

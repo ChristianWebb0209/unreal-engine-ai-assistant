@@ -450,6 +450,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_BlueprintCompile(A);
 	}
+	if (ToolId == TEXT("blueprint_set_component_default"))
+	{
+		return UnrealAiDispatch_BlueprintSetComponentDefault(A);
+	}
 	if (ToolId == TEXT("blueprint_export_ir"))
 	{
 		return UnrealAiDispatch_BlueprintExportIr(A);
@@ -457,6 +461,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	if (ToolId == TEXT("blueprint_apply_ir"))
 	{
 		return UnrealAiDispatch_BlueprintApplyIr(A);
+	}
+	if (ToolId == TEXT("blueprint_graph_patch"))
+	{
+		return UnrealAiDispatch_BlueprintGraphPatch(A);
+	}
+	if (ToolId == TEXT("blueprint_graph_list_pins"))
+	{
+		return UnrealAiDispatch_BlueprintGraphListPins(A);
 	}
 	if (ToolId == TEXT("blueprint_format_graph"))
 	{

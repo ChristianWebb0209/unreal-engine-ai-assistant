@@ -1,6 +1,7 @@
 #include "Tools/UnrealAiToolDispatch_BlueprintTools.h"
 
 #include "Tools/UnrealAiToolDispatch_ArgRepair.h"
+#include "Tools/UnrealAiBlueprintFunctionResolve.h"
 #include "BlueprintFormat/BlueprintGraphCommentReflow.h"
 #include "BlueprintFormat/BlueprintGraphFormatOptions.h"
 #include "BlueprintFormat/UnrealAiBlueprintFormatterBridge.h"
@@ -16,6 +17,10 @@
 #include "EdGraph/EdGraphPin.h"
 #include "Engine/Blueprint.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Components/ActorComponent.h"
+#include "Engine/BlueprintGeneratedClass.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_DynamicCast.h"
 #include "K2Node_Event.h"
@@ -38,6 +43,7 @@
 #include "Misc/PackageName.h"
 #include "Tools/Presentation/UnrealAiEditorNavigation.h"
 #include "UObject/Class.h"
+#include "UObject/Script.h"
 #include "UObject/Field.h"
 #include "UObject/Package.h"
 #include "UObject/SoftObjectPath.h"
@@ -894,41 +900,100 @@ namespace UnrealAiBlueprintToolsPriv
 		return nullptr;
 	}
 
-	static FEdGraphPinType ParsePinType(const FString& TypeStr)
+	static bool TryParsePinType(const FString& TypeStr, FEdGraphPinType& P)
 	{
-		FEdGraphPinType P;
-		const FString T = TypeStr.ToLower();
+		FString Trimmed = TypeStr;
+		Trimmed.TrimStartAndEndInline();
+		if (Trimmed.IsEmpty())
+		{
+			return false;
+		}
+		const FString T = Trimmed.ToLower();
 		if (T == TEXT("bool") || T == TEXT("boolean"))
 		{
 			P.PinCategory = UEdGraphSchema_K2::PC_Boolean;
+			return true;
 		}
-		else if (T == TEXT("int") || T == TEXT("integer"))
+		if (T == TEXT("int") || T == TEXT("integer") || T == TEXT("int32"))
 		{
 			P.PinCategory = UEdGraphSchema_K2::PC_Int;
+			return true;
 		}
-		else if (T == TEXT("float") || T == TEXT("double"))
+		if (T == TEXT("int64") || T == TEXT("long"))
+		{
+			P.PinCategory = UEdGraphSchema_K2::PC_Int64;
+			return true;
+		}
+		if (T == TEXT("byte") || T == TEXT("uint8"))
+		{
+			P.PinCategory = UEdGraphSchema_K2::PC_Byte;
+			return true;
+		}
+		if (T == TEXT("float"))
 		{
 			P.PinCategory = UEdGraphSchema_K2::PC_Real;
 			P.PinSubCategory = UEdGraphSchema_K2::PC_Float;
+			return true;
 		}
-		else if (T == TEXT("string"))
+		if (T == TEXT("double"))
+		{
+			P.PinCategory = UEdGraphSchema_K2::PC_Real;
+			P.PinSubCategory = UEdGraphSchema_K2::PC_Double;
+			return true;
+		}
+		if (T == TEXT("string"))
 		{
 			P.PinCategory = UEdGraphSchema_K2::PC_String;
+			return true;
 		}
-		else if (T == TEXT("vector"))
+		if (T == TEXT("name") || T == TEXT("fname"))
+		{
+			P.PinCategory = UEdGraphSchema_K2::PC_Name;
+			return true;
+		}
+		if (T == TEXT("text") || T == TEXT("ftext"))
+		{
+			P.PinCategory = UEdGraphSchema_K2::PC_Text;
+			return true;
+		}
+		if (T == TEXT("vector"))
 		{
 			P.PinCategory = UEdGraphSchema_K2::PC_Struct;
 			P.PinSubCategoryObject = TBaseStructure<FVector>::Get();
+			return true;
 		}
-		else if (T == TEXT("rotator"))
+		if (T == TEXT("rotator"))
 		{
 			P.PinCategory = UEdGraphSchema_K2::PC_Struct;
 			P.PinSubCategoryObject = TBaseStructure<FRotator>::Get();
+			return true;
 		}
-		else
+		if (Trimmed.StartsWith(TEXT("/")))
 		{
-			P.PinCategory = UEdGraphSchema_K2::PC_Boolean;
+			if (UClass* C = LoadObject<UClass>(nullptr, *Trimmed))
+			{
+				P.PinCategory = UEdGraphSchema_K2::PC_Object;
+				P.PinSubCategoryObject = C;
+				return true;
+			}
+			if (UScriptStruct* S = Cast<UScriptStruct>(StaticLoadObject(UScriptStruct::StaticClass(), nullptr, *Trimmed)))
+			{
+				P.PinCategory = UEdGraphSchema_K2::PC_Struct;
+				P.PinSubCategoryObject = S;
+				return true;
+			}
 		}
+		return false;
+	}
+
+	static FEdGraphPinType ParsePinTypeWithBooleanFallback(const FString& TypeStr)
+	{
+		FEdGraphPinType P;
+		if (TryParsePinType(TypeStr, P))
+		{
+			return P;
+		}
+		P.PinCategory = UEdGraphSchema_K2::PC_Boolean;
 		return P;
 	}
 
@@ -1589,6 +1654,8 @@ namespace UnrealAiBlueprintToolsPriv
 		OutOp = TEXT("unknown");
 		OutObj->SetStringField(TEXT("op"), OutOp);
 		OutObj->SetStringField(TEXT("class"), N->GetClass()->GetName());
+		OutObj->SetStringField(TEXT("k2_class"), N->GetClass()->GetPathName());
+		OutObj->SetStringField(TEXT("node_guid"), LexToString(N->NodeGuid));
 		OutObj->SetStringField(TEXT("title"), N->GetNodeTitle(ENodeTitleType::ListView).ToString());
 	}
 
@@ -1952,7 +2019,10 @@ namespace UnrealAiBlueprintToolsPriv
 		}
 		else if (Op == TEXT("call_function"))
 		{
-			if (D.ClassPath.IsEmpty() || D.FunctionName.IsEmpty())
+			FString ClassPathResolved = D.ClassPath;
+			FString FnResolved = D.FunctionName;
+			UnrealAiBlueprintFunctionResolve::SplitCombinedClassPathAndFunctionName(ClassPathResolved, FnResolved);
+			if (ClassPathResolved.IsEmpty() || FnResolved.IsEmpty())
 			{
 				AddError(
 					Errors,
@@ -1962,15 +2032,22 @@ namespace UnrealAiBlueprintToolsPriv
 					TEXT("Example: class_path=/Script/Engine.KismetSystemLibrary, function_name=PrintString"));
 				return nullptr;
 			}
-			UClass* Class = LoadObject<UClass>(nullptr, *D.ClassPath);
-			UFunction* Fn = Class ? Class->FindFunctionByName(FName(*D.FunctionName)) : nullptr;
+			UClass* Class = LoadObject<UClass>(nullptr, *ClassPathResolved);
+			UFunction* Fn = nullptr;
+			if (Class)
+			{
+				Fn = UnrealAiBlueprintFunctionResolve::ResolveCallFunction(Class, FnResolved);
+			}
 			if (!Fn)
 			{
 				AddError(
 					Errors,
 					TEXT("symbol_not_found"),
 					FString::Printf(TEXT("$.nodes[%s]"), *D.NodeId),
-					TEXT("Function not found on class"),
+					FString::Printf(
+						TEXT("Function not found (class=%s, name=%s). Use declaring class: Actor+GetActorLocation, KismetMathLibrary+RandomFloatInRange, KismetSystemLibrary+Delay."),
+						*ClassPathResolved,
+						*FnResolved),
 					TEXT("Verify class_path and function_name"));
 				return nullptr;
 			}
@@ -2089,11 +2166,293 @@ void UnrealAiNormalizeBlueprintObjectPath(FString& BlueprintObjectPath)
 	UnrealAiBlueprintToolsPriv::NormalizeBlueprintObjectPath(BlueprintObjectPath);
 }
 
+FUnrealBlueprintGraphFormatOptions UnrealAiBlueprintTools_MakeFormatOptions(
+	const FString& LayoutMode,
+	const FString& WireKnots,
+	const UUnrealAiEditorSettings* Settings)
+{
+	return UnrealAiBlueprintToolsPriv::MakeBlueprintFormatOptions(LayoutMode, WireKnots, Settings);
+}
+
 static FString UnrealAiBlueprintLoadHint(const FString& BlueprintPath)
 {
 	return FString::Printf(
 		TEXT("Could not load Blueprint '%s'. Expected a Blueprint asset object path under /Game (for example /Game/Blueprints/MyBP or /Game/Blueprints/MyBP.MyBP). If this is a new asset, create it first with asset_create or set create_if_missing:true in blueprint_apply_ir."),
 		*BlueprintPath);
+}
+
+namespace UnrealAiBlueprintComponentDefaultPriv
+{
+	static bool PropertyIsEditableForComponentDefault(const FProperty* Prop)
+	{
+		return Prop && !Prop->HasAnyPropertyFlags(CPF_Transient | CPF_SkipSerialization) && Prop->HasAnyPropertyFlags(CPF_Edit);
+	}
+
+	static bool TryApplyJsonToEditableProperty(
+		const FProperty* Prop,
+		void* Addr,
+		UObject* Owner,
+		const TSharedPtr<FJsonValue>& Val,
+		FString& OutErr)
+	{
+		if (!Prop || !Addr || !Owner || !Val.IsValid())
+		{
+			OutErr = TEXT("internal: invalid property apply args");
+			return false;
+		}
+		const FString FieldName = Prop->GetName();
+		if (const FBoolProperty* BP = CastField<FBoolProperty>(Prop))
+		{
+			bool B = false;
+			if (Val->TryGetBool(B))
+			{
+				const_cast<FBoolProperty*>(BP)->SetPropertyValue(Addr, B);
+				return true;
+			}
+			OutErr = FString::Printf(TEXT("%s: expected bool"), *FieldName);
+			return false;
+		}
+		if (const FNumericProperty* NP = CastField<FNumericProperty>(Prop))
+		{
+			double Num = 0;
+			if (!Val->TryGetNumber(Num))
+			{
+				OutErr = FString::Printf(TEXT("%s: expected number"), *FieldName);
+				return false;
+			}
+			FNumericProperty* NPM = const_cast<FNumericProperty*>(NP);
+			if (NPM->IsFloatingPoint())
+			{
+				NPM->SetFloatingPointPropertyValue(Addr, Num);
+				return true;
+			}
+			if (NPM->IsInteger())
+			{
+				NPM->SetIntPropertyValue(Addr, static_cast<int64>(FMath::RoundToDouble(Num)));
+				return true;
+			}
+			OutErr = FString::Printf(TEXT("%s: unsupported numeric storage"), *FieldName);
+			return false;
+		}
+		if (const FStrProperty* SP = CastField<FStrProperty>(Prop))
+		{
+			FString S;
+			if (Val->TryGetString(S))
+			{
+				const_cast<FStrProperty*>(SP)->SetPropertyValue(Addr, MoveTemp(S));
+				return true;
+			}
+			OutErr = FString::Printf(TEXT("%s: expected string"), *FieldName);
+			return false;
+		}
+		if (const FNameProperty* NP = CastField<FNameProperty>(Prop))
+		{
+			FString S;
+			if (Val->TryGetString(S))
+			{
+				const_cast<FNameProperty*>(NP)->SetPropertyValue(Addr, FName(*S));
+				return true;
+			}
+			OutErr = FString::Printf(TEXT("%s: expected string (name)"), *FieldName);
+			return false;
+		}
+		if (const FTextProperty* TP = CastField<FTextProperty>(Prop))
+		{
+			FString S;
+			if (Val->TryGetString(S))
+			{
+				const_cast<FTextProperty*>(TP)->SetPropertyValue(Addr, FText::FromString(S));
+				return true;
+			}
+			OutErr = FString::Printf(TEXT("%s: expected string (text)"), *FieldName);
+			return false;
+		}
+		if (const FEnumProperty* EP = CastField<FEnumProperty>(Prop))
+		{
+			FString S;
+			if (!Val->TryGetString(S))
+			{
+				OutErr = FString::Printf(TEXT("%s: expected enum string"), *FieldName);
+				return false;
+			}
+			if (UEnum* En = EP->GetEnum())
+			{
+				const int64 Ev = En->GetValueByName(FName(*S));
+				if (Ev == INDEX_NONE)
+				{
+					OutErr = FString::Printf(TEXT("%s: unknown enum value %s"), *FieldName, *S);
+					return false;
+				}
+				if (FNumericProperty* Under = EP->GetUnderlyingProperty())
+				{
+					Under->SetIntPropertyValue(Addr, Ev);
+					return true;
+				}
+			}
+			OutErr = FString::Printf(TEXT("%s: enum apply failed"), *FieldName);
+			return false;
+		}
+		if (const FStructProperty* StructProp = CastField<FStructProperty>(Prop))
+		{
+			FString S;
+			if (!Val->TryGetString(S))
+			{
+				OutErr = FString::Printf(TEXT("%s: expected struct export-text string"), *FieldName);
+				return false;
+			}
+			void* StructAddr = Addr;
+			const TCHAR* Buf = *S;
+			const TCHAR* NewBuf = StructProp->ImportText_Direct(Buf, StructAddr, Owner, PPF_None);
+			if (NewBuf == nullptr)
+			{
+				OutErr = FString::Printf(TEXT("%s: struct ImportText failed"), *FieldName);
+				return false;
+			}
+			return true;
+		}
+
+		FString S;
+		if (!Val->TryGetString(S))
+		{
+			OutErr = FString::Printf(TEXT("%s: use string ExportText form for this property type"), *FieldName);
+			return false;
+		}
+		const TCHAR* Buf = *S;
+		void* PropAddr = Addr;
+		const TCHAR* NewBuf = Prop->ImportText_Direct(Buf, PropAddr, Owner, PPF_None);
+		if (NewBuf == nullptr)
+		{
+			OutErr = FString::Printf(TEXT("%s: ImportText failed"), *FieldName);
+			return false;
+		}
+		return true;
+	}
+
+	static UActorComponent* FindNamedComponentOnActorCDO(AActor* ActorCDO, const FString& ComponentName)
+	{
+		if (!ActorCDO || ComponentName.IsEmpty())
+		{
+			return nullptr;
+		}
+		const FName Want(*ComponentName);
+
+		if (ACharacter* Char = Cast<ACharacter>(ActorCDO))
+		{
+			if (Want == FName(TEXT("CharacterMovement")) || ComponentName.Equals(TEXT("CharacterMovement"), ESearchCase::IgnoreCase))
+			{
+				return Char->GetCharacterMovement();
+			}
+		}
+
+		TInlineComponentArray<UActorComponent*> Components(ActorCDO);
+		for (UActorComponent* C : Components)
+		{
+			if (!C)
+			{
+				continue;
+			}
+			if (C->GetFName() == Want || C->GetName().Equals(ComponentName, ESearchCase::IgnoreCase))
+			{
+				return C;
+			}
+		}
+		return nullptr;
+	}
+} // namespace UnrealAiBlueprintComponentDefaultPriv
+
+FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintSetComponentDefault(const TSharedPtr<FJsonObject>& Args)
+{
+	using namespace UnrealAiBlueprintComponentDefaultPriv;
+	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
+	FString Path;
+	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
+		SuggestedArgs->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
+		SuggestedArgs->SetStringField(TEXT("component"), TEXT("CharacterMovement"));
+		SuggestedArgs->SetStringField(TEXT("property"), TEXT("JumpZVelocity"));
+		SuggestedArgs->SetNumberField(TEXT("value"), 1200.0);
+		return UnrealAiToolJson::ErrorWithSuggestedCall(
+			TEXT("blueprint_path is required. Discover Blueprints with asset_index_fuzzy_search or asset_registry_query."),
+			TEXT("blueprint_set_component_default"),
+			SuggestedArgs);
+	}
+	FString ComponentName;
+	if (!Args->TryGetStringField(TEXT("component"), ComponentName) || ComponentName.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("component is required (e.g. CharacterMovement)."));
+	}
+	FString PropertyName;
+	if (!Args->TryGetStringField(TEXT("property"), PropertyName) || PropertyName.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("property is required (e.g. JumpZVelocity)."));
+	}
+	TSharedPtr<FJsonValue> ValueField = Args->TryGetField(TEXT("value"));
+	if (!ValueField.IsValid())
+	{
+		return UnrealAiToolJson::Error(TEXT("value is required (JSON number, bool, or string per property type)."));
+	}
+
+	if (!UnrealAiBlueprintToolsPriv::IsGameWritableBlueprintObjectPath(Path))
+	{
+		return UnrealAiToolJson::Error(TEXT("blueprint_path must be under /Game."));
+	}
+
+	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path);
+	if (!BP || !BP->GeneratedClass)
+	{
+		return UnrealAiToolJson::Error(UnrealAiBlueprintLoadHint(Path));
+	}
+
+	UObject* CDO = BP->GeneratedClass->GetDefaultObject();
+	AActor* ActorCDO = Cast<AActor>(CDO);
+	if (!ActorCDO)
+	{
+		return UnrealAiToolJson::Error(
+			TEXT("This Blueprint's generated class default is not an Actor. Component defaults can only be set on Actor-based Blueprints (e.g. Character, Pawn)."));
+	}
+
+	UActorComponent* Comp = FindNamedComponentOnActorCDO(ActorCDO, ComponentName);
+	if (!Comp)
+	{
+		return UnrealAiToolJson::Error(FString::Printf(
+			TEXT("Component '%s' not found on the class default. Use the component name from the Blueprint (e.g. CharacterMovement)."),
+			*ComponentName));
+	}
+
+	FProperty* Prop = FindFProperty<FProperty>(Comp->GetClass(), FName(*PropertyName));
+	if (!Prop || !PropertyIsEditableForComponentDefault(Prop))
+	{
+		return UnrealAiToolJson::Error(FString::Printf(
+			TEXT("Property '%s' is not editable on %s (must exist on the component instance with Edit flag)."),
+			*PropertyName,
+			*Comp->GetClass()->GetName()));
+	}
+
+	void* Addr = Prop->ContainerPtrToValuePtr<void>(Comp);
+	FString ApplyErr;
+	if (!TryApplyJsonToEditableProperty(Prop, Addr, Comp, ValueField, ApplyErr))
+	{
+		return UnrealAiToolJson::Error(ApplyErr);
+	}
+
+	const FScopedTransaction Txn(
+		NSLOCTEXT("UnrealAiEditor", "TxnBpSetCompDefault", "Unreal AI: set component class default"));
+	BP->Modify();
+	Comp->Modify();
+	Comp->PostEditChange();
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+	FKismetEditorUtilities::CompileBlueprint(BP, EBlueprintCompileOptions::None, nullptr);
+
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetBoolField(TEXT("ok"), BP->Status != BS_Error);
+	O->SetStringField(TEXT("blueprint_path"), Path);
+	O->SetStringField(TEXT("component"), ComponentName);
+	O->SetStringField(TEXT("property"), PropertyName);
+	O->SetField(TEXT("value"), ValueField);
+	O->SetStringField(TEXT("component_class"), Comp->GetClass()->GetPathName());
+	O->SetNumberField(TEXT("blueprint_status"), static_cast<double>(static_cast<int32>(BP->Status)));
+	return UnrealAiToolJson::Ok(O);
 }
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompile(const TSharedPtr<FJsonObject>& Args)
@@ -2488,7 +2847,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 		{
 			continue;
 		}
-		FBlueprintEditorUtils::AddMemberVariable(BP, FName(*Var.Name), ParsePinType(Var.Type));
+		FBlueprintEditorUtils::AddMemberVariable(BP, FName(*Var.Name), ParsePinTypeWithBooleanFallback(Var.Type));
 	}
 
 	const FString EffectiveMergePolicy = ResolveEffectiveMergePolicy(Ir, BP, Graph);
@@ -3155,7 +3514,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintAddVariable(const TShare
 	{
 		return UnrealAiToolJson::Error(UnrealAiBlueprintLoadHint(Path));
 	}
-	const FEdGraphPinType PinType = UnrealAiBlueprintToolsPriv::ParsePinType(TypeStr);
+	FEdGraphPinType PinType;
+	if (!UnrealAiBlueprintToolsPriv::TryParsePinType(TypeStr, PinType))
+	{
+		return UnrealAiToolJson::Error(FString::Printf(
+			TEXT("Unknown or unsupported type \"%s\". Use a keyword (int, float, bool, object path under /Script or /Game, etc.)."),
+			*TypeStr));
+	}
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnBpVar", "Unreal AI: add BP variable"));
 	FBlueprintEditorUtils::AddMemberVariable(BP, FName(*VarName), PinType);
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
@@ -3180,6 +3545,31 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AnimBlueprintGetGraphSummary(cons
 	TSharedPtr<FJsonObject> Fake = MakeShared<FJsonObject>();
 	Fake->SetStringField(TEXT("blueprint_path"), Path);
 	return UnrealAiDispatch_BlueprintGetGraphSummary(Fake);
+}
+
+UBlueprint* UnrealAiBlueprintTools_LoadBlueprintGame(const FString& BlueprintObjectPath)
+{
+	return UnrealAiBlueprintToolsPriv::LoadBlueprint(BlueprintObjectPath);
+}
+
+bool UnrealAiBlueprintTools_IsGameWritableBlueprintPath(const FString& BlueprintObjectPath)
+{
+	return UnrealAiBlueprintToolsPriv::IsGameWritableBlueprintObjectPath(BlueprintObjectPath);
+}
+
+UEdGraph* UnrealAiBlueprintTools_FindGraphByName(UBlueprint* BP, const FString& GraphName)
+{
+	return UnrealAiBlueprintToolsPriv::FindGraphByName(BP, GraphName);
+}
+
+bool UnrealAiBlueprintTools_TryParsePinTypeFromString(const FString& TypeStr, FEdGraphPinType& OutType)
+{
+	return UnrealAiBlueprintToolsPriv::TryParsePinType(TypeStr, OutType);
+}
+
+FEdGraphPinType UnrealAiBlueprintTools_ParsePinTypeFromString(const FString& TypeStr)
+{
+	return UnrealAiBlueprintToolsPriv::ParsePinTypeWithBooleanFallback(TypeStr);
 }
 
 void UnrealAiFocusBlueprintEditor(const FString& BlueprintObjectPath, const FString& GraphName)
