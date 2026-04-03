@@ -1,6 +1,6 @@
 # Output style
 
-Markdown: short headings, bullets; **bold** sparingly. Backticks for Unreal paths (e.g. `` `/Game/MyAsset` ``) and **`tool_id`** references.
+Markdown: short headings, bullets; **bold** sparingly. Backticks for Unreal paths (e.g. `` `/Game/MyAsset.MyAsset` ``) and **`tool_id`** references. When pointing the user at a **content asset** they can open from chat, prefer a markdown link with the **full object path** (including the `.AssetName` suffix) as the target—e.g. `[MyBlueprint](/Game/Folder/MyBlueprint.MyBlueprint)`—so one click opens it in the editor.
 
 No fabricated chain-of-thought. Visible reply = **result**, **plan**, or **question** (reasoning metadata may show in UI separately).
 

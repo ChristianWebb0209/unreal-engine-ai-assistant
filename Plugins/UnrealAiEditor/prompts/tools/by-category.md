@@ -38,9 +38,11 @@ _No catalog entries._ Placeholder tools for generic network access, raw exec str
 | tool_id | Summary | permission | status | modes |
 |---------|---------|------------|--------|-------|
 | `blueprint_add_variable` | Add member variable to Blueprint. | write | future | ask=False agent=True |
-| `blueprint_apply_ir` | Apply compact Blueprint IR and materialize/wire EventGraph nodes; merge_policy, event_tick, auto_layout, layout_scope; pair with blueprint_compile. | write | implemented | ask=False agent=True |
+| `blueprint_apply_ir` | Compact Blueprint IR DSL; merge_policy, event_tick, auto_layout, layout_scope; use when ops fit—else blueprint_graph_patch. | write | implemented | ask=False agent=True |
 | `blueprint_compile` | Compile a Blueprint and return diagnostics; optional format_graphs runs Unreal Blueprint Formatter on script graphs before compile. | write | implemented | ask=False agent=True |
-| `blueprint_export_ir` | Serialize graph to blueprint_apply_ir-style JSON (lossy for unknown nodes). | read | implemented | ask=True agent=True |
+| `blueprint_export_ir` | Export graph to IR JSON; unknown nodes include k2_class/node_guid for blueprint_graph_patch round-trip. | read | implemented | ask=True agent=True |
+| `blueprint_graph_list_pins` | List visible pins on one node (GUID from export or patch); read-only introspection before connect/set_pin_default. | read | implemented | ask=True agent=True |
+| `blueprint_graph_patch` | Graph mutator: create_node, create_comment, connect, break_link, splice_on_link, set_pin_default, add_variable, remove/move_node; auto_layout + layout_scope (patched_nodes default); /Game. | write | implemented | ask=False agent=True |
 | `blueprint_format_graph` | LayoutEntireGraph readability pass on a script graph (bundled layout). | write | implemented | ask=False agent=True |
 | `blueprint_get_graph_summary` | Export bounded summary of a Blueprint graph. | read | implemented | ask=True agent=True |
 | `blueprint_open_graph_tab` | Open Blueprint editor focused on a graph. | write | implemented | ask=False agent=True |

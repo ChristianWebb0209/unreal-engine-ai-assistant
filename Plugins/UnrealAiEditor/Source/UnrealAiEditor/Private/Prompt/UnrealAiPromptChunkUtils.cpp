@@ -58,7 +58,7 @@ namespace UnrealAiPromptChunkUtilsPriv
 		if (P == TEXT("blueprint_only"))
 		{
 			return TEXT(
-				"**Code-type preference: blueprint_only** — Prefer Blueprint graph work (`blueprint_export_ir` / `blueprint_apply_ir`) and gameplay assets. Avoid introducing or editing C++ under `Source/` unless the user explicitly requires native code. After graph edits, run `blueprint_compile` and fix all reported errors before finishing. Use `asset_rename` for `/Game` assets; use `project_file_move` for on-disk files outside Content if needed.");
+				"**Code-type preference: blueprint_only** — Prefer Blueprint graph work (`blueprint_export_ir`, `blueprint_graph_patch`, `blueprint_apply_ir`) and gameplay assets. Avoid introducing or editing C++ under `Source/` unless the user explicitly requires native code. After graph edits, run `blueprint_compile` and fix all reported errors before finishing. Use `asset_rename` for `/Game` assets; use `project_file_move` for on-disk files outside Content if needed.");
 		}
 		if (P == TEXT("cpp_only"))
 		{
@@ -68,7 +68,7 @@ namespace UnrealAiPromptChunkUtilsPriv
 		if (P == TEXT("blueprint_first"))
 		{
 			return TEXT(
-				"**Code-type preference: blueprint_first** — Default to Blueprint graphs and `/Game` assets when either approach could work; fall back to C++ when Blueprint or tools are insufficient. Always compile: `blueprint_compile` for Blueprints; after substantive C++ use a closed-editor build when possible, or `cpp_project_compile` with `confirm_external_rebuild:true` if the editor is interactive.");
+				"**Code-type preference: blueprint_first** — Default to Blueprint graphs and `/Game` assets when either approach could work; fall back to C++ when Blueprint or tools are insufficient. Use `blueprint_graph_patch` when arbitrary K2 nodes matter; use `blueprint_apply_ir` when the compact IR ops fit. Always compile: `blueprint_compile` for Blueprints; after substantive C++ use a closed-editor build when possible, or `cpp_project_compile` with `confirm_external_rebuild:true` if the editor is interactive.");
 		}
 		if (P == TEXT("cpp_first"))
 		{
