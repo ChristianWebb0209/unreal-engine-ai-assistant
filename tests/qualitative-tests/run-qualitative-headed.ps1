@@ -21,7 +21,7 @@
     .\tests\qualitative-tests\run-qualitative-headed.ps1 -DryRun
   Bandwidth: -MaxSuites N runs only the first N suite files (sorted by name). Use 0 for all (default).
     N may be negative (e.g. -MaxSuites -1 = first suite only, -2 = first two). Same as positive |N|.
-  Budget (harness): primary stop = 4 consecutive identical tool failures OR per-turn token cap (model profile / default 500k);
+  Budget (harness): primary stop = 4 consecutive identical tool failures OR per-turn token cap (model profile; default ~1M when unset; maxAgentTurnTokens=-1 = unlimited);
     round cap is a 512 backstop. -MaxLlmRounds / -MaxTurnTokens are recorded in summary.json only; tune limits in the model profile JSON (env overrides removed).
 
   Editor process exit vs harness success
