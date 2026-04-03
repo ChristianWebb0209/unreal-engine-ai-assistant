@@ -90,4 +90,25 @@ namespace UnrealAiStartupOpsStatus
 		const FProjectTreeSummary& Summary = UnrealAiProjectTreeSampler::GetOrRefreshProjectSummary(ProjectId, false);
 		return BuildCompactLine(BuildStatus(Retrieval, Summary, ProjectId));
 	}
+
+	void BuildFooterStrip(
+		const TSharedPtr<FUnrealAiBackendRegistry>& BackendRegistry,
+		const FString& ProjectId,
+		FFooterStrip& Out)
+	{
+		Out = FFooterStrip();
+		if (!BackendRegistry.IsValid())
+		{
+			Out.Aggregate = TEXT("Startup ops: —");
+			Out.Discovery = TEXT("discovery=—");
+			Out.Retrieval = TEXT("retrieval=—");
+			return;
+		}
+		IUnrealAiRetrievalService* const Retrieval = BackendRegistry->GetRetrievalService();
+		const FProjectTreeSummary& Summary = UnrealAiProjectTreeSampler::GetOrRefreshProjectSummary(ProjectId, false);
+		const FStatus S = BuildStatus(Retrieval, Summary, ProjectId);
+		Out.Aggregate = FString::Printf(TEXT("Startup ops: %s"), *S.AggregateState);
+		Out.Discovery = FString::Printf(TEXT("discovery=%s"), *S.DiscoveryState);
+		Out.Retrieval = FString::Printf(TEXT("retrieval=%s"), *S.RetrievalState);
+	}
 }

@@ -80,7 +80,9 @@ namespace UnrealAiCtxMutationPriv
 			|| T.StartsWith(TEXT("viewport_camera_"))
 			|| T.StartsWith(TEXT("asset_"))
 			|| T.StartsWith(TEXT("blueprint_apply_"))
+			|| T == TEXT("blueprint_graph_patch")
 			|| T == TEXT("blueprint_compile")
+			|| T == TEXT("blueprint_set_component_default")
 			|| T.StartsWith(TEXT("content_browser_sync_")))
 		{
 			return true;

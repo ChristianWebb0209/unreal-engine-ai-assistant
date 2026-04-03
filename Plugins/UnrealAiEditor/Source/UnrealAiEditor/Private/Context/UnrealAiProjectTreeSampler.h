@@ -9,7 +9,11 @@ namespace UnrealAiProjectTreeSampler
 	/** Refresh interval for project tree sampling in minutes. */
 	inline constexpr int32 RefreshMinutes = 5;
 
-	/** Best-effort update from Asset Registry; returns true when a new sample was taken. */
+	/**
+	 * Best-effort update from Asset Registry; returns true when a new sample was taken.
+	 * Editor scans Blueprint + material-instance assets under /Game with a visit cap and time budget
+	 * so context builds (game thread) do not allocate a full asset array or block for minutes.
+	 */
 	bool MaybeRefreshProjectTreeSummary(
 		const FString& ProjectId,
 		FProjectTreeSummary& InOutSummary,

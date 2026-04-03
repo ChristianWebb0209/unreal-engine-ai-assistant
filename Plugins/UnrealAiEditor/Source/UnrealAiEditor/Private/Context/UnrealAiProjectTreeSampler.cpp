@@ -1,10 +1,12 @@
 #include "Context/UnrealAiProjectTreeSampler.h"
 
+#include "UnrealAiEditorSettings.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformTime.h"
 #include "Engine/Blueprint.h"
 #if WITH_EDITOR
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
 #include "Modules/ModuleManager.h"
 #endif
 
@@ -12,7 +14,55 @@ namespace UnrealAiProjectTreeSampler
 {
 	namespace
 	{
+		/** Caps Asset Registry work during project-tree refresh (runs on caller thread; context builds use this on the game thread). */
+		static constexpr int32 GProjectTreeMaxRegistryVisits = 12000;
+		static constexpr double GProjectTreeMaxScanSeconds = 0.12;
+
 		static TMap<FString, FProjectTreeSummary> GProjectSummaryCache;
+
+		/** Paths under /Game matching configured segments are ignored for preferred-folder inference (harness/sandbox). */
+		static bool ShouldExcludeFromPreferredInference(const FString& PackageOrFolderPathIn)
+		{
+			FString Path = PackageOrFolderPathIn;
+			Path.ReplaceInline(TEXT("\\"), TEXT("/"));
+			Path.TrimStartAndEndInline();
+			if (Path.IsEmpty() || !Path.StartsWith(TEXT("/Game")))
+			{
+				return false;
+			}
+			const UUnrealAiEditorSettings* Set = GetDefault<UUnrealAiEditorSettings>();
+			if (!Set)
+			{
+				return false;
+			}
+			const TArray<FString>& Subs = Set->AgentContentPathExcludeFromPreferredInference;
+			if (Subs.Num() == 0)
+			{
+				return false;
+			}
+			auto MatchesSegment = [&Path](const FString& SegIn) -> bool
+			{
+				FString Seg = SegIn;
+				Seg.TrimStartAndEndInline();
+				if (Seg.IsEmpty())
+				{
+					return false;
+				}
+				const FString SlashSegSlash = FString(TEXT("/")) + Seg + TEXT("/");
+				const FString SlashSeg = FString(TEXT("/")) + Seg;
+				return Path.Contains(SlashSegSlash, ESearchCase::IgnoreCase)
+					|| Path.EndsWith(SlashSeg, ESearchCase::IgnoreCase)
+					|| Path.Equals(FString(TEXT("/Game/")) + Seg, ESearchCase::IgnoreCase);
+			};
+			for (const FString& Sub : Subs)
+			{
+				if (MatchesSegment(Sub))
+				{
+					return true;
+				}
+			}
+			return false;
+		}
 
 		static FString NormalizeTopFolder(const FString& ObjectPath)
 		{
@@ -190,27 +240,50 @@ namespace UnrealAiProjectTreeSampler
 		Filter.ClassPaths.Add(FTopLevelAssetPath(TEXT("/Script/Engine"), TEXT("MaterialInstanceConstant")));
 		Filter.bRecursiveClasses = true;
 
-		TArray<FAssetData> Assets;
-		ARM->Get().GetAssets(Filter, Assets);
-		for (const FAssetData& AD : Assets)
-		{
-			const FString ObjPath = AD.GetObjectPathString();
-			const FString Top = NormalizeTopFolder(ObjPath);
-			if (!Top.IsEmpty())
-			{
-				TopFolders.FindOrAdd(Top) += 1;
-			}
+		IAssetRegistry& AR = ARM->Get();
+		const FTopLevelAssetPath BlueprintClassPath = UBlueprint::StaticClass()->GetClassPathName();
+		int32 VisitCount = 0;
+		bool bScanTruncated = false;
+		const double DeadlineSec = FPlatformTime::Seconds() + GProjectTreeMaxScanSeconds;
 
-			const FString PkgPath = AD.PackagePath.ToString();
-			if (AD.AssetClassPath == UBlueprint::StaticClass()->GetClassPathName())
+		AR.EnumerateAssets(
+			Filter,
+			[&](const FAssetData& AD) -> bool
 			{
-				BlueprintFolders.FindOrAdd(PkgPath) += 1;
-			}
-			else if (AD.AssetClassPath.GetAssetName().ToString().Contains(TEXT("MaterialInstance"), ESearchCase::IgnoreCase))
-			{
-				MaterialInstanceFolders.FindOrAdd(PkgPath) += 1;
-			}
-		}
+				++VisitCount;
+				if (VisitCount > GProjectTreeMaxRegistryVisits)
+				{
+					bScanTruncated = true;
+					return false;
+				}
+				if ((VisitCount & 0x3FF) == 0 && FPlatformTime::Seconds() >= DeadlineSec)
+				{
+					bScanTruncated = true;
+					return false;
+				}
+
+				const FString ObjPath = AD.GetObjectPathString();
+				const FString Top = NormalizeTopFolder(ObjPath);
+				if (!Top.IsEmpty() && !ShouldExcludeFromPreferredInference(Top))
+				{
+					TopFolders.FindOrAdd(Top) += 1;
+				}
+
+				const FString PkgPath = AD.PackagePath.ToString();
+				if (ShouldExcludeFromPreferredInference(PkgPath))
+				{
+					return true;
+				}
+				if (AD.AssetClassPath == BlueprintClassPath)
+				{
+					BlueprintFolders.FindOrAdd(PkgPath) += 1;
+				}
+				else if (AD.AssetClassPath.GetAssetName().ToString().Contains(TEXT("MaterialInstance"), ESearchCase::IgnoreCase))
+				{
+					MaterialInstanceFolders.FindOrAdd(PkgPath) += 1;
+				}
+				return true;
+			});
 
 		InOutSummary.TopLevelFolders.Reset();
 		TopFolders.KeySort([](const FString& A, const FString& B) { return A < B; });
@@ -227,9 +300,31 @@ namespace UnrealAiProjectTreeSampler
 		AppendPreferredPath(InOutSummary, TEXT("blueprint"), BlueprintFolders, TEXT("/Game/Blueprints"));
 		AppendPreferredPath(InOutSummary, TEXT("material_instance"), MaterialInstanceFolders, TEXT("/Game/Materials"));
 		InOutSummary.UpdatedUtc = FDateTime::UtcNow();
-		InOutSummary.LastQueryStatus = RefreshReason.IsEmpty()
-			? FString::Printf(TEXT("ok assets=%d project=%s"), Assets.Num(), *ProjectId)
-			: FString::Printf(TEXT("ok reason=%s assets=%d project=%s"), *RefreshReason, Assets.Num(), *ProjectId);
+		if (bScanTruncated)
+		{
+			InOutSummary.LastQueryStatus = RefreshReason.IsEmpty()
+				? FString::Printf(
+					  TEXT("ok_truncated visits=%d cap=%d project=%s (partial registry scan for responsiveness)"),
+					  VisitCount,
+					  GProjectTreeMaxRegistryVisits,
+					  *ProjectId)
+				: FString::Printf(
+					  TEXT("ok_truncated reason=%s visits=%d cap=%d project=%s"),
+					  *RefreshReason,
+					  VisitCount,
+					  GProjectTreeMaxRegistryVisits,
+					  *ProjectId);
+		}
+		else
+		{
+			InOutSummary.LastQueryStatus = RefreshReason.IsEmpty()
+				? FString::Printf(TEXT("ok visits=%d project=%s"), VisitCount, *ProjectId)
+				: FString::Printf(
+					  TEXT("ok reason=%s visits=%d project=%s"),
+					  *RefreshReason,
+					  VisitCount,
+					  *ProjectId);
+		}
 #else
 		InOutSummary.TopLevelFolders = { TEXT("/Game") };
 		InOutSummary.PreferredCreatePaths.Reset();
@@ -349,6 +444,10 @@ namespace UnrealAiProjectTreeSampler
 			TArray<FString> Merged;
 			for (const TPair<FString, int32>& Pair : RankedFolders)
 			{
+				if (ShouldExcludeFromPreferredInference(Pair.Key))
+				{
+					continue;
+				}
 				Merged.Add(Pair.Key);
 				if (Merged.Num() >= 8)
 				{
@@ -360,6 +459,10 @@ namespace UnrealAiProjectTreeSampler
 				if (Merged.Num() >= 8)
 				{
 					break;
+				}
+				if (ShouldExcludeFromPreferredInference(Existing))
+				{
+					continue;
 				}
 				if (!Merged.Contains(Existing))
 				{
@@ -375,13 +478,16 @@ namespace UnrealAiProjectTreeSampler
 			int32 BestCount = -1;
 			for (const TPair<FString, int32>& Pair : BlueprintFolderHits)
 			{
-				if (Pair.Value > BestCount)
+				if (Pair.Value > BestCount && !ShouldExcludeFromPreferredInference(Pair.Key))
 				{
 					BestPath = Pair.Key;
 					BestCount = Pair.Value;
 				}
 			}
-			UpsertPreferredPath(InOutSummary, TEXT("blueprint"), BestPath, BestCount);
+			if (!BestPath.IsEmpty())
+			{
+				UpsertPreferredPath(InOutSummary, TEXT("blueprint"), BestPath, BestCount);
+			}
 		}
 		if (MaterialFolderHits.Num() > 0)
 		{
@@ -389,13 +495,16 @@ namespace UnrealAiProjectTreeSampler
 			int32 BestCount = -1;
 			for (const TPair<FString, int32>& Pair : MaterialFolderHits)
 			{
-				if (Pair.Value > BestCount)
+				if (Pair.Value > BestCount && !ShouldExcludeFromPreferredInference(Pair.Key))
 				{
 					BestPath = Pair.Key;
 					BestCount = Pair.Value;
 				}
 			}
-			UpsertPreferredPath(InOutSummary, TEXT("material_instance"), BestPath, BestCount);
+			if (!BestPath.IsEmpty())
+			{
+				UpsertPreferredPath(InOutSummary, TEXT("material_instance"), BestPath, BestCount);
+			}
 		}
 
 		InOutSummary.SamplerVersion = TEXT("project_tree_sampler_v1+retrieval_hints");
