@@ -60,70 +60,78 @@ void UnrealAiBlueprintFormatEditorExtendBlueprintToolbar()
 		{
 			continue;
 		}
-		FToolMenuSection& Section = Toolbar->FindOrAddSection(TEXT("UnrealAiBlueprintFormat"));
-		Section.AddEntry(FToolMenuEntry::InitToolBarButton(
-			TEXT("UnrealAiFormatBlueprintUbergraph"),
-			FUIAction(
-				FExecuteAction::CreateLambda([]()
-				{
-					UBlueprint* BP = nullptr;
-					UEdGraph* Graph = nullptr;
-					int32 Count = 0;
-					if (!UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count) || !BP || !Graph)
+		// Same strip as the primary Compile controls (avoids overflow "⋯" island for extra sections).
+		FToolMenuSection& Section = Toolbar->FindOrAddSection(TEXT("Compile"));
+		{
+			FToolMenuEntry FormatGraphEntry = FToolMenuEntry::InitToolBarButton(
+				TEXT("UnrealAiFormatBlueprintUbergraph"),
+				FUIAction(
+					FExecuteAction::CreateLambda([]()
 					{
-						return;
-					}
-					TSharedPtr<FJsonObject> J = MakeShared<FJsonObject>();
-					J->SetStringField(TEXT("blueprint_path"), BP->GetPathName());
-					J->SetStringField(TEXT("graph_name"), Graph->GetName());
-					const FUnrealAiToolInvocationResult R = UnrealAiDispatch_BlueprintFormatGraph(J);
-					if (!R.bOk)
+						UBlueprint* BP = nullptr;
+						UEdGraph* Graph = nullptr;
+						int32 Count = 0;
+						if (!UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count) || !BP || !Graph)
+						{
+							return;
+						}
+						TSharedPtr<FJsonObject> J = MakeShared<FJsonObject>();
+						J->SetStringField(TEXT("blueprint_path"), BP->GetPathName());
+						J->SetStringField(TEXT("graph_name"), Graph->GetName());
+						const FUnrealAiToolInvocationResult R = UnrealAiDispatch_BlueprintFormatGraph(J);
+						if (!R.bOk)
+						{
+							UE_LOG(LogTemp, Warning, TEXT("Unreal AI format blueprint (ubergraph): %s"), *R.ErrorMessage);
+						}
+					}),
+					FCanExecuteAction::CreateLambda([]()
 					{
-						UE_LOG(LogTemp, Warning, TEXT("Unreal AI format blueprint (ubergraph): %s"), *R.ErrorMessage);
-					}
-				}),
-				FCanExecuteAction::CreateLambda([]()
-				{
-					UBlueprint* BP = nullptr;
-					UEdGraph* Graph = nullptr;
-					int32 Count = 0;
-					return UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count);
-				})),
-			LOCTEXT("FmtBlueprintBtn", "AI: Format Blueprint"),
-			LOCTEXT("FmtBlueprintTip", "Run bundled layout on the Blueprint Ubergraph (Event Graph). Requires Event Graph to be focused."),
-			FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("LevelEditor.GameSettings"))));
-
-		Section.AddEntry(FToolMenuEntry::InitToolBarButton(
-			TEXT("UnrealAiFormatBlueprintSelection"),
-			FUIAction(
-				FExecuteAction::CreateLambda([]()
-				{
-					UBlueprint* BP = nullptr;
-					UEdGraph* Graph = nullptr;
-					int32 Count = 0;
-					if (!UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count) || !BP || !Graph || Count <= 0)
+						UBlueprint* BP = nullptr;
+						UEdGraph* Graph = nullptr;
+						int32 Count = 0;
+						return UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count);
+					})),
+				LOCTEXT("FmtBlueprintBtn", "AI: Format graph"),
+				LOCTEXT("FmtBlueprintTip", "Run bundled layout on the Blueprint Ubergraph (Event Graph). Requires Event Graph to be focused."),
+				FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("ClassIcon.Blueprint")));
+			FormatGraphEntry.InsertPosition = FToolMenuInsert(TEXT("CompileBlueprint"), EToolMenuInsertType::After);
+			Section.AddEntry(FormatGraphEntry);
+		}
+		{
+			FToolMenuEntry FormatSelEntry = FToolMenuEntry::InitToolBarButton(
+				TEXT("UnrealAiFormatBlueprintSelection"),
+				FUIAction(
+					FExecuteAction::CreateLambda([]()
 					{
-						return;
-					}
-					TSharedPtr<FJsonObject> J = MakeShared<FJsonObject>();
-					J->SetStringField(TEXT("blueprint_path"), BP->GetPathName());
-					J->SetStringField(TEXT("graph_name"), Graph->GetName());
-					const FUnrealAiToolInvocationResult R = UnrealAiDispatch_BlueprintFormatSelection(J);
-					if (!R.bOk)
+						UBlueprint* BP = nullptr;
+						UEdGraph* Graph = nullptr;
+						int32 Count = 0;
+						if (!UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count) || !BP || !Graph || Count <= 0)
+						{
+							return;
+						}
+						TSharedPtr<FJsonObject> J = MakeShared<FJsonObject>();
+						J->SetStringField(TEXT("blueprint_path"), BP->GetPathName());
+						J->SetStringField(TEXT("graph_name"), Graph->GetName());
+						const FUnrealAiToolInvocationResult R = UnrealAiDispatch_BlueprintFormatSelection(J);
+						if (!R.bOk)
+						{
+							UE_LOG(LogTemp, Warning, TEXT("Unreal AI format selection (ubergraph): %s"), *R.ErrorMessage);
+						}
+					}),
+					FCanExecuteAction::CreateLambda([]()
 					{
-						UE_LOG(LogTemp, Warning, TEXT("Unreal AI format selection (ubergraph): %s"), *R.ErrorMessage);
-					}
-				}),
-				FCanExecuteAction::CreateLambda([]()
-				{
-					UBlueprint* BP = nullptr;
-					UEdGraph* Graph = nullptr;
-					int32 Count = 0;
-					return UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count) && Count > 0;
-				})),
-			LOCTEXT("FmtSelBtn", "AI: Format selection"),
-			LOCTEXT("FmtSelTip", "Run bundled layout on the Blueprint Ubergraph selection. Requires Event Graph to be focused and at least one node selected."),
-			FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("LevelEditor.GameSettings"))));
+						UBlueprint* BP = nullptr;
+						UEdGraph* Graph = nullptr;
+						int32 Count = 0;
+						return UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count) && Count > 0;
+					})),
+				LOCTEXT("FmtSelBtn", "AI: Format selection"),
+				LOCTEXT("FmtSelTip", "Run bundled layout on the Blueprint Ubergraph selection. Requires Event Graph to be focused and at least one node selected."),
+				FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("GraphEditor.StateMachine_24x")));
+			FormatSelEntry.InsertPosition = FToolMenuInsert(TEXT("UnrealAiFormatBlueprintUbergraph"), EToolMenuInsertType::After);
+			Section.AddEntry(FormatSelEntry);
+		}
 		break;
 	}
 }

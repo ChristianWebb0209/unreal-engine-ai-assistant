@@ -96,6 +96,91 @@ namespace UnrealBlueprintFormatServicePriv
 		return CX >= Rect.MinX && CX <= Rect.MaxX && CY >= Rect.MinY && CY <= Rect.MaxY;
 	}
 
+	static bool NodeRectsOverlapWithGap(const FNodeRect& A, const FNodeRect& B, int32 Gap)
+	{
+		return !(A.MaxX + Gap <= B.MinX || B.MaxX + Gap <= A.MinX || A.MaxY + Gap <= B.MinY || B.MaxY + Gap <= A.MinY);
+	}
+
+	/** Minimum clear space between two nodes' boxes scales with their size (not a single hardcoded pixel value). */
+	static int32 PairwiseSeparationGap(const UEdGraphNode* A, const UEdGraphNode* B)
+	{
+		const int32 Wa = FMath::Max(64, A && A->NodeWidth > 0 ? A->NodeWidth : 240);
+		const int32 Wb = FMath::Max(64, B && B->NodeWidth > 0 ? B->NodeWidth : 240);
+		const int32 Ha = FMath::Max(32, A && A->NodeHeight > 0 ? A->NodeHeight : 120);
+		const int32 Hb = FMath::Max(32, B && B->NodeHeight > 0 ? B->NodeHeight : 120);
+		return FMath::Clamp((Wa + Wb + Ha + Hb) / 16, 28, 120);
+	}
+
+	static int32 HorizontalGapBetweenConsecutive(const UEdGraphNode* Left, const UEdGraphNode* Right)
+	{
+		return PairwiseSeparationGap(Left, Right);
+	}
+
+	/** Rule 1: script nodes we position must not overlap (AABB + pairwise minimum gap). */
+	static void ResolveAxisAlignedOverlapsAmong(TArray<UEdGraphNode*>& Nodes)
+	{
+		if (Nodes.Num() < 2)
+		{
+			return;
+		}
+		constexpr int32 MaxPasses = 128;
+		Nodes.Sort([](UEdGraphNode& A, UEdGraphNode& B) { return A.NodeGuid < B.NodeGuid; });
+		for (int32 Pass = 0; Pass < MaxPasses; ++Pass)
+		{
+			bool bMoved = false;
+			for (int32 i = 0; i < Nodes.Num(); ++i)
+			{
+				UEdGraphNode* const A = Nodes[i];
+				if (!A)
+				{
+					continue;
+				}
+				const FNodeRect Ra = GetNodeRect(A);
+				for (int32 j = i + 1; j < Nodes.Num(); ++j)
+				{
+					UEdGraphNode* const B = Nodes[j];
+					if (!B)
+					{
+						continue;
+					}
+					const int32 G = PairwiseSeparationGap(A, B);
+					const FNodeRect Rb = GetNodeRect(B);
+					if (!NodeRectsOverlapWithGap(Ra, Rb, G))
+					{
+						continue;
+					}
+					UEdGraphNode* const Mover = B;
+					const FNodeRect Ra2 = GetNodeRect(A);
+					const FNodeRect Rm = GetNodeRect(Mover);
+					int32 Dx = (Ra2.MaxX + G) - Rm.MinX;
+					int32 Dy = (Ra2.MaxY + G) - Rm.MinY;
+					if (Dx < 0)
+					{
+						Dx = 0;
+					}
+					if (Dy < 0)
+					{
+						Dy = 0;
+					}
+					const int32 Nudge = FMath::Max(8, G / 4);
+					if (Dx <= Dy)
+					{
+						Mover->NodePosX += FMath::Max(Dx, Nudge);
+					}
+					else
+					{
+						Mover->NodePosY += FMath::Max(Dy, Nudge);
+					}
+					bMoved = true;
+				}
+			}
+			if (!bMoved)
+			{
+				break;
+			}
+		}
+	}
+
 	static TArray<UEdGraphNode_Comment*> GetComments(UEdGraph* Graph)
 	{
 		TArray<UEdGraphNode_Comment*> Comments;
@@ -357,16 +442,21 @@ namespace UnrealBlueprintFormatServicePriv
 	{
 		Nodes.Sort([](const UEdGraphNode& A, const UEdGraphNode& B) { return A.NodeGuid < B.NodeGuid; });
 		int32 X = 0;
-		const int32 DX = 400;
+		UEdGraphNode* Prev = nullptr;
 		for (UEdGraphNode* N : Nodes)
 		{
 			if (!N)
 			{
 				continue;
 			}
+			if (Prev)
+			{
+				const int32 WPrev = FMath::Max(64, Prev->NodeWidth > 0 ? Prev->NodeWidth : 240);
+				X += WPrev + HorizontalGapBetweenConsecutive(Prev, N);
+			}
 			N->NodePosX = X;
 			N->NodePosY = 0;
-			X += DX;
+			Prev = N;
 			++OutResult.NodesPositioned;
 		}
 	}
@@ -386,6 +476,58 @@ namespace UnrealBlueprintFormatServicePriv
 		else
 		{
 			LayoutNodesHorizontal(ScriptNodes, R);
+		}
+		ResolveAxisAlignedOverlapsAmong(ScriptNodes);
+	}
+
+	/** After strip layout, move the cluster so its top-left origin matches the pre-layout cluster (avoids piling on Y=0 over unrelated nodes). */
+	static void TranslateNodesPreservingSelectionOrigin(
+		const TArray<UEdGraphNode*>& ScriptNodes,
+		const TMap<const UEdGraphNode*, FIntPoint>& BeforePositions)
+	{
+		if (ScriptNodes.Num() == 0 || BeforePositions.Num() == 0)
+		{
+			return;
+		}
+		int32 OldMinX = MAX_int32;
+		int32 OldMinY = MAX_int32;
+		for (const TPair<const UEdGraphNode*, FIntPoint>& Pair : BeforePositions)
+		{
+			OldMinX = FMath::Min(OldMinX, Pair.Value.X);
+			OldMinY = FMath::Min(OldMinY, Pair.Value.Y);
+		}
+		if (OldMinX == MAX_int32)
+		{
+			return;
+		}
+		int32 NewMinX = MAX_int32;
+		int32 NewMinY = MAX_int32;
+		for (UEdGraphNode* N : ScriptNodes)
+		{
+			if (!N)
+			{
+				continue;
+			}
+			NewMinX = FMath::Min(NewMinX, N->NodePosX);
+			NewMinY = FMath::Min(NewMinY, N->NodePosY);
+		}
+		if (NewMinX == MAX_int32)
+		{
+			return;
+		}
+		const int32 DX = OldMinX - NewMinX;
+		const int32 DY = OldMinY - NewMinY;
+		if (DX == 0 && DY == 0)
+		{
+			return;
+		}
+		for (UEdGraphNode* N : ScriptNodes)
+		{
+			if (N)
+			{
+				N->NodePosX += DX;
+				N->NodePosY += DY;
+			}
 		}
 	}
 }
@@ -508,6 +650,7 @@ FUnrealBlueprintGraphFormatResult FUnrealBlueprintGraphFormatService::LayoutSele
 	const TMap<const UEdGraphNode*, FIntPoint> BeforePositions =
 		UnrealBlueprintFormatServicePriv::SnapshotNodePositions(ScriptNodes);
 	UnrealBlueprintFormatServicePriv::RunScriptStripLayout(Graph, ScriptNodes, Options, R);
+	UnrealBlueprintFormatServicePriv::TranslateNodesPreservingSelectionOrigin(ScriptNodes, BeforePositions);
 	UnrealBlueprintFormatServicePriv::EnforceCommentContainmentAfterMove(Graph, ScriptNodes, BeforePositions);
 	UnrealBlueprintFormatServicePriv::RunPostLayoutPasses(Graph, Options, R);
 	return R;

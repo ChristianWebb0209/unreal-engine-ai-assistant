@@ -9,9 +9,8 @@ class UEdGraphNode;
 namespace UnrealBlueprintStrandLayout
 {
 	/**
-	 * Phase A strand layout: partition nodes into exec-flow components (undirected exec edges),
-	 * topologically order within each component (Guid tie-break on cycles), lay out each strand
-	 * horizontally with LaneGapY between lanes. Comment nodes should be excluded by the caller.
+	 * Exec-flow layout: isolates exec components, depth layers on exec edges, branches fan up/down by
+	 * pin order, column packing. Caller applies a global script-node overlap pass afterward.
 	 */
 	void LayoutNodesMultiStrand(UEdGraph* Graph, const TArray<UEdGraphNode*>& Nodes, int32& OutNodesPositioned);
 }

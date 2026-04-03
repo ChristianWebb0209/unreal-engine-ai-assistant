@@ -1,11 +1,11 @@
 #include "BlueprintFormat/UnrealAiBlueprintGraphSelectionLayout.h"
 
+#include "BlueprintFormat/UnrealAiBlueprintEditorGraphSelection.h"
+
 #include "EdGraph/EdGraph.h"
-#include "Editor.h"
 #include "Engine/Blueprint.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "BlueprintEditorModule.h"
-#include "Selection.h"
 
 bool UnrealAiTryGetBlueprintGraphSelectedNodes(
 	UBlueprint* BP,
@@ -49,22 +49,7 @@ bool UnrealAiTryGetBlueprintGraphSelectedNodes(
 
 	Ed->OpenGraphAndBringToFront(TargetGraph, false);
 
-	if (GEditor)
-	{
-		if (USelection* ObjSel = GEditor->GetSelectedObjects())
-		{
-			for (int32 i = 0; i < ObjSel->Num(); ++i)
-			{
-				if (UEdGraphNode* GN = Cast<UEdGraphNode>(ObjSel->GetSelectedObject(i)))
-				{
-					if (GN->GetGraph() == TargetGraph)
-					{
-						OutSelected.Add(GN);
-					}
-				}
-			}
-		}
-	}
+	UnrealAiAppendSelectedGraphNodesForGraph(Ed, TargetGraph, OutSelected);
 
 	if (OutSelected.Num() == 0)
 	{

@@ -1,11 +1,12 @@
 #include "BlueprintFormat/UnrealAiBlueprintGraphFocusSelection.h"
 
+#include "BlueprintFormat/UnrealAiBlueprintEditorGraphSelection.h"
+
 #include "EdGraph/EdGraph.h"
 #include "Editor.h"
 #include "Engine/Blueprint.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "BlueprintEditorModule.h"
-#include "Selection.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 
 bool UnrealAiTryGetFocusedBlueprintUbergraphSelection(
@@ -27,9 +28,6 @@ bool UnrealAiTryGetFocusedBlueprintUbergraphSelection(
 	{
 		return false;
 	}
-
-	// Selection is global; we count only nodes selected in the focused ubergraph.
-	USelection* SelectedObjects = GEditor->GetSelectedObjects();
 
 	const TArray<UObject*> EditedAssets = Subsys->GetAllEditedAssets();
 	for (UObject* A : EditedAssets)
@@ -70,20 +68,9 @@ bool UnrealAiTryGetFocusedBlueprintUbergraphSelection(
 
 		OutBlueprint = BP;
 		OutFocusedUbergraph = FocusedGraph;
-		OutSelectedNodeCount = 0;
-		if (SelectedObjects)
-		{
-			for (int32 i = 0; i < SelectedObjects->Num(); ++i)
-			{
-				if (UEdGraphNode* GN = Cast<UEdGraphNode>(SelectedObjects->GetSelectedObject(i)))
-				{
-					if (GN->GetGraph() == FocusedGraph)
-					{
-						++OutSelectedNodeCount;
-					}
-				}
-			}
-		}
+		TArray<UEdGraphNode*> SelectedInGraph;
+		UnrealAiAppendSelectedGraphNodesForGraph(Ed, FocusedGraph, SelectedInGraph);
+		OutSelectedNodeCount = SelectedInGraph.Num();
 
 		return true;
 	}

@@ -21,7 +21,7 @@ enum class EUnrealBlueprintWireKnotAggression : uint8
 /** Controls how LayoutEntireGraph / selection / post-IR layout behave. */
 struct FUnrealBlueprintGraphFormatOptions
 {
-	EUnrealBlueprintGraphLayoutStrategy LayoutStrategy = EUnrealBlueprintGraphLayoutStrategy::SingleRow;
+	EUnrealBlueprintGraphLayoutStrategy LayoutStrategy = EUnrealBlueprintGraphLayoutStrategy::MultiStrand;
 	EUnrealBlueprintWireKnotAggression WireKnotAggression = EUnrealBlueprintWireKnotAggression::Off;
 	/** After layout, re-snap every comment box to nodes geometrically inside it (grow/shrink). */
 	bool bReflowCommentsByGeometry = true;
