@@ -192,6 +192,29 @@ namespace UnrealAiHarnessTpmThrottle
 			const double Now = FPlatformTime::Seconds();
 			Events.Emplace(Now, Tokens);
 		}
+
+		/** Token estimate for one embedding `input` string (matches MaybeWaitBeforeEmbeddingRequest before WaitForWindowRoom). */
+		static int32 EstimateEmbeddingInputTokens(const int32 InputUtf16CharCount)
+		{
+			const bool bStrict = IsStrictTpmEnabled();
+			const int64 Chars = static_cast<int64>(FMath::Max(0, InputUtf16CharCount));
+			int32 PromptEst = 1;
+			if (bStrict)
+			{
+				const int32 Div = UnrealAiRuntimeDefaults::HarnessTpmPromptDivisor;
+				const int64 Ceil = (Chars + static_cast<int64>(Div) - 1) / static_cast<int64>(FMath::Max(1, Div));
+				PromptEst = static_cast<int32>(FMath::Min<int64>(FMath::Max(1LL, Ceil), INT32_MAX));
+				const int32 Overhead = UnrealAiRuntimeDefaults::HarnessTpmEmbedOverheadTokens;
+				PromptEst = FMath::Min(INT32_MAX, PromptEst + Overhead);
+			}
+			else
+			{
+				const int32 Div = 4;
+				const int64 Ceil = (Chars + static_cast<int64>(Div) - 1) / static_cast<int64>(Div);
+				PromptEst = static_cast<int32>(FMath::Min<int64>(FMath::Max(1LL, Ceil), INT32_MAX));
+			}
+			return ApplySafetyToPromptTokens(PromptEst, bStrict);
+		}
 	}
 
 	int32 EstimateChatFootprintTokens(const FUnrealAiLlmRequest& Req, int32 CharPerTokenApprox)
@@ -274,26 +297,34 @@ namespace UnrealAiHarnessTpmThrottle
 		{
 			return;
 		}
-		const bool bStrict = IsStrictTpmEnabled();
-		const int64 Chars = static_cast<int64>(FMath::Max(0, InputUtf16CharCount));
-		int32 PromptEst = 1;
-		if (bStrict)
-		{
-			const int32 Div = UnrealAiRuntimeDefaults::HarnessTpmPromptDivisor;
-			const int64 Ceil = (Chars + static_cast<int64>(Div) - 1) / static_cast<int64>(FMath::Max(1, Div));
-			PromptEst = static_cast<int32>(FMath::Min<int64>(FMath::Max(1LL, Ceil), INT32_MAX));
-			const int32 Overhead = UnrealAiRuntimeDefaults::HarnessTpmEmbedOverheadTokens;
-			PromptEst = FMath::Min(INT32_MAX, PromptEst + Overhead);
-		}
-		else
-		{
-			const int32 Div = 4;
-			const int64 Ceil = (Chars + static_cast<int64>(Div) - 1) / static_cast<int64>(Div);
-			PromptEst = static_cast<int32>(FMath::Min<int64>(FMath::Max(1LL, Ceil), INT32_MAX));
-		}
-		const int32 Est = ApplySafetyToPromptTokens(PromptEst, bStrict);
+		const int32 Est = EstimateEmbeddingInputTokens(InputUtf16CharCount);
 		FScopeLock Lock(&GTpmMutex);
 		WaitForWindowRoom(TEXT("embedding"), GEmbeddingEvents, EmbedBudget, Est, GetWindowSeconds());
+	}
+
+	void MaybeWaitBeforeEmbeddingBatchRequest(const TArray<FString>& InputTexts)
+	{
+		int32 ChatBudget = 0;
+		int32 EmbedBudget = 0;
+		GetBudgets(ChatBudget, EmbedBudget);
+		(void)ChatBudget;
+		if (EmbedBudget <= 0 || InputTexts.Num() <= 0)
+		{
+			return;
+		}
+		int64 SumEst = 0;
+		for (const FString& T : InputTexts)
+		{
+			SumEst += static_cast<int64>(EstimateEmbeddingInputTokens(T.Len()));
+			if (SumEst >= INT32_MAX)
+			{
+				SumEst = INT32_MAX;
+				break;
+			}
+		}
+		const int32 Est = static_cast<int32>(FMath::Min<int64>(SumEst, INT32_MAX));
+		FScopeLock Lock(&GTpmMutex);
+		WaitForWindowRoom(TEXT("embedding_batch"), GEmbeddingEvents, EmbedBudget, FMath::Max(1, Est), GetWindowSeconds());
 	}
 
 	void RecordEmbeddingTokens(int32 TotalTokens)

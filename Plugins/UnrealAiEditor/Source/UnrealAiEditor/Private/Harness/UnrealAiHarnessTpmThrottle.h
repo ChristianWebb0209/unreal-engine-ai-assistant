@@ -23,6 +23,12 @@ namespace UnrealAiHarnessTpmThrottle
 	/** Block until the embedding window has room (no-op if disabled). Pass UTF-16 input length (e.g. Request.InputText.Len()). */
 	void MaybeWaitBeforeEmbeddingRequest(int32 InputUtf16CharCount);
 
+	/**
+	 * Single WaitForWindowRoom using the sum of per-input token estimates (same rules as MaybeWaitBeforeEmbeddingRequest).
+	 * Use before a batched `/embeddings` HTTP call when TPM is enabled.
+	 */
+	void MaybeWaitBeforeEmbeddingBatchRequest(const TArray<FString>& InputTexts);
+
 	/** Record actual tokens from a successful embeddings response (no-op if disabled or <= 0). */
 	void RecordEmbeddingTokens(int32 TotalTokens);
 }

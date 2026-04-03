@@ -29,8 +29,8 @@ struct FUnrealAiModelCapabilities
 	 */
 	int32 MaxAgentLlmRounds = 512;
 	/**
-	 * Max total prompt+completion tokens for one agent turn (one user message / RunTurn). 0 = use harness default
-	 * Profile field maxAgentTurnTokens; 0 uses harness default budget.
+	 * Max total prompt+completion tokens for one agent turn (one user message / RunTurn).
+	 * Negative = unlimited; 0 = harness default cap; positive = hard limit.
 	 */
 	int32 MaxAgentTurnTokens = 0;
 };

@@ -46,8 +46,8 @@ namespace UnrealAiAgentHarnessPriv
 	static constexpr int32 GHarnessRepeatedFailureStopCount = 4;
 	/** How many retries we allow when streamed tool JSON is truncated and never becomes valid. */
 	static constexpr int32 GHarnessStreamToolCallIncompleteMaxRetriesPerRound = 1;
-	/** Default token budget per agent turn when profile does not set maxAgentTurnTokens and env is unset. */
-	static constexpr int32 GHarnessDefaultMaxTurnTokens = 500000;
+	/** Default token budget per agent turn when profile sets maxAgentTurnTokens to 0 (unset in JSON). */
+	static constexpr int32 GHarnessDefaultMaxTurnTokens = 1000000;
 	/** Hard backstop on LLM↔tool iterations if token/repeat limits do not apply first. */
 	static constexpr int32 GHarnessMaxLlmRoundBackstop = 512;
 
@@ -924,6 +924,8 @@ namespace UnrealAiAgentHarnessPriv
 		int32 EffectiveMaxLlmRounds = GHarnessMaxLlmRoundBackstop;
 		/** Last resolved token budget for this turn (for near-budget hints in CompleteToolPath). */
 		int32 EffectiveMaxTurnTokensHint = 0;
+		/** Model profile maxAgentTurnTokens < 0 disables the per-turn token cap (near-budget hints off). */
+		bool bAgentTurnTokenBudgetDisabled = false;
 		/** Retries transient HTTP-level cancellations without consuming a round. */
 		int32 TransientTransportRetryCountThisRound = 0;
 		/** Plan-node agent only: retries HTTP complete-without-Finish (truncated SSE) without consuming a round. */
@@ -1250,13 +1252,23 @@ namespace UnrealAiAgentHarnessPriv
 		}
 		FUnrealAiModelCapabilities CapLimits;
 		Profiles->GetEffectiveCapabilities(Request.ModelProfileId, CapLimits);
-		// Per-turn token budget from profile. 0 = no token cap. Default 500k when profile unset.
+		// Per-turn token budget: <0 = unlimited; 0 = harness default; >0 = hard cap.
+		bAgentTurnTokenBudgetDisabled = false;
 		int32 EffectiveMaxTurnTokens = CapLimits.MaxAgentTurnTokens;
-		if (EffectiveMaxTurnTokens <= 0)
+		if (EffectiveMaxTurnTokens < 0)
 		{
-			EffectiveMaxTurnTokens = GHarnessDefaultMaxTurnTokens;
+			bAgentTurnTokenBudgetDisabled = true;
+			EffectiveMaxTurnTokens = 0;
+			EffectiveMaxTurnTokensHint = 0;
 		}
-		EffectiveMaxTurnTokensHint = EffectiveMaxTurnTokens;
+		else
+		{
+			if (EffectiveMaxTurnTokens == 0)
+			{
+				EffectiveMaxTurnTokens = GHarnessDefaultMaxTurnTokens;
+			}
+			EffectiveMaxTurnTokensHint = EffectiveMaxTurnTokens;
+		}
 		int32 ParsedMax = CapLimits.MaxAgentLlmRounds > 0 ? CapLimits.MaxAgentLlmRounds : GHarnessMaxLlmRoundBackstop;
 		ParsedMax = FMath::Clamp(ParsedMax, 1, GHarnessMaxLlmRoundBackstop);
 		if (Request.LlmRoundBudgetFloor > 0)
@@ -1284,10 +1296,11 @@ namespace UnrealAiAgentHarnessPriv
 					LastToolFailureSignature.IsEmpty() ? TEXT("unknown signature") : *LastToolFailureSignature));
 				return;
 			}
-			if (EffectiveMaxTurnTokens > 0 && AccumulatedUsage.TotalTokens >= EffectiveMaxTurnTokens)
+			if (!bAgentTurnTokenBudgetDisabled && EffectiveMaxTurnTokens > 0
+				&& AccumulatedUsage.TotalTokens >= EffectiveMaxTurnTokens)
 			{
 				Fail(FString::Printf(
-					TEXT("Agent turn token budget exceeded (%d tokens, limit %d). Raise maxAgentTurnTokens in the model profile or set it to 0 for unlimited."),
+					TEXT("Agent turn token budget exceeded (%d tokens, limit %d). Raise maxAgentTurnTokens in the model profile or set it to -1 for unlimited."),
 					AccumulatedUsage.TotalTokens,
 					EffectiveMaxTurnTokens));
 				return;
