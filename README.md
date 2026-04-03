@@ -139,7 +139,7 @@ Telemetry (`tool_surface_metrics`) and optional **`tool_usage_events.jsonl`** su
 <details>
 <summary><strong>Retrieval components</strong></summary>
 
-**Optional retrieval service** internals: **index lifecycle** (`BuildOrRebuildIndexNow`), **policy** (whitelist extensions, root presets, caps, throttles), **corpora** (filesystem text, Asset Registry shards, Blueprint features, optional memory chunks), **embedding** path, **SQLite** store + manifest, **query** engine (cosine Top-K, lexical fallback), and **model compatibility** guard.
+**Optional retrieval service** internals: **index lifecycle** (`BuildOrRebuildIndexNow`) with **phased embedding/commits** (waves P0-P4 aligned with `UnrealAiRetrievalIndexConfig` priority), **policy** (whitelist extensions, root presets, caps, throttles, wave bucket helper), **corpora** (filesystem text, Asset Registry shards, Blueprint features, optional memory chunks), **embedding** path, **SQLite** store + manifest (`UpsertIncremental` per wave; removals after all waves), **query** engine (cosine Top-K, lexical fallback once rows exist), and **model compatibility** guard.
 
 Retrieval is **off by default**; when disabled, behavior must match pre-retrieval deterministic context ([`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 3). See also **Vector DB** views below for end-to-end and query sequences.
 
@@ -201,6 +201,8 @@ Use this view with [`docs/context/context-management.md`](docs/context/context-m
 
 **Container-level end-to-end** optional vector story: **Retrieval Service** + **Embedding Provider** + **Context Service** + **Harness** + **Memory** (optional corpus feed) + on-disk **SQLite** + **manifest** + **LLM provider** for `/embeddings` + **Unreal Editor** for Asset Registry and Blueprint-derived corpora.
 
+Index builds use **phased wave commits** to SQLite (priority corpora first; deferred deletions) so context can retrieve partial results earlier when enabled.
+
 Aligns with [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 2.1 (visual architecture diagrams) and section 2.2 (what is indexed vs excludedâ€”no full chat dump, no raw binary `.uasset` bytes).
 
 [Open full-size SVG](docs/architecture-maps/vector-db-end-to-end.svg)
@@ -214,9 +216,9 @@ Aligns with [`docs/context/vector-db-implementation-plan.md`](docs/context/vecto
 <details>
 <summary><strong>Vector db index build</strong></summary>
 
-**Index rebuild** rationale: settings-driven **whitelist** and **root presets** bound CPU, disk, and **BYOK embedding** API cost. **Filesystem** corpus reads UTF-8 text for allow-listed extensions only; **Asset Registry** adds deterministic metadata shards; **Blueprint** corpus uses feature lines, not raw assets; **memory** chunks into the index are **optional** and default-off so **tagged memory** stays primary.
+**Index rebuild** rationale: settings-driven **whitelist** and **root presets** bound CPU, disk, and **BYOK embedding** API cost. **Phased commits** write high-priority corpus (e.g. project `Source/`) to SQLite before lower-priority waves finish, improving time-to-first-retrieval; **manifest** tracks wave progress when enabled. **Filesystem** corpus reads UTF-8 text for allow-listed extensions only; **Asset Registry** adds deterministic metadata shards; **Blueprint** corpus uses feature lines, not raw assets; **memory** chunks into the index are **optional** and default-off so **tagged memory** stays primary.
 
-See the long view caption in `architecture.dsl` and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) sections 2.2â€“2.3.
+See the long view caption in `architecture.dsl` and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) sections 2.2â€“2.3 and phased indexing notes.
 
 [Open full-size SVG](docs/architecture-maps/vector-db-index-build.svg)
 
