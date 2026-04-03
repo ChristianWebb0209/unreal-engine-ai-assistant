@@ -813,7 +813,8 @@
       "context_selector": {
         "priority": 78,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -1049,7 +1050,8 @@
       "context_selector": {
         "priority": 20,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -1112,7 +1114,8 @@
       "context_selector": {
         "priority": 50,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -1163,7 +1166,8 @@
       "context_selector": {
         "priority": 74,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -1774,7 +1778,8 @@
       "context_selector": {
         "priority": 73,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -1852,7 +1857,8 @@
       "context_selector": {
         "priority": 52,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -1910,7 +1916,8 @@
       "context_selector": {
         "priority": 68,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -2140,7 +2147,8 @@
       "context_selector": {
         "priority": 67,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -2214,7 +2222,8 @@
       "context_selector": {
         "priority": 66,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -2281,7 +2290,8 @@
       "context_selector": {
         "priority": 70,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -2331,7 +2341,8 @@
       "context_selector": {
         "priority": 56,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -4143,7 +4154,8 @@
       "context_selector": {
         "priority": 66,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -4629,7 +4641,8 @@
       "context_selector": {
         "priority": 64,
         "always_include_in_core_pack": true,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -5741,7 +5754,8 @@
       "context_selector": {
         "priority": 76,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -6101,7 +6115,8 @@
       "context_selector": {
         "priority": 71,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -6127,6 +6142,253 @@
       "side_effects": "none",
       "permission": "read",
       "ue_entry_points": "UBlueprint; UEdGraph",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "blueprint_graph_introspect",
+      "summary": "Read-only: enumerate nodes in a Blueprint graph with node_guid, class, title, and pins (name, direction, category). Use before T3D authoring.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 72,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "graph_name": {
+            "type": "string"
+          },
+          "focused": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FEdGraphUtilities",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "blueprint_export_graph_t3d",
+      "summary": "Read-only: export graph nodes as Unreal T3D clipboard text. Optional max_chars (default 500000).",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "read",
+        "t3d"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 72,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "graph_name": {
+            "type": "string"
+          },
+          "max_chars": {
+            "type": "integer"
+          },
+          "focused": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FEdGraphUtilities",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "blueprint_t3d_preflight_validate",
+      "summary": "Resolve __UAI_G_NNNNNN__ placeholders in t3d_text and run CanImportNodesFromText without mutating the graph.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "t3d"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 72,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "graph_name": {
+            "type": "string"
+          },
+          "t3d_text": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "blueprint_path",
+          "t3d_text"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FEdGraphUtilities",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "blueprint_graph_import_t3d",
+      "summary": "Atomic graph mutation: resolve __UAI_G_NNNNNN__ placeholders then ImportNodesFromText on the target graph. Writable /Game path only.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "t3d",
+        "write"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 72,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "graph_name": {
+            "type": "string"
+          },
+          "t3d_text": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "blueprint_path",
+          "t3d_text"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "FEdGraphUtilities",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "blueprint_verify_graph",
+      "summary": "Post-edit verification: optional steps (default [\"links\"]): links (null/cross-graph pin links), orphan_pins (disconnected exec inputs on impure K2 nodes), duplicate_node_guids. Unknown step strings listed in unknown_steps output.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "verify"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 70,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "graph_name": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UEdGraphPin",
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],

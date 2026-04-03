@@ -5,6 +5,7 @@
 #include "Templates/SharedPointer.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Harness/FUnrealAiConversationStore.h"
+#include "Tools/UnrealAiBuildBlueprintTag.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Harness/IAgentRunSink.h"
 #include "Planning/FUnrealAiPlanExecutor.h"
@@ -17,6 +18,7 @@
 #include "Misc/SecureHash.h"
 #include "Tools/UnrealAiToolUsageEventLogger.h"
 #include "Tools/UnrealAiToolUsagePrior.h"
+#include "Tools/UnrealAiBlueprintToolGate.h"
 #include "Backend/FUnrealAiUsageTracker.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Memory/FUnrealAiMemoryCompactor.h"
@@ -150,6 +152,10 @@ namespace UnrealAiAgentHarnessPriv
 		TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 		Root->SetStringField(TEXT("query_shape"), Tel.QueryShape);
 		Root->SetStringField(TEXT("query_hash"), Tel.QueryHash);
+		if (!Tel.SurfaceProfile.IsEmpty())
+		{
+			Root->SetStringField(TEXT("surface_profile"), Tel.SurfaceProfile);
+		}
 		Root->SetNumberField(TEXT("k_effective"), static_cast<double>(Tel.KEffective));
 		Root->SetNumberField(TEXT("eligible_count"), static_cast<double>(Tel.EligibleCount));
 		TArray<TSharedPtr<FJsonValue>> ToolsArr;
@@ -2072,6 +2078,38 @@ namespace UnrealAiAgentHarnessPriv
 		const bool bRepeatSignature = Request.Mode == EUnrealAiAgentMode::Agent && InvokeName != TEXT("agent_emit_todo_plan")
 			&& (SigCount >= GHarnessRepeatedFailureStopCount || NameCount >= 6);
 		EmitEnforcementEvent(TEXT("stream_tool_exec_start"), FString::Printf(TEXT("id=%s name=%s"), *Tc.Id, *InvokeName));
+		if (Request.Mode == EUnrealAiAgentMode::Agent && !UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Request, InvokeName))
+		{
+			const FString BlockMsg = FString::Printf(
+				TEXT("[Harness][reason=blueprint_tool_withheld] Blocked: tool \"%s\" is reserved for automated Blueprint Builder sub-turns. ")
+				TEXT("Delegate graph edits via <unreal_ai_build_blueprint> (see system prompt), or use read-only / non-mutation blueprint tools on the main agent."),
+				*InvokeName);
+			if (Sink.IsValid())
+			{
+				Sink->OnToolCallFinished(InvokeName, Tc.Id, false, UnrealAiTruncateForUi(BlockMsg), nullptr);
+			}
+			if (Conv.IsValid())
+			{
+				FUnrealAiConversationMessage Tm;
+				Tm.Role = TEXT("tool");
+				Tm.ToolCallId = Tc.Id;
+				Tm.Content = BlockMsg;
+				Conv->GetMessagesMutable().Add(Tm);
+			}
+			++CurrentRoundToolFailCount;
+			CurrentRoundExecutedToolNames.Add(InvokeName);
+			if (!Tc.Id.IsEmpty())
+			{
+				ExecutedToolCallIds.Add(Tc.Id);
+			}
+			EmitEnforcementEvent(
+				TEXT("blueprint_tool_gate_block"),
+				FString::Printf(TEXT("tool=%s blueprint_builder_only=1"), *InvokeName));
+			UnrealAiToolUsagePrior::NoteSessionOutcome(InvokeName, false);
+			LastConsecutiveIdenticalOkSignature.Reset();
+			ConsecutiveIdenticalOkCount = 0;
+			return;
+		}
 		const FUnrealAiToolInvocationResult Inv = Tools->InvokeTool(InvokeName, InvokeArgs, Tc.Id);
 		CurrentRoundExecutedToolNames.Add(InvokeName);
 		const FString DialogFootnote = FUnrealAiEditorModalMonitor::ConsumePendingToolDialogFootnote();
@@ -2528,9 +2566,37 @@ namespace UnrealAiAgentHarnessPriv
 			return;
 		}
 		AccumulateRoundUsage();
+		const FString OrigAssist = AssistantBuffer;
+		FString BbResultInner;
+		FString BbResultVisible;
+		const bool bBbResultParsed =
+			Request.bBlueprintBuilderTurn && UnrealAiBlueprintBuilderResultTag::TryConsume(OrigAssist, BbResultInner, BbResultVisible);
+
+		FString BpInner;
+		FString BpVisible;
+		const bool bBpParsed = !Request.bBlueprintBuilderTurn
+			&& UnrealAiBuildBlueprintTag::TryConsume(OrigAssist, BpInner, BpVisible);
+		const bool bBpHandoff = bBpParsed && (Request.Mode == EUnrealAiAgentMode::Agent) && !Request.bBlueprintBuilderTurn
+			&& !Request.ThreadId.Contains(TEXT("_plan_")) && !BpInner.TrimStartAndEnd().IsEmpty();
+
 		FUnrealAiConversationMessage Am;
 		Am.Role = TEXT("assistant");
-		Am.Content = AssistantBuffer;
+		if (bBpHandoff)
+		{
+			Am.Content = BpVisible;
+		}
+		else if (bBbResultParsed)
+		{
+			Am.Content = BbResultVisible;
+			if (Am.Content.TrimStartAndEnd().IsEmpty())
+			{
+				Am.Content = TEXT("Blueprint Builder finished (structured result follows for the main agent).");
+			}
+		}
+		else
+		{
+			Am.Content = OrigAssist;
+		}
 		Conv->GetMessagesMutable().Add(Am);
 
 		// Second+ LLM rounds often end with finish_reason=stop and no tool_calls. Models sometimes return an
@@ -2540,7 +2606,7 @@ namespace UnrealAiAgentHarnessPriv
 		const bool bPlanPlannerPass = UnrealAiPlanPlannerHarness::IsPlanPlannerPass(Request.Mode);
 		const FString LastRealUser = GetLastRealUserMessage(Conv->GetMessages());
 		const bool bActionIntent = UserLikelyRequestsActionTool(LastRealUser);
-		const bool bHasExplicitBlocker = AssistantContainsExplicitBlocker(AssistantBuffer);
+		const bool bHasExplicitBlocker = AssistantContainsExplicitBlocker(OrigAssist);
 		if (bAgentModeWantsToolExecution && bActionIntent)
 		{
 			if (!bActionIntentCounted)
@@ -2561,7 +2627,8 @@ namespace UnrealAiAgentHarnessPriv
 		// Interactive Agent mode retries empty assistant deltas with a harness nudge. Plan DAG node threads
 		// (`*_plan_*`) run in series; burning multiple LLM rounds here blocks the plan executor and looks
 		// like a hang. Finish the node so the parent plan can advance.
-		if (bAgentModeWantsToolExecution && AssistantBuffer.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
+		if (!bBpHandoff && !bBbResultParsed && bAgentModeWantsToolExecution && Am.Content.TrimStartAndEnd().IsEmpty()
+			&& LlmRound < EffectiveMaxLlmRounds)
 		{
 			if (!Request.ThreadId.Contains(TEXT("_plan_")))
 			{
@@ -2581,7 +2648,7 @@ namespace UnrealAiAgentHarnessPriv
 			Fail(TEXT("Plan node finished with empty assistant output (no text and no tools)."));
 			return;
 		}
-		if (bPlanPlannerPass && AssistantBuffer.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
+		if (bPlanPlannerPass && Am.Content.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
 		{
 			FUnrealAiConversationMessage Nudge;
 			Nudge.Role = TEXT("user");
@@ -2595,7 +2662,7 @@ namespace UnrealAiAgentHarnessPriv
 		if (Request.Mode == EUnrealAiAgentMode::Ask && !bPlanPlannerPass && !Request.ThreadId.Contains(TEXT("_plan_"))
 			&& LlmRound < EffectiveMaxLlmRounds)
 		{
-			const FString TrimAsk = AssistantBuffer.TrimStartAndEnd();
+			const FString TrimAsk = Am.Content.TrimStartAndEnd();
 			if (UnrealAiAgentHarnessPriv::LooksLikeIncompleteAskAnswer(TrimAsk) && AskAnswerRepairNudgeCount < 1)
 			{
 				++AskAnswerRepairNudgeCount;
@@ -2625,6 +2692,41 @@ namespace UnrealAiAgentHarnessPriv
 			EmitEnforcementEvent(
 				TEXT("action_text_only_completion"),
 				TEXT("agent round ended with assistant text only (no tool_calls); harness allows success for qualitative review"));
+		}
+
+		if (bBpHandoff)
+		{
+			Request.bBlueprintBuilderTurn = true;
+			EmitEnforcementEvent(TEXT("blueprint_builder_chain"), TEXT("chained_subturn_from_build_blueprint_tag"));
+			FUnrealAiConversationMessage Sub;
+			Sub.Role = TEXT("user");
+			Sub.Content = FString::Printf(
+				TEXT("[Blueprint Builder — automated sub-turn]\n")
+				TEXT("The main agent delegated work using `<unreal_ai_build_blueprint>`. Target Blueprint assets MUST already exist at the paths referenced below.\n")
+				TEXT("Prefer the T3D loop: `blueprint_graph_introspect` and `blueprint_export_graph_t3d`, edit T3D using `__UAI_G_NNNNNN__` placeholders, "
+					 "`blueprint_t3d_preflight_validate`, then `blueprint_graph_import_t3d`, then `blueprint_compile` + `blueprint_verify_graph`. "
+					 "Fallback: `blueprint_apply_ir` / `blueprint_graph_patch`. When done (or blocked), emit `<unreal_ai_blueprint_builder_result>...</unreal_ai_blueprint_builder_result>` for the main agent.\n\n%s"),
+				*BpInner);
+			Conv->GetMessagesMutable().Add(Sub);
+			AssistantBuffer.Reset();
+			DispatchLlm();
+			return;
+		}
+
+		if (bBbResultParsed)
+		{
+			Request.bBlueprintBuilderTurn = false;
+			Request.bInjectBlueprintBuilderResumeChunk = true;
+			EmitEnforcementEvent(TEXT("blueprint_builder_result"), TEXT("return_to_main_agent"));
+			FUnrealAiConversationMessage Ret;
+			Ret.Role = TEXT("user");
+			Ret.Content = FString::Printf(
+				TEXT("[Blueprint Builder — result for main agent]\n%s"),
+				*BbResultInner);
+			Conv->GetMessagesMutable().Add(Ret);
+			AssistantBuffer.Reset();
+			DispatchLlm();
+			return;
 		}
 
 		Succeed();

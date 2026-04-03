@@ -53,3 +53,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AnimBlueprintGetGraphSummary(cons
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TSharedPtr<FJsonObject>& Args);
 /** Introspect pins on a node (patch_id from same session or guid: form). */
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphListPins(const TSharedPtr<FJsonObject>& Args);
+
+/** Pin audit + node map for Blueprint graph (builder / read paths). */
+FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphIntrospect(const TSharedPtr<FJsonObject>& Args);
+/** Export graph nodes as Unreal T3D clipboard text. */
+FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportGraphT3d(const TSharedPtr<FJsonObject>& Args);
+/** Resolve __UAI_G_NNNNNN__ placeholders and run CanImportNodesFromText. */
+FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintT3dPreflightValidate(const TSharedPtr<FJsonObject>& Args);
+/** Atomic ImportNodesFromText after placeholder resolution. */
+FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphImportT3d(const TSharedPtr<FJsonObject>& Args);
+/** Post-edit link sanity checks (extensible steps[]). */
+FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintVerifyGraph(const TSharedPtr<FJsonObject>& Args);

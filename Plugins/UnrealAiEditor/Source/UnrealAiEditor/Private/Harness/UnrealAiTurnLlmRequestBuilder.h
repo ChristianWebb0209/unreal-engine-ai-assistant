@@ -17,7 +17,7 @@ struct FUnrealAiToolSurfaceTelemetry;
 namespace UnrealAiTurnLlmRequestBuilder
 {
 	bool Build(
-		const FUnrealAiAgentTurnRequest& Request,
+		FUnrealAiAgentTurnRequest& Request,
 		int32 LlmRound,
 		int32 MaxLlmRounds,
 		const FString& RetrievalTurnKey,

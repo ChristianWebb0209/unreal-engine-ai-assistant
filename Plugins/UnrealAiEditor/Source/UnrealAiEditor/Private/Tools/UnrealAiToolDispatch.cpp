@@ -490,6 +490,26 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_BlueprintAddVariable(A);
 	}
+	if (ToolId == TEXT("blueprint_graph_introspect"))
+	{
+		return UnrealAiDispatch_BlueprintGraphIntrospect(A);
+	}
+	if (ToolId == TEXT("blueprint_export_graph_t3d"))
+	{
+		return UnrealAiDispatch_BlueprintExportGraphT3d(A);
+	}
+	if (ToolId == TEXT("blueprint_t3d_preflight_validate"))
+	{
+		return UnrealAiDispatch_BlueprintT3dPreflightValidate(A);
+	}
+	if (ToolId == TEXT("blueprint_graph_import_t3d"))
+	{
+		return UnrealAiDispatch_BlueprintGraphImportT3d(A);
+	}
+	if (ToolId == TEXT("blueprint_verify_graph"))
+	{
+		return UnrealAiDispatch_BlueprintVerifyGraph(A);
+	}
 	if (ToolId == TEXT("animation_blueprint_get_graph_summary"))
 	{
 		return UnrealAiDispatch_AnimBlueprintGetGraphSummary(A);

@@ -2,6 +2,8 @@
 
 #include "Prompt/UnrealAiPromptChunkUtils.h"
 
+#include <initializer_list>
+
 FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const FUnrealAiPromptAssembleParams& Params) const
 {
 	if (!Params.Built)
@@ -24,6 +26,67 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 		}
 	};
 
+	auto AppendBlueprintBuilderChunk = [&Acc](const TCHAR* FileUnderBlueprintBuilder)
+	{
+		FString C;
+		if (UnrealAiPromptChunkUtils::LoadChunk(TEXT("chunks"), FileUnderBlueprintBuilder, C))
+		{
+			if (!Acc.IsEmpty())
+			{
+				Acc += TEXT("\n\n---\n\n");
+			}
+			Acc += C;
+		}
+	};
+
+	auto AppendChunkList = [&Acc](const std::initializer_list<const TCHAR*> RelPathsUnderChunks)
+	{
+		for (const TCHAR* Rel : RelPathsUnderChunks)
+		{
+			FString C;
+			if (UnrealAiPromptChunkUtils::LoadChunk(TEXT("chunks"), Rel, C))
+			{
+				if (!Acc.IsEmpty())
+				{
+					Acc += TEXT("\n\n---\n\n");
+				}
+				Acc += C;
+			}
+		}
+	};
+
+	if (Params.bBlueprintBuilderMode)
+	{
+		AppendChunk(TEXT("01-identity.md"));
+		{
+			FString C2;
+			if (UnrealAiPromptChunkUtils::LoadChunk(ChunkSubdir, TEXT("02-operating-modes.md"), C2))
+			{
+				C2 = UnrealAiPromptChunkUtils::ExtractOperatingModeSection(C2, Params.Mode);
+				if (!Acc.IsEmpty())
+				{
+					Acc += TEXT("\n\n---\n\n");
+				}
+				Acc += C2;
+			}
+		}
+		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/00-overview.md"));
+		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/01-deterministic-loop.md"));
+		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/02-architecture-plain-language.md"));
+		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/03-fail-safe-handoff.md"));
+		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/04-t3d-placeholders-and-import.md"));
+		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/05-verification-ladder.md"));
+		AppendChunk(TEXT("05-context-and-editor.md"));
+		AppendChunk(TEXT("07-safety-banned.md"));
+		AppendChunk(TEXT("08-output-style.md"));
+		UnrealAiPromptChunkUtils::ApplyTemplateTokens(Acc, Params, B);
+		if (!B.SystemOrDeveloperBlock.IsEmpty())
+		{
+			Acc = B.SystemOrDeveloperBlock + TEXT("\n\n---\n\n") + Acc;
+		}
+		return Acc;
+	}
+
 	AppendChunk(TEXT("01-identity.md"));
 
 	{
@@ -41,11 +104,20 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 
 	AppendChunk(TEXT("03-complexity-and-todo-plan.md"));
 	AppendChunk(TEXT("04-tool-calling-contract.md"));
+	AppendChunk(TEXT("12-build-blueprint-delegation.md"));
+	if (Params.bInjectBlueprintBuilderResumeChunk)
+	{
+		AppendChunk(TEXT("13-blueprint-builder-resume.md"));
+	}
 	AppendChunk(TEXT("05-context-and-editor.md"));
 	AppendChunk(TEXT("10-mvp-gameplay-and-tooling.md"));
 	if (Params.bIncludePlanNodeExecutionChunk)
 	{
-		AppendChunk(TEXT("11-plan-node-execution.md"));
+		AppendChunkList({
+			TEXT("plan-node/01-scope-and-context.md"),
+			TEXT("plan-node/02-completion-and-tools.md"),
+			TEXT("plan-node/03-retries-blockers-budget.md"),
+		});
 	}
 	if (Params.bIncludeExecutionSubturnChunk)
 	{
@@ -55,7 +127,12 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 	AppendChunk(TEXT("08-output-style.md"));
 	if (Params.bIncludePlanDagChunk)
 	{
-		AppendChunk(TEXT("09-plan-dag.md"));
+		AppendChunkList({
+			TEXT("plan/01-overview-shape-next.md"),
+			TEXT("plan/02-rules-and-selfchecks.md"),
+			TEXT("plan/03-automatic-replan.md"),
+			TEXT("plan/04-policies-and-canonical-shape.md"),
+		});
 	}
 
 	UnrealAiPromptChunkUtils::ApplyTemplateTokens(Acc, Params, B);

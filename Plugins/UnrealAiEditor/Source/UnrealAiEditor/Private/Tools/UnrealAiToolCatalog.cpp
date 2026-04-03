@@ -184,6 +184,21 @@ void FUnrealAiToolCatalog::ForEachEnabledToolForMode(
 	const FUnrealAiToolPackOptions* PackOptions,
 	TFunctionRef<void(const FString& ToolId, const TSharedPtr<FJsonObject>& Definition)> Fn) const
 {
+	ForEachEnabledToolForMode(
+		Mode,
+		Caps,
+		PackOptions,
+		[](const FString&) { return true; },
+		Fn);
+}
+
+void FUnrealAiToolCatalog::ForEachEnabledToolForMode(
+	EUnrealAiAgentMode Mode,
+	const FUnrealAiModelCapabilities& Caps,
+	const FUnrealAiToolPackOptions* PackOptions,
+	TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
+	TFunctionRef<void(const FString& ToolId, const TSharedPtr<FJsonObject>& Definition)> Fn) const
+{
 	if (!Caps.bSupportsNativeTools || !bLoaded)
 	{
 		return;
@@ -213,6 +228,10 @@ void FUnrealAiToolCatalog::ForEachEnabledToolForMode(
 		{
 			continue;
 		}
+		if (!ToolIdFilter(Tid))
+		{
+			continue;
+		}
 		Fn(Tid, *ObjPtr);
 	}
 }
@@ -221,6 +240,16 @@ void FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode(
 	EUnrealAiAgentMode Mode,
 	const FUnrealAiModelCapabilities& Caps,
 	const FUnrealAiToolPackOptions* PackOptions,
+	FString& OutJsonArray) const
+{
+	BuildLlmToolsJsonArrayForMode(Mode, Caps, PackOptions, [](const FString&) { return true; }, OutJsonArray);
+}
+
+void FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode(
+	EUnrealAiAgentMode Mode,
+	const FUnrealAiModelCapabilities& Caps,
+	const FUnrealAiToolPackOptions* PackOptions,
+	TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
 	FString& OutJsonArray) const
 {
 	OutJsonArray.Reset();
@@ -233,6 +262,7 @@ void FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode(
 		Mode,
 		Caps,
 		PackOptions,
+		ToolIdFilter,
 		[&](const FString& Tid, const TSharedPtr<FJsonObject>& Obj)
 	{
 		FString Summary;
@@ -326,9 +356,24 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendix(
 	const FUnrealAiToolPackOptions* PackOptions,
 	FString& OutMarkdown) const
 {
+	BuildCompactToolIndexAppendix(
+		Mode,
+		Caps,
+		PackOptions,
+		[](const FString&) { return true; },
+		OutMarkdown);
+}
+
+void FUnrealAiToolCatalog::BuildCompactToolIndexAppendix(
+	EUnrealAiAgentMode Mode,
+	const FUnrealAiModelCapabilities& Caps,
+	const FUnrealAiToolPackOptions* PackOptions,
+	TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
+	FString& OutMarkdown) const
+{
 	TArray<FString> EmptyOrder;
 	const TSet<FString> EmptyGuard;
-	BuildCompactToolIndexAppendixTiered(Mode, Caps, PackOptions, EmptyOrder, EmptyGuard, 0, 2000000000, OutMarkdown);
+	BuildCompactToolIndexAppendixTiered(Mode, Caps, PackOptions, EmptyOrder, EmptyGuard, 0, 2000000000, ToolIdFilter, OutMarkdown);
 }
 
 bool FUnrealAiToolCatalog::TryGetToolParametersJsonString(const FString& ToolId, FString& OutParametersJson) const
@@ -362,6 +407,29 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
 	int32 MaxTotalChars,
 	FString& OutMarkdown) const
 {
+	BuildCompactToolIndexAppendixTiered(
+		Mode,
+		Caps,
+		PackOptions,
+		OrderedToolIds,
+		GuardrailToolIds,
+		ExpandedCount,
+		MaxTotalChars,
+		[](const FString&) { return true; },
+		OutMarkdown);
+}
+
+void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
+	EUnrealAiAgentMode Mode,
+	const FUnrealAiModelCapabilities& Caps,
+	const FUnrealAiToolPackOptions* PackOptions,
+	const TArray<FString>& OrderedToolIds,
+	const TSet<FString>& GuardrailToolIds,
+	int32 ExpandedCount,
+	int32 MaxTotalChars,
+	TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
+	FString& OutMarkdown) const
+{
 	OutMarkdown.Reset();
 	if (!Caps.bSupportsNativeTools || !bLoaded)
 	{
@@ -375,6 +443,7 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
 			Mode,
 			Caps,
 			PackOptions,
+			ToolIdFilter,
 			[&](const FString& Tid, const TSharedPtr<FJsonObject>&)
 			{
 				Order.Add(Tid);
@@ -422,6 +491,10 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
 	{
 		const TSharedPtr<FJsonObject> Obj = FindToolDefinition(Tid);
 		if (!Obj.IsValid())
+		{
+			continue;
+		}
+		if (!ToolIdFilter(Tid))
 		{
 			continue;
 		}

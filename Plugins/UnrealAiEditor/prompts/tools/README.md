@@ -8,6 +8,6 @@
 
 ## Structured planning (product)
 
-Use **Plan mode** in chat for `unreal_ai.plan_dag` (planner JSON + executor). See chunks **`09-plan-dag.md`**, **`11-plan-node-execution.md`**, and `Private/Planning/` in source.
+Use **Plan mode** in chat for `unreal_ai.plan_dag` (planner JSON + executor). See **`chunks/plan/`**, **`chunks/plan-node/`**, and `Private/Planning/` in source.
 
 The catalog entry **`agent_emit_todo_plan`** is **deprecated** (not exposed to the model). Legacy persisted `activeTodoPlan` JSON may still exist on disk—see [`context-management.md`](../../../../docs/context/context-management.md).

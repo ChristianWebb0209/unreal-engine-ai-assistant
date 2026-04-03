@@ -76,6 +76,16 @@ void FUnrealAiToolBm25Index::RebuildForEnabledTools(
 	const FUnrealAiModelCapabilities& Caps,
 	const FUnrealAiToolPackOptions* PackOptions)
 {
+	RebuildForEnabledTools(Catalog, Mode, Caps, PackOptions, [](const FString&) { return true; });
+}
+
+void FUnrealAiToolBm25Index::RebuildForEnabledTools(
+	const FUnrealAiToolCatalog& Catalog,
+	EUnrealAiAgentMode Mode,
+	const FUnrealAiModelCapabilities& Caps,
+	const FUnrealAiToolPackOptions* PackOptions,
+	TFunctionRef<bool(const FString& ToolId)> ToolIdFilter)
+{
 	Docs.Reset();
 	Idf.Reset();
 	NumDocs = 0;
@@ -88,6 +98,7 @@ void FUnrealAiToolBm25Index::RebuildForEnabledTools(
 		Mode,
 		Caps,
 		PackOptions,
+		ToolIdFilter,
 		[&](const FString& Tid, const TSharedPtr<FJsonObject>& Obj)
 		{
 			const FString DocText = UnrealAiToolBm25IndexPriv::BuildDocText(Obj, Tid);

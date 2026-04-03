@@ -307,6 +307,75 @@ bool FUnrealAiBlueprintGraphPatchContractTest::RunTest(const FString& Parameters
 		TestFalse(TEXT("blueprint_graph_list_pins empty args: ok"), O->GetBoolField(TEXT("ok")));
 	}
 
+	{
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_graph_introspect"),
+			MakeShared<FJsonObject>(),
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_graph_introspect empty args: bOk"), R.bOk);
+	}
+	{
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_export_graph_t3d"),
+			MakeShared<FJsonObject>(),
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_export_graph_t3d empty args: bOk"), R.bOk);
+	}
+	{
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_t3d_preflight_validate"),
+			MakeShared<FJsonObject>(),
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_t3d_preflight_validate empty args: bOk"), R.bOk);
+	}
+	{
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_graph_import_t3d"),
+			MakeShared<FJsonObject>(),
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_graph_import_t3d empty args: bOk"), R.bOk);
+	}
+	{
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_verify_graph"),
+			MakeShared<FJsonObject>(),
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_verify_graph empty args: bOk"), R.bOk);
+	}
+	// Missing asset: steps are not evaluated (load fails first). Validates args + steps parse path without crashing.
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/__does_not_exist__/BP_VerifySteps.BP_VerifySteps"));
+		TArray<TSharedPtr<FJsonValue>> St;
+		St.Add(MakeShared<FJsonValueString>(TEXT("links")));
+		St.Add(MakeShared<FJsonValueString>(TEXT("orphan_pins")));
+		St.Add(MakeShared<FJsonValueString>(TEXT("not_a_real_step")));
+		Args->SetArrayField(TEXT("steps"), St);
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("blueprint_verify_graph"),
+			Args,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_verify_graph missing asset with steps: bOk"), R.bOk);
+	}
+
 	return true;
 }
 

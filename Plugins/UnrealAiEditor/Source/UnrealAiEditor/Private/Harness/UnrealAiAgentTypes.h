@@ -123,6 +123,8 @@ struct FUnrealAiToolSurfaceTelemetry
 	FString QueryHash;
 	/** Full ordered roster passed to the tiered index (guardrails + top‑K), with per-tool scoring breakdown. */
 	TArray<FUnrealAiToolSurfaceRankedEntry> RankedTools;
+	/** e.g. default | blueprint_builder_narrow_bm25 */
+	FString SurfaceProfile;
 };
 
 /** Request into the harness from UI / tabs. */
@@ -148,4 +150,22 @@ struct FUnrealAiAgentTurnRequest
 	int32 LlmRoundBudgetFloor = 0;
 	/** Skip dispatch + tiered tool index; emit full per-tool JSON (headless tests / diagnostics). */
 	bool bForceNativeToolSurface = false;
+
+	/**
+	 * When true, this turn uses Blueprint Builder prompts and receives the full Blueprint mutation tool surface.
+	 * Set by the harness when chaining after `<unreal_ai_build_blueprint>...</unreal_ai_build_blueprint>` from the main agent.
+	 */
+	bool bBlueprintBuilderTurn = false;
+
+	/**
+	 * When true (default) on Agent turns that are NOT bBlueprintBuilderTurn, graph mutation tools
+	 * (patch / format / compile / add_variable) are omitted from the tiered tool index — use build-blueprint handoff instead.
+	 */
+	bool bOmitMainAgentBlueprintMutationTools = true;
+
+	/**
+	 * One-shot: after `<unreal_ai_blueprint_builder_result>`, inject `13-blueprint-builder-resume.md` into the main-agent system prompt once.
+	 * Cleared when UnrealAiTurnLlmRequestBuilder::Build consumes it.
+	 */
+	bool bInjectBlueprintBuilderResumeChunk = false;
 };

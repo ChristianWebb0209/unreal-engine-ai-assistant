@@ -6,6 +6,7 @@
 #include "Misc/UnrealAiRuntimeDefaults.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Misc/SecureHash.h"
+#include "Tools/UnrealAiBlueprintToolGate.h"
 #include "Tools/UnrealAiToolBm25Index.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Tools/UnrealAiToolContextBias.h"
@@ -68,17 +69,48 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 	}
 
 	const double T0 = FPlatformTime::Seconds();
+	const auto ToolFilter = [&](const FString& Tid) -> bool
+	{
+		return UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Request, Tid);
+	};
+
 	const FString& QueryForTools = Request.ContextComplexityUserText.IsEmpty() ? Request.UserText : Request.ContextComplexityUserText;
 	FString Shaped;
 	EUnrealAiToolQueryShape ShapeUsed = EUnrealAiToolQueryShape::Raw;
 	UnrealAiToolQueryShaper::ShapeForRetrieval(QueryForTools, Shaped, ShapeUsed);
 	FString Hybrid;
 	UnrealAiToolQueryShaper::BuildHybridQuery(QueryForTools, Shaped, Hybrid);
+	if (Request.bBlueprintBuilderTurn)
+	{
+		Hybrid += TEXT(
+			" blueprint blueprint_graph blueprint_compile blueprint_export blueprint_import t3d k2 node graph pin guid patch apply_ir verify compile asset ");
+		OutTelemetry.SurfaceProfile = TEXT("blueprint_builder_narrow_bm25");
+	}
+	else
+	{
+		OutTelemetry.SurfaceProfile = TEXT("default");
+	}
 	OutTelemetry.QueryShape = (ShapeUsed == EUnrealAiToolQueryShape::Heuristic) ? TEXT("hybrid") : TEXT("raw");
 	OutTelemetry.QueryHash = UnrealAiToolSurfacePipelinePriv::HashUtf8(Hybrid);
 
 	FUnrealAiToolBm25Index Index;
-	Index.RebuildForEnabledTools(*Catalog, Request.Mode, Caps, PackOptions);
+	Index.RebuildForEnabledTools(
+		*Catalog,
+		Request.Mode,
+		Caps,
+		PackOptions,
+		[&](const FString& Tid) -> bool
+		{
+			if (!ToolFilter(Tid))
+			{
+				return false;
+			}
+			if (Request.bBlueprintBuilderTurn)
+			{
+				return UnrealAiBlueprintToolGate::PassesBuilderNarrowBm25Corpus(*Catalog, Tid);
+			}
+			return true;
+		});
 	TMap<FString, float> RawScores;
 	Index.ScoreQuery(Hybrid, RawScores);
 
@@ -103,6 +135,7 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 		Request.Mode,
 		Caps,
 		PackOptions,
+		ToolFilter,
 		[&](const FString& Tid, const TSharedPtr<FJsonObject>& Def)
 		{
 			const FString CodePref = FUnrealAiEditorModule::GetAgentCodeTypePreference();
@@ -145,10 +178,16 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 			}
 			Row.Score = Combined;
 			bool bGr = false;
+			bool bBpBuilderCore = false;
 			const TSharedPtr<FJsonObject>* Ctx = nullptr;
 			if (Def->TryGetObjectField(TEXT("context_selector"), Ctx) && Ctx && (*Ctx).IsValid())
 			{
 				(*Ctx)->TryGetBoolField(TEXT("always_include_in_core_pack"), bGr);
+				(*Ctx)->TryGetBoolField(TEXT("blueprint_builder_core"), bBpBuilderCore);
+			}
+			if (Request.bBlueprintBuilderTurn && bBpBuilderCore)
+			{
+				Row.Score += 3.f;
 			}
 			Row.bGuardrail = bGr;
 			Pool.Add(Row);
@@ -175,7 +214,11 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 	// Defaults keep the tiered appendix smaller so user + history retain more of the context window.
 	const int32 KMin = UnrealAiRuntimeDefaults::ToolKMin;
 	const int32 KMax = FMath::Clamp(UnrealAiRuntimeDefaults::ToolKMax, KMin, 512);
-	const int32 Keffective = UnrealAiToolKPolicy::ComputeEffectiveK(NonGuardScores, KMin, KMax);
+	int32 Keffective = UnrealAiToolKPolicy::ComputeEffectiveK(NonGuardScores, KMin, KMax);
+	if (Request.bBlueprintBuilderTurn)
+	{
+		Keffective = FMath::Min(KMax, Keffective + 14);
+	}
 
 	TSet<FString> GuardrailIds;
 	TArray<FString> Ordered;
@@ -202,6 +245,66 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 		++Taken;
 	}
 
+	if (Request.bBlueprintBuilderTurn)
+	{
+		TArray<FString> CoreInsert;
+		Catalog->ForEachEnabledToolForMode(
+			Request.Mode,
+			Caps,
+			PackOptions,
+			ToolFilter,
+			[&](const FString& Tid, const TSharedPtr<FJsonObject>& Def)
+			{
+				bool bCore = false;
+				const TSharedPtr<FJsonObject>* Ctx = nullptr;
+				if (Def->TryGetObjectField(TEXT("context_selector"), Ctx) && Ctx && (*Ctx).IsValid())
+				{
+					(*Ctx)->TryGetBoolField(TEXT("blueprint_builder_core"), bCore);
+				}
+				if (bCore)
+				{
+					CoreInsert.Add(Tid);
+				}
+			});
+		CoreInsert.Sort();
+		TSet<FString> SeenOrdered(Ordered);
+		int32 SplitIdx = 0;
+		for (; SplitIdx < Ordered.Num(); ++SplitIdx)
+		{
+			if (!GuardrailIds.Contains(Ordered[SplitIdx]))
+			{
+				break;
+			}
+		}
+		TArray<FString> Prefix;
+		for (int32 I = 0; I < SplitIdx; ++I)
+		{
+			Prefix.Add(Ordered[I]);
+		}
+		TArray<FString> Tail;
+		for (int32 I = SplitIdx; I < Ordered.Num(); ++I)
+		{
+			Tail.Add(Ordered[I]);
+		}
+		Ordered.Reset();
+		Ordered.Append(Prefix);
+		for (const FString& Cid : CoreInsert)
+		{
+			if (!SeenOrdered.Contains(Cid))
+			{
+				Ordered.Add(Cid);
+				SeenOrdered.Add(Cid);
+			}
+		}
+		for (const FString& T : Tail)
+		{
+			if (!SeenOrdered.Contains(T))
+			{
+				Ordered.Add(T);
+				SeenOrdered.Add(T);
+			}
+		}
+	}
 	TMap<FString, UnrealAiToolSurfacePipelinePriv::FScored> ScoreById;
 	ScoreById.Reserve(Pool.Num());
 	for (const UnrealAiToolSurfacePipelinePriv::FScored& R : Pool)
@@ -240,6 +343,7 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 		GuardrailIds,
 		ExpandedCount,
 		Budget,
+		ToolFilter,
 		OutToolIndexMarkdown);
 
 	const double T1 = FPlatformTime::Seconds();
