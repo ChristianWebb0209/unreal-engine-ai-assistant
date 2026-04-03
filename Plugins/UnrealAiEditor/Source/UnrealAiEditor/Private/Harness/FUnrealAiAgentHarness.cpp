@@ -6,6 +6,7 @@
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Harness/FUnrealAiConversationStore.h"
 #include "Tools/UnrealAiBuildBlueprintTag.h"
+#include "Tools/UnrealAiBlueprintBuilderToolSurface.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Harness/IAgentRunSink.h"
 #include "Planning/FUnrealAiPlanExecutor.h"
@@ -155,6 +156,10 @@ namespace UnrealAiAgentHarnessPriv
 		if (!Tel.SurfaceProfile.IsEmpty())
 		{
 			Root->SetStringField(TEXT("surface_profile"), Tel.SurfaceProfile);
+		}
+		if (Tel.AppendixCharBudgetLimit > 0)
+		{
+			Root->SetNumberField(TEXT("appendix_char_budget_limit"), static_cast<double>(Tel.AppendixCharBudgetLimit));
 		}
 		Root->SetNumberField(TEXT("k_effective"), static_cast<double>(Tel.KEffective));
 		Root->SetNumberField(TEXT("eligible_count"), static_cast<double>(Tel.EligibleCount));
@@ -1417,11 +1422,12 @@ namespace UnrealAiAgentHarnessPriv
 			Sink->OnEnforcementEvent(
 				TEXT("tool_surface_metrics"),
 				FString::Printf(
-					TEXT("mode=%s eligible=%d roster_chars=%d budget_left=%d latency_ms=%d k=%d qshape=%s qhash=%s expanded=%s"),
+					TEXT("mode=%s eligible=%d roster_chars=%d budget_left=%d appendix_budget=%d latency_ms=%d k=%d qshape=%s qhash=%s expanded=%s"),
 					*ToolSurfaceTel.ToolSurfaceMode,
 					ToolSurfaceTel.EligibleCount,
 					ToolSurfaceTel.RosterChars,
 					ToolSurfaceTel.BudgetRemaining,
+					ToolSurfaceTel.AppendixCharBudgetLimit,
 					ToolSurfaceTel.RetrievalLatencyMs,
 					ToolSurfaceTel.KEffective,
 					*ToolSurfaceTel.QueryShape,
@@ -2700,13 +2706,7 @@ namespace UnrealAiAgentHarnessPriv
 			EmitEnforcementEvent(TEXT("blueprint_builder_chain"), TEXT("chained_subturn_from_build_blueprint_tag"));
 			FUnrealAiConversationMessage Sub;
 			Sub.Role = TEXT("user");
-			Sub.Content = FString::Printf(
-				TEXT("[Blueprint Builder — automated sub-turn]\n")
-				TEXT("The main agent delegated work using `<unreal_ai_build_blueprint>`. Target Blueprint assets MUST already exist at the paths referenced below.\n")
-				TEXT("Prefer the T3D loop: `blueprint_graph_introspect` and `blueprint_export_graph_t3d`, edit T3D using `__UAI_G_NNNNNN__` placeholders, "
-					 "`blueprint_t3d_preflight_validate`, then `blueprint_graph_import_t3d`, then `blueprint_compile` + `blueprint_verify_graph`. "
-					 "Fallback: `blueprint_apply_ir` / `blueprint_graph_patch`. When done (or blocked), emit `<unreal_ai_blueprint_builder_result>...</unreal_ai_blueprint_builder_result>` for the main agent.\n\n%s"),
-				*BpInner);
+			Sub.Content = UnrealAiBlueprintBuilderToolSurface::BuildAutomatedSubturnHarnessPreamble() + BpInner;
 			Conv->GetMessagesMutable().Add(Sub);
 			AssistantBuffer.Reset();
 			DispatchLlm();

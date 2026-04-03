@@ -10,6 +10,7 @@
 #include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Prompt/UnrealAiPromptBuilder.h"
 #include "Tools/UnrealAiBlueprintToolGate.h"
+#include "Tools/UnrealAiBlueprintBuilderToolSurface.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Tools/UnrealAiToolSurfacePipeline.h"
 #include "UnrealAiEditorSettings.h"
@@ -202,6 +203,20 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	bool bUsingDispatchSurface = false;
 	if (Request.Mode != EUnrealAiAgentMode::Plan && Caps.bSupportsNativeTools && bWantDispatchSurface)
 	{
+		int32 BlueprintBuilderAppendixBudgetChars = 0;
+		if (Request.bBlueprintBuilderTurn && Request.Mode == EUnrealAiAgentMode::Agent)
+		{
+			FString BpBudgetErr;
+			if (!UnrealAiBlueprintBuilderToolSurface::TryComputeAppendixBudgetFromModelContext(
+					Caps.MaxContextTokens,
+					CharPerTokenApprox,
+					BlueprintBuilderAppendixBudgetChars,
+					&BpBudgetErr))
+			{
+				OutError = BpBudgetErr;
+				return false;
+			}
+		}
 		FString ToolIndexMd;
 		FUnrealAiToolSurfaceTelemetry Tel;
 		const bool bTiered = UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
@@ -213,7 +228,8 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 			PackPtr,
 			true,
 			ToolIndexMd,
-			Tel);
+			Tel,
+			BlueprintBuilderAppendixBudgetChars);
 		if (!bTiered)
 		{
 			Catalog->BuildCompactToolIndexAppendix(Request.Mode, Caps, PackPtr, ToolSurfaceFilter, ToolIndexMd);

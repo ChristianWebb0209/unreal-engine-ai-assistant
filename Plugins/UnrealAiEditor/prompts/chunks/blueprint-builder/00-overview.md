@@ -14,4 +14,4 @@ You are running inside an **automated Blueprint Builder sub-turn**: the main age
 
 - Do not create brand-new `/Game` Blueprint assets unless the spec explicitly says they already exist — if a path is missing, stop and report (see fail-safe chunk).
 
-This turn receives the **full** Blueprint mutation tool catalog (patch, format, compile, etc.).
+This turn receives a **verbose dispatch tool index**: effectively **every** Agent-eligible tool is listed with **expanded** parameter schema text (not a short Top-K roster). You still have the full Blueprint mutation set; use non-Blueprint tools when needed.

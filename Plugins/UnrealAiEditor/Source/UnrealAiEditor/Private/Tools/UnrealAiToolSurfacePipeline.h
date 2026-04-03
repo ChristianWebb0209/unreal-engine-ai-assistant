@@ -24,5 +24,6 @@ namespace UnrealAiToolSurfacePipeline
 		const FUnrealAiToolPackOptions* PackOptions,
 		bool bWantDispatchSurface,
 		FString& OutToolIndexMarkdown,
-		FUnrealAiToolSurfaceTelemetry& OutTelemetry);
+		FUnrealAiToolSurfaceTelemetry& OutTelemetry,
+		int32 BlueprintBuilderAppendixBudgetChars = 0);
 }

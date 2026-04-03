@@ -373,7 +373,7 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendix(
 {
 	TArray<FString> EmptyOrder;
 	const TSet<FString> EmptyGuard;
-	BuildCompactToolIndexAppendixTiered(Mode, Caps, PackOptions, EmptyOrder, EmptyGuard, 0, 2000000000, ToolIdFilter, OutMarkdown);
+	BuildCompactToolIndexAppendixTiered(Mode, Caps, PackOptions, EmptyOrder, EmptyGuard, 0, 2000000000, ToolIdFilter, OutMarkdown, 900);
 }
 
 bool FUnrealAiToolCatalog::TryGetToolParametersJsonString(const FString& ToolId, FString& OutParametersJson) const
@@ -405,7 +405,8 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
 	const TSet<FString>& GuardrailToolIds,
 	int32 ExpandedCount,
 	int32 MaxTotalChars,
-	FString& OutMarkdown) const
+	FString& OutMarkdown,
+	int32 MaxParametersExcerptChars) const
 {
 	BuildCompactToolIndexAppendixTiered(
 		Mode,
@@ -416,7 +417,8 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
 		ExpandedCount,
 		MaxTotalChars,
 		[](const FString&) { return true; },
-		OutMarkdown);
+		OutMarkdown,
+		MaxParametersExcerptChars);
 }
 
 void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
@@ -428,7 +430,8 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
 	int32 ExpandedCount,
 	int32 MaxTotalChars,
 	TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
-	FString& OutMarkdown) const
+	FString& OutMarkdown,
+	int32 MaxParametersExcerptChars) const
 {
 	OutMarkdown.Reset();
 	if (!Caps.bSupportsNativeTools || !bLoaded)
@@ -471,9 +474,9 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
 		Obj->TryGetStringField(TEXT("summary"), Summary);
 		FString ParamsJson;
 		TryGetToolParametersJsonString(Tid, ParamsJson);
-		if (ParamsJson.Len() > 900)
+		if (MaxParametersExcerptChars > 0 && ParamsJson.Len() > MaxParametersExcerptChars)
 		{
-			ParamsJson.LeftInline(900);
+			ParamsJson.LeftInline(MaxParametersExcerptChars);
 			ParamsJson += TEXT("...");
 		}
 		FSeg S;

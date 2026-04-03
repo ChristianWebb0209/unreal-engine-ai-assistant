@@ -97,7 +97,7 @@ public:
 		TFunctionRef<void(const FString& ToolId, const TSharedPtr<FJsonObject>& Definition)> Fn) const;
 
 	/**
-	 * Tiered markdown: first ExpandedCount tools include a compact JSON parameters excerpt; remaining tools are one line each.
+	 * Tiered markdown: first ExpandedCount tools include a JSON parameters excerpt (truncated when MaxParametersExcerptChars > 0); remaining tools are one line each.
 	 * OrderedToolIds empty = same set as ForEachEnabled (sorted ids). GuardrailIds are evicted last when over MaxTotalChars.
 	 */
 	void BuildCompactToolIndexAppendixTiered(
@@ -109,7 +109,8 @@ public:
 		int32 ExpandedCount,
 		int32 MaxTotalChars,
 		TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
-		FString& OutMarkdown) const;
+		FString& OutMarkdown,
+		int32 MaxParametersExcerptChars = 900) const;
 
 	void BuildCompactToolIndexAppendixTiered(
 		EUnrealAiAgentMode Mode,
@@ -119,7 +120,8 @@ public:
 		const TSet<FString>& GuardrailToolIds,
 		int32 ExpandedCount,
 		int32 MaxTotalChars,
-		FString& OutMarkdown) const;
+		FString& OutMarkdown,
+		int32 MaxParametersExcerptChars = 900) const;
 
 	/** Minified parameters object JSON for repair prompts; false if unknown tool. */
 	bool TryGetToolParametersJsonString(const FString& ToolId, FString& OutParametersJson) const;

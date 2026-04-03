@@ -123,8 +123,10 @@ struct FUnrealAiToolSurfaceTelemetry
 	FString QueryHash;
 	/** Full ordered roster passed to the tiered index (guardrails + top‑K), with per-tool scoring breakdown. */
 	TArray<FUnrealAiToolSurfaceRankedEntry> RankedTools;
-	/** e.g. default | blueprint_builder_narrow_bm25 */
+	/** e.g. default | blueprint_builder_verbose */
 	FString SurfaceProfile;
+	/** Blueprint Builder: max chars allowed for the tiered tool appendix before catalog trim (0 = not builder / default path). */
+	int32 AppendixCharBudgetLimit = 0;
 };
 
 /** Request into the harness from UI / tabs. */
