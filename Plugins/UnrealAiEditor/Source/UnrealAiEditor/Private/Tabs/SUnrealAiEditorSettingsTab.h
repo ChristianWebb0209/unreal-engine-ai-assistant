@@ -195,14 +195,21 @@ private:
 	FString RetrievalMaxFilesPerRebuildStr = TEXT("0");
 	FString RetrievalMaxTotalChunksPerRebuildStr = TEXT("0");
 	FString RetrievalMaxEmbeddingCallsPerRebuildStr = TEXT("0");
-	FString RetrievalChunkCharsStr = TEXT("1200");
-	FString RetrievalChunkOverlapStr = TEXT("200");
+	FString RetrievalMaxChunksPerFileStr = TEXT("96");
+	FString RetrievalChunkCharsStr = TEXT("4000");
+	FString RetrievalChunkOverlapStr = TEXT("150");
 	FString RetrievalAssetRegistryMaxAssetsStr = TEXT("0");
 	bool bRetrievalAssetRegistryIncludeEngineAssets = false;
-	FString RetrievalEmbeddingBatchSizeStr = TEXT("8");
+	FString RetrievalEmbeddingBatchSizeStr = TEXT("128");
 	FString RetrievalMinDelayMsBetweenBatchesStr = TEXT("0");
+	FString RetrievalIndexFirstWaveTimeBudgetStr = TEXT("0");
 	bool bRetrievalIndexMemoryRecordsInVectorStore = false;
 	FString RetrievalBlueprintMaxFeatureRecordsStr = TEXT("0");
+	bool bRetrievalBlueprintIncludeEngineAssets = false;
+	bool bRetrievalIndexDirectorySummaries = true;
+	bool bRetrievalIndexAssetFamilySummaries = true;
+	bool bRetrievalIndexEditorScene = false;
+	bool bRetrievalIndexRetrievalWave4 = false;
 	FString RetrievalContextAggressionStr = TEXT("0.5");
 
 	TArray<TSharedPtr<FString>> RetrievalRootPresetOptions;

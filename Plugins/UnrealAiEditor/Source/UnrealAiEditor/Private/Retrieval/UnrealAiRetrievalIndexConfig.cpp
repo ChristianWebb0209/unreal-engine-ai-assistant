@@ -2,6 +2,8 @@
 
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
+#include "Misc/SecureHash.h"
+#include "Logging/LogMacros.h"
 
 namespace UnrealAiRetrievalIndexConfig
 {
@@ -135,6 +137,179 @@ namespace UnrealAiRetrievalIndexConfig
 			}
 			OutAbsolutePathsSorted.Add(Path);
 			++Taken;
+		}
+	}
+
+	static FString NormalizePathSlashes(FString P)
+	{
+		P.ReplaceInline(TEXT("\\"), TEXT("/"));
+		return P;
+	}
+
+	static FString RelativePathUnderProject(const FString& AbsolutePath, const FString& ProjectDirFull)
+	{
+		FString Abs = NormalizePathSlashes(FPaths::ConvertRelativePathToFull(AbsolutePath));
+		FString Base = NormalizePathSlashes(FPaths::ConvertRelativePathToFull(ProjectDirFull));
+		if (!Base.EndsWith(TEXT("/")))
+		{
+			Base += TEXT("/");
+		}
+		if (Abs.StartsWith(Base))
+		{
+			return Abs.Mid(Base.Len());
+		}
+		return Abs;
+	}
+
+	static int32 BuildPriorityBucket(const FString& RelPath)
+	{
+		if (RelPath.StartsWith(TEXT("Source/"), ESearchCase::IgnoreCase)
+			&& !RelPath.Contains(TEXT("/Plugins/"), ESearchCase::IgnoreCase))
+		{
+			return 0;
+		}
+		if (RelPath.Contains(TEXT("/Plugins/"), ESearchCase::IgnoreCase)
+			&& RelPath.Contains(TEXT("/Source/"), ESearchCase::IgnoreCase))
+		{
+			return 1;
+		}
+		if (RelPath.StartsWith(TEXT("Config/"), ESearchCase::IgnoreCase))
+		{
+			return 2;
+		}
+		if (RelPath.StartsWith(TEXT("docs/"), ESearchCase::IgnoreCase))
+		{
+			return 3;
+		}
+		if (RelPath.StartsWith(TEXT("Content/"), ESearchCase::IgnoreCase))
+		{
+			return 4;
+		}
+		return 5;
+	}
+
+	void SortFilesystemIndexPathsForBuildPriority(const FString& ProjectDirAbs, TArray<FString>& InOutAbsolutePaths)
+	{
+		const FString ProjectDirFull = FPaths::ConvertRelativePathToFull(ProjectDirAbs);
+		InOutAbsolutePaths.Sort([&ProjectDirFull](const FString& A, const FString& B)
+		{
+			const FString RelA = RelativePathUnderProject(A, ProjectDirFull);
+			const FString RelB = RelativePathUnderProject(B, ProjectDirFull);
+			const int32 Pa = BuildPriorityBucket(RelA);
+			const int32 Pb = BuildPriorityBucket(RelB);
+			if (Pa != Pb)
+			{
+				return Pa < Pb;
+			}
+			return RelA < RelB;
+		});
+	}
+
+	namespace ChunkingDetail
+	{
+		static void ClampChunkParamsLocal(int32& ChunkChars, int32& ChunkOverlap)
+		{
+			ChunkChars = FMath::Clamp(ChunkChars, 128, 32000);
+			ChunkOverlap = FMath::Max(0, ChunkOverlap);
+			if (ChunkOverlap >= ChunkChars)
+			{
+				ChunkOverlap = FMath::Max(0, ChunkChars - 1);
+			}
+		}
+
+		static FString MakeChunkIdLocal(const FString& SourcePath, const int32 ChunkStart, const FString& ChunkText)
+		{
+			return SourcePath + TEXT(":") + FString::FromInt(ChunkStart) + TEXT(":") + FMD5::HashAnsiString(*ChunkText);
+		}
+	}
+
+	void ChunkTextFixedWindow(
+		const FString& RelativePath,
+		const FString& Text,
+		int32 ChunkChars,
+		int32 OverlapChars,
+		const int32 MaxChunksPerSource,
+		TArray<FUnrealAiVectorChunkRow>& OutChunks)
+	{
+		using namespace ChunkingDetail;
+		ClampChunkParamsLocal(ChunkChars, OverlapChars);
+		OutChunks.Reset();
+		if (Text.IsEmpty())
+		{
+			return;
+		}
+		int32 Start = 0;
+		while (Start < Text.Len())
+		{
+			if (MaxChunksPerSource > 0 && OutChunks.Num() >= MaxChunksPerSource)
+			{
+				UE_LOG(
+					LogTemp,
+					Verbose,
+					TEXT("Retrieval index: chunk cap reached for source %s (%d chunks)."),
+					*RelativePath,
+					MaxChunksPerSource);
+				break;
+			}
+			const int32 Len = FMath::Min(ChunkChars, Text.Len() - Start);
+			const FString ChunkText = Text.Mid(Start, Len);
+			FUnrealAiVectorChunkRow Row;
+			Row.SourcePath = RelativePath;
+			Row.Text = ChunkText;
+			Row.ContentHash = FMD5::HashAnsiString(*ChunkText);
+			Row.ChunkId = MakeChunkIdLocal(RelativePath, Start, ChunkText);
+			OutChunks.Add(MoveTemp(Row));
+			if (Start + Len >= Text.Len())
+			{
+				break;
+			}
+			Start += (ChunkChars - OverlapChars);
+		}
+	}
+
+	int32 GetIndexBuildWaveCount()
+	{
+		return 5;
+	}
+
+	int32 GetIndexBuildWaveForSource(const FString& ProjectDirAbs, const FString& SourceKey)
+	{
+		(void)ProjectDirAbs;
+		FString Key = SourceKey;
+		Key.ReplaceInline(TEXT("\\"), TEXT("/"));
+
+		if (Key.StartsWith(TEXT("virtual://"), ESearchCase::IgnoreCase))
+		{
+			return 4;
+		}
+		if (Key.StartsWith(TEXT("memory:"), ESearchCase::IgnoreCase))
+		{
+			return 4;
+		}
+		if (Key.StartsWith(TEXT("/Game/"), ESearchCase::IgnoreCase) || Key.StartsWith(TEXT("/Engine/"), ESearchCase::IgnoreCase))
+		{
+			return 4;
+		}
+
+		while (Key.StartsWith(TEXT("/")))
+		{
+			Key.RightChopInline(1, EAllowShrinking::No);
+		}
+
+		const int32 B = BuildPriorityBucket(Key);
+		switch (B)
+		{
+		case 0:
+			return 0;
+		case 1:
+			return 1;
+		case 2:
+		case 3:
+			return 2;
+		case 4:
+			return 3;
+		default:
+			return 4;
 		}
 	}
 }

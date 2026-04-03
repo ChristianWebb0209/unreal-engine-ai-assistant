@@ -77,7 +77,85 @@ FUnrealAiVectorIndexStore* FUnrealAiRetrievalService::GetOrCreateStore(const FSt
 		}
 		return nullptr;
 	}
+	TryNormalizeInterruptedIndexingManifest(*StorePtr, ProjectId);
 	return StorePtr.Get();
+}
+
+void FUnrealAiRetrievalService::TryNormalizeInterruptedIndexingManifest(
+	FUnrealAiVectorIndexStore& Store,
+	const FString& ProjectId) const
+{
+	// Callers must ensure no index rebuild is in flight for ProjectId (e.g. GetOrCreateStore rejects that case).
+	FUnrealAiVectorManifest Manifest;
+	if (!Store.LoadManifest(Manifest))
+	{
+		return;
+	}
+	if (!Manifest.Status.Equals(TEXT("indexing"), ESearchCase::IgnoreCase))
+	{
+		return;
+	}
+	int32 DbFiles = 0;
+	int32 DbChunks = 0;
+	FString CountError;
+	if (!Store.GetIndexCounts(DbFiles, DbChunks, CountError))
+	{
+		return;
+	}
+
+	bool bChanged = false;
+	if (Manifest.IndexBuildTargetChunks != 0 || Manifest.IndexBuildCompletedChunks != 0
+		|| Manifest.IndexBuildPhaseStartedUtc != FDateTime::MinValue()
+		|| Manifest.IndexBuildWaveTotal != 0 || Manifest.IndexBuildWaveDone != 0)
+	{
+		Manifest.IndexBuildTargetChunks = 0;
+		Manifest.IndexBuildCompletedChunks = 0;
+		Manifest.IndexBuildPhaseStartedUtc = FDateTime::MinValue();
+		Manifest.IndexBuildWaveTotal = 0;
+		Manifest.IndexBuildWaveDone = 0;
+		bChanged = true;
+	}
+	if (Manifest.FilesIndexed != DbFiles || Manifest.ChunksIndexed != DbChunks)
+	{
+		Manifest.FilesIndexed = DbFiles;
+		Manifest.ChunksIndexed = DbChunks;
+		bChanged = true;
+	}
+	const FString DesiredStatus = DbChunks > 0 ? TEXT("ready") : TEXT("stale");
+	if (!Manifest.Status.Equals(DesiredStatus, ESearchCase::IgnoreCase))
+	{
+		Manifest.Status = DesiredStatus;
+		bChanged = true;
+	}
+	if (!bChanged)
+	{
+		return;
+	}
+
+	UE_LOG(
+		LogTemp,
+		Log,
+		TEXT("Retrieval: normalized stale vector index manifest (project_id=%s, status=%s, chunks=%d)."),
+		*ProjectId,
+		*Manifest.Status,
+		DbChunks);
+
+	if (Manifest.Status.Equals(TEXT("ready"), ESearchCase::IgnoreCase) && DbChunks > 0)
+	{
+		TArray<TPair<FString, int32>> Top;
+		FString TopErr;
+		Store.GetTopSourcesByChunkCount(12, Top, TopErr);
+		TArray<FUnrealAiRetrievalDiagnosticsRow> Rows;
+		for (const TPair<FString, int32>& P : Top)
+		{
+			FUnrealAiRetrievalDiagnosticsRow R;
+			R.SourceId = P.Key;
+			R.ChunkCount = P.Value;
+			Rows.Add(MoveTemp(R));
+		}
+		UnrealAiRetrievalDiagnostics::WriteIndexDiagnostics(ProjectId, TEXT("ready"), Manifest.FilesIndexed, Manifest.ChunksIndexed, Rows);
+	}
+	Store.SaveManifest(Manifest);
 }
 
 namespace
@@ -104,6 +182,9 @@ namespace
 			ChunkOverlap = FMath::Max(0, ChunkChars - 1);
 		}
 	}
+
+	/** OpenAI-style embeddings APIs accept many inputs per request; clamp to avoid oversized bodies or proxy limits. */
+	static constexpr int32 GMaxEmbeddingsInputsPerHttpRequest = 512;
 
 	static FString MakeChunkId(const FString& SourcePath, const int32 ChunkStart, const FString& ChunkText)
 	{
@@ -214,6 +295,10 @@ FUnrealAiRetrievalSettings FUnrealAiRetrievalService::LoadSettings() const
 	{
 		Settings.MaxEmbeddingCallsPerRebuild = FMath::Max(0, static_cast<int32>(NumberField));
 	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("maxChunksPerFile"), NumberField))
+	{
+		Settings.MaxChunksPerFile = FMath::Max(0, static_cast<int32>(NumberField));
+	}
 	if ((*RetrievalObj)->TryGetNumberField(TEXT("chunkChars"), NumberField))
 	{
 		Settings.ChunkChars = static_cast<int32>(NumberField);
@@ -227,6 +312,10 @@ FUnrealAiRetrievalSettings FUnrealAiRetrievalService::LoadSettings() const
 		Settings.AssetRegistryMaxAssets = FMath::Max(0, static_cast<int32>(NumberField));
 	}
 	(*RetrievalObj)->TryGetBoolField(TEXT("assetRegistryIncludeEngineAssets"), Settings.bAssetRegistryIncludeEngineAssets);
+	(*RetrievalObj)->TryGetBoolField(TEXT("blueprintIncludeEngineAssets"), Settings.bBlueprintIncludeEngineAssets);
+	(*RetrievalObj)->TryGetBoolField(TEXT("indexDirectorySummaries"), Settings.bIndexDirectorySummaries);
+	(*RetrievalObj)->TryGetBoolField(TEXT("indexAssetFamilySummaries"), Settings.bIndexAssetFamilySummaries);
+	(*RetrievalObj)->TryGetBoolField(TEXT("indexEditorScene"), Settings.bIndexEditorScene);
 	if ((*RetrievalObj)->TryGetNumberField(TEXT("embeddingBatchSize"), NumberField))
 	{
 		Settings.EmbeddingBatchSize = FMath::Max(1, static_cast<int32>(NumberField));
@@ -235,6 +324,11 @@ FUnrealAiRetrievalSettings FUnrealAiRetrievalService::LoadSettings() const
 	{
 		Settings.MinDelayMsBetweenEmbeddingBatches = FMath::Max(0, static_cast<int32>(NumberField));
 	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("indexFirstWaveTimeBudgetSeconds"), NumberField))
+	{
+		Settings.IndexFirstWaveTimeBudgetSeconds = FMath::Max(0, static_cast<int32>(NumberField));
+	}
+	(*RetrievalObj)->TryGetBoolField(TEXT("indexRetrievalWave4"), Settings.bIndexRetrievalWave4);
 	(*RetrievalObj)->TryGetBoolField(TEXT("indexMemoryRecordsInVectorStore"), Settings.bIndexMemoryRecordsInVectorStore);
 	if ((*RetrievalObj)->TryGetNumberField(TEXT("blueprintMaxFeatureRecords"), NumberField))
 	{
@@ -280,6 +374,18 @@ FUnrealAiRetrievalProjectStatus FUnrealAiRetrievalService::GetProjectStatus(cons
 		{
 			Status.bBusy = true;
 			Status.StateText = TEXT("indexing");
+			FUnrealAiVectorIndexStore Scratch(ProjectId);
+			FUnrealAiVectorManifest PM;
+			if (Scratch.LoadManifest(PM))
+			{
+				Status.IndexBuildTargetChunks = PM.IndexBuildTargetChunks;
+				Status.IndexBuildCompletedChunks = PM.IndexBuildCompletedChunks;
+				Status.IndexBuildWaveTotal = PM.IndexBuildWaveTotal;
+				Status.IndexBuildWaveDone = PM.IndexBuildWaveDone;
+				Status.IndexBuildPhaseStartedUtc = PM.IndexBuildPhaseStartedUtc;
+				Status.FilesIndexed = PM.FilesIndexed;
+				Status.ChunksIndexed = PM.ChunksIndexed;
+			}
 			return Status;
 		}
 	}
@@ -300,34 +406,14 @@ FUnrealAiRetrievalProjectStatus FUnrealAiRetrievalService::GetProjectStatus(cons
 		FScopeLock Lock(&StoreCacheMutex);
 		Status.bBusy = IndexBuildsInFlight.Contains(ProjectId);
 	}
-	if (!Status.bBusy && Manifest.Status.Equals(TEXT("indexing"), ESearchCase::IgnoreCase))
-	{
-		int32 DbFiles = 0;
-		int32 DbChunks = 0;
-		FString CountError;
-		if (Store->GetIndexCounts(DbFiles, DbChunks, CountError) && DbChunks > 0)
-		{
-			Manifest.FilesIndexed = DbFiles;
-			Manifest.ChunksIndexed = DbChunks;
-			Manifest.Status = TEXT("ready");
-			Store->SaveManifest(Manifest);
-			TArray<TPair<FString, int32>> Top;
-			FString TopErr;
-			Store->GetTopSourcesByChunkCount(12, Top, TopErr);
-			TArray<FUnrealAiRetrievalDiagnosticsRow> Rows;
-			for (const TPair<FString, int32>& P : Top)
-			{
-				FUnrealAiRetrievalDiagnosticsRow R;
-				R.SourceId = P.Key;
-				R.ChunkCount = P.Value;
-				Rows.Add(MoveTemp(R));
-			}
-			UnrealAiRetrievalDiagnostics::WriteIndexDiagnostics(ProjectId, TEXT("ready"), Manifest.FilesIndexed, Manifest.ChunksIndexed, Rows);
-		}
-	}
 	Status.StateText = Manifest.Status;
 	Status.FilesIndexed = Manifest.FilesIndexed;
 	Status.ChunksIndexed = Manifest.ChunksIndexed;
+	Status.IndexBuildTargetChunks = Manifest.IndexBuildTargetChunks;
+	Status.IndexBuildCompletedChunks = Manifest.IndexBuildCompletedChunks;
+	Status.IndexBuildWaveTotal = Manifest.IndexBuildWaveTotal;
+	Status.IndexBuildWaveDone = Manifest.IndexBuildWaveDone;
+	Status.IndexBuildPhaseStartedUtc = Manifest.IndexBuildPhaseStartedUtc;
 	if (Status.StateText.Equals(TEXT("ready"), ESearchCase::IgnoreCase) && Status.FilesIndexed > 0 && Status.ChunksIndexed > 0)
 	{
 		TArray<TPair<FString, int32>> Top;
@@ -558,31 +644,6 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 		FScopeLock Lock(&StoreCacheMutex);
 		bBusy = IndexBuildsInFlight.Contains(Query.ProjectId);
 	}
-	if (bHasManifest && !bBusy && Manifest.Status.Equals(TEXT("indexing"), ESearchCase::IgnoreCase))
-	{
-		int32 DbFiles = 0;
-		int32 DbChunks = 0;
-		FString CountError;
-		if (Store->GetIndexCounts(DbFiles, DbChunks, CountError) && DbChunks > 0)
-		{
-			Manifest.FilesIndexed = DbFiles;
-			Manifest.ChunksIndexed = DbChunks;
-			Manifest.Status = TEXT("ready");
-			Store->SaveManifest(Manifest);
-			TArray<TPair<FString, int32>> Top;
-			FString TopErr;
-			Store->GetTopSourcesByChunkCount(12, Top, TopErr);
-			TArray<FUnrealAiRetrievalDiagnosticsRow> Rows;
-			for (const TPair<FString, int32>& P : Top)
-			{
-				FUnrealAiRetrievalDiagnosticsRow R;
-				R.SourceId = P.Key;
-				R.ChunkCount = P.Value;
-				Rows.Add(MoveTemp(R));
-			}
-			UnrealAiRetrievalDiagnostics::WriteIndexDiagnostics(Query.ProjectId, TEXT("ready"), Manifest.FilesIndexed, Manifest.ChunksIndexed, Rows);
-		}
-	}
 	bool bCanQueryFromStore = (bHasManifest && Manifest.Status.Equals(TEXT("ready"), ESearchCase::IgnoreCase));
 	if (!bCanQueryFromStore)
 	{
@@ -764,7 +825,22 @@ FUnrealAiRetrievalQueryResult FUnrealAiRetrievalService::Query(const FUnrealAiRe
 
 	if (!Store->QueryTopKByCosine(EmbeddingResponse.Vector, FetchK, Result.Snippets, StoreError))
 	{
-		Result.Warnings.Add(FString::Printf(TEXT("Retrieval query failed: %s"), *StoreError));
+		Result.Warnings.Add(FString::Printf(TEXT("Retrieval vector query failed; trying lexical fallback: %s"), *StoreError));
+		FString LexErr;
+		if (Store->QueryTopKByLexical(Query.QueryText, FetchK, Result.Snippets, LexErr))
+		{
+			UE_LOG(
+				LogTemp,
+				Log,
+				TEXT("Retrieval lexical fallback after vector query error project_id=%s topk=%d hits=%d"),
+				*Query.ProjectId,
+				TopK,
+				Result.Snippets.Num());
+		}
+		else
+		{
+			Result.Warnings.Add(FString::Printf(TEXT("Retrieval lexical fallback failed: %s"), *LexErr));
+		}
 	}
 	else
 	{
@@ -1024,7 +1100,10 @@ void FUnrealAiRetrievalService::EnsureBackgroundIndexBuild(const FString& Projec
 			return;
 		}
 		IndexBuildsInFlight.Add(ProjectId);
-		CachedStoresByProject.Remove(ProjectId);
+		// Do not evict CachedStoresByProject here: retrieval Query() can run on the thread pool
+		// (prefetch) while this runs on the game thread; destroying the store closes SQLite while
+		// another thread still holds statements, sqlite3_close returns SQLITE_BUSY, and UE's
+		// FSQLiteDatabase destructor check-fails. Reuse the cached connection; the rebuild uses its own.
 	}
 	Async(EAsyncExecution::ThreadPool, [this, ProjectId, Settings]()
 	{
@@ -1070,30 +1149,10 @@ void FUnrealAiRetrievalService::ChunkFileText(
 	const FString& Text,
 	int32 ChunkChars,
 	int32 OverlapChars,
+	const int32 MaxChunksPerSource,
 	TArray<FUnrealAiVectorChunkRow>& OutChunks) const
 {
-	ClampChunkParams(ChunkChars, OverlapChars);
-	if (Text.IsEmpty())
-	{
-		return;
-	}
-	int32 Start = 0;
-	while (Start < Text.Len())
-	{
-		const int32 Len = FMath::Min(ChunkChars, Text.Len() - Start);
-		const FString ChunkText = Text.Mid(Start, Len);
-		FUnrealAiVectorChunkRow Row;
-		Row.SourcePath = RelativePath;
-		Row.Text = ChunkText;
-		Row.ContentHash = FMD5::HashAnsiString(*ChunkText);
-		Row.ChunkId = MakeChunkId(RelativePath, Start, ChunkText);
-		OutChunks.Add(MoveTemp(Row));
-		if (Start + Len >= Text.Len())
-		{
-			break;
-		}
-		Start += (ChunkChars - OverlapChars);
-	}
+	UnrealAiRetrievalIndexConfig::ChunkTextFixedWindow(RelativePath, Text, ChunkChars, OverlapChars, MaxChunksPerSource, OutChunks);
 }
 
 void FUnrealAiRetrievalService::CollectBlueprintFeatureChunks(
@@ -1102,16 +1161,17 @@ void FUnrealAiRetrievalService::CollectBlueprintFeatureChunks(
 {
 	TArray<FUnrealAiBlueprintFeatureRecord> Records;
 	const int32 BpCap = Settings.BlueprintMaxFeatureRecords;
+	const bool bBpEngine = Settings.bBlueprintIncludeEngineAssets;
 	if (IsInGameThread())
 	{
-		FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(Records, BpCap);
+		FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(Records, BpCap, bBpEngine);
 	}
 	else
 	{
 		FEvent* Done = FPlatformProcess::GetSynchEventFromPool(false);
-		AsyncTask(ENamedThreads::GameThread, [&Records, Done, BpCap]()
+		AsyncTask(ENamedThreads::GameThread, [&Records, Done, BpCap, bBpEngine]()
 		{
-			FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(Records, BpCap);
+			FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(Records, BpCap, bBpEngine);
 			if (Done)
 			{
 				Done->Trigger();
@@ -1223,7 +1283,7 @@ void FUnrealAiRetrievalService::CollectSceneActorChunks(
 	int32 ChunkOv = Settings.ChunkOverlap;
 	ClampChunkParams(ChunkChars, ChunkOv);
 	TArray<FUnrealAiVectorChunkRow> SceneChunks;
-	ChunkFileText(SceneSourcePath, SceneText, ChunkChars, ChunkOv, SceneChunks);
+	ChunkFileText(SceneSourcePath, SceneText, ChunkChars, ChunkOv, Settings.MaxChunksPerFile, SceneChunks);
 	OutChunks.Append(MoveTemp(SceneChunks));
 #endif
 }
@@ -1343,9 +1403,14 @@ void FUnrealAiRetrievalService::CollectMemoryChunks(const FUnrealAiRetrievalSett
 }
 
 void FUnrealAiRetrievalService::CollectDirectorySummaryChunks(
+	const FUnrealAiRetrievalSettings& Settings,
 	const TMap<FString, FString>& SourceHashesByPath,
 	TArray<FUnrealAiVectorChunkRow>& OutChunks) const
 {
+	if (!Settings.bIndexDirectorySummaries)
+	{
+		return;
+	}
 	TMap<FString, TArray<FString>> PathsByDirectory;
 	for (const TPair<FString, FString>& Pair : SourceHashesByPath)
 	{
@@ -1397,9 +1462,14 @@ void FUnrealAiRetrievalService::CollectDirectorySummaryChunks(
 }
 
 void FUnrealAiRetrievalService::CollectAssetEquivalenceSummaryChunks(
+	const FUnrealAiRetrievalSettings& Settings,
 	const TMap<FString, FString>& SourceHashesByPath,
 	TArray<FUnrealAiVectorChunkRow>& OutChunks) const
 {
+	if (!Settings.bIndexAssetFamilySummaries)
+	{
+		return;
+	}
 	struct FAssetGroup
 	{
 		TArray<FString> Members;
@@ -1519,6 +1589,30 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 	{
 		return false;
 	}
+	{
+		int32 UnusableEmbeddings = 0;
+		FString ScanErr;
+		if (!Store.CountChunksWithUnusableEmbeddings(UnusableEmbeddings, ScanErr))
+		{
+			OutError = ScanErr;
+			return false;
+		}
+		if (UnusableEmbeddings > 0)
+		{
+			int32 DeletedBad = 0;
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("Retrieval index: %d chunk(s) have unusable embeddings; deleting only those rows for project_id=%s before rebuild."),
+				UnusableEmbeddings,
+				*ProjectId);
+			if (!Store.DeleteChunksWithUnusableEmbeddings(DeletedBad, OutError))
+			{
+				return false;
+			}
+			UE_LOG(LogTemp, Log, TEXT("Retrieval index: deleted %d chunk row(s) with unusable embeddings."), DeletedBad);
+		}
+	}
 	FUnrealAiVectorManifest Manifest;
 	const bool bHadManifest = Store.LoadManifest(Manifest);
 	Manifest.ProjectId = ProjectId;
@@ -1539,12 +1633,16 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 	{
 		Manifest.Status = TEXT("indexing");
 	}
+	Manifest.IndexBuildTargetChunks = 0;
+	Manifest.IndexBuildCompletedChunks = 0;
+	Manifest.IndexBuildPhaseStartedUtc = FDateTime::MinValue();
 	Store.SaveManifest(Manifest);
 
 	const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 	int32 SkippedFilesDueToCap = 0;
 	TArray<FString> Files;
 	UnrealAiRetrievalIndexConfig::CollectFilesystemIndexPaths(ProjectDir, Settings, Files, SkippedFilesDueToCap);
+	UnrealAiRetrievalIndexConfig::SortFilesystemIndexPathsForBuildPriority(ProjectDir, Files);
 	if (SkippedFilesDueToCap > 0)
 	{
 		UE_LOG(
@@ -1582,7 +1680,7 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 		{
 			++ChangedFiles;
 			TArray<FUnrealAiVectorChunkRow> ChunksForSource;
-			ChunkFileText(RelPath, Text, ChunkChars, ChunkOverlap, ChunksForSource);
+			ChunkFileText(RelPath, Text, ChunkChars, ChunkOverlap, Settings.MaxChunksPerFile, ChunksForSource);
 			ChangedChunksBySource.Add(RelPath, MoveTemp(ChunksForSource));
 		}
 	}
@@ -1602,7 +1700,7 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 			{
 				++ChangedFiles;
 				TArray<FUnrealAiVectorChunkRow> ChunksForSource;
-				ChunkFileText(VPath, ShardText, ChunkChars, ChunkOverlap, ChunksForSource);
+				ChunkFileText(VPath, ShardText, ChunkChars, ChunkOverlap, Settings.MaxChunksPerFile, ChunksForSource);
 				ChangedChunksBySource.Add(VPath, MoveTemp(ChunksForSource));
 			}
 		}
@@ -1626,20 +1724,23 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 		}
 	}
 	{
-		TArray<FUnrealAiVectorChunkRow> SceneChunks;
-		CollectSceneActorChunks(Settings, SceneChunks);
-		for (FUnrealAiVectorChunkRow& Row : SceneChunks)
+		if (Settings.bIndexEditorScene)
 		{
-			const FString SourceHash = Row.ContentHash;
-			NewSourceHashes.Add(Row.SourcePath, SourceHash);
-			RemovedSources.Remove(Row.SourcePath);
-			const FString* ExistingHash = ExistingSourceHashes.Find(Row.SourcePath);
-			const bool bChanged = !ExistingHash || *ExistingHash != SourceHash;
-			if (bChanged)
+			TArray<FUnrealAiVectorChunkRow> SceneChunks;
+			CollectSceneActorChunks(Settings, SceneChunks);
+			for (FUnrealAiVectorChunkRow& Row : SceneChunks)
 			{
-				++ChangedFiles;
-				TArray<FUnrealAiVectorChunkRow>& Rows = ChangedChunksBySource.FindOrAdd(Row.SourcePath);
-				Rows.Add(MoveTemp(Row));
+				const FString SourceHash = Row.ContentHash;
+				NewSourceHashes.Add(Row.SourcePath, SourceHash);
+				RemovedSources.Remove(Row.SourcePath);
+				const FString* ExistingHash = ExistingSourceHashes.Find(Row.SourcePath);
+				const bool bChanged = !ExistingHash || *ExistingHash != SourceHash;
+				if (bChanged)
+				{
+					++ChangedFiles;
+					TArray<FUnrealAiVectorChunkRow>& Rows = ChangedChunksBySource.FindOrAdd(Row.SourcePath);
+					Rows.Add(MoveTemp(Row));
+				}
 			}
 		}
 	}
@@ -1663,7 +1764,7 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 	}
 	{
 		TArray<FUnrealAiVectorChunkRow> DirectorySummaryChunks;
-		CollectDirectorySummaryChunks(NewSourceHashes, DirectorySummaryChunks);
+		CollectDirectorySummaryChunks(Settings, NewSourceHashes, DirectorySummaryChunks);
 		for (FUnrealAiVectorChunkRow& Row : DirectorySummaryChunks)
 		{
 			const FString SourceHash = Row.ContentHash;
@@ -1681,7 +1782,7 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 	}
 	{
 		TArray<FUnrealAiVectorChunkRow> AssetFamilySummaryChunks;
-		CollectAssetEquivalenceSummaryChunks(NewSourceHashes, AssetFamilySummaryChunks);
+		CollectAssetEquivalenceSummaryChunks(Settings, NewSourceHashes, AssetFamilySummaryChunks);
 		for (FUnrealAiVectorChunkRow& Row : AssetFamilySummaryChunks)
 		{
 			const FString SourceHash = Row.ContentHash;
@@ -1696,6 +1797,29 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 				Arr.Add(MoveTemp(Row));
 			}
 		}
+	}
+
+	if (!Settings.bIndexRetrievalWave4)
+	{
+		const int32 LastWaveIndex = UnrealAiRetrievalIndexConfig::GetIndexBuildWaveCount() - 1;
+		TArray<FString> StripKeys;
+		for (const TPair<FString, FString>& P : NewSourceHashes)
+		{
+			if (UnrealAiRetrievalIndexConfig::GetIndexBuildWaveForSource(ProjectDir, P.Key) == LastWaveIndex)
+			{
+				StripKeys.Add(P.Key);
+			}
+		}
+		for (const FString& K : StripKeys)
+		{
+			NewSourceHashes.Remove(K);
+			ChangedChunksBySource.Remove(K);
+			if (ExistingSourceHashes.Contains(K))
+			{
+				RemovedSources.AddUnique(K);
+			}
+		}
+		ChangedFiles = ChangedChunksBySource.Num();
 	}
 
 	int32 MaxChunksSetting = Settings.MaxTotalChunksPerRebuild;
@@ -1758,66 +1882,240 @@ bool FUnrealAiRetrievalService::BuildOrRebuildIndexNow(const FString& ProjectId,
 		}
 	}
 
-	int32 InBatch = 0;
-	const int32 EmbedBatchSize = FMath::Max(1, Settings.EmbeddingBatchSize);
-	const int32 DelayMs = Settings.MinDelayMsBetweenEmbeddingBatches;
-
-	for (TPair<FString, TArray<FUnrealAiVectorChunkRow>>& Pair : ChangedChunksBySource)
+	int32 TotalEmbedChunks = 0;
+	for (const TPair<FString, TArray<FUnrealAiVectorChunkRow>>& Pair : ChangedChunksBySource)
 	{
-		for (FUnrealAiVectorChunkRow& Chunk : Pair.Value)
+		TotalEmbedChunks += Pair.Value.Num();
+	}
+	const int32 ConfiguredWaves = UnrealAiRetrievalIndexConfig::GetIndexBuildWaveCount();
+	const int32 ActiveWaveCount = Settings.bIndexRetrievalWave4 ? ConfiguredWaves : (ConfiguredWaves - 1);
+
+	if (TotalEmbedChunks > 0)
+	{
+		UE_LOG(
+			LogTemp,
+			Log,
+			TEXT("Retrieval index: embedding %d chunk(s) from %d changed source(s) in %d waves (batch=%d, maxChunksPerFile=%d)."),
+			TotalEmbedChunks,
+			ChangedChunksBySource.Num(),
+			ActiveWaveCount,
+			Settings.EmbeddingBatchSize,
+			Settings.MaxChunksPerFile);
+		Manifest.IndexBuildTargetChunks = TotalEmbedChunks;
+		Manifest.IndexBuildCompletedChunks = 0;
+		Manifest.IndexBuildPhaseStartedUtc = FDateTime::UtcNow();
+		Manifest.IndexBuildWaveTotal = ActiveWaveCount;
+		Manifest.IndexBuildWaveDone = 0;
+		Store.SaveManifest(Manifest);
+	}
+	else
+	{
+		Manifest.IndexBuildTargetChunks = 0;
+		Manifest.IndexBuildCompletedChunks = 0;
+		Manifest.IndexBuildPhaseStartedUtc = FDateTime::MinValue();
+		Manifest.IndexBuildWaveTotal = 0;
+		Manifest.IndexBuildWaveDone = 0;
+		Store.SaveManifest(Manifest);
+	}
+
+	const int32 RequestedBatch = FMath::Max(1, Settings.EmbeddingBatchSize);
+	const int32 HttpBatch = FMath::Min(RequestedBatch, GMaxEmbeddingsInputsPerHttpRequest);
+	if (RequestedBatch > GMaxEmbeddingsInputsPerHttpRequest)
+	{
+		UE_LOG(
+			LogTemp,
+			Log,
+			TEXT("Retrieval index: embeddingBatchSize %d clamped to %d (max inputs per HTTP request)."),
+			RequestedBatch,
+			GMaxEmbeddingsInputsPerHttpRequest);
+	}
+
+	const int32 DelayMs = Settings.MinDelayMsBetweenEmbeddingBatches;
+	int32 CompletedEmbedChunks = 0;
+	FDateTime Wave0BudgetStartUtc = FDateTime::MinValue();
+
+	for (int32 Wave = 0; Wave < ActiveWaveCount; ++Wave)
+	{
+		if (TotalEmbedChunks <= 0)
 		{
-			FUnrealAiEmbeddingRequest Req;
-			Req.InputText = Chunk.Text.Left(6000);
-			Req.bBackgroundIndexer = true;
-			FUnrealAiEmbeddingResponse Resp;
-			if (!EmbeddingProvider.IsValid() || !EmbeddingProvider->EmbedOne(Settings.EmbeddingModel, Req, Resp))
+			break;
+		}
+		TArray<FString> WaveKeys;
+		for (const TPair<FString, TArray<FUnrealAiVectorChunkRow>>& Pair : ChangedChunksBySource)
+		{
+			if (UnrealAiRetrievalIndexConfig::GetIndexBuildWaveForSource(ProjectDir, Pair.Key) == Wave)
 			{
-				OutError = Resp.Error.IsEmpty() ? TEXT("Embedding generation failed during indexing.") : Resp.Error;
+				WaveKeys.Add(Pair.Key);
+			}
+		}
+		WaveKeys.Sort();
+		if (WaveKeys.Num() == 0)
+		{
+			Manifest.IndexBuildWaveDone = Wave + 1;
+			Store.SaveManifest(Manifest);
+			continue;
+		}
+
+		TArray<FUnrealAiVectorChunkRow*> EmbedWork;
+		EmbedWork.Reserve(TotalEmbedChunks);
+		for (const FString& K : WaveKeys)
+		{
+			if (TArray<FUnrealAiVectorChunkRow>* Rows = ChangedChunksBySource.Find(K))
+			{
+				for (FUnrealAiVectorChunkRow& Ch : *Rows)
+				{
+					EmbedWork.Add(&Ch);
+				}
+			}
+		}
+
+		for (int32 Base = 0; Base < EmbedWork.Num(); Base += HttpBatch)
+		{
+			if (Wave == 0 && Settings.IndexFirstWaveTimeBudgetSeconds > 0 && Base == 0)
+			{
+				Wave0BudgetStartUtc = FDateTime::UtcNow();
+			}
+			const int32 End = FMath::Min(Base + HttpBatch, EmbedWork.Num());
+			TArray<FString> BatchTexts;
+			BatchTexts.Reserve(End - Base);
+			for (int32 i = Base; i < End; ++i)
+			{
+				BatchTexts.Add(EmbedWork[i]->Text.Left(6000));
+			}
+			TArray<TArray<float>> BatchVecs;
+			FString BatchErr;
+			if (!EmbeddingProvider.IsValid()
+				|| !EmbeddingProvider->EmbedBatch(Settings.EmbeddingModel, BatchTexts, true, BatchVecs, BatchErr))
+			{
+				OutError = BatchErr.IsEmpty() ? TEXT("Embedding generation failed during indexing.") : BatchErr;
 				Manifest.Status = TEXT("error");
 				Store.SaveManifest(Manifest);
 				return false;
 			}
-			Chunk.Embedding = MoveTemp(Resp.Vector);
-			++InBatch;
-			if (InBatch >= EmbedBatchSize)
+			if (BatchVecs.Num() != BatchTexts.Num())
 			{
-				if (DelayMs > 0)
+				OutError = TEXT("Embedding batch returned unexpected vector count.");
+				Manifest.Status = TEXT("error");
+				Store.SaveManifest(Manifest);
+				return false;
+			}
+			for (int32 i = Base; i < End; ++i)
+			{
+				const int32 Local = i - Base;
+				EmbedWork[i]->Embedding = MoveTemp(BatchVecs[Local]);
+				++CompletedEmbedChunks;
+				Manifest.IndexBuildCompletedChunks = CompletedEmbedChunks;
+			}
+			if (DelayMs > 0)
+			{
+				FPlatformProcess::Sleep(static_cast<float>(DelayMs) / 1000.f);
+			}
+			Store.SaveManifest(Manifest);
+
+			if (Wave == 0 && Settings.IndexFirstWaveTimeBudgetSeconds > 0 && Wave0BudgetStartUtc > FDateTime::MinValue())
+			{
+				const double Elapsed = (FDateTime::UtcNow() - Wave0BudgetStartUtc).GetTotalSeconds();
+				if (Elapsed >= static_cast<double>(Settings.IndexFirstWaveTimeBudgetSeconds))
 				{
-					FPlatformProcess::Sleep(static_cast<float>(DelayMs) / 1000.f);
+					TMap<FString, TArray<FUnrealAiVectorChunkRow>> FlushChunks;
+					TMap<FString, FString> FlushHashes;
+					for (const FString& K : WaveKeys)
+					{
+						const TArray<FUnrealAiVectorChunkRow>* Rows = ChangedChunksBySource.Find(K);
+						if (!Rows)
+						{
+							continue;
+						}
+						bool bAllEmbedded = true;
+						for (const FUnrealAiVectorChunkRow& R : *Rows)
+						{
+							if (R.Embedding.Num() == 0)
+							{
+								bAllEmbedded = false;
+								break;
+							}
+						}
+						if (bAllEmbedded)
+						{
+							FlushChunks.Add(K, *Rows);
+							if (const FString* H = NewSourceHashes.Find(K))
+							{
+								FlushHashes.Add(K, *H);
+							}
+						}
+					}
+					if (FlushChunks.Num() > 0)
+					{
+						if (!Store.UpsertIncremental(FlushHashes, FlushChunks, TArray<FString>(), OutError))
+						{
+							Manifest.Status = TEXT("error");
+							Store.SaveManifest(Manifest);
+							return false;
+						}
+						int32 DbF = 0;
+						int32 DbC = 0;
+						FString CountErr;
+						if (Store.GetIndexCounts(DbF, DbC, CountErr))
+						{
+							Manifest.FilesIndexed = DbF;
+							Manifest.ChunksIndexed = DbC;
+							Store.SaveManifest(Manifest);
+						}
+					}
 				}
-				InBatch = 0;
 			}
 		}
+
+		TMap<FString, TArray<FUnrealAiVectorChunkRow>> WaveChunks;
+		TMap<FString, FString> WaveHashes;
+		for (const FString& K : WaveKeys)
+		{
+			if (const TArray<FUnrealAiVectorChunkRow>* Rows = ChangedChunksBySource.Find(K))
+			{
+				WaveChunks.Add(K, *Rows);
+			}
+			if (const FString* H = NewSourceHashes.Find(K))
+			{
+				WaveHashes.Add(K, *H);
+			}
+		}
+		if (!Store.UpsertIncremental(WaveHashes, WaveChunks, TArray<FString>(), OutError))
+		{
+			Manifest.Status = TEXT("error");
+			Store.SaveManifest(Manifest);
+			return false;
+		}
+		int32 DbFilesWave = 0;
+		int32 DbChunksWave = 0;
+		Store.GetIndexCounts(DbFilesWave, DbChunksWave, OutError);
+		Manifest.FilesIndexed = DbFilesWave;
+		Manifest.ChunksIndexed = DbChunksWave;
+		Manifest.IndexBuildWaveDone = Wave + 1;
+		Store.SaveManifest(Manifest);
 	}
 
-	if (ExistingSourceHashes.Num() == 0)
 	{
-		TArray<FUnrealAiVectorChunkRow> InitialChunks;
-		for (TPair<FString, TArray<FUnrealAiVectorChunkRow>>& Pair : ChangedChunksBySource)
-		{
-			for (FUnrealAiVectorChunkRow& Chunk : Pair.Value)
-			{
-				InitialChunks.Add(Chunk);
-			}
-		}
-		if (!Store.UpsertAllChunks(InitialChunks, OutError))
+		TMap<FString, FString> NoChunkHashes;
+		TMap<FString, TArray<FUnrealAiVectorChunkRow>> NoChunks;
+		if (RemovedSources.Num() > 0
+			&& !Store.UpsertIncremental(NoChunkHashes, NoChunks, RemovedSources, OutError))
 		{
 			Manifest.Status = TEXT("error");
 			Store.SaveManifest(Manifest);
 			return false;
 		}
 	}
-	else if (!Store.UpsertIncremental(NewSourceHashes, ChangedChunksBySource, RemovedSources, OutError))
-	{
-		Manifest.Status = TEXT("error");
-		Store.SaveManifest(Manifest);
-		return false;
-	}
+
 	int32 DbFiles = 0;
 	int32 DbChunks = 0;
 	Store.GetIndexCounts(DbFiles, DbChunks, OutError);
 	Manifest.FilesIndexed = DbFiles;
 	Manifest.ChunksIndexed = DbChunks;
+	Manifest.IndexBuildTargetChunks = 0;
+	Manifest.IndexBuildCompletedChunks = 0;
+	Manifest.IndexBuildPhaseStartedUtc = FDateTime::MinValue();
+	Manifest.IndexBuildWaveTotal = 0;
+	Manifest.IndexBuildWaveDone = 0;
 	Manifest.LastFullScanUtc = FDateTime::UtcNow();
 	Manifest.LastIncrementalScanUtc = Manifest.LastFullScanUtc;
 	Manifest.MigrationState = TEXT("none");

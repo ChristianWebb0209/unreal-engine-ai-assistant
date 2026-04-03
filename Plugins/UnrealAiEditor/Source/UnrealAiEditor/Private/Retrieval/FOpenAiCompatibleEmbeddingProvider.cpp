@@ -1,5 +1,6 @@
 #include "Retrieval/FOpenAiCompatibleEmbeddingProvider.h"
 
+#include "Retrieval/UnrealAiOpenAiBatchEmbeddingsParse.h"
 #include "Harness/UnrealAiHarnessTpmThrottle.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -9,7 +10,6 @@
 #include "HttpManager.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
-#include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "HAL/Event.h"
@@ -55,7 +55,6 @@ namespace
 		{
 			return false;
 		}
-		// If not on game thread, plain wait is fine.
 		if (!IsInGameThread())
 		{
 			return Event->Wait(WaitMs);
@@ -73,7 +72,6 @@ namespace
 		return Event->Wait(0u);
 	}
 
-	/** Background indexer: HTTP was started on this thread — pump HttpManager here until complete. */
 	static bool WaitEmbeddingPollHttpOnCallerThread(FEvent* Event, uint32 WaitMs)
 	{
 		if (!Event)
@@ -92,6 +90,20 @@ namespace
 		}
 		return Event->Wait(0u);
 	}
+
+	static int32 TotalInputChars(const TArray<FString>& InputTexts)
+	{
+		int64 Sum = 0;
+		for (const FString& T : InputTexts)
+		{
+			Sum += static_cast<int64>(T.Len());
+			if (Sum > INT32_MAX)
+			{
+				return INT32_MAX;
+			}
+		}
+		return static_cast<int32>(Sum);
+	}
 }
 
 FOpenAiCompatibleEmbeddingProvider::FOpenAiCompatibleEmbeddingProvider(FUnrealAiModelProfileRegistry* InProfiles)
@@ -104,10 +116,23 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne(
 	const FUnrealAiEmbeddingRequest& Request,
 	FUnrealAiEmbeddingResponse& OutResponse)
 {
-	// Vector index rebuild runs on the thread pool; never route bulk HTTP through the game thread.
+	TArray<FString> One;
+	One.Add(Request.InputText);
+
 	if (Request.bBackgroundIndexer)
 	{
-		return EmbedOne_OnGameThread(ModelId, Request, OutResponse, true);
+		TArray<TArray<float>> BatchOut;
+		if (!EmbedTexts_OnGameThread(ModelId, One, BatchOut, OutResponse.Error, true))
+		{
+			return false;
+		}
+		if (BatchOut.Num() != 1)
+		{
+			OutResponse.Error = TEXT("Embeddings response count mismatch.");
+			return false;
+		}
+		OutResponse.Vector = MoveTemp(BatchOut[0]);
+		return OutResponse.Vector.Num() > 0;
 	}
 
 	if (!IsInGameThread())
@@ -119,18 +144,17 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne(
 			return false;
 		}
 
-		// Copy everything the game-thread task needs; capturing references to the caller stack is UB
-		// once the waiter returns or if the task is reordered relative to unrelated pumping.
 		const FString ModelIdCopy(ModelId);
-		const FUnrealAiEmbeddingRequest RequestCopy(Request);
-		const TSharedPtr<FUnrealAiEmbeddingResponse> GameThreadResponse = MakeShared<FUnrealAiEmbeddingResponse>();
+		const FString InputCopy(Request.InputText);
+		const TSharedPtr<TArray<TArray<float>>> GameThreadVectors = MakeShared<TArray<TArray<float>>>();
+		const TSharedPtr<FString> GameThreadError = MakeShared<FString>();
 		struct FSyncOutcome
 		{
 			bool bOk = false;
 		};
 		const TSharedPtr<FSyncOutcome> Outcome = MakeShared<FSyncOutcome>();
 
-		AsyncTask(ENamedThreads::GameThread, [this, ModelIdCopy, RequestCopy, GameThreadResponse, Outcome, Sync]()
+		AsyncTask(ENamedThreads::GameThread, [this, ModelIdCopy, InputCopy, GameThreadVectors, GameThreadError, Outcome, Sync]()
 		{
 			struct FAlwaysSignal
 			{
@@ -144,44 +168,136 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne(
 				}
 			} AlwaysSignal{Sync};
 
-			Outcome->bOk = EmbedOne_OnGameThread(ModelIdCopy, RequestCopy, *GameThreadResponse, false);
+			TArray<FString> Single;
+			Single.Add(InputCopy);
+			Outcome->bOk = EmbedTexts_OnGameThread(ModelIdCopy, Single, *GameThreadVectors, *GameThreadError, false);
 		});
 
-		// If Wait times out, the calling thread must not return Sync->DoneEvent to the pool while the
-		// game-thread task may still run; FEmbedGameThreadSync lifetime is tied to this TSharedPtr and
-		// the AsyncTask capture so the event is pooled only after Trigger (or last ref drop).
-		const bool bSignaled = Sync->DoneEvent->Wait(static_cast<uint32>(FMath::Max(1000.0f, (UnrealAiWaitTime::EmbeddingHttpTimeoutSec * 1000.0f) + 2000.0f)));
+		const bool bSignaled = Sync->DoneEvent->Wait(static_cast<uint32>(
+			FMath::Max(1000.0f, (UnrealAiWaitTime::EmbeddingHttpTimeoutSec * 1000.0f) + 2000.0f)));
 		if (!bSignaled)
 		{
 			OutResponse.Error = TEXT("Timed out waiting for game-thread embedding dispatch.");
 			return false;
 		}
-		OutResponse = MoveTemp(*GameThreadResponse);
-		return Outcome->bOk;
+		if (!Outcome->bOk || GameThreadVectors->Num() != 1)
+		{
+			OutResponse.Error = GameThreadError->IsEmpty() ? TEXT("Embedding failed.") : *GameThreadError;
+			return false;
+		}
+		OutResponse.Vector = MoveTemp((*GameThreadVectors)[0]);
+		return OutResponse.Vector.Num() > 0;
 	}
 
-	return EmbedOne_OnGameThread(ModelId, Request, OutResponse, false);
+	TArray<TArray<float>> BatchOut;
+	if (!EmbedTexts_OnGameThread(ModelId, One, BatchOut, OutResponse.Error, false))
+	{
+		return false;
+	}
+	if (BatchOut.Num() != 1)
+	{
+		OutResponse.Error = TEXT("Embeddings response count mismatch.");
+		return false;
+	}
+	OutResponse.Vector = MoveTemp(BatchOut[0]);
+	return OutResponse.Vector.Num() > 0;
 }
 
-bool FOpenAiCompatibleEmbeddingProvider::EmbedOne_OnGameThread(
+bool FOpenAiCompatibleEmbeddingProvider::EmbedBatch(
 	const FString& ModelId,
-	const FUnrealAiEmbeddingRequest& Request,
-	FUnrealAiEmbeddingResponse& OutResponse,
+	const TArray<FString>& InputTexts,
+	bool bBackgroundIndexer,
+	TArray<TArray<float>>& OutVectors,
+	FString& OutError)
+{
+	if (InputTexts.Num() == 0)
+	{
+		OutError = TEXT("EmbedBatch: empty input list.");
+		return false;
+	}
+
+	if (bBackgroundIndexer)
+	{
+		return EmbedTexts_OnGameThread(ModelId, InputTexts, OutVectors, OutError, true);
+	}
+
+	if (!IsInGameThread())
+	{
+		const TSharedPtr<FEmbedGameThreadSync> Sync = MakeShared<FEmbedGameThreadSync>();
+		if (!Sync->DoneEvent)
+		{
+			OutError = TEXT("Failed to allocate sync event for game-thread embedding batch dispatch.");
+			return false;
+		}
+
+		const FString ModelIdCopy(ModelId);
+		const TArray<FString> InputsCopy(InputTexts);
+		const TSharedPtr<TArray<TArray<float>>> OutPtr = MakeShared<TArray<TArray<float>>>();
+		const TSharedPtr<FString> ErrPtr = MakeShared<FString>();
+		struct FSyncOutcome
+		{
+			bool bOk = false;
+		};
+		const TSharedPtr<FSyncOutcome> Outcome = MakeShared<FSyncOutcome>();
+
+		AsyncTask(ENamedThreads::GameThread, [this, ModelIdCopy, InputsCopy, OutPtr, ErrPtr, Outcome, Sync]()
+		{
+			struct FAlwaysSignal
+			{
+				TSharedPtr<FEmbedGameThreadSync> S;
+				~FAlwaysSignal()
+				{
+					if (S.IsValid())
+					{
+						S->SignalDone();
+					}
+				}
+			} AlwaysSignal{Sync};
+
+			Outcome->bOk = EmbedTexts_OnGameThread(ModelIdCopy, InputsCopy, *OutPtr, *ErrPtr, false);
+		});
+
+		const uint32 WaitMs = static_cast<uint32>(FMath::Max(
+			1000.0f,
+			(UnrealAiWaitTime::EmbeddingHttpTimeoutSec * 1000.0f) + 2000.0f));
+		const bool bSignaled = Sync->DoneEvent->Wait(WaitMs);
+		if (!bSignaled)
+		{
+			OutError = TEXT("Timed out waiting for game-thread embedding batch dispatch.");
+			return false;
+		}
+		if (!Outcome->bOk)
+		{
+			OutError = ErrPtr->IsEmpty() ? TEXT("Embedding batch failed.") : *ErrPtr;
+			return false;
+		}
+		OutVectors = MoveTemp(*OutPtr);
+		return OutVectors.Num() == InputTexts.Num();
+	}
+
+	return EmbedTexts_OnGameThread(ModelId, InputTexts, OutVectors, OutError, false);
+}
+
+bool FOpenAiCompatibleEmbeddingProvider::EmbedTexts_OnGameThread(
+	const FString& ModelId,
+	const TArray<FString>& InputTexts,
+	TArray<TArray<float>>& OutVectors,
+	FString& OutError,
 	const bool bCallerThreadPumpsHttp)
 {
+	OutVectors.Reset();
+
 	if (!Profiles)
 	{
-		OutResponse.Error = TEXT("Embedding provider missing model profile registry.");
+		OutError = TEXT("Embedding provider missing model profile registry.");
 		return false;
 	}
 
 	FString BaseUrl;
 	FString ApiKey;
-	// Resolve API credentials for the embedding model path, not the default chat model.
-	// This prevents accidental provider/base-url mismatch when chat and embeddings differ.
 	if (!Profiles->TryResolveApiForModel(ModelId, BaseUrl, ApiKey) || ApiKey.IsEmpty())
 	{
-		OutResponse.Error = TEXT("No API key configured for embeddings.");
+		OutError = TEXT("No API key configured for embeddings.");
 		return false;
 	}
 	while (!BaseUrl.IsEmpty() && BaseUrl.EndsWith(TEXT("/")))
@@ -192,7 +308,11 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne_OnGameThread(
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetStringField(TEXT("model"), ModelId);
 	TArray<TSharedPtr<FJsonValue>> Inputs;
-	Inputs.Add(MakeShared<FJsonValueString>(Request.InputText));
+	Inputs.Reserve(InputTexts.Num());
+	for (const FString& T : InputTexts)
+	{
+		Inputs.Add(MakeShared<FJsonValueString>(T));
+	}
 	Root->SetArrayField(TEXT("input"), Inputs);
 
 	FString Body;
@@ -209,12 +329,12 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne_OnGameThread(
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 	HttpRequest->SetContentAsString(Body);
 
-	// Embeddings should be quick for small query text.
-	// Keep this fail-fast so a bad network path does not consume most of a harness turn.
-	const float TimeoutSec = UnrealAiWaitTime::EmbeddingHttpTimeoutSec;
+	const float BaseTimeout = UnrealAiWaitTime::EmbeddingHttpTimeoutSec;
+	const float TimeoutScale = FMath::Clamp(FMath::Sqrt(static_cast<float>(FMath::Max(1, InputTexts.Num()))), 1.f, 3.f);
+	const float TimeoutSec = BaseTimeout * TimeoutScale;
 	HttpRequest->SetTimeout(TimeoutSec);
 
-	UnrealAiHarnessTpmThrottle::MaybeWaitBeforeEmbeddingRequest(Request.InputText.Len());
+	UnrealAiHarnessTpmThrottle::MaybeWaitBeforeEmbeddingBatchRequest(InputTexts);
 
 	struct FEmbeddingRequestState
 	{
@@ -230,7 +350,7 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne_OnGameThread(
 	FEvent* DoneEvent = FPlatformProcess::GetSynchEventFromPool(false);
 	if (!DoneEvent)
 	{
-		OutResponse.Error = TEXT("Failed to allocate sync event for embeddings request.");
+		OutError = TEXT("Failed to allocate sync event for embeddings request.");
 		return false;
 	}
 	State->DoneEvent = DoneEvent;
@@ -258,26 +378,25 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne_OnGameThread(
 
 	if (!HttpRequest->ProcessRequest())
 	{
-		OutResponse.Error = TEXT("Failed to start embeddings request.");
+		OutError = TEXT("Failed to start embeddings request.");
 		FPlatformProcess::ReturnSynchEventToPool(DoneEvent);
 		return false;
 	}
 
 	const double StartSeconds = FPlatformTime::Seconds();
-	// Keep wait margin small so timeout paths return quickly to lexical fallback.
 	const uint32 WaitMs = static_cast<uint32>(FMath::Max(1000.0f, (TimeoutSec * 1000.0f) + 100.0f));
-	const bool bSignaled = bCallerThreadPumpsHttp
-		? WaitEmbeddingPollHttpOnCallerThread(DoneEvent, WaitMs)
-		: WaitForEventWhilePumpingHttpAndGameThread(DoneEvent, WaitMs);
+	const bool bSignaled = bCallerThreadPumpsHttp ? WaitEmbeddingPollHttpOnCallerThread(DoneEvent, WaitMs)
+												   : WaitForEventWhilePumpingHttpAndGameThread(DoneEvent, WaitMs);
 	const double ElapsedMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
 	UE_LOG(
 		LogTemp,
 		Display,
-		TEXT("Retrieval embeddings HTTP model=%s timeout=%.2fs waited_ms=%.0f input_chars=%d url=%s"),
+		TEXT("Retrieval embeddings HTTP model=%s timeout=%.2fs waited_ms=%.0f batch=%d input_chars=%d url=%s"),
 		*ModelId,
 		TimeoutSec,
 		ElapsedMs,
-		Request.InputText.Len(),
+		InputTexts.Num(),
+		TotalInputChars(InputTexts),
 		*Url);
 	if (!bSignaled)
 	{
@@ -289,7 +408,7 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne_OnGameThread(
 			State->DoneEvent = nullptr;
 		}
 		FPlatformProcess::ReturnSynchEventToPool(DoneEvent);
-		OutResponse.Error = FString::Printf(
+		OutError = FString::Printf(
 			TEXT("Embeddings HTTP request timed out after %.2fs (waited %.0f ms)."),
 			TimeoutSec,
 			ElapsedMs);
@@ -312,62 +431,16 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedOne_OnGameThread(
 	if (!bDone || !bOk)
 	{
 		const FString BodyPreview = ResponseBody.Left(240).ReplaceCharWithEscapedChar();
-		OutResponse.Error = FString::Printf(
+		OutError = FString::Printf(
 			TEXT("Embeddings HTTP request failed (status=%d, body=%s)"),
 			StatusCode,
 			*BodyPreview);
 		return false;
 	}
 
-	TSharedPtr<FJsonObject> ResponseJson;
+	if (!UnrealAiOpenAiBatchEmbeddingsParse::ParseEmbeddingsDataFromResponse(ResponseBody, InputTexts.Num(), OutVectors, OutError))
 	{
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseBody);
-		if (!FJsonSerializer::Deserialize(Reader, ResponseJson) || !ResponseJson.IsValid())
-		{
-			OutResponse.Error = TEXT("Embeddings response JSON parse failed.");
-			return false;
-		}
-	}
-	{
-		const TSharedPtr<FJsonObject>* UsageObj = nullptr;
-		if (ResponseJson->TryGetObjectField(TEXT("usage"), UsageObj) && UsageObj && (*UsageObj).IsValid())
-		{
-			double TotalTok = 0.0;
-			double PromptTok = 0.0;
-			if ((*UsageObj)->TryGetNumberField(TEXT("total_tokens"), TotalTok) && TotalTok > 0.0)
-			{
-				UnrealAiHarnessTpmThrottle::RecordEmbeddingTokens(static_cast<int32>(TotalTok));
-			}
-			else if ((*UsageObj)->TryGetNumberField(TEXT("prompt_tokens"), PromptTok) && PromptTok > 0.0)
-			{
-				UnrealAiHarnessTpmThrottle::RecordEmbeddingTokens(static_cast<int32>(PromptTok));
-			}
-		}
-	}
-	const TArray<TSharedPtr<FJsonValue>>* DataArray = nullptr;
-	if (!ResponseJson->TryGetArrayField(TEXT("data"), DataArray) || !DataArray || DataArray->Num() == 0)
-	{
-		OutResponse.Error = TEXT("Embeddings response missing data.");
 		return false;
 	}
-	const TSharedPtr<FJsonObject>* FirstObj = nullptr;
-	if (!(*DataArray)[0].IsValid() || !(*DataArray)[0]->TryGetObject(FirstObj) || !FirstObj || !(*FirstObj).IsValid())
-	{
-		OutResponse.Error = TEXT("Embeddings response data[0] invalid.");
-		return false;
-	}
-	const TArray<TSharedPtr<FJsonValue>>* EmbeddingArray = nullptr;
-	if (!(*FirstObj)->TryGetArrayField(TEXT("embedding"), EmbeddingArray) || !EmbeddingArray)
-	{
-		OutResponse.Error = TEXT("Embeddings response missing embedding array.");
-		return false;
-	}
-	OutResponse.Vector.Reset();
-	OutResponse.Vector.Reserve(EmbeddingArray->Num());
-	for (const TSharedPtr<FJsonValue>& Value : *EmbeddingArray)
-	{
-		const double Number = Value.IsValid() ? Value->AsNumber() : 0.0;
-		OutResponse.Vector.Add(static_cast<float>(Number));
-	}
-	return OutResponse.Vector.Num() > 0;
+	return true;
 }

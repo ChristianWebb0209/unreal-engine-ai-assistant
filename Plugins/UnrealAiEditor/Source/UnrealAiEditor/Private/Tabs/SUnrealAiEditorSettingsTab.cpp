@@ -7,6 +7,7 @@
 #include "Context/UnrealAiProjectId.h"
 #include "Context/UnrealAiStartupOpsStatus.h"
 #include "Retrieval/IUnrealAiRetrievalService.h"
+#include "Retrieval/UnrealAiRetrievalTypes.h"
 #include "Backend/IUnrealAiModelConnector.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Backend/UnrealAiBackendRegistry.h"
@@ -89,12 +90,19 @@ namespace UnrealAiSettingsTemplate
 		"\t\t\"maxFilesPerRebuild\": 0,\n"
 		"\t\t\"maxTotalChunksPerRebuild\": 0,\n"
 		"\t\t\"maxEmbeddingCallsPerRebuild\": 0,\n"
-		"\t\t\"chunkChars\": 1200,\n"
-		"\t\t\"chunkOverlap\": 200,\n"
+		"\t\t\"maxChunksPerFile\": 96,\n"
+		"\t\t\"chunkChars\": 4000,\n"
+		"\t\t\"chunkOverlap\": 150,\n"
 		"\t\t\"assetRegistryMaxAssets\": 0,\n"
 		"\t\t\"assetRegistryIncludeEngineAssets\": false,\n"
-		"\t\t\"embeddingBatchSize\": 8,\n"
+		"\t\t\"blueprintIncludeEngineAssets\": false,\n"
+		"\t\t\"indexDirectorySummaries\": true,\n"
+		"\t\t\"indexAssetFamilySummaries\": true,\n"
+		"\t\t\"indexEditorScene\": false,\n"
+		"\t\t\"embeddingBatchSize\": 128,\n"
 		"\t\t\"minDelayMsBetweenEmbeddingBatches\": 0,\n"
+		"\t\t\"indexFirstWaveTimeBudgetSeconds\": 0,\n"
+		"\t\t\"indexRetrievalWave4\": false,\n"
 		"\t\t\"indexMemoryRecordsInVectorStore\": false,\n"
 		"\t\t\"blueprintMaxFeatureRecords\": 0,\n"
 		"\t\t\"contextAggression\": 0.5\n"
@@ -925,7 +933,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 														.WrapTextAt(520.f)
 														.Text(LOCTEXT(
 															"EditorFocusHelp",
-															"Editor focus: when on, the agent may follow along in the editor (Content Browser sync, viewport framing, post-tool navigation). When off, optional UI is skipped; tools that must open an editor still open."))
+															"Editor focus: when on, successful blueprint and asset tools open or foreground the relevant editor automatically. Pass focused:false on a tool call to skip once. When off, this follow behavior is skipped; tools that must open an editor to work still do."))
 												]
 											]
 											+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 12.f))
@@ -1198,7 +1206,9 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 												]
 												+ SGridPanel::Slot(0, 14).Padding(4.f)
 												[
-													SNew(STextBlock).Text(LOCTEXT("RetrievalEmbedThrottleLbl", "Embed batch size / delay ms"))
+													SNew(STextBlock)
+														.Text(LOCTEXT("RetrievalEmbedThrottleLbl", "Chunks per HTTP / delay ms"))
+														.ToolTipText(LOCTEXT("RetrievalEmbedThrottleTip", "Index builds send up to this many chunk texts per /embeddings request (capped at 512 per request in the indexer; align with your provider limit). Query embeds stay single. Delay runs between HTTP batches."))
 												]
 												+ SGridPanel::Slot(1, 14).Padding(4.f)
 												[
@@ -1206,7 +1216,7 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 													+ SHorizontalBox::Slot().FillWidth(1.f).Padding(FMargin(0.f, 0.f, 6.f, 0.f))
 													[
 														SNew(SEditableTextBox)
-															.HintText(LOCTEXT("RetrievalBatchHint", "Batch"))
+															.HintText(LOCTEXT("RetrievalBatchHint", "Chunks / request"))
 															.Text_Lambda([this]() { return FText::FromString(RetrievalEmbeddingBatchSizeStr); })
 															.OnTextChanged_Lambda([this](const FText& T)
 															{
@@ -1228,9 +1238,26 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 												]
 												+ SGridPanel::Slot(0, 15).Padding(4.f)
 												[
-													SNew(STextBlock).Text(LOCTEXT("RetrievalMemVecLbl", "Index memory records in vector store"))
+													SNew(STextBlock)
+														.Text(LOCTEXT("RetrievalFirstWaveBudgetLbl", "P0 index time budget (sec, 0=off)"))
+														.ToolTipText(LOCTEXT("RetrievalFirstWaveBudgetTip", "During wave 0 (project Source/), upsert embedded chunks when this many seconds elapse so retrieval can start earlier. Zero disables mid-wave commits."))
 												]
 												+ SGridPanel::Slot(1, 15).Padding(4.f)
+												[
+													SNew(SEditableTextBox)
+														.HintText(LOCTEXT("RetrievalFirstWaveBudgetHint", "Seconds"))
+														.Text_Lambda([this]() { return FText::FromString(RetrievalIndexFirstWaveTimeBudgetStr); })
+														.OnTextChanged_Lambda([this](const FText& T)
+														{
+															RetrievalIndexFirstWaveTimeBudgetStr = T.ToString();
+															OnAnySettingsChanged(T);
+														})
+												]
+												+ SGridPanel::Slot(0, 16).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalMemVecLbl", "Index memory records in vector store"))
+												]
+												+ SGridPanel::Slot(1, 16).Padding(4.f)
 												[
 													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
 														.IsChecked_Lambda([this]()
@@ -1243,11 +1270,13 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 															OnAnySettingsChanged(FText::GetEmpty());
 														})
 												]
-												+ SGridPanel::Slot(0, 16).Padding(4.f)
+												+ SGridPanel::Slot(0, 17).Padding(4.f)
 												[
-													SNew(STextBlock).Text(LOCTEXT("RetrievalBpMaxLbl", "Blueprint feature cap (0=default)"))
+													SNew(STextBlock)
+														.Text(LOCTEXT("RetrievalBpMaxLbl", "Blueprint feature cap (0=default 800)"))
+														.ToolTipText(LOCTEXT("RetrievalBpMaxTip", "Maximum Blueprint metadata rows from /Game (and /Engine if enabled). Zero uses an internal default (~800). Set higher for large projects."))
 												]
-												+ SGridPanel::Slot(1, 16).Padding(4.f)
+												+ SGridPanel::Slot(1, 17).Padding(4.f)
 												[
 													SNew(SEditableTextBox)
 														.Text_Lambda([this]() { return FText::FromString(RetrievalBlueprintMaxFeatureRecordsStr); })
@@ -1257,11 +1286,118 @@ void SUnrealAiEditorSettingsTab::Construct(const FArguments& InArgs)
 															OnAnySettingsChanged(T);
 														})
 												]
-												+ SGridPanel::Slot(0, 17).Padding(4.f)
+												+ SGridPanel::Slot(0, 18).Padding(4.f)
+												[
+													SNew(STextBlock)
+														.Text(LOCTEXT("RetrievalMaxChunkPerFileLbl", "Max chunks per file (0=unlimited)"))
+														.ToolTipText(LOCTEXT("RetrievalMaxChunkPerFileTip", "Caps fixed-window splits per source file to limit embedding work on huge files."))
+												]
+												+ SGridPanel::Slot(1, 18).Padding(4.f)
+												[
+													SNew(SEditableTextBox)
+														.Text_Lambda([this]() { return FText::FromString(RetrievalMaxChunksPerFileStr); })
+														.OnTextChanged_Lambda([this](const FText& T)
+														{
+															RetrievalMaxChunksPerFileStr = T.ToString();
+															OnAnySettingsChanged(T);
+														})
+												]
+												+ SGridPanel::Slot(0, 19).Padding(4.f)
+												[
+													SNew(STextBlock)
+														.Text(LOCTEXT("RetrievalBpEngineLbl", "Blueprint index include /Engine"))
+														.ToolTipText(LOCTEXT("RetrievalBpEngineTip", "When off, only /Game Blueprint metadata is embedded (much faster). Enable if you need engine blueprint names in retrieval."))
+												]
+												+ SGridPanel::Slot(1, 19).Padding(4.f)
+												[
+													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
+														.IsChecked_Lambda([this]()
+														{
+															return bRetrievalBlueprintIncludeEngineAssets ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+														})
+														.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+														{
+															bRetrievalBlueprintIncludeEngineAssets = (S == ECheckBoxState::Checked);
+															OnAnySettingsChanged(FText::GetEmpty());
+														})
+												]
+												+ SGridPanel::Slot(0, 20).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalDirSumLbl", "Index directory summaries"))
+												]
+												+ SGridPanel::Slot(1, 20).Padding(4.f)
+												[
+													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
+														.IsChecked_Lambda([this]()
+														{
+															return bRetrievalIndexDirectorySummaries ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+														})
+														.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+														{
+															bRetrievalIndexDirectorySummaries = (S == ECheckBoxState::Checked);
+															OnAnySettingsChanged(FText::GetEmpty());
+														})
+												]
+												+ SGridPanel::Slot(0, 21).Padding(4.f)
+												[
+													SNew(STextBlock).Text(LOCTEXT("RetrievalAssetFamLbl", "Index asset family summaries"))
+												]
+												+ SGridPanel::Slot(1, 21).Padding(4.f)
+												[
+													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
+														.IsChecked_Lambda([this]()
+														{
+															return bRetrievalIndexAssetFamilySummaries ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+														})
+														.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+														{
+															bRetrievalIndexAssetFamilySummaries = (S == ECheckBoxState::Checked);
+															OnAnySettingsChanged(FText::GetEmpty());
+														})
+												]
+												+ SGridPanel::Slot(0, 22).Padding(4.f)
+												[
+													SNew(STextBlock)
+														.Text(LOCTEXT("RetrievalSceneLbl", "Index editor scene actors"))
+														.ToolTipText(LOCTEXT("RetrievalSceneTip", "Embeds the current editor world actor list; can be large. Off by default for faster indexing."))
+												]
+												+ SGridPanel::Slot(1, 22).Padding(4.f)
+												[
+													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
+														.IsChecked_Lambda([this]()
+														{
+															return bRetrievalIndexEditorScene ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+														})
+														.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+														{
+															bRetrievalIndexEditorScene = (S == ECheckBoxState::Checked);
+															OnAnySettingsChanged(FText::GetEmpty());
+														})
+												]
+												+ SGridPanel::Slot(0, 23).Padding(4.f)
+												[
+													SNew(STextBlock)
+														.Text(LOCTEXT("RetrievalWave4Lbl", "Index retrieval wave 4+ (virtual, blueprints, etc.)"))
+														.ToolTipText(LOCTEXT("RetrievalWave4Tip", "When off, only the first four embedding waves run (project Source through Content/). Skips virtual shards/summaries, Blueprint /Game paths, memory vector rows, and other wave-4 sources; a rebuild removes existing wave-4 chunks from the index."))
+												]
+												+ SGridPanel::Slot(1, 23).Padding(4.f)
+												[
+													SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
+														.IsChecked_Lambda([this]()
+														{
+															return bRetrievalIndexRetrievalWave4 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+														})
+														.OnCheckStateChanged_Lambda([this](ECheckBoxState S)
+														{
+															bRetrievalIndexRetrievalWave4 = (S == ECheckBoxState::Checked);
+															OnAnySettingsChanged(FText::GetEmpty());
+														})
+												]
+												+ SGridPanel::Slot(0, 24).Padding(4.f)
 												[
 													SNew(STextBlock).Text(LOCTEXT("RetrievalCtxAggLbl", "Context aggression (0-1)"))
 												]
-												+ SGridPanel::Slot(1, 17).Padding(4.f)
+												+ SGridPanel::Slot(1, 24).Padding(4.f)
 												[
 													SNew(SEditableTextBox)
 														.Text_Lambda([this]() { return FText::FromString(RetrievalContextAggressionStr); })
@@ -2555,14 +2691,21 @@ bool SUnrealAiEditorSettingsTab::LoadRetrievalSettingsFromRoot(const TSharedPtr<
 	RetrievalMaxFilesPerRebuildStr = TEXT("0");
 	RetrievalMaxTotalChunksPerRebuildStr = TEXT("0");
 	RetrievalMaxEmbeddingCallsPerRebuildStr = TEXT("0");
-	RetrievalChunkCharsStr = TEXT("1200");
-	RetrievalChunkOverlapStr = TEXT("200");
+	RetrievalMaxChunksPerFileStr = TEXT("96");
+	RetrievalChunkCharsStr = TEXT("4000");
+	RetrievalChunkOverlapStr = TEXT("150");
 	RetrievalAssetRegistryMaxAssetsStr = TEXT("0");
 	bRetrievalAssetRegistryIncludeEngineAssets = false;
-	RetrievalEmbeddingBatchSizeStr = TEXT("8");
+	RetrievalEmbeddingBatchSizeStr = TEXT("128");
 	RetrievalMinDelayMsBetweenBatchesStr = TEXT("0");
+	RetrievalIndexFirstWaveTimeBudgetStr = TEXT("0");
 	bRetrievalIndexMemoryRecordsInVectorStore = false;
 	RetrievalBlueprintMaxFeatureRecordsStr = TEXT("0");
+	bRetrievalBlueprintIncludeEngineAssets = false;
+	bRetrievalIndexDirectorySummaries = true;
+	bRetrievalIndexAssetFamilySummaries = true;
+	bRetrievalIndexEditorScene = false;
+	bRetrievalIndexRetrievalWave4 = false;
 	RetrievalContextAggressionStr = TEXT("0.5");
 	if (!Root.IsValid())
 	{
@@ -2627,6 +2770,10 @@ bool SUnrealAiEditorSettingsTab::LoadRetrievalSettingsFromRoot(const TSharedPtr<
 	{
 		RetrievalMaxEmbeddingCallsPerRebuildStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
 	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("maxChunksPerFile"), Number))
+	{
+		RetrievalMaxChunksPerFileStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
+	}
 	if ((*RetrievalObj)->TryGetNumberField(TEXT("chunkChars"), Number))
 	{
 		RetrievalChunkCharsStr = FString::FromInt(static_cast<int32>(Number));
@@ -2640,6 +2787,10 @@ bool SUnrealAiEditorSettingsTab::LoadRetrievalSettingsFromRoot(const TSharedPtr<
 		RetrievalAssetRegistryMaxAssetsStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
 	}
 	(*RetrievalObj)->TryGetBoolField(TEXT("assetRegistryIncludeEngineAssets"), bRetrievalAssetRegistryIncludeEngineAssets);
+	(*RetrievalObj)->TryGetBoolField(TEXT("blueprintIncludeEngineAssets"), bRetrievalBlueprintIncludeEngineAssets);
+	(*RetrievalObj)->TryGetBoolField(TEXT("indexDirectorySummaries"), bRetrievalIndexDirectorySummaries);
+	(*RetrievalObj)->TryGetBoolField(TEXT("indexAssetFamilySummaries"), bRetrievalIndexAssetFamilySummaries);
+	(*RetrievalObj)->TryGetBoolField(TEXT("indexEditorScene"), bRetrievalIndexEditorScene);
 	if ((*RetrievalObj)->TryGetNumberField(TEXT("embeddingBatchSize"), Number))
 	{
 		RetrievalEmbeddingBatchSizeStr = FString::FromInt(FMath::Max(1, static_cast<int32>(Number)));
@@ -2648,7 +2799,12 @@ bool SUnrealAiEditorSettingsTab::LoadRetrievalSettingsFromRoot(const TSharedPtr<
 	{
 		RetrievalMinDelayMsBetweenBatchesStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
 	}
+	if ((*RetrievalObj)->TryGetNumberField(TEXT("indexFirstWaveTimeBudgetSeconds"), Number))
+	{
+		RetrievalIndexFirstWaveTimeBudgetStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
+	}
 	(*RetrievalObj)->TryGetBoolField(TEXT("indexMemoryRecordsInVectorStore"), bRetrievalIndexMemoryRecordsInVectorStore);
+	(*RetrievalObj)->TryGetBoolField(TEXT("indexRetrievalWave4"), bRetrievalIndexRetrievalWave4);
 	if ((*RetrievalObj)->TryGetNumberField(TEXT("blueprintMaxFeatureRecords"), Number))
 	{
 		RetrievalBlueprintMaxFeatureRecordsStr = FString::FromInt(FMath::Max(0, static_cast<int32>(Number)));
@@ -2722,13 +2878,20 @@ void SUnrealAiEditorSettingsTab::WriteRetrievalSettingsToRoot(TSharedPtr<FJsonOb
 	RetrievalObj->SetNumberField(TEXT("maxFilesPerRebuild"), FMath::Max(0, FCString::Atoi(*RetrievalMaxFilesPerRebuildStr)));
 	RetrievalObj->SetNumberField(TEXT("maxTotalChunksPerRebuild"), FMath::Max(0, FCString::Atoi(*RetrievalMaxTotalChunksPerRebuildStr)));
 	RetrievalObj->SetNumberField(TEXT("maxEmbeddingCallsPerRebuild"), FMath::Max(0, FCString::Atoi(*RetrievalMaxEmbeddingCallsPerRebuildStr)));
+	RetrievalObj->SetNumberField(TEXT("maxChunksPerFile"), FMath::Max(0, FCString::Atoi(*RetrievalMaxChunksPerFileStr)));
 	RetrievalObj->SetNumberField(TEXT("chunkChars"), FCString::Atoi(*RetrievalChunkCharsStr));
 	RetrievalObj->SetNumberField(TEXT("chunkOverlap"), FCString::Atoi(*RetrievalChunkOverlapStr));
 	RetrievalObj->SetNumberField(TEXT("assetRegistryMaxAssets"), FMath::Max(0, FCString::Atoi(*RetrievalAssetRegistryMaxAssetsStr)));
 	RetrievalObj->SetBoolField(TEXT("assetRegistryIncludeEngineAssets"), bRetrievalAssetRegistryIncludeEngineAssets);
+	RetrievalObj->SetBoolField(TEXT("blueprintIncludeEngineAssets"), bRetrievalBlueprintIncludeEngineAssets);
+	RetrievalObj->SetBoolField(TEXT("indexDirectorySummaries"), bRetrievalIndexDirectorySummaries);
+	RetrievalObj->SetBoolField(TEXT("indexAssetFamilySummaries"), bRetrievalIndexAssetFamilySummaries);
+	RetrievalObj->SetBoolField(TEXT("indexEditorScene"), bRetrievalIndexEditorScene);
 	RetrievalObj->SetNumberField(TEXT("embeddingBatchSize"), FMath::Max(1, FCString::Atoi(*RetrievalEmbeddingBatchSizeStr)));
 	RetrievalObj->SetNumberField(TEXT("minDelayMsBetweenEmbeddingBatches"), FMath::Max(0, FCString::Atoi(*RetrievalMinDelayMsBetweenBatchesStr)));
+	RetrievalObj->SetNumberField(TEXT("indexFirstWaveTimeBudgetSeconds"), FMath::Max(0, FCString::Atoi(*RetrievalIndexFirstWaveTimeBudgetStr)));
 	RetrievalObj->SetBoolField(TEXT("indexMemoryRecordsInVectorStore"), bRetrievalIndexMemoryRecordsInVectorStore);
+	RetrievalObj->SetBoolField(TEXT("indexRetrievalWave4"), bRetrievalIndexRetrievalWave4);
 	RetrievalObj->SetNumberField(TEXT("blueprintMaxFeatureRecords"), FMath::Max(0, FCString::Atoi(*RetrievalBlueprintMaxFeatureRecordsStr)));
 	RetrievalObj->SetNumberField(TEXT("contextAggression"), FMath::Clamp(FCString::Atof(*RetrievalContextAggressionStr), 0.0f, 1.0f));
 
@@ -4034,6 +4197,51 @@ FReply SUnrealAiEditorSettingsTab::OnSaveClicked()
 	StatusText = LOCTEXT("SavedReloaded", "Saved — LLM stack reloaded.");
 	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 	RefreshUsageHeaderText();
+
+	// If retrieval is enabled but the project has no index yet, verify the saved API and queue a rebuild (same probe as Test connection).
+	const TWeakPtr<SUnrealAiEditorSettingsTab> WeakSelf = StaticCastSharedRef<SUnrealAiEditorSettingsTab>(AsShared());
+	const TWeakPtr<FUnrealAiBackendRegistry> WeakReg(BackendRegistry);
+	if (IUnrealAiModelConnector* Connector = BackendRegistry->GetModelConnector())
+	{
+		Connector->TestConnection(FUnrealAiModelTestResultDelegate::CreateLambda(
+			[WeakSelf, WeakReg](const bool bOk)
+			{
+				if (!bOk)
+				{
+					return;
+				}
+				const TSharedPtr<FUnrealAiBackendRegistry> Reg = WeakReg.Pin();
+				if (!Reg.IsValid())
+				{
+					return;
+				}
+				IUnrealAiRetrievalService* const Retrieval = Reg->GetRetrievalService();
+				if (!Retrieval)
+				{
+					return;
+				}
+				const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+				if (!Retrieval->IsEnabledForProject(ProjectId))
+				{
+					return;
+				}
+				const FUnrealAiRetrievalProjectStatus St = Retrieval->GetProjectStatus(ProjectId);
+				const bool bHasIndex = St.StateText.Equals(TEXT("ready"), ESearchCase::IgnoreCase) && St.ChunksIndexed > 0;
+				if (bHasIndex)
+				{
+					return;
+				}
+				Retrieval->RequestRebuild(ProjectId);
+				const TSharedPtr<SUnrealAiEditorSettingsTab> Self = WeakSelf.Pin();
+				if (Self.IsValid())
+				{
+					Self->StatusText =
+						LOCTEXT("SavedReloadedAndQueuedIndex", "Saved — LLM reloaded. Connection OK — vector index rebuild queued.");
+					Self->Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+				}
+			}));
+	}
+
 	return FReply::Handled();
 }
 

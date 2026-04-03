@@ -24,4 +24,12 @@ public:
 		const FString& ModelId,
 		const FUnrealAiEmbeddingRequest& Request,
 		FUnrealAiEmbeddingResponse& OutResponse) = 0;
+
+	/** Multiple texts in one OpenAI-style `/embeddings` request; `OutVectors` length must match `InputTexts` on success. */
+	virtual bool EmbedBatch(
+		const FString& ModelId,
+		const TArray<FString>& InputTexts,
+		bool bBackgroundIndexer,
+		TArray<TArray<float>>& OutVectors,
+		FString& OutError) = 0;
 };

@@ -2603,6 +2603,13 @@ void FUnrealAiEditorModule::TryKickoffStartupDiscoveryAndIndexing(
 			{
 				return false;
 			}
+			{
+				const FUnrealAiRetrievalProjectStatus IndexSt = Retrieval->GetProjectStatus(ProjectIdCopy);
+				if (IndexSt.StateText.Equals(TEXT("ready"), ESearchCase::IgnoreCase) && IndexSt.ChunksIndexed > 0)
+				{
+					return false;
+				}
+			}
 			Retrieval->RequestRebuild(ProjectIdCopy);
 			const FString RetrievalDetail = UnrealAiBackgroundOpsLog::BuildDetailJson(
 				TEXT("startup_retrieval_rebuild"),

@@ -62,11 +62,16 @@ These fields live under `retrieval` in plugin settings JSON and in **AI Settings
 | `chunkChars`, `chunkOverlap` | Text chunking for files and asset-registry shards (clamped in code). |
 | `assetRegistryMaxAssets` | 0 = no registry snapshot. &gt; 0 caps rows included; shards are deterministic (`virtual://asset_registry/part_NNNN.txt`). |
 | `assetRegistryIncludeEngineAssets` | When true, includes `/Engine` in the registry filter (can be very large). |
-| `embeddingBatchSize`, `minDelayMsBetweenEmbeddingBatches` | Throttle HTTP/local work between embedding batches during index builds. |
+| `embeddingBatchSize`, `minDelayMsBetweenEmbeddingBatches` | Index builds send **up to** `embeddingBatchSize` chunk texts per OpenAI-compatible `/embeddings` HTTP request (capped internally, e.g. 512). `minDelayMsBetweenEmbeddingBatches` sleeps between **HTTP** batches (not between chunks). Query-time embedding stays a single text per request. |
+| `indexFirstWaveTimeBudgetSeconds` | **0 = off.** During wave **P0** (project `Source/`), optionally commit **fully embedded** P0 sources to SQLite when wall time exceeds this many seconds (mid-wave `UpsertIncremental`), so retrieval can see high-priority chunks before P0 finishes embedding. |
 | `indexMemoryRecordsInVectorStore` | Default **false**; keeps **tagged memory** as the main memory story. |
 | `blueprintMaxFeatureRecords` | 0 = extractor default cap (~4000); otherwise caps Blueprint rows per rebuild. |
 
 **Cost tuning**: Reduce API load by lowering caps, shrinking the whitelist, using `minimal` preset, setting `assetRegistryMaxAssets` to 0, increasing batch delay, or disabling optional corpora (memory vector chunks off by default). **Query path** is unchanged: embedding-first cosine in SQLite, then lexical fallback on failure or empty hits (`FUnrealAiRetrievalService::Query`).
+
+**Index progress / ETA (chat status)**: Manifest fields `index_build_target_chunks` and `index_build_completed_chunks` remain **per-chunk**. While each `/embeddings` HTTP batch is in flight, the completed count may stay flat and then jump by up to the batch size; ETA is approximate during that window. **`index_build_wave_total`** / **`index_build_wave_done`** (when non-zero) reflect phased build progress across priority waves (P0â€“P4).
+
+**Phased indexing**: Rebuilds embed and **`UpsertIncremental`** commit **per wave** - project `Source/`, then `Plugins/*/Source/`, then `Config/` + `docs/`, then `Content/` (extended preset), then virtual corpora - so SQLite gains rows incrementally. **Removed** sources are applied in a **final** transaction only (empty chunk map), avoiding accidental deletion of not-yet-processed sources. Query remains embedding-first with **lexical fallback** only when the index has rows (empty DB still means no corpus).
 
 Current context assembly remains the source of truth. Vector retrieval is a new candidate source, not a replacement for:
 - attachments,
@@ -193,6 +198,7 @@ Current manifest (`manifest.json`) includes:
 - `pending_dirty_count`
 - `status` (`ready`, `indexing`, `error`, `stale`)
 - `migration_state` (`none`, `pending_reembed`, `reembedding`, `mixed_compat`)
+- `index_build_wave_total`, `index_build_wave_done` (phased rebuild: wave count and waves committed to SQLite; 0 when not in a multi-wave build)
 
 ## 7) Blueprint feature extraction
 
@@ -222,9 +228,9 @@ Implementation note: current extractor starts with a minimal, safe feature set f
    - `Source/`, selected `Config/`, selected docs,
    - Blueprint extracted feature records.
 3. Chunk + hash.
-4. Embed batches.
-5. Upsert into local index.
-6. Mark manifest `ready`.
+4. Partition changed work into **waves** (priority: project Source, plugin Source, Config+docs, Content, virtual); embed each waveâ€™s chunks in multi-input HTTP batches (configurable chunk count per request). Optional **`indexFirstWaveTimeBudgetSeconds`**: during P0, upsert sources that are already fully embedded when the budget elapses.
+5. **Upsert incremental** after each wave (intermediate passes omit **removed** source list); apply **deletions** once after all waves.
+6. Mark manifest `ready` (existing logic may promote to `ready` earlier if `chunks_indexed` > 0 while status was still `indexing`).
 
 ### 8.2 Incremental indexing
 - Triggered by file/asset changes:

@@ -21,7 +21,10 @@ namespace
 	}
 }
 
-void FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(TArray<FUnrealAiBlueprintFeatureRecord>& OutRecords, const int32 MaxRecords)
+void FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(
+	TArray<FUnrealAiBlueprintFeatureRecord>& OutRecords,
+	const int32 MaxRecords,
+	const bool bIncludeEngineBlueprints)
 {
 	OutRecords.Reset();
 #if WITH_EDITOR
@@ -29,10 +32,16 @@ void FUnrealAiBlueprintFeatureExtractor::ExtractFeatureRecords(TArray<FUnrealAiB
 	FARFilter Filter;
 	Filter.ClassPaths.Add(FTopLevelAssetPath(TEXT("/Script/Engine"), TEXT("Blueprint")));
 	Filter.bRecursiveClasses = true;
+	Filter.PackagePaths.Add(FName(TEXT("/Game")));
+	if (bIncludeEngineBlueprints)
+	{
+		Filter.PackagePaths.Add(FName(TEXT("/Engine")));
+	}
 	TArray<FAssetData> Assets;
 	RegistryModule.Get().GetAssets(Filter, Assets);
 
-	const int32 MaxFeatures = (MaxRecords > 0) ? MaxRecords : 4000;
+	constexpr int32 DefaultBlueprintFeatureCap = 800;
+	const int32 MaxFeatures = (MaxRecords > 0) ? MaxRecords : DefaultBlueprintFeatureCap;
 	int32 Added = 0;
 	for (const FAssetData& Asset : Assets)
 	{

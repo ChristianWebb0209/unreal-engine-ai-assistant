@@ -35,6 +35,8 @@ public:
 
 private:
 	FUnrealAiVectorIndexStore* GetOrCreateStore(const FString& ProjectId, FString& OutError) const;
+	/** After a crash during indexing, manifest can be stuck in "indexing" while the DB still matches the last commit; align manifest to the DB and clear embed-phase fields. No-op while a rebuild is in flight for this project. */
+	void TryNormalizeInterruptedIndexingManifest(FUnrealAiVectorIndexStore& Store, const FString& ProjectId) const;
 	void EnsureBackgroundIndexBuild(const FString& ProjectId, const FUnrealAiRetrievalSettings& Settings);
 	bool BuildOrRebuildIndexNow(const FString& ProjectId, const FUnrealAiRetrievalSettings& Settings, FString& OutError);
 	void ChunkFileText(
@@ -42,13 +44,20 @@ private:
 		const FString& Text,
 		int32 ChunkChars,
 		int32 ChunkOverlap,
+		int32 MaxChunksPerSource,
 		TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
 	void CollectBlueprintFeatureChunks(const FUnrealAiRetrievalSettings& Settings, TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
 	void CollectSceneActorChunks(const FUnrealAiRetrievalSettings& Settings, TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
 	void GatherAssetRegistryShardTexts(const FUnrealAiRetrievalSettings& Settings, TArray<TPair<FString, FString>>& OutVirtualPathAndFullText) const;
 	void CollectMemoryChunks(const FUnrealAiRetrievalSettings& Settings, TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
-	void CollectDirectorySummaryChunks(const TMap<FString, FString>& SourceHashesByPath, TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
-	void CollectAssetEquivalenceSummaryChunks(const TMap<FString, FString>& SourceHashesByPath, TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
+	void CollectDirectorySummaryChunks(
+		const FUnrealAiRetrievalSettings& Settings,
+		const TMap<FString, FString>& SourceHashesByPath,
+		TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
+	void CollectAssetEquivalenceSummaryChunks(
+		const FUnrealAiRetrievalSettings& Settings,
+		const TMap<FString, FString>& SourceHashesByPath,
+		TArray<struct FUnrealAiVectorChunkRow>& OutChunks) const;
 	void ApplySummaryPreference(const FString& QueryText, int32 MaxResults, TArray<struct FUnrealAiRetrievalSnippet>& InOutSnippets) const;
 
 	IUnrealAiPersistence* Persistence = nullptr;

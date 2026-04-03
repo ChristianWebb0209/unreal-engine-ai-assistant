@@ -62,6 +62,12 @@ FUnrealAiVectorIndexStore::~FUnrealAiVectorIndexStore()
 
 bool FUnrealAiVectorIndexStore::Initialize(FString& OutError)
 {
+	FScopeLock Lock(&DbMutex);
+	return EnsureInitializedUnlocked(OutError);
+}
+
+bool FUnrealAiVectorIndexStore::EnsureInitializedUnlocked(FString& OutError)
+{
 	IFileManager::Get().MakeDirectory(*RootDir, true);
 	return OpenDb(OutError) && EnsureSchema(OutError);
 }
@@ -87,7 +93,7 @@ bool FUnrealAiVectorIndexStore::OpenDb(FString& OutError)
 			return true;
 		}
 
-		CloseDb();
+		CloseDbUnlocked();
 		if (Attempt < MaxAttempts)
 		{
 			const float BackoffSec = FMath::Min(0.5f, 0.05f * FMath::Pow(2.f, static_cast<float>(Attempt)));
@@ -106,11 +112,39 @@ bool FUnrealAiVectorIndexStore::OpenDb(FString& OutError)
 
 void FUnrealAiVectorIndexStore::CloseDb()
 {
+	FScopeLock Lock(&DbMutex);
+	CloseDbUnlocked();
+}
+
+void FUnrealAiVectorIndexStore::CloseDbUnlocked()
+{
 	if (!Db)
 	{
 		return;
 	}
-	Db->Close();
+	FScopeLock OpenLock(&GVectorDbOpenMutex);
+	// Drop any unexpected transaction so sqlite3_close is more likely to succeed.
+	Db->Execute(TEXT("ROLLBACK;"));
+	constexpr int32 MaxAttempts = 80;
+	for (int32 Attempt = 0; Attempt < MaxAttempts && Db && Db->IsValid(); ++Attempt)
+	{
+		if (Db->Close())
+		{
+			break;
+		}
+		FPlatformProcess::Sleep(0.015f);
+	}
+	if (Db && Db->IsValid())
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("UnrealAi vector SQLite: could not close DB after retries; leaking connection to avoid engine fatal (path=%s err=%s)"),
+			*GetIndexDbPath(),
+			*Db->GetLastError());
+		Db = nullptr;
+		return;
+	}
 	delete Db;
 	Db = nullptr;
 }
@@ -151,7 +185,8 @@ bool FUnrealAiVectorIndexStore::EnsureSchema(FString& OutError)
 
 bool FUnrealAiVectorIndexStore::UpsertAllChunks(const TArray<FUnrealAiVectorChunkRow>& Chunks, FString& OutError)
 {
-	if (!Initialize(OutError))
+	FScopeLock Lock(&DbMutex);
+	if (!EnsureInitializedUnlocked(OutError))
 	{
 		return false;
 	}
@@ -228,8 +263,9 @@ bool FUnrealAiVectorIndexStore::UpsertAllChunks(const TArray<FUnrealAiVectorChun
 
 bool FUnrealAiVectorIndexStore::LoadSourceHashes(TMap<FString, FString>& OutSourceHashes, FString& OutError)
 {
+	FScopeLock Lock(&DbMutex);
 	OutSourceHashes.Reset();
-	if (!Initialize(OutError))
+	if (!EnsureInitializedUnlocked(OutError))
 	{
 		return false;
 	}
@@ -262,7 +298,8 @@ bool FUnrealAiVectorIndexStore::UpsertIncremental(
 	const TArray<FString>& RemovedSources,
 	FString& OutError)
 {
-	if (!Initialize(OutError))
+	FScopeLock Lock(&DbMutex);
+	if (!EnsureInitializedUnlocked(OutError))
 	{
 		return false;
 	}
@@ -361,8 +398,9 @@ bool FUnrealAiVectorIndexStore::QueryTopKByCosine(
 	TArray<FUnrealAiRetrievalSnippet>& OutSnippets,
 	FString& OutError)
 {
+	FScopeLock Lock(&DbMutex);
 	OutSnippets.Reset();
-	if (!Initialize(OutError))
+	if (!EnsureInitializedUnlocked(OutError))
 	{
 		return false;
 	}
@@ -441,8 +479,9 @@ bool FUnrealAiVectorIndexStore::QueryTopKByLexical(
 	TArray<FUnrealAiRetrievalSnippet>& OutSnippets,
 	FString& OutError)
 {
+	FScopeLock Lock(&DbMutex);
 	OutSnippets.Reset();
-	if (!Initialize(OutError))
+	if (!EnsureInitializedUnlocked(OutError))
 	{
 		return false;
 	}
@@ -544,9 +583,10 @@ bool FUnrealAiVectorIndexStore::QueryTopKByLexical(
 
 bool FUnrealAiVectorIndexStore::GetIndexCounts(int32& OutFiles, int32& OutChunks, FString& OutError)
 {
+	FScopeLock Lock(&DbMutex);
 	OutFiles = 0;
 	OutChunks = 0;
-	if (!Initialize(OutError))
+	if (!EnsureInitializedUnlocked(OutError))
 	{
 		return false;
 	}
@@ -579,9 +619,176 @@ bool FUnrealAiVectorIndexStore::GetIndexCounts(int32& OutFiles, int32& OutChunks
 	return true;
 }
 
+namespace UnrealAiVectorIndexStorePriv
+{
+	static bool IsEmbeddingJsonUnusable(const FString& EmbeddingJson)
+	{
+		if (EmbeddingJson.IsEmpty())
+		{
+			return true;
+		}
+		TSharedPtr<FJsonObject> EmbeddingObj;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(EmbeddingJson);
+		if (!FJsonSerializer::Deserialize(Reader, EmbeddingObj) || !EmbeddingObj.IsValid())
+		{
+			return true;
+		}
+		const TArray<TSharedPtr<FJsonValue>>* VecArray = nullptr;
+		if (!EmbeddingObj->TryGetArrayField(TEXT("v"), VecArray) || !VecArray || VecArray->Num() == 0)
+		{
+			return true;
+		}
+		return false;
+	}
+}
+
+bool FUnrealAiVectorIndexStore::CountChunksWithUnusableEmbeddings(int32& OutCount, FString& OutError)
+{
+	FScopeLock Lock(&DbMutex);
+	OutCount = 0;
+	if (!EnsureInitializedUnlocked(OutError))
+	{
+		return false;
+	}
+	FSQLitePreparedStatement SelectStmt;
+	if (!SelectStmt.Create(
+		*Db,
+		TEXT("SELECT embedding_json FROM chunks WHERE project_id=?1;"),
+		ESQLitePreparedStatementFlags::Persistent))
+	{
+		OutError = TEXT("Failed to create embedding scan statement.");
+		return false;
+	}
+	SelectStmt.SetBindingValueByIndex(1, ProjectId);
+	while (SelectStmt.Step() == ESQLitePreparedStatementStepResult::Row)
+	{
+		FString EmbeddingJson;
+		SelectStmt.GetColumnValueByIndex(0, EmbeddingJson);
+		if (UnrealAiVectorIndexStorePriv::IsEmbeddingJsonUnusable(EmbeddingJson))
+		{
+			++OutCount;
+		}
+	}
+	return true;
+}
+
+bool FUnrealAiVectorIndexStore::DeleteChunksWithUnusableEmbeddings(int32& OutDeleted, FString& OutError)
+{
+	FScopeLock Lock(&DbMutex);
+	OutDeleted = 0;
+	if (!EnsureInitializedUnlocked(OutError))
+	{
+		return false;
+	}
+	TArray<FString> BadChunkIds;
+	{
+		FSQLitePreparedStatement SelectStmt;
+		if (!SelectStmt.Create(
+			*Db,
+			TEXT("SELECT chunk_id, embedding_json FROM chunks WHERE project_id=?1;"),
+			ESQLitePreparedStatementFlags::Persistent))
+		{
+			OutError = TEXT("Failed to create embedding/chunk_id scan statement.");
+			return false;
+		}
+		SelectStmt.SetBindingValueByIndex(1, ProjectId);
+		while (SelectStmt.Step() == ESQLitePreparedStatementStepResult::Row)
+		{
+			FString ChunkId;
+			FString EmbeddingJson;
+			SelectStmt.GetColumnValueByIndex(0, ChunkId);
+			SelectStmt.GetColumnValueByIndex(1, EmbeddingJson);
+			if (ChunkId.IsEmpty())
+			{
+				continue;
+			}
+			if (UnrealAiVectorIndexStorePriv::IsEmbeddingJsonUnusable(EmbeddingJson))
+			{
+				BadChunkIds.Add(MoveTemp(ChunkId));
+			}
+		}
+	}
+	if (BadChunkIds.Num() == 0)
+	{
+		return true;
+	}
+	if (!Db->Execute(TEXT("BEGIN IMMEDIATE;")))
+	{
+		OutError = TEXT("Failed to begin unusable-embedding delete transaction.");
+		return false;
+	}
+	FSQLitePreparedStatement DelStmt;
+	if (!DelStmt.Create(
+		*Db,
+		TEXT("DELETE FROM chunks WHERE project_id=?1 AND chunk_id=?2;"),
+		ESQLitePreparedStatementFlags::Persistent))
+	{
+		Db->Execute(TEXT("ROLLBACK;"));
+		OutError = TEXT("Failed to create per-chunk delete statement.");
+		return false;
+	}
+	for (const FString& Id : BadChunkIds)
+	{
+		DelStmt.Reset();
+		DelStmt.SetBindingValueByIndex(1, ProjectId);
+		DelStmt.SetBindingValueByIndex(2, Id);
+		if (DelStmt.Step() != ESQLitePreparedStatementStepResult::Done)
+		{
+			Db->Execute(TEXT("ROLLBACK;"));
+			OutError = TEXT("Failed deleting a chunk with unusable embedding.");
+			return false;
+		}
+		++OutDeleted;
+	}
+	if (!Db->Execute(TEXT("COMMIT;")))
+	{
+		OutError = TEXT("Failed to commit unusable-embedding deletes.");
+		return false;
+	}
+	return true;
+}
+
+bool FUnrealAiVectorIndexStore::DeleteAllChunksForProject(FString& OutError)
+{
+	FScopeLock Lock(&DbMutex);
+	if (!EnsureInitializedUnlocked(OutError))
+	{
+		return false;
+	}
+	if (!Db->Execute(TEXT("BEGIN IMMEDIATE;")))
+	{
+		OutError = TEXT("Failed to begin wipe transaction.");
+		return false;
+	}
+	FSQLitePreparedStatement DelStmt;
+	if (!DelStmt.Create(
+		*Db,
+		TEXT("DELETE FROM chunks WHERE project_id=?1;"),
+		ESQLitePreparedStatementFlags::Persistent))
+	{
+		Db->Execute(TEXT("ROLLBACK;"));
+		OutError = TEXT("Failed to create chunk delete statement.");
+		return false;
+	}
+	DelStmt.SetBindingValueByIndex(1, ProjectId);
+	if (DelStmt.Step() != ESQLitePreparedStatementStepResult::Done)
+	{
+		Db->Execute(TEXT("ROLLBACK;"));
+		OutError = TEXT("Failed deleting project chunks.");
+		return false;
+	}
+	if (!Db->Execute(TEXT("COMMIT;")))
+	{
+		OutError = TEXT("Failed to commit chunk wipe.");
+		return false;
+	}
+	return true;
+}
+
 bool FUnrealAiVectorIndexStore::CheckIntegrity(FString& OutError)
 {
-	if (!Initialize(OutError))
+	FScopeLock Lock(&DbMutex);
+	if (!EnsureInitializedUnlocked(OutError))
 	{
 		return false;
 	}
@@ -606,13 +813,12 @@ bool FUnrealAiVectorIndexStore::CheckIntegrity(FString& OutError)
 	return true;
 }
 
-bool FUnrealAiVectorIndexStore::GetTopSourcesByChunkCount(const int32 Limit, TArray<TPair<FString, int32>>& OutRows, FString& OutError)
+bool FUnrealAiVectorIndexStore::GetTopSourcesByChunkCount_NoLock(
+	const int32 Limit,
+	TArray<TPair<FString, int32>>& OutRows,
+	FString& OutError)
 {
 	OutRows.Reset();
-	if (!Initialize(OutError))
-	{
-		return false;
-	}
 	FSQLitePreparedStatement Stmt;
 	if (!Stmt.Create(
 		*Db,
@@ -635,20 +841,31 @@ bool FUnrealAiVectorIndexStore::GetTopSourcesByChunkCount(const int32 Limit, TAr
 	return true;
 }
 
+bool FUnrealAiVectorIndexStore::GetTopSourcesByChunkCount(const int32 Limit, TArray<TPair<FString, int32>>& OutRows, FString& OutError)
+{
+	FScopeLock Lock(&DbMutex);
+	if (!EnsureInitializedUnlocked(OutError))
+	{
+		return false;
+	}
+	return GetTopSourcesByChunkCount_NoLock(Limit, OutRows, OutError);
+}
+
 bool FUnrealAiVectorIndexStore::GetTopSourcesByChunkCountWithSamples(
 	const int32 Limit,
 	const int32 SamplePerSource,
 	TArray<FUnrealAiVectorDbTopSourceRow>& OutRows,
 	FString& OutError)
 {
+	FScopeLock Lock(&DbMutex);
 	OutRows.Reset();
-	if (!Initialize(OutError))
+	if (!EnsureInitializedUnlocked(OutError))
 	{
 		return false;
 	}
 
 	TArray<TPair<FString, int32>> Top;
-	if (!GetTopSourcesByChunkCount(Limit, Top, OutError))
+	if (!GetTopSourcesByChunkCount_NoLock(Limit, Top, OutError))
 	{
 		return false;
 	}
@@ -751,6 +968,27 @@ bool FUnrealAiVectorIndexStore::LoadManifest(FUnrealAiVectorManifest& OutManifes
 	{
 		OutManifest.ChunksIndexed = static_cast<int32>(Number);
 	}
+	if (Root->TryGetNumberField(TEXT("index_build_target_chunks"), Number))
+	{
+		OutManifest.IndexBuildTargetChunks = static_cast<int32>(Number);
+	}
+	if (Root->TryGetNumberField(TEXT("index_build_completed_chunks"), Number))
+	{
+		OutManifest.IndexBuildCompletedChunks = static_cast<int32>(Number);
+	}
+	if (Root->TryGetNumberField(TEXT("index_build_wave_total"), Number))
+	{
+		OutManifest.IndexBuildWaveTotal = static_cast<int32>(Number);
+	}
+	if (Root->TryGetNumberField(TEXT("index_build_wave_done"), Number))
+	{
+		OutManifest.IndexBuildWaveDone = static_cast<int32>(Number);
+	}
+	FString PhaseStartedIso;
+	if (Root->TryGetStringField(TEXT("index_build_phase_started_utc"), PhaseStartedIso))
+	{
+		FDateTime::ParseIso8601(*PhaseStartedIso, OutManifest.IndexBuildPhaseStartedUtc);
+	}
 	if (Root->TryGetNumberField(TEXT("pending_dirty_count"), Number))
 	{
 		OutManifest.PendingDirtyCount = static_cast<int32>(Number);
@@ -782,6 +1020,14 @@ bool FUnrealAiVectorIndexStore::SaveManifest(const FUnrealAiVectorManifest& Mani
 	Root->SetStringField(TEXT("last_incremental_scan_utc"), Manifest.LastIncrementalScanUtc.ToIso8601());
 	Root->SetNumberField(TEXT("files_indexed"), Manifest.FilesIndexed);
 	Root->SetNumberField(TEXT("chunks_indexed"), Manifest.ChunksIndexed);
+	Root->SetNumberField(TEXT("index_build_target_chunks"), Manifest.IndexBuildTargetChunks);
+	Root->SetNumberField(TEXT("index_build_completed_chunks"), Manifest.IndexBuildCompletedChunks);
+	Root->SetNumberField(TEXT("index_build_wave_total"), Manifest.IndexBuildWaveTotal);
+	Root->SetNumberField(TEXT("index_build_wave_done"), Manifest.IndexBuildWaveDone);
+	if (Manifest.IndexBuildPhaseStartedUtc > FDateTime::MinValue())
+	{
+		Root->SetStringField(TEXT("index_build_phase_started_utc"), Manifest.IndexBuildPhaseStartedUtc.ToIso8601());
+	}
 	Root->SetNumberField(TEXT("pending_dirty_count"), Manifest.PendingDirtyCount);
 	Root->SetStringField(TEXT("status"), Manifest.Status);
 	Root->SetStringField(TEXT("migration_state"), Manifest.MigrationState);

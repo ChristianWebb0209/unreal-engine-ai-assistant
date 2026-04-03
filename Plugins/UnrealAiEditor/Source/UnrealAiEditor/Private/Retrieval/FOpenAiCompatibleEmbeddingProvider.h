@@ -14,12 +14,20 @@ public:
 		const FUnrealAiEmbeddingRequest& Request,
 		FUnrealAiEmbeddingResponse& OutResponse) override;
 
-private:
-	bool EmbedOne_OnGameThread(
+	virtual bool EmbedBatch(
 		const FString& ModelId,
-		const FUnrealAiEmbeddingRequest& Request,
-		FUnrealAiEmbeddingResponse& OutResponse,
-		bool bCallerThreadPumpsHttp = false);
+		const TArray<FString>& InputTexts,
+		bool bBackgroundIndexer,
+		TArray<TArray<float>>& OutVectors,
+		FString& OutError) override;
+
+private:
+	bool EmbedTexts_OnGameThread(
+		const FString& ModelId,
+		const TArray<FString>& InputTexts,
+		TArray<TArray<float>>& OutVectors,
+		FString& OutError,
+		bool bCallerThreadPumpsHttp);
 
 	FUnrealAiModelProfileRegistry* Profiles = nullptr;
 };
