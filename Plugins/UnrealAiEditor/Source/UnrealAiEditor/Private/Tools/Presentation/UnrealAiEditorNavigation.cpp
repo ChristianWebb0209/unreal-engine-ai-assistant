@@ -1,8 +1,12 @@
 #include "Tools/Presentation/UnrealAiEditorNavigation.h"
 
+#include "ContentBrowserModule.h"
+#include "Containers/Ticker.h"
 #include "Editor.h"
 #include "GameFramework/Actor.h"
 #include "HAL/PlatformProcess.h"
+#include "IContentBrowserSingleton.h"
+#include "Modules/ModuleManager.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -35,17 +39,6 @@ namespace
 		{
 			S = FString::Printf(TEXT("%s.%s"), *S, *Leaf);
 		}
-		return S;
-	}
-
-	static FString NormalizePotentialObjectPath(FString S)
-	{
-		S.TrimStartAndEndInline();
-		if (S.StartsWith(TEXT("Game/")))
-		{
-			S = FString(TEXT("/")) + S;
-		}
-		S = NormalizeAssetObjectPath(S);
 		return S;
 	}
 
@@ -125,20 +118,21 @@ bool UnrealAiEditorNavigation::NavigateToAssetObjectPath(const FString& ObjectPa
 
 bool UnrealAiEditorNavigation::NavigateFromChatMarkdownTarget(const FString& TargetIn)
 {
-	FString Target = NormalizePotentialObjectPath(TargetIn);
-	if (Target.IsEmpty())
+	FString Raw = TargetIn;
+	Raw.TrimStartAndEndInline();
+	if (Raw.StartsWith(TEXT("\"")) && Raw.EndsWith(TEXT("\"")) && Raw.Len() > 1)
+	{
+		Raw = Raw.Mid(1, Raw.Len() - 2);
+		Raw.TrimStartAndEndInline();
+	}
+	if (Raw.IsEmpty())
 	{
 		return false;
 	}
 
-	if (IsProbablyWebOrMailto(Target))
+	if (IsProbablyWebOrMailto(Raw))
 	{
-		FPlatformProcess::LaunchURL(*Target, nullptr, nullptr);
-		return true;
-	}
-
-	if (NavigateToAssetObjectPath(Target))
-	{
+		FPlatformProcess::LaunchURL(*Raw, nullptr, nullptr);
 		return true;
 	}
 
@@ -147,22 +141,88 @@ bool UnrealAiEditorNavigation::NavigateFromChatMarkdownTarget(const FString& Tar
 		return false;
 	}
 
-	// Subobject / actor paths (e.g. /Game/Maps/Foo.Foo:PersistentLevel.StaticMeshActor_0)
-	if (Target.Contains(TEXT(":")) || Target.StartsWith(TEXT("PersistentLevel.")))
+	FString T = Raw;
+	if (T.StartsWith(TEXT("Game/")))
 	{
-		if (AActor* Act = Cast<AActor>(StaticFindObject(AActor::StaticClass(), nullptr, *Target, EFindObjectFlags::None)))
+		T = FString(TEXT("/")) + T;
+	}
+
+	// Map / subobject paths (e.g. /Game/Maps/Foo.Foo:PersistentLevel.StaticMeshActor_0) — before /Game folder heuristics.
+	if (!IsProbablyWebOrMailto(Raw) && (T.Contains(TEXT(":")) || T.StartsWith(TEXT("PersistentLevel."))))
+	{
+		if (AActor* Act = Cast<AActor>(StaticFindObject(AActor::StaticClass(), nullptr, *T, EFindObjectFlags::None)))
 		{
 			GEditor->SelectNone(false, true);
 			GEditor->SelectActor(Act, true, true);
 			return true;
 		}
-		if (UObject* SubObj = StaticFindObject(UObject::StaticClass(), nullptr, *Target, EFindObjectFlags::None))
+		if (UObject* SubObj = StaticFindObject(UObject::StaticClass(), nullptr, *T, EFindObjectFlags::None))
 		{
 			OpenAssetEditorPreferDocked(SubObj);
 			return true;
 		}
+		return false;
 	}
 
-	return false;
+	const int32 LastSlash = T.Find(TEXT("/"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+	const FString Tail = (LastSlash != INDEX_NONE) ? T.Mid(LastSlash + 1) : T;
+	const bool bTailHasDot = Tail.Contains(TEXT("."));
+
+	if (T.StartsWith(TEXT("/Game/")) || T.StartsWith(TEXT("/Engine/")))
+	{
+		if (bTailHasDot)
+		{
+			const FString Normalized = NormalizeAssetObjectPath(T);
+			// Full object path: open the asset editor (sync alone felt like a "broken" link).
+			if (NavigateToAssetObjectPath(Normalized))
+			{
+				return true;
+			}
+		}
+		if (FModuleManager::Get().IsModuleLoaded(TEXT("ContentBrowser")))
+		{
+			FContentBrowserModule& CBM = FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser"));
+			CBM.Get().SyncBrowserToFolders({T});
+			return true;
+		}
+		return false;
+	}
+
+	if (T.StartsWith(TEXT("/Script/")))
+	{
+		if (UObject* Obj = LoadObject<UObject>(nullptr, *T))
+		{
+			TArray<UObject*> ToSync;
+			ToSync.Add(Obj);
+			GEditor->SyncBrowserToObjects(ToSync);
+			return true;
+		}
+		return false;
+	}
+
+	// Rare paths: fall back to sync + open (tool-style).
+	FString Fallback = NormalizeAssetObjectPath(T);
+	return NavigateToAssetObjectPath(Fallback);
+}
+
+void UnrealAiEditorNavigation::NavigateFromChatMarkdownTargetFromChatLink(const FString& Target)
+{
+	FString Quick = Target;
+	Quick.TrimStartAndEndInline();
+	const bool bUrl = Quick.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
+		|| Quick.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase)
+		|| Quick.StartsWith(TEXT("mailto:"), ESearchCase::IgnoreCase);
+	if (bUrl)
+	{
+		NavigateFromChatMarkdownTarget(Target);
+		return;
+	}
+
+	const FString Copy = Target;
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Copy](float) -> bool
+	{
+		UnrealAiEditorNavigation::NavigateFromChatMarkdownTarget(Copy);
+		return false;
+	}));
 }
 

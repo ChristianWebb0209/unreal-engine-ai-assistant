@@ -44,11 +44,23 @@ FUnrealAiToolInvocationResult FUnrealAiToolExecutionHost::InvokeTool(
 		}
 	}
 
-	const bool bFocused = UnrealAiConsumeFocusedFlag(Args);
+	// Optional per-call opt-out: "focused": false suppresses follow navigation when global Editor focus is on.
+	bool bSuppressEditorFollow = false;
+	if (Args.IsValid() && Args->HasField(TEXT("focused")))
+	{
+		bool bFocusedField = true;
+		if (Args->TryGetBoolField(TEXT("focused"), bFocusedField) && !bFocusedField)
+		{
+			bSuppressEditorFollow = true;
+		}
+	}
+	UnrealAiConsumeFocusedFlag(Args);
 	const TSharedPtr<FJsonObject> Entry = Catalog.FindToolDefinition(ToolName);
 	FUnrealAiToolInvocationResult Result =
 		UnrealAiDispatchTool(ToolName, Args, Entry, Registry, SessionProjectId, SessionThreadId);
-	if (Result.bOk && bFocused && FUnrealAiEditorModule::IsEditorFocusEnabled())
+	// When Editor focus is enabled, automatically open/foreground relevant editors after successful
+	// blueprint/asset/content tools (models rarely pass focused:true). Explicit focused:false opts out.
+	if (Result.bOk && FUnrealAiEditorModule::IsEditorFocusEnabled() && !bSuppressEditorFollow)
 	{
 		UnrealAiApplyPostToolEditorFocus(ToolName, Args, Result);
 	}

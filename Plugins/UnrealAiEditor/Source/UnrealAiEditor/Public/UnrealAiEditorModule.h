@@ -26,7 +26,7 @@ public:
 	static void NotifyContextAttachmentsChanged();
 	static FSimpleMulticastDelegate& OnContextAttachmentsChanged();
 
-	/** Global: allow optional post-tool editor navigation (focused flag) and non-essential UI (e.g. Content Browser sync). Default false. Persisted in plugin_settings.json under ui.editorFocus. */
+	/** Global: after successful tools, open/foreground Blueprint editors, assets, and related UI where supported. Default false. Per-call "focused": false opts out. Persisted in plugin_settings.json under ui.editorFocus. */
 	static bool IsEditorFocusEnabled();
 	static void SetEditorFocusEnabled(bool bEnabled);
 	static void HydrateEditorFocusFromJsonRoot(const TSharedPtr<FJsonObject>& Root);
