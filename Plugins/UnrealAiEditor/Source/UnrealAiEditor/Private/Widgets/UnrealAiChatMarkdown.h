@@ -14,8 +14,7 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownChatBody(const FString& Markdown);
 FString UnrealAiStripInlineMarkdown(const FString& Line);
 
 /**
- * Single clickable link (blue hyperlink styling, small leading icon for web vs editor targets).
- * Target is passed to navigation (http(s)/mailto vs Unreal object paths).
+ * Single clickable link (wrapping blue text). Target is passed to navigation (http(s)/mailto vs Unreal paths).
  */
 TSharedRef<SWidget> UnrealAiMakeChatHyperlink(const FString& Label, const FString& Target);
 

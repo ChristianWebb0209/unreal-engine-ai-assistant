@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Templates/Function.h"
 #include "Harness/IAgentRunSink.h"
 #include "Harness/UnrealAiAgentTypes.h"
 
@@ -49,10 +50,21 @@ public:
 	virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) override;
 
 private:
+	static void AppendStreamChunkFilteringTranscriptEchoLines(
+		FString& LineCarry,
+		const FString& Chunk,
+		TFunctionRef<void(const FString&)> EmitDelta);
+
+	void FlushStreamLineCarries();
+
 	TSharedPtr<FUnrealAiChatTranscript> Transcript;
 	TSharedPtr<FUnrealAiChatUiSession> Session;
 	IUnrealAiPersistence* Persistence = nullptr;
 	FString ProjectId;
 	FString ThreadId;
 	EUnrealAiAgentMode AgentMode = EUnrealAiAgentMode::Agent;
+
+	/** Incomplete line tails from streamed tokens; strip "--- Section ---" only on full lines. */
+	FString AssistantStreamLineCarry;
+	FString ThinkingStreamLineCarry;
 };

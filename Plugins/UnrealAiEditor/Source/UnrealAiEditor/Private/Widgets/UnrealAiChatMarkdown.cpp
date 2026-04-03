@@ -3,26 +3,61 @@
 #include "Tools/Presentation/UnrealAiEditorNavigation.h"
 #include "Style/UnrealAiEditorStyle.h"
 
+#include "Framework/Commands/UIAction.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Misc/Char.h"
 #include "Styling/AppStyle.h"
-#include "Widgets/Images/SImage.h"
-#include "Widgets/Input/SHyperlink.h"
+#include "Styling/CoreStyle.h"
+#include "Input/CursorReply.h"
+#include "Input/Events.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Layout/SWrapBox.h"
-#include "Widgets/Text/STextBlock.h"
+#include "Widgets/SCompoundWidget.h"
+#include "Widgets/Text/SMultiLineEditableText.h"
 
-#if WITH_EDITOR
-#include "AssetRegistry/AssetRegistryModule.h"
-#include "ClassIconFinder.h"
-#include "Editor.h"
-#include "GameFramework/Actor.h"
-#include "Modules/ModuleManager.h"
-#include "UObject/SoftObjectPath.h"
-#include "UObject/UObjectGlobals.h"
-#endif
+/** Updates shared prose wrap width from allotted geometry so every frame's layout sees the current column width (narrow and wide). */
+class SChatMarkdownProseWidthShim final : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SChatMarkdownProseWidthShim) {}
+		/** Must be set; use TSharedPtr so default FArguments() does not invoke forbidden TSharedRef(). */
+		SLATE_ARGUMENT(TSharedPtr<float>, ProseWrapWidthPx)
+		SLATE_DEFAULT_SLOT(FArguments, Content)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs)
+	{
+		ProseWrapWidthPx = InArgs._ProseWrapWidthPx;
+		check(ProseWrapWidthPx.IsValid());
+		ChildSlot.HAlign(HAlign_Fill)
+		[
+			InArgs._Content.Widget
+		];
+		SetCanTick(true);
+	}
+
+	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override
+	{
+		SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+		const float W = AllottedGeometry.GetLocalSize().X;
+		if (W <= KINDA_SMALL_NUMBER)
+		{
+			return;
+		}
+		const float Clamped = FMath::Max(8.f, W);
+		if (!FMath::IsNearlyEqual(*ProseWrapWidthPx, Clamped, 0.25f))
+		{
+			*ProseWrapWidthPx = Clamped;
+			Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Prepass);
+		}
+	}
+
+private:
+	TSharedPtr<float> ProseWrapWidthPx;
+};
 
 FString UnrealAiStripInlineMarkdown(const FString& Line)
 {
@@ -32,6 +67,108 @@ FString UnrealAiStripInlineMarkdown(const FString& Line)
 	O.ReplaceInline(TEXT("`"), TEXT(""));
 	return O;
 }
+
+/** Read-only multiline text that supports selection/copy; plain click opens the link if the pointer did not drag (dragging still selects). */
+class SChatSelectableLinkEdit final : public SMultiLineEditableText
+{
+public:
+	SLATE_BEGIN_ARGS(SChatSelectableLinkEdit) {}
+		SLATE_ARGUMENT(FString, LinkTarget)
+		SLATE_ARGUMENT(FString, LinkLabel)
+		SLATE_ARGUMENT(FSlateFontInfo, LinkFont)
+		SLATE_ARGUMENT(TSharedPtr<float>, ProseWrapWidthPx)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs)
+	{
+		LinkTarget = InArgs._LinkTarget;
+		const FString TargetCopy = LinkTarget;
+		const TSharedPtr<float> Wpx = InArgs._ProseWrapWidthPx;
+		check(Wpx.IsValid());
+		FTextBlockStyle LinkStyle =
+			FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>(TEXT("NormalUnderlinedText"));
+		LinkStyle.SetFont(InArgs._LinkFont);
+		LinkStyle.SetColorAndOpacity(
+			FSlateColor(FLinearColor(0.25f, 0.52f, 0.96f, 1.f)));
+		SMultiLineEditableText::Construct(SMultiLineEditableText::FArguments()
+											  .Text(FText::FromString(InArgs._LinkLabel))
+											  .TextStyle(&LinkStyle)
+											  .IsReadOnly(true)
+											  .AutoWrapText(true)
+											  .WrapTextAt(TAttribute<float>::CreateLambda([Wpx]()
+											  {
+												  return FMath::Max(8.f, *Wpx);
+											  }))
+											  .WrappingPolicy(ETextWrappingPolicy::AllowPerCharacterWrapping)
+											  .AllowContextMenu(true)
+											  .SelectAllTextWhenFocused(false)
+											  .OnContextMenuOpening(FOnContextMenuOpening::CreateLambda(
+												  [TargetCopy]()
+												  {
+													  FMenuBuilder MenuBuilder(true, nullptr);
+													  MenuBuilder.AddMenuEntry(
+														  NSLOCTEXT("UnrealAiEditor", "ChatOpenLink", "Open link"),
+														  NSLOCTEXT(
+															  "UnrealAiEditor",
+															  "ChatOpenLinkTip",
+															  "Go to this URL or project path"),
+														  FSlateIcon(),
+														  FUIAction(FExecuteAction::CreateLambda([TargetCopy]()
+														  {
+															  UnrealAiEditorNavigation::
+																  NavigateFromChatMarkdownTargetFromChatLink(
+																	  TargetCopy);
+														  })));
+													  return MenuBuilder.MakeWidget();
+												  })));
+		SetToolTipText(NSLOCTEXT("UnrealAiEditor", "ChatLinkClickTip", "Click to open this link"));
+	}
+
+	virtual FCursorReply OnCursorQuery(const FGeometry& MyGeometry, const FPointerEvent& CursorEvent) const override
+	{
+		return FCursorReply::Cursor(EMouseCursor::Hand);
+	}
+
+	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+	{
+		if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+		{
+			bLinkLeftDown = true;
+			LinkPressScreenPos = MouseEvent.GetScreenSpacePosition();
+		}
+		return SMultiLineEditableText::OnMouseButtonDown(MyGeometry, MouseEvent);
+	}
+
+	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+	{
+		if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bLinkLeftDown)
+		{
+			bLinkLeftDown = false;
+			const FVector2D Delta = MouseEvent.GetScreenSpacePosition() - LinkPressScreenPos;
+			if (Delta.SizeSquared() <= 64.f)
+			{
+				UnrealAiEditorNavigation::NavigateFromChatMarkdownTargetFromChatLink(LinkTarget);
+				return FReply::Handled();
+			}
+		}
+		else if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+		{
+			bLinkLeftDown = false;
+		}
+		return SMultiLineEditableText::OnMouseButtonUp(MyGeometry, MouseEvent);
+	}
+
+	virtual void OnMouseLeave(const FPointerEvent& MouseEvent) override
+	{
+		bLinkLeftDown = false;
+		SMultiLineEditableText::OnMouseLeave(MouseEvent);
+	}
+
+private:
+	FString LinkTarget;
+	bool bLinkLeftDown = false;
+	FVector2D LinkPressScreenPos = FVector2D::ZeroVector;
+};
 
 namespace UnrealAiChatMarkdownInline
 {
@@ -49,6 +186,28 @@ namespace UnrealAiChatMarkdownInline
 		FString Text;
 		FString Target;
 	};
+
+	static TSharedRef<SMultiLineEditableText> MakeChatSelectableReadonlyText(
+		const FString& Body,
+		const FSlateFontInfo& Font,
+		const FSlateColor& SlateColor,
+		const TSharedRef<float>& ProseWrapWidthPx)
+	{
+		FTextBlockStyle TextStyle =
+			FCoreStyle::Get().GetWidgetStyle<FTextBlockStyle>(TEXT("NormalText"));
+		TextStyle.SetFont(Font);
+		TextStyle.SetColorAndOpacity(SlateColor);
+		const TSharedRef<float> Wpx = ProseWrapWidthPx;
+		return SNew(SMultiLineEditableText)
+			.Text(FText::FromString(Body))
+			.TextStyle(&TextStyle)
+			.IsReadOnly(true)
+			.AutoWrapText(true)
+			.WrapTextAt(TAttribute<float>::CreateLambda([Wpx]() { return FMath::Max(8.f, *Wpx); }))
+			.WrappingPolicy(ETextWrappingPolicy::AllowPerCharacterWrapping)
+			.AllowContextMenu(true)
+			.SelectAllTextWhenFocused(false);
+	}
 
 	static void SplitBareHttpUrlsFromText(const FString& Text, TArray<FInlineSegment>& OutAppend)
 	{
@@ -141,6 +300,101 @@ namespace UnrealAiChatMarkdownInline
 				continue;
 			}
 			SplitBareHttpUrlsFromText(Seg.Text, Expanded);
+		}
+		Segs = MoveTemp(Expanded);
+	}
+
+	static void SplitBareUnrealObjectPathsFromText(const FString& Text, TArray<FInlineSegment>& OutAppend)
+	{
+		if (Text.IsEmpty())
+		{
+			return;
+		}
+		int32 Pos = 0;
+		const int32 Len = Text.Len();
+		while (Pos < Len)
+		{
+			const int32 HitGame = Text.Find(TEXT("/Game/"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Pos);
+			const int32 HitEngine = Text.Find(TEXT("/Engine/"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Pos);
+			const int32 HitScript = Text.Find(TEXT("/Script/"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Pos);
+			int32 Hit = INDEX_NONE;
+			if (HitGame >= 0)
+			{
+				Hit = HitGame;
+			}
+			if (HitEngine >= 0)
+			{
+				Hit = Hit == INDEX_NONE ? HitEngine : FMath::Min(Hit, HitEngine);
+			}
+			if (HitScript >= 0)
+			{
+				Hit = Hit == INDEX_NONE ? HitScript : FMath::Min(Hit, HitScript);
+			}
+
+			if (Hit == INDEX_NONE)
+			{
+				const FString Tail = Text.Mid(Pos);
+				if (!Tail.IsEmpty())
+				{
+					FInlineSegment Seg;
+					Seg.Kind = ESegmentKind::Text;
+					Seg.Text = Tail;
+					OutAppend.Add(MoveTemp(Seg));
+				}
+				break;
+			}
+			if (Hit > Pos)
+			{
+				const FString Pre = Text.Mid(Pos, Hit - Pos);
+				if (!Pre.IsEmpty())
+				{
+					FInlineSegment Seg;
+					Seg.Kind = ESegmentKind::Text;
+					Seg.Text = Pre;
+					OutAppend.Add(MoveTemp(Seg));
+				}
+			}
+
+			int32 PathEnd = Hit + 1;
+			while (PathEnd < Len)
+			{
+				const TCHAR Ch = Text[PathEnd];
+				if (FChar::IsWhitespace(Ch) || Ch == TEXT(')') || Ch == TEXT(']') || Ch == TEXT('>')
+					|| Ch == TEXT('"') || Ch == TEXT('\'') || Ch == TEXT('`') || Ch == TEXT(','))
+				{
+					break;
+				}
+				++PathEnd;
+			}
+			while (PathEnd > Hit
+				&& (Text[PathEnd - 1] == TEXT(';') || Text[PathEnd - 1] == TEXT('!')))
+			{
+				--PathEnd;
+			}
+			const FString PathToken = Text.Mid(Hit, PathEnd - Hit).TrimStartAndEnd();
+			if (!PathToken.IsEmpty())
+			{
+				FInlineSegment Seg;
+				Seg.Kind = ESegmentKind::Link;
+				Seg.Text = PathToken;
+				Seg.Target = PathToken;
+				OutAppend.Add(MoveTemp(Seg));
+			}
+			Pos = FMath::Max(PathEnd, Hit + 1);
+		}
+	}
+
+	static void ExpandTextSegmentsBareUnrealPaths(TArray<FInlineSegment>& Segs)
+	{
+		TArray<FInlineSegment> Expanded;
+		for (FInlineSegment& Seg : Segs)
+		{
+			if (Seg.Kind != ESegmentKind::Text)
+			{
+				Expanded.Add(MoveTemp(Seg));
+				continue;
+			}
+			SplitBareUnrealObjectPathsFromText(Seg.Text, Expanded);
 		}
 		Segs = MoveTemp(Expanded);
 	}
@@ -399,90 +653,27 @@ namespace UnrealAiChatMarkdownInline
 		ExpandTextSegmentsInlineCode(OutSegments);
 		ExpandTextSegmentsBold(OutSegments);
 		ExpandTextSegmentsBareUrls(OutSegments);
+		ExpandTextSegmentsBareUnrealPaths(OutSegments);
 	}
 
-	static const FSlateBrush* BrushForChatLinkTarget(const FString& TargetIn)
+	TSharedRef<SWidget> MakeChatHyperlinkRow(
+		const FString& Label,
+		const FString& Target,
+		const FSlateFontInfo& LinkFont,
+		const TSharedRef<float>& ProseWrapWidthPx)
 	{
-		FString T = TargetIn;
-		T.TrimStartAndEndInline();
-		if (T.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
-			|| T.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase))
-		{
-			return FAppStyle::GetBrush(TEXT("Icons.Import"));
-		}
-		if (T.StartsWith(TEXT("mailto:"), ESearchCase::IgnoreCase))
-		{
-			return FAppStyle::GetBrush(TEXT("Icons.Plus"));
-		}
-#if WITH_EDITOR
-		if (!T.StartsWith(TEXT("/")) && T.StartsWith(TEXT("Game/")))
-		{
-			T = FString(TEXT("/")) + T;
-		}
-		if (T.Contains(TEXT(":")) && GEditor)
-		{
-			if (AActor* Act = Cast<AActor>(StaticFindObject(AActor::StaticClass(), nullptr, *T, EFindObjectFlags::None)))
-			{
-				return FClassIconFinder::FindIconForActor(Act);
-			}
-		}
-		if (FModuleManager::Get().IsModuleLoaded(TEXT("AssetRegistry")))
-		{
-			FAssetRegistryModule& ARM = FModuleManager::GetModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
-			const FAssetData AD = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(T));
-			if (AD.IsValid())
-			{
-				bool bIsClassType = false;
-				if (const UClass* IconCls = FClassIconFinder::GetIconClassForAssetData(AD, &bIsClassType))
-				{
-					return FClassIconFinder::FindThumbnailForClass(IconCls);
-				}
-			}
-		}
-		if (UObject* Obj = LoadObject<UObject>(nullptr, *T))
-		{
-			return FClassIconFinder::FindThumbnailForClass(Obj->GetClass());
-		}
-#endif
-		return FAppStyle::GetBrush(TEXT("Icons.Document"));
+		return SNew(SChatSelectableLinkEdit)
+			.LinkTarget(Target)
+			.LinkLabel(UnrealAiStripInlineMarkdown(Label))
+			.LinkFont(LinkFont)
+			.ProseWrapWidthPx(ProseWrapWidthPx.ToSharedPtr());
 	}
 
-	TSharedRef<SWidget> MakeChatHyperlinkRow(const FString& Label, const FString& Target)
-	{
-		const FSlateBrush* IconBrush = BrushForChatLinkTarget(Target);
-		TSharedRef<SHorizontalBox> Row = SNew(SHorizontalBox);
-		if (IconBrush)
-		{
-			Row->AddSlot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(0.f, 0.f, 4.f, 0.f)
-				[
-					SNew(SBox)
-						.WidthOverride(14.f)
-						.HeightOverride(14.f)
-						[
-							SNew(SImage)
-								.Image(IconBrush)
-						]
-				];
-		}
-		Row->AddSlot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			[
-				SNew(SHyperlink)
-					.Style(FAppStyle::Get(), TEXT("CommonHyperlink"))
-					.Text(FText::FromString(UnrealAiStripInlineMarkdown(Label)))
-					.OnNavigate_Lambda([Target]()
-					{
-						UnrealAiEditorNavigation::NavigateFromChatMarkdownTarget(Target);
-					})
-			];
-		return Row;
-	}
-
-	TSharedRef<SWidget> MakeLinkAwareBodyText(const FString& LineText, const FSlateFontInfo& Font, const FSlateColor& Color)
+	TSharedRef<SWidget> MakeLinkAwareBodyText(
+		const FString& LineText,
+		const FSlateFontInfo& Font,
+		const FSlateColor& Color,
+		const TSharedRef<float>& ProseWrapWidthPx)
 	{
 		TArray<FInlineSegment> Segs;
 		SplitInlineLinks(LineText, Segs);
@@ -494,7 +685,10 @@ namespace UnrealAiChatMarkdownInline
 			if (Seg.Kind == ESegmentKind::Link && !Seg.Target.IsEmpty())
 			{
 				const FString Display = Seg.Text.IsEmpty() ? Seg.Target : Seg.Text;
-				Wrap->AddSlot().Padding(FMargin(0.f, 0.f, 2.f, 0.f))[MakeChatHyperlinkRow(Display, Seg.Target)];
+				Wrap->AddSlot().Padding(FMargin(0.f, 0.f, 2.f, 0.f))
+				[
+					MakeChatHyperlinkRow(Display, Seg.Target, Font, ProseWrapWidthPx)
+				];
 				continue;
 			}
 			if (Seg.Kind == ESegmentKind::Code)
@@ -503,18 +697,18 @@ namespace UnrealAiChatMarkdownInline
 				{
 					Wrap->AddSlot().Padding(FMargin(0.f, 0.f, 2.f, 0.f))
 					[
-						MakeChatHyperlinkRow(Seg.Text, Seg.Target)
+						MakeChatHyperlinkRow(Seg.Text, Seg.Target, FUnrealAiEditorStyle::FontMono9(), ProseWrapWidthPx)
 					];
 				}
 				else
 				{
 					Wrap->AddSlot()
 					[
-						SNew(STextBlock)
-							.Font(FUnrealAiEditorStyle::FontMono9())
-							.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextPrimary())
-							.AutoWrapText(true)
-							.Text(FText::FromString(Seg.Text))
+						MakeChatSelectableReadonlyText(
+							Seg.Text,
+							FUnrealAiEditorStyle::FontMono9(),
+							FUnrealAiEditorStyle::ColorTextPrimary(),
+							ProseWrapWidthPx)
 					];
 				}
 				continue;
@@ -523,22 +717,22 @@ namespace UnrealAiChatMarkdownInline
 			{
 				Wrap->AddSlot().Padding(FMargin(0.f, 0.f, 2.f, 0.f))
 				[
-					SNew(STextBlock)
-						.Font(FUnrealAiEditorStyle::FontBold(11))
-						.ColorAndOpacity(Color)
-						.AutoWrapText(true)
-						.Text(FText::FromString(UnrealAiStripInlineMarkdown(Seg.Text)))
+					MakeChatSelectableReadonlyText(
+						UnrealAiStripInlineMarkdown(Seg.Text),
+						FUnrealAiEditorStyle::FontBold(11),
+						Color,
+						ProseWrapWidthPx)
 				];
 				continue;
 			}
 
 			Wrap->AddSlot()
 				[
-					SNew(STextBlock)
-						.Font(Font)
-						.ColorAndOpacity(Color)
-						.AutoWrapText(true)
-						.Text(FText::FromString(UnrealAiStripInlineMarkdown(Seg.Text)))
+					MakeChatSelectableReadonlyText(
+						UnrealAiStripInlineMarkdown(Seg.Text),
+						Font,
+						Color,
+						ProseWrapWidthPx)
 				];
 		}
 		return Wrap;
@@ -548,7 +742,12 @@ namespace UnrealAiChatMarkdownInline
 TSharedRef<SWidget> UnrealAiMakeChatHyperlink(const FString& Label, const FString& Target)
 {
 	const FString L = Label.IsEmpty() ? Target : Label;
-	return UnrealAiChatMarkdownInline::MakeChatHyperlinkRow(L, Target);
+	const TSharedRef<float> StandaloneWrapPx = MakeShared<float>(16000.f);
+	return UnrealAiChatMarkdownInline::MakeChatHyperlinkRow(
+		L,
+		Target,
+		FUnrealAiEditorStyle::FontBodyRegular11(),
+		StandaloneWrapPx);
 }
 
 namespace UnrealAiChatMarkdown
@@ -775,7 +974,10 @@ namespace UnrealAiChatMarkdown
 		return FUnrealAiEditorStyle::FontBold(Size);
 	}
 
-	static TSharedRef<SWidget> MakeTodoRow(bool bDone, const FString& ItemText)
+	static TSharedRef<SWidget> MakeTodoRow(
+		bool bDone,
+		const FString& ItemText,
+		const TSharedRef<float>& ProseWrapWidthPx)
 	{
 		const TCHAR* Box = bDone ? TEXT("\x2611") : TEXT("\x2610");
 		const FLinearColor Accent = bDone ? FUnrealAiEditorStyle::LinearColorMarkdownTodoDoneCheck()
@@ -790,10 +992,11 @@ namespace UnrealAiChatMarkdown
 					  .VAlign(VAlign_Top)
 					  .Padding(0.f, 0.f, 10.f, 0.f)
 				[
-					SNew(STextBlock)
-						.Font(FUnrealAiEditorStyle::FontSectionHeading())
-						.ColorAndOpacity(FSlateColor(Accent))
-						.Text(FText::FromString(FString(Box)))
+					UnrealAiChatMarkdownInline::MakeChatSelectableReadonlyText(
+						FString(Box),
+						FUnrealAiEditorStyle::FontSectionHeading(),
+						FSlateColor(Accent),
+						ProseWrapWidthPx)
 				]
 				+ SHorizontalBox::Slot()
 					  .FillWidth(1.f)
@@ -802,12 +1005,13 @@ namespace UnrealAiChatMarkdown
 					UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 						ItemText,
 						FUnrealAiEditorStyle::FontBodyRegular11(),
-						FUnrealAiEditorStyle::ColorMarkdownBody())
+						FUnrealAiEditorStyle::ColorMarkdownBody(),
+						ProseWrapWidthPx)
 				]
 			];
 	}
 
-	static TSharedRef<SWidget> MakeBulletRow(const FString& ItemText)
+	static TSharedRef<SWidget> MakeBulletRow(const FString& ItemText, const TSharedRef<float>& ProseWrapWidthPx)
 	{
 		return SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot()
@@ -815,10 +1019,11 @@ namespace UnrealAiChatMarkdown
 				  .VAlign(VAlign_Top)
 				  .Padding(0.f, 1.f, 6.f, 0.f)
 			[
-				SNew(STextBlock)
-					.Font(BodyFont())
-					.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
-					.Text(FText::FromString(TEXT("\x2022")))
+				UnrealAiChatMarkdownInline::MakeChatSelectableReadonlyText(
+					FString(TEXT("\x2022")),
+					BodyFont(),
+					FUnrealAiEditorStyle::ColorTextMuted(),
+					ProseWrapWidthPx)
 			]
 			+ SHorizontalBox::Slot()
 				  .FillWidth(1.f)
@@ -826,11 +1031,15 @@ namespace UnrealAiChatMarkdown
 				UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 					ItemText,
 					BodyFont(),
-					FUnrealAiEditorStyle::ColorMarkdownBody())
+					FUnrealAiEditorStyle::ColorMarkdownBody(),
+					ProseWrapWidthPx)
 			];
 	}
 
-	static TSharedRef<SWidget> MakeOrderedRow(const int32 OrderedN, const FString& ItemText)
+	static TSharedRef<SWidget> MakeOrderedRow(
+		const int32 OrderedN,
+		const FString& ItemText,
+		const TSharedRef<float>& ProseWrapWidthPx)
 	{
 		const int32 N = FMath::Max(1, OrderedN);
 		return SNew(SHorizontalBox)
@@ -839,10 +1048,11 @@ namespace UnrealAiChatMarkdown
 				  .VAlign(VAlign_Top)
 				  .Padding(0.f, 1.f, 8.f, 0.f)
 			[
-				SNew(STextBlock)
-					.Font(BodyFont())
-					.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
-					.Text(FText::FromString(FString::Printf(TEXT("%d."), N)))
+				UnrealAiChatMarkdownInline::MakeChatSelectableReadonlyText(
+					FString::Printf(TEXT("%d."), N),
+					BodyFont(),
+					FUnrealAiEditorStyle::ColorTextMuted(),
+					ProseWrapWidthPx)
 			]
 			+ SHorizontalBox::Slot()
 				  .FillWidth(1.f)
@@ -850,7 +1060,8 @@ namespace UnrealAiChatMarkdown
 				UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 					ItemText,
 					BodyFont(),
-					FUnrealAiEditorStyle::ColorMarkdownBody())
+					FUnrealAiEditorStyle::ColorMarkdownBody(),
+					ProseWrapWidthPx)
 			];
 	}
 
@@ -925,7 +1136,8 @@ namespace UnrealAiChatMarkdown
 	static void AppendStructuredMarkdownFromProse(
 		const TSharedRef<SVerticalBox>& V,
 		const FString& ProseMarkdown,
-		const bool bToolNoteMergePlainLinesWithSpace)
+		const bool bToolNoteMergePlainLinesWithSpace,
+		const TSharedRef<float>& ProseWrapWidthPx)
 	{
 		if (ProseMarkdown.TrimStartAndEnd().IsEmpty())
 		{
@@ -958,7 +1170,8 @@ namespace UnrealAiChatMarkdown
 						UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 							Para,
 							BodyFont(),
-							FUnrealAiEditorStyle::ColorMarkdownBody())
+							FUnrealAiEditorStyle::ColorMarkdownBody(),
+							ProseWrapWidthPx)
 					];
 				continue;
 			}
@@ -971,7 +1184,8 @@ namespace UnrealAiChatMarkdown
 						UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 							L.Text,
 							HeadingFont(14),
-							FUnrealAiEditorStyle::ColorMarkdownHeading())
+							FUnrealAiEditorStyle::ColorMarkdownHeading(),
+							ProseWrapWidthPx)
 					];
 				break;
 			case ELineKind::H2:
@@ -980,7 +1194,8 @@ namespace UnrealAiChatMarkdown
 						UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 							L.Text,
 							HeadingFont(13),
-							FUnrealAiEditorStyle::ColorMarkdownHeading())
+							FUnrealAiEditorStyle::ColorMarkdownHeading(),
+							ProseWrapWidthPx)
 					];
 				break;
 			case ELineKind::H3:
@@ -989,21 +1204,22 @@ namespace UnrealAiChatMarkdown
 						UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 							L.Text,
 							HeadingFont(11),
-							FUnrealAiEditorStyle::ColorMarkdownHeading())
+							FUnrealAiEditorStyle::ColorMarkdownHeading(),
+							ProseWrapWidthPx)
 					];
 				break;
 			case ELineKind::Bullet:
-				V->AddSlot().AutoHeight().Padding(4.f, 1.f, 0.f, 0.f)[MakeBulletRow(L.Text)];
+				V->AddSlot().AutoHeight().Padding(4.f, 1.f, 0.f, 0.f)[MakeBulletRow(L.Text, ProseWrapWidthPx)];
 				break;
 			case ELineKind::OrderedBullet:
 				V->AddSlot().AutoHeight().Padding(4.f, 1.f, 0.f, 0.f)
-					[MakeOrderedRow(L.OrderedIndex, L.Text)];
+					[MakeOrderedRow(L.OrderedIndex, L.Text, ProseWrapWidthPx)];
 				break;
 			case ELineKind::TodoOpen:
-				V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(false, L.Text)];
+				V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(false, L.Text, ProseWrapWidthPx)];
 				break;
 			case ELineKind::TodoDone:
-				V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(true, L.Text)];
+				V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(true, L.Text, ProseWrapWidthPx)];
 				break;
 			default:
 				V->AddSlot().AutoHeight().Padding(0.f, 1.f)
@@ -1011,7 +1227,8 @@ namespace UnrealAiChatMarkdown
 						UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
 							L.Text,
 							BodyFont(),
-							FUnrealAiEditorStyle::ColorMarkdownBody())
+							FUnrealAiEditorStyle::ColorMarkdownBody(),
+							ProseWrapWidthPx)
 					];
 				break;
 			}
@@ -1037,7 +1254,9 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownChatBody(const FString& Markdown)
 		return SNew(SBox);
 	}
 
+	const TSharedRef<float> ProseWrapWidthPx = MakeShared<float>(2000.f);
 	TSharedRef<SVerticalBox> V = SNew(SVerticalBox);
+	const TSharedRef<float> Wpx = ProseWrapWidthPx;
 	for (const FMarkdownChunk& Ch : Chunks)
 	{
 		if (Ch.bCode)
@@ -1056,6 +1275,8 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownChatBody(const FString& Markdown)
 								SNew(SMultiLineEditableTextBox)
 									.IsReadOnly(true)
 									.AutoWrapText(true)
+									.WrapTextAt(TAttribute<float>::CreateLambda([Wpx]() { return FMath::Max(8.f, *Wpx); }))
+									.WrappingPolicy(ETextWrappingPolicy::AllowPerCharacterWrapping)
 									.Font(FUnrealAiEditorStyle::FontMono8())
 									.Text(FText::FromString(Ch.Text))
 							]
@@ -1064,10 +1285,18 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownChatBody(const FString& Markdown)
 		}
 		else
 		{
-			AppendStructuredMarkdownFromProse(V, Ch.Text, false);
+			AppendStructuredMarkdownFromProse(V, Ch.Text, false, ProseWrapWidthPx);
 		}
 	}
-	return V;
+	return SNew(SChatMarkdownProseWidthShim)
+		.ProseWrapWidthPx(ProseWrapWidthPx.ToSharedPtr())
+		[
+			SNew(SBox)
+				.HAlign(HAlign_Fill)
+				[
+					V
+				]
+		];
 }
 
 TSharedRef<SWidget> UnrealAiBuildMarkdownToolNoteBody(const FString& Markdown)
@@ -1087,7 +1316,9 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownToolNoteBody(const FString& Markdown)
 		return SNew(SBox);
 	}
 
+	const TSharedRef<float> ProseWrapWidthPx = MakeShared<float>(2000.f);
 	TSharedRef<SVerticalBox> V = SNew(SVerticalBox);
+	const TSharedRef<float> Wpx = ProseWrapWidthPx;
 	for (const FMarkdownChunk& Ch : Chunks)
 	{
 		if (Ch.bCode)
@@ -1106,6 +1337,8 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownToolNoteBody(const FString& Markdown)
 								SNew(SMultiLineEditableTextBox)
 									.IsReadOnly(true)
 									.AutoWrapText(true)
+									.WrapTextAt(TAttribute<float>::CreateLambda([Wpx]() { return FMath::Max(8.f, *Wpx); }))
+									.WrappingPolicy(ETextWrappingPolicy::AllowPerCharacterWrapping)
 									.Font(FUnrealAiEditorStyle::FontMono8())
 									.Text(FText::FromString(Ch.Text))
 							]
@@ -1114,8 +1347,16 @@ TSharedRef<SWidget> UnrealAiBuildMarkdownToolNoteBody(const FString& Markdown)
 		}
 		else
 		{
-			AppendStructuredMarkdownFromProse(V, Ch.Text, true);
+			AppendStructuredMarkdownFromProse(V, Ch.Text, true, ProseWrapWidthPx);
 		}
 	}
-	return V;
+	return SNew(SChatMarkdownProseWidthShim)
+		.ProseWrapWidthPx(ProseWrapWidthPx.ToSharedPtr())
+		[
+			SNew(SBox)
+				.HAlign(HAlign_Fill)
+				[
+					V
+				]
+		];
 }

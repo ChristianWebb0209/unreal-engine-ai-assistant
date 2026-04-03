@@ -33,7 +33,6 @@ public:
 private:
 	EActiveTimerReturnType TickTypewriter(double CurrentTime, float DeltaTime);
 	void SyncMarkdownBody();
-	void UpdateTextFadeOpacity();
 
 	bool bEnableTypewriter = true;
 	float TypewriterCps = 400.f;

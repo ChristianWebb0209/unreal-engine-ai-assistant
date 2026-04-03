@@ -1,7 +1,11 @@
 #include "Widgets/UnrealAiChatUiHelpers.h"
 
 #include "Misc/EngineVersion.h"
+#include "Dom/JsonObject.h"
+#include "Internationalization/Text.h"
 #include "Interfaces/IPluginManager.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Widgets/UnrealAiChatTranscript.h"
 #include "Widgets/SChatMessageList.h"
@@ -49,6 +53,7 @@ void UnrealAiChatUi_StartNewChat(
 	if (MessageList.IsValid())
 	{
 		MessageList->ClearTranscript();
+		UnrealAiChatUi_MaybeInjectLlmSetupNotice(BackendRegistry, MessageList);
 	}
 }
 
@@ -94,6 +99,7 @@ void UnrealAiChatUi_DeleteChatPermanently(
 	if (MessageList.IsValid())
 	{
 		MessageList->ClearTranscript();
+		UnrealAiChatUi_MaybeInjectLlmSetupNotice(BackendRegistry, MessageList);
 	}
 }
 
@@ -163,6 +169,66 @@ void UnrealAiChatUi_LoadPersistedThreadIntoUi(
 			MessageList->GetTranscript()->AddPlanDraftPending(Dag);
 		}
 	}
+}
+
+bool UnrealAiChatUi_IsPersistedApiKeyConfigured(TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry)
+{
+	if (!BackendRegistry.IsValid())
+	{
+		return false;
+	}
+	IUnrealAiPersistence* const P = BackendRegistry->GetPersistence();
+	if (!P)
+	{
+		return false;
+	}
+	FString Json;
+	if (!P->LoadSettingsJson(Json) || Json.IsEmpty())
+	{
+		return false;
+	}
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		return false;
+	}
+	const TSharedPtr<FJsonObject>* ApiObj = nullptr;
+	if (!Root->TryGetObjectField(TEXT("api"), ApiObj) || !ApiObj->IsValid())
+	{
+		return false;
+	}
+	FString Key;
+	if (!(*ApiObj)->TryGetStringField(TEXT("apiKey"), Key))
+	{
+		return false;
+	}
+	return !Key.TrimStartAndEnd().IsEmpty();
+}
+
+void UnrealAiChatUi_MaybeInjectLlmSetupNotice(
+	TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry,
+	TSharedPtr<SChatMessageList> MessageList)
+{
+	if (!BackendRegistry.IsValid() || !MessageList.IsValid())
+	{
+		return;
+	}
+	if (UnrealAiChatUi_IsPersistedApiKeyConfigured(BackendRegistry))
+	{
+		return;
+	}
+	const TSharedPtr<FUnrealAiChatTranscript> Tr = MessageList->GetTranscript();
+	if (!Tr.IsValid() || Tr->Blocks.Num() > 0)
+	{
+		return;
+	}
+	const FText NoticeText = NSLOCTEXT(
+		"UnrealAiEditor",
+		"ChatLlmSetupNotice",
+		"Welcome! Open AI Settings (Window → Unreal AI → AI Settings, or Tools → Unreal AI → AI Settings), enter your API key, "
+		"then click Save and apply. Chat and vector indexing require a working provider connection.");
+	Tr->AddInformationalNotice(NoticeText.ToString());
 }
 
 FText UnrealAiChatUi_GetComposerFooterVersionText()

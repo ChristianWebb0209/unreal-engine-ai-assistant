@@ -68,6 +68,16 @@ FString UnrealAiFormatStepDurationForUi(double Seconds);
  */
 bool UnrealAiStripChatNameTagsFromText(FString& InOutText, FString& OutChatName);
 
+/** True when TrimmedLine is an echoed transcript/export header like "--- User ---", not a bare markdown "---". */
+bool UnrealAiIsTranscriptStyleDelimiterTrimmedLine(const FString& TrimmedLine);
+
+/**
+ * Remove echoed transcript section headers (e.g. "--- User ---", "--- Tool: foo ---") from model output.
+ * Bare "---" lines (markdown horizontal rules) are kept. Only labels matching the editor's export/transcript
+ * vocabulary are stripped.
+ */
+void UnrealAiStripTranscriptStyleDelimiterLines(FString& InOutText);
+
 /** Mutable transcript for the chat UI; updated by FUnrealAiChatRunSink. */
 class FUnrealAiChatTranscript : public TSharedFromThis<FUnrealAiChatTranscript>
 {

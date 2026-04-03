@@ -22,8 +22,68 @@ FUnrealAiChatRunSink::FUnrealAiChatRunSink(
 {
 }
 
+void FUnrealAiChatRunSink::AppendStreamChunkFilteringTranscriptEchoLines(
+	FString& LineCarry,
+	const FString& Chunk,
+	TFunctionRef<void(const FString&)> EmitDelta)
+{
+	if (Chunk.IsEmpty())
+	{
+		return;
+	}
+	FString Work = LineCarry + Chunk;
+	LineCarry.Reset();
+	int32 ReadAt = 0;
+	while (ReadAt < Work.Len())
+	{
+		const int32 Nl = Work.Find(TEXT("\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, ReadAt);
+		if (Nl == INDEX_NONE)
+		{
+			LineCarry = Work.Mid(ReadAt);
+			break;
+		}
+		const FString Line = Work.Mid(ReadAt, Nl - ReadAt);
+		ReadAt = Nl + 1;
+		FString T = Line;
+		T.TrimStartAndEndInline();
+		if (!UnrealAiIsTranscriptStyleDelimiterTrimmedLine(T))
+		{
+			EmitDelta(Line + TEXT('\n'));
+		}
+	}
+}
+
+void FUnrealAiChatRunSink::FlushStreamLineCarries()
+{
+	auto FlushOne = [this](FString& Carry, TFunctionRef<void(const FString&)> Emit)
+	{
+		if (Carry.IsEmpty() || !Transcript.IsValid())
+		{
+			Carry.Reset();
+			return;
+		}
+		FString T = Carry;
+		Carry.Reset();
+		T.TrimStartAndEndInline();
+		if (T.IsEmpty())
+		{
+			return;
+		}
+		if (UnrealAiIsTranscriptStyleDelimiterTrimmedLine(T))
+		{
+			return;
+		}
+		Emit(T);
+	};
+
+	FlushOne(AssistantStreamLineCarry, [this](const FString& S) { Transcript->AppendAssistantDelta(S); });
+	FlushOne(ThinkingStreamLineCarry, [this](const FString& S) { Transcript->AppendThinkingDelta(S); });
+}
+
 void FUnrealAiChatRunSink::OnRunStarted(const FUnrealAiRunIds& Ids)
 {
+	AssistantStreamLineCarry.Reset();
+	ThinkingStreamLineCarry.Reset();
 	if (Transcript.IsValid())
 	{
 		if (!Ids.ParentRunId.IsValid())
@@ -72,7 +132,10 @@ void FUnrealAiChatRunSink::OnAssistantDelta(const FString& Chunk)
 {
 	if (Transcript.IsValid())
 	{
-		Transcript->AppendAssistantDelta(Chunk);
+		AppendStreamChunkFilteringTranscriptEchoLines(
+			AssistantStreamLineCarry,
+			Chunk,
+			[this](const FString& Emit) { Transcript->AppendAssistantDelta(Emit); });
 	}
 }
 
@@ -80,7 +143,10 @@ void FUnrealAiChatRunSink::OnThinkingDelta(const FString& Chunk)
 {
 	if (Transcript.IsValid())
 	{
-		Transcript->AppendThinkingDelta(Chunk);
+		AppendStreamChunkFilteringTranscriptEchoLines(
+			ThinkingStreamLineCarry,
+			Chunk,
+			[this](const FString& Emit) { Transcript->AppendThinkingDelta(Emit); });
 	}
 }
 
@@ -243,6 +309,8 @@ void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMess
 		return;
 	}
 
+	FlushStreamLineCarries();
+
 	if (!bSuccess)
 	{
 		Transcript->SetRunProgress(TEXT("Run failed"));
@@ -268,9 +336,16 @@ void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMess
 		if (B.Kind == EUnrealAiChatBlockKind::Assistant && !B.AssistantText.IsEmpty())
 		{
 			FString LocalText = B.AssistantText;
-			if (UnrealAiStripChatNameTagsFromText(LocalText, LocalName))
+			const int32 LenBeforeStrip = LocalText.Len();
+			UnrealAiStripTranscriptStyleDelimiterLines(LocalText);
+			if (LocalText.Len() != LenBeforeStrip)
 			{
 				B.AssistantText = LocalText;
+				B.AssistantText.TrimStartAndEndInline();
+				bModifiedAnyVisibleText = true;
+			}
+			if (UnrealAiStripChatNameTagsFromText(B.AssistantText, LocalName))
+			{
 				B.AssistantText.TrimStartAndEndInline();
 				bModifiedAnyVisibleText = true;
 				if (!LocalName.IsEmpty() && ExtractedName.IsEmpty())
@@ -282,9 +357,16 @@ void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMess
 		else if (B.Kind == EUnrealAiChatBlockKind::Thinking && !B.ThinkingText.IsEmpty())
 		{
 			FString LocalText = B.ThinkingText;
-			if (UnrealAiStripChatNameTagsFromText(LocalText, LocalName))
+			const int32 LenBeforeStrip = LocalText.Len();
+			UnrealAiStripTranscriptStyleDelimiterLines(LocalText);
+			if (LocalText.Len() != LenBeforeStrip)
 			{
 				B.ThinkingText = LocalText;
+				B.ThinkingText.TrimStartAndEndInline();
+				bModifiedAnyVisibleText = true;
+			}
+			if (UnrealAiStripChatNameTagsFromText(B.ThinkingText, LocalName))
+			{
 				B.ThinkingText.TrimStartAndEndInline();
 				bModifiedAnyVisibleText = true;
 				if (!LocalName.IsEmpty() && ExtractedName.IsEmpty())

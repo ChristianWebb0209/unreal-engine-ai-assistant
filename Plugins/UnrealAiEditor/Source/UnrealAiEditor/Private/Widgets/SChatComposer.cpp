@@ -716,7 +716,7 @@ void SChatComposer::Construct(const FArguments& InArgs)
 							})
 							.ToolTipText(LOCTEXT(
 								"EditorFocusComposerTip",
-								"When on, the agent may follow along in the editor (optional navigation). Tools that must open an editor still open. Stored in plugin settings."))
+								"When on, successful blueprint and asset tools automatically open or bring forward the relevant editor (graphs, Content Browser sync). Pass focused:false on a tool to skip once. Stored in plugin settings."))
 					]
 					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 					[
@@ -751,6 +751,15 @@ void SChatComposer::Construct(const FArguments& InArgs)
 		Session->OnPlanDraftBuild.AddSP(this, &SChatComposer::HandlePlanDraftBuild);
 	}
 
+	if (MessageList.IsValid())
+	{
+		TranscriptChromeBinding = MessageList->GetTranscript();
+		if (TranscriptChromeBinding.IsValid())
+		{
+			TranscriptChromeBinding->OnStructuralChange.AddSP(this, &SChatComposer::OnTranscriptStructuralForComposerChrome);
+		}
+	}
+
 	RegisterActiveTimer(
 		0.5f,
 		FWidgetActiveTimerDelegate::CreateSP(this, &SChatComposer::OnComposerRefreshTick));
@@ -758,6 +767,11 @@ void SChatComposer::Construct(const FArguments& InArgs)
 
 SChatComposer::~SChatComposer()
 {
+	if (TranscriptChromeBinding.IsValid())
+	{
+		TranscriptChromeBinding->OnStructuralChange.RemoveAll(this);
+		TranscriptChromeBinding.Reset();
+	}
 	if (Session.IsValid())
 	{
 		Session->OnPlanDraftBuild.RemoveAll(this);
@@ -910,13 +924,24 @@ bool SChatComposer::IsHarnessTurnInProgress() const
 	return false;
 }
 
+void SChatComposer::OnTranscriptStructuralForComposerChrome()
+{
+	const bool bBusy = IsHarnessTurnInProgress();
+	if (bBusy != bLastHarnessTurnBusy)
+	{
+		bLastHarnessTurnBusy = bBusy;
+		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+	}
+}
+
 const FSlateBrush* SChatComposer::GetSendStopBrush() const
 {
 	if (IsHarnessTurnInProgress())
 	{
 		return FAppStyle::GetBrush(TEXT("Icons.Toolbar.Stop"));
 	}
-	return FAppStyle::GetBrush(TEXT("Icons.Toolbar.Export"));
+	// Distinct from Stop: forward/send affordance (Export reads as "share" in many themes).
+	return FAppStyle::GetBrush(TEXT("Icons.ChevronRight"));
 }
 
 FText SChatComposer::GetSendStopLabel() const
@@ -1895,6 +1920,8 @@ FReply SChatComposer::OnSendClicked()
 	}
 
 	RefreshAttachmentChips();
+	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+	bLastHarnessTurnBusy = IsHarnessTurnInProgress();
 	return FReply::Handled();
 }
 

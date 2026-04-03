@@ -62,6 +62,88 @@ bool UnrealAiStripChatNameTagsFromText(FString& InOutText, FString& OutChatName)
 	return bFoundAny;
 }
 
+namespace UnrealAiTranscriptDelimiterStrip
+{
+	bool IsKnownSectionLabel(const FString& InnerTrimmed)
+	{
+		if (InnerTrimmed.IsEmpty())
+		{
+			return false;
+		}
+		if (InnerTrimmed.Equals(TEXT("User"), ESearchCase::IgnoreCase)
+			|| InnerTrimmed.Equals(TEXT("Assistant"), ESearchCase::IgnoreCase)
+			|| InnerTrimmed.Equals(TEXT("Thinking"), ESearchCase::IgnoreCase)
+			|| InnerTrimmed.Equals(TEXT("Harness"), ESearchCase::IgnoreCase)
+			|| InnerTrimmed.Equals(TEXT("Progress"), ESearchCase::IgnoreCase)
+			|| InnerTrimmed.Equals(TEXT("Notice"), ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		if (InnerTrimmed.StartsWith(TEXT("Tool:"), ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		if (InnerTrimmed.StartsWith(TEXT("Todo plan:"), ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		if (InnerTrimmed.StartsWith(TEXT("Plan draft"), ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		return false;
+	}
+}
+
+bool UnrealAiIsTranscriptStyleDelimiterTrimmedLine(const FString& T)
+{
+	if (T.Len() <= 3 || !T.StartsWith(TEXT("---")) || !T.EndsWith(TEXT("---")))
+	{
+		return false;
+	}
+	const int32 InnerLen = T.Len() - 6;
+	if (InnerLen <= 0)
+	{
+		return false;
+	}
+	FString Inner = T.Mid(3, InnerLen);
+	Inner.TrimStartAndEndInline();
+	if (Inner.IsEmpty())
+	{
+		return false;
+	}
+	return UnrealAiTranscriptDelimiterStrip::IsKnownSectionLabel(Inner);
+}
+
+void UnrealAiStripTranscriptStyleDelimiterLines(FString& InOutText)
+{
+	if (InOutText.IsEmpty())
+	{
+		return;
+	}
+	TArray<FString> Lines;
+	InOutText.ParseIntoArrayLines(Lines, /*bCullEmpty*/ false);
+
+	TArray<FString> Kept;
+	Kept.Reserve(Lines.Num());
+	for (const FString& Line : Lines)
+	{
+		FString T = Line;
+		T.TrimStartAndEndInline();
+		if (UnrealAiIsTranscriptStyleDelimiterTrimmedLine(T))
+		{
+			continue;
+		}
+		Kept.Add(Line);
+	}
+	if (Kept.Num() == Lines.Num())
+	{
+		return;
+	}
+	InOutText = FString::Join(Kept, TEXT("\n"));
+	InOutText.TrimStartAndEndInline();
+}
+
 FString UnrealAiFormatStepDurationForUi(const double Sec)
 {
 	if (Sec < 0.0)
@@ -687,8 +769,9 @@ void FUnrealAiChatTranscript::EndRun(bool bSuccess, const FString& ErrorMessage)
 			B.NoticeText = ErrorMessage.IsEmpty() ? FString(TEXT("Run failed.")) : ErrorMessage;
 		}
 		Blocks.Add(MoveTemp(B));
-		OnStructuralChange.Broadcast();
 	}
+	// Success previously did not broadcast; composer Send/Stop and other chrome rely on this transition.
+	OnStructuralChange.Broadcast();
 }
 
 void FUnrealAiChatTranscript::OnContinuation(int32 PhaseIndex, int32 TotalPhasesHint)
@@ -772,6 +855,7 @@ void FUnrealAiChatTranscript::HydrateFromConversationMessages(const TArray<FUnre
 				FString Body = M.Content;
 				FString UnusedName;
 				UnrealAiStripChatNameTagsFromText(Body, UnusedName);
+				UnrealAiStripTranscriptStyleDelimiterLines(Body);
 				B.AssistantText = MoveTemp(Body);
 				Blocks.Add(MoveTemp(B));
 			}

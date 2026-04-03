@@ -25,5 +25,18 @@ void UnrealAiChatUi_LoadPersistedThreadIntoUi(
 	TSharedPtr<FUnrealAiChatUiSession> Session,
 	TSharedPtr<SChatMessageList> MessageList);
 
+/**
+ * True when plugin_settings.json has a non-empty api.apiKey (trimmed).
+ * Does not perform network validation.
+ */
+bool UnrealAiChatUi_IsPersistedApiKeyConfigured(TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry);
+
+/**
+ * If the transcript is empty and no API key is persisted, adds an informational notice pointing users to AI Settings.
+ */
+void UnrealAiChatUi_MaybeInjectLlmSetupNotice(
+	TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry,
+	TSharedPtr<SChatMessageList> MessageList);
+
 /** Plugin version + engine label for chat chrome (e.g. "Unreal AI Editor 1.0 · 5.7..."). */
 FText UnrealAiChatUi_GetComposerFooterVersionText();

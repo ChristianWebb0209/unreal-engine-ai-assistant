@@ -13,6 +13,7 @@ struct FSlateBrush;
 
 class FUnrealAiBackendRegistry;
 class FUnrealAiPlanExecutor;
+class FUnrealAiChatTranscript;
 class SChatMessageList;
 struct FUnrealAiChatUiSession;
 
@@ -52,6 +53,7 @@ private:
 	const FSlateBrush* GetSendStopBrush() const;
 	FText GetSendStopLabel() const;
 	FText GetSendStopTooltip() const;
+	void OnTranscriptStructuralForComposerChrome();
 	EActiveTimerReturnType OnComposerRefreshTick(double InCurrentTime, float InDeltaTime);
 
 	FReply OnInputKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent);
@@ -89,6 +91,7 @@ private:
 	TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry;
 	TSharedPtr<SChatMessageList> MessageList;
 	TSharedPtr<FUnrealAiChatUiSession> Session;
+	TSharedPtr<FUnrealAiChatTranscript> TranscriptChromeBinding;
 
 	TArray<TSharedPtr<FString>> ModelOptions;
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> ModelCombo;

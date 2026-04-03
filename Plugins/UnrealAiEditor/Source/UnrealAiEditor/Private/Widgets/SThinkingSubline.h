@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
 
-class STextBlock;
+class SMultiLineEditableText;
 
 /** Single muted line of model reasoning below the assistant bubble (Cursor-style). */
 class SThinkingSubline final : public SCompoundWidget
@@ -21,7 +21,7 @@ private:
 	EActiveTimerReturnType TickDots(double CurrentTime, float DeltaTime);
 	static FString ToOneLinePreview(const FString& Text);
 
-	TSharedPtr<STextBlock> LineText;
+	TSharedPtr<SMultiLineEditableText> LineText;
 	FString Accumulated;
 	int32 DotsPhase = 0;
 };

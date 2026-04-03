@@ -1,8 +1,10 @@
 #include "Widgets/SThinkingSubline.h"
 
+#include "Widgets/UnrealAiChatTranscript.h"
 #include "Style/UnrealAiEditorStyle.h"
+#include "Styling/CoreStyle.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/Text/STextBlock.h"
+#include "Widgets/Text/SMultiLineEditableText.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
@@ -28,15 +30,22 @@ FString SThinkingSubline::ToOneLinePreview(const FString& Text)
 void SThinkingSubline::Construct(const FArguments& InArgs)
 {
 	(void)InArgs;
+	FTextBlockStyle ThinkingStyle =
+		FCoreStyle::Get().GetWidgetStyle<FTextBlockStyle>(TEXT("NormalText"));
+	ThinkingStyle.SetFont(FUnrealAiEditorStyle::FontItalicCaption());
+	ThinkingStyle.SetColorAndOpacity(FUnrealAiEditorStyle::ColorThinkingSubline());
 	ChildSlot
 		[
 			SNew(SBox)
 				.Padding(FMargin(2.f, 4.f, 0.f, 0.f))
 				[
-					SAssignNew(LineText, STextBlock)
-						.Font(FUnrealAiEditorStyle::FontItalicCaption())
-						.ColorAndOpacity(FUnrealAiEditorStyle::ColorThinkingSubline())
+					SAssignNew(LineText, SMultiLineEditableText)
+						.TextStyle(&ThinkingStyle)
+						.IsReadOnly(true)
 						.AutoWrapText(false)
+						.AllowMultiLine(false)
+						.AllowContextMenu(true)
+						.SelectAllTextWhenFocused(false)
 						.Text(FText::FromString(TEXT("Thinking...")))
 				]
 		];
@@ -71,6 +80,7 @@ EActiveTimerReturnType SThinkingSubline::TickDots(double, float)
 void SThinkingSubline::Append(const FString& Chunk)
 {
 	Accumulated += Chunk;
+	UnrealAiStripTranscriptStyleDelimiterLines(Accumulated);
 	if (LineText.IsValid())
 	{
 		if (Accumulated.IsEmpty())
@@ -84,6 +94,7 @@ void SThinkingSubline::Append(const FString& Chunk)
 void SThinkingSubline::SetFullText(const FString& Text)
 {
 	Accumulated = Text;
+	UnrealAiStripTranscriptStyleDelimiterLines(Accumulated);
 	if (!LineText.IsValid())
 	{
 		return;

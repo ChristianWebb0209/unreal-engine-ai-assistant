@@ -27,13 +27,15 @@ void SChatHeader::Construct(const FArguments& InArgs)
 				.Padding(FMargin(8.f))
 				[
 					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().FillWidth(1.f)
+					+ SHorizontalBox::Slot()
+						  .FillWidth(1.f)
+						  .VAlign(VAlign_Center)
 					[
 						SNew(STextBlock)
-						.Text(this, &SChatHeader::GetChatTitleText)
-						.Font(FUnrealAiEditorStyle::FontComposerBadge())
+							.Text(this, &SChatHeader::GetChatTitleText)
+							.Font(FUnrealAiEditorStyle::FontComposerBadge())
+							.AutoWrapText(true)
 					]
-					+ SHorizontalBox::Slot().FillWidth(1.f)
 					+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))
 					[
 						SNew(SButton)

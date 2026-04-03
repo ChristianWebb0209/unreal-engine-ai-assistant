@@ -1,7 +1,10 @@
 #include "Widgets/SAssistantStreamBlock.h"
 
 #include "Widgets/UnrealAiChatMarkdown.h"
+#include "Widgets/UnrealAiChatTranscript.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/SNullWidget.h"
 
 void SAssistantStreamBlock::Construct(const FArguments& InArgs)
 {
@@ -17,39 +20,42 @@ void SAssistantStreamBlock::Construct(const FArguments& InArgs)
 	ChildSlot
 		[
 			SAssignNew(BodyBox, SBox)
-			[
-				UnrealAiBuildMarkdownChatBody(VisibleText)
-			]
+				.HAlign(HAlign_Fill)
+				[
+					SNullWidget::NullWidget
+				]
 		];
-}
-
-void SAssistantStreamBlock::UpdateTextFadeOpacity()
-{
-	if (bSkipTextFade)
-	{
-		SetRenderOpacity(1.f);
-		return;
-	}
-	// Subtle fade-in over the first ~72 visible characters (streaming + typewriter).
-	const int32 Len = VisibleText.Len();
-	if (Len <= 0)
-	{
-		SetRenderOpacity(0.94f);
-		return;
-	}
-	const float T = FMath::Clamp(static_cast<float>(Len) / 72.f, 0.f, 1.f);
-	const float Eased = T * T * (3.f - 2.f * T);
-	const float Opac = FMath::Lerp(0.88f, 0.96f, Eased);
-	SetRenderOpacity(Opac);
+	SyncMarkdownBody();
 }
 
 void SAssistantStreamBlock::SyncMarkdownBody()
 {
+	FString ForDisplay = VisibleText + PendingBuffer;
+	UnrealAiStripTranscriptStyleDelimiterLines(ForDisplay);
 	if (BodyBox.IsValid())
 	{
-		BodyBox->SetContent(UnrealAiBuildMarkdownChatBody(VisibleText));
+		BodyBox->SetContent(UnrealAiBuildMarkdownChatBody(ForDisplay));
 	}
-	UpdateTextFadeOpacity();
+	if (bSkipTextFade)
+	{
+		SetRenderOpacity(1.f);
+	}
+	else
+	{
+		// Subtle fade-in over the first ~72 visible characters (streaming + typewriter); length uses display text.
+		const int32 Len = ForDisplay.Len();
+		if (Len <= 0)
+		{
+			SetRenderOpacity(0.94f);
+		}
+		else
+		{
+			const float T = FMath::Clamp(static_cast<float>(Len) / 72.f, 0.f, 1.f);
+			const float Eased = T * T * (3.f - 2.f * T);
+			const float Opac = FMath::Lerp(0.88f, 0.96f, Eased);
+			SetRenderOpacity(Opac);
+		}
+	}
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
 

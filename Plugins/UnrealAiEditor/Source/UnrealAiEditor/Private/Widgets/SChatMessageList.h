@@ -6,11 +6,13 @@
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
+#include "Types/SlateStructs.h"
 
 #include "Context/AgentContextTypes.h"
 
 struct FUnrealAiConversationMessage;
 
+class SBox;
 class FUnrealAiChatTranscript;
 class FUnrealAiBackendRegistry;
 struct FUnrealAiChatUiSession;
@@ -58,11 +60,19 @@ private:
 	EVisibility GetJumpToBottomVisibility() const;
 	FReply OnJumpToBottomClicked();
 
+	/** Keeps transcript column at least as wide as the scroll viewport (fixes sticky narrow reflow after dock resize). */
+	FOptionalSize GetScrollContentMinWidth() const;
+
+	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
+
 	TSharedPtr<FUnrealAiChatTranscript> Transcript;
 	TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry;
 	TSharedPtr<FUnrealAiChatUiSession> Session;
 	TSharedPtr<SScrollBox> ScrollBox;
+	TSharedPtr<SBox> ScrollContentMinBox;
 	TSharedPtr<SVerticalBox> MessageBox;
+
+	float ChatScrollViewportWidthPx = 0.f;
 
 	TSharedPtr<SAssistantStreamBlock> ActiveAssistantWidget;
 	TSharedPtr<SThinkingSubline> ActiveThinkingWidget;

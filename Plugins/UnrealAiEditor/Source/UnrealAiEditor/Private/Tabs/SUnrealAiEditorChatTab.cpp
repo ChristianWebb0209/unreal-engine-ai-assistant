@@ -22,8 +22,11 @@
 #include "Framework/Docking/TabManager.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "IDesktopPlatform.h"
+#include "Misc/DateTime.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Internationalization/Text.h"
+#include "Widgets/Layout/SSpacer.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Styling/CoreStyle.h"
@@ -34,7 +37,7 @@
 
 namespace
 {
-	/** Bottom-of-chat status: animated dots while vector index rebuild is in flight or manifest reports indexing. */
+	/** Bottom-of-chat status: phased indexing progress, chunk + wave counts, ETA for full embed, partial-DB hint. */
 	class SIndexingProjectFooterLabel final : public SCompoundWidget
 	{
 	public:
@@ -66,15 +69,16 @@ namespace
 			}
 			const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
 			bool bIndexing = false;
+			FUnrealAiRetrievalProjectStatus LastStatus;
 			if (const TSharedPtr<FUnrealAiBackendRegistry> Reg = BackendRegistryWeak.Pin())
 			{
 				if (IUnrealAiRetrievalService* Retrieval = Reg->GetRetrievalService())
 				{
 					if (Retrieval->IsEnabledForProject(ProjectId))
 					{
-						const FUnrealAiRetrievalProjectStatus S = Retrieval->GetProjectStatus(ProjectId);
-						bIndexing = S.bBusy
-							|| S.StateText.Equals(TEXT("indexing"), ESearchCase::IgnoreCase);
+						LastStatus = Retrieval->GetProjectStatus(ProjectId);
+						bIndexing = LastStatus.bBusy
+							|| LastStatus.StateText.Equals(TEXT("indexing"), ESearchCase::IgnoreCase);
 					}
 				}
 			}
@@ -86,15 +90,165 @@ namespace
 			Label->SetVisibility(EVisibility::Visible);
 			static const TCHAR* const DotSuffix[] = { TEXT(""), TEXT("."), TEXT(".."), TEXT("...") };
 			DotPhase = (DotPhase + 1) % 4;
-			Label->SetText(FText::Format(
-				LOCTEXT("IndexingProjectFmt", "Indexing project{0}"),
-				FText::FromString(FString(DotSuffix[DotPhase]))));
+			const FText DotsText = FText::FromString(FString(DotSuffix[DotPhase]));
+
+			FText EtaFullIndex = FText::GetEmpty();
+			const int32 TargetN = LastStatus.IndexBuildTargetChunks;
+			const int32 DoneN = LastStatus.IndexBuildCompletedChunks;
+			const int32 WaveTotal = LastStatus.IndexBuildWaveTotal;
+			const int32 WaveDone = LastStatus.IndexBuildWaveDone;
+			const int32 DbChunks = LastStatus.ChunksIndexed;
+			if (TargetN > 0)
+			{
+				if (DoneN <= 0)
+				{
+					EtaFullIndex = LOCTEXT("IndexingEtaPending", "ETA: not enough progress yet — wait for first embeddings");
+				}
+				else if (DoneN < TargetN && LastStatus.IndexBuildPhaseStartedUtc != FDateTime::MinValue())
+				{
+					const double ElapsedSec = (FDateTime::UtcNow() - LastStatus.IndexBuildPhaseStartedUtc).GetTotalSeconds();
+					if (ElapsedSec > 0.25)
+					{
+						const double Rate = static_cast<double>(DoneN) / ElapsedSec;
+						if (Rate > 1.e-9)
+						{
+							const int32 RemainingTotalSec = FMath::Clamp(
+								static_cast<int32>(FMath::RoundToDouble(static_cast<double>(TargetN - DoneN) / Rate)),
+								0,
+								24 * 3600);
+							const int32 EtaMin = RemainingTotalSec / 60;
+							const int32 EtaSec = RemainingTotalSec % 60;
+							EtaFullIndex = FText::Format(
+								LOCTEXT("IndexingEtaFullIndexFmt", "~{0}m {1}s to finish embedding all chunks (rough estimate)"),
+								FText::AsNumber(EtaMin),
+								FText::AsNumber(EtaSec));
+						}
+					}
+				}
+			}
+
+			TArray<FText> Parts;
+			Parts.Reserve(6);
+			Parts.Add(FText::Format(LOCTEXT("IndexingProjectLeadFmt", "Indexing project{0}"), DotsText));
+			if (TargetN > 0)
+			{
+				Parts.Add(FText::Format(
+					LOCTEXT("IndexingChunksProgressFmt", "{0}/{1} chunks embedded"),
+					FText::AsNumber(DoneN),
+					FText::AsNumber(TargetN)));
+			}
+			else
+			{
+				Parts.Add(LOCTEXT("IndexingPreparingCorpus", "preparing corpus…"));
+			}
+			if (WaveTotal > 0)
+			{
+				Parts.Add(FText::Format(
+					LOCTEXT("IndexingWavesFmt", "priority waves {0}/{1} written to disk"),
+					FText::AsNumber(WaveDone),
+					FText::AsNumber(WaveTotal)));
+			}
+			if (DbChunks > 0)
+			{
+				Parts.Add(FText::Format(
+					LOCTEXT("IndexingPartialDbFmt", "{0} chunks in DB — search may already return results (coverage grows)"),
+					FText::AsNumber(DbChunks)));
+			}
+			if (!EtaFullIndex.IsEmpty())
+			{
+				Parts.Add(EtaFullIndex);
+			}
+			Parts.Add(LOCTEXT(
+				"IndexingPhasedExplain",
+				"High-priority paths are indexed first; long ETA is for the entire job, not a lockout."));
+			const FText Line = FText::Join(FText::FromString(TEXT(" · ")), Parts);
+			Label->SetText(Line);
+			Label->SetToolTipText(Line);
 			return EActiveTimerReturnType::Continue;
 		}
 
 		TWeakPtr<FUnrealAiBackendRegistry> BackendRegistryWeak;
 		TSharedPtr<STextBlock> Label;
 		int32 DotPhase = 0;
+	};
+
+	/** Single-row startup / discovery / retrieval status (three captions on one line). */
+	class SStartupOpsFooterStrip final : public SCompoundWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SStartupOpsFooterStrip) {}
+		SLATE_ARGUMENT(TWeakPtr<FUnrealAiBackendRegistry>, BackendRegistry)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			BackendRegistryWeak = InArgs._BackendRegistry;
+			ChildSlot
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
+						SAssignNew(TextAggregate, STextBlock)
+							.Font(FUnrealAiEditorStyle::FontCaption())
+							.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(14.f, 0.f, 0.f, 0.f))
+					[
+						SAssignNew(TextDiscovery, STextBlock)
+							.Font(FUnrealAiEditorStyle::FontCaption())
+							.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(14.f, 0.f, 0.f, 0.f))
+					[
+						SAssignNew(TextRetrieval, STextBlock)
+							.Font(FUnrealAiEditorStyle::FontCaption())
+							.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+					]
+					+ SHorizontalBox::Slot().FillWidth(1.f)
+					[
+						SNew(SSpacer)
+					]
+				];
+			RegisterActiveTimer(
+				0.35f,
+				FWidgetActiveTimerDelegate::CreateSP(this, &SStartupOpsFooterStrip::TickRefresh));
+			SyncFooterTexts();
+		}
+
+	private:
+		void SyncFooterTexts()
+		{
+			if (!TextAggregate.IsValid() || !TextDiscovery.IsValid() || !TextRetrieval.IsValid())
+			{
+				return;
+			}
+			UnrealAiStartupOpsStatus::FFooterStrip Strip;
+			const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
+			if (const TSharedPtr<FUnrealAiBackendRegistry> Reg = BackendRegistryWeak.Pin())
+			{
+				UnrealAiStartupOpsStatus::BuildFooterStrip(Reg, ProjectId, Strip);
+			}
+			else
+			{
+				Strip.Aggregate = TEXT("Startup ops: —");
+				Strip.Discovery = TEXT("discovery=—");
+				Strip.Retrieval = TEXT("retrieval=—");
+			}
+			TextAggregate->SetText(FText::FromString(Strip.Aggregate));
+			TextDiscovery->SetText(FText::FromString(Strip.Discovery));
+			TextRetrieval->SetText(FText::FromString(Strip.Retrieval));
+		}
+
+		EActiveTimerReturnType TickRefresh(double /*CurrentTime*/, float /*DeltaTime*/)
+		{
+			SyncFooterTexts();
+			return EActiveTimerReturnType::Continue;
+		}
+
+		TWeakPtr<FUnrealAiBackendRegistry> BackendRegistryWeak;
+		TSharedPtr<STextBlock> TextAggregate;
+		TSharedPtr<STextBlock> TextDiscovery;
+		TSharedPtr<STextBlock> TextRetrieval;
 	};
 }
 
@@ -172,36 +326,10 @@ void SUnrealAiEditorChatTab::Construct(const FArguments& InArgs)
 				SNew(SIndexingProjectFooterLabel)
 					.BackendRegistry(BackendRegistry)
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(6.f, 4.f, 6.f, 4.f))
+			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(6.f, 2.f, 6.f, 4.f))
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-					.FillWidth(1.f)
-					.VAlign(VAlign_Center)
-					.Padding(FMargin(0.f, 0.f, 10.f, 0.f))
-				[
-					SNew(STextBlock)
-						.Font(FUnrealAiEditorStyle::FontCaption())
-						.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
-						.AutoWrapText(true)
-						.Text_Lambda([this]()
-						{
-							const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
-							return FText::FromString(UnrealAiStartupOpsStatus::BuildCompactLine(BackendRegistry, ProjectId));
-						})
-				]
-				+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-						.Font(FUnrealAiEditorStyle::FontCaption())
-						.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextFooter())
-						.Text_Lambda([]()
-						{
-							return UnrealAiChatUi_GetComposerFooterVersionText();
-						})
-				]
+				SNew(SStartupOpsFooterStrip)
+					.BackendRegistry(BackendRegistry)
 			]
 		];
 
@@ -209,6 +337,7 @@ void SUnrealAiEditorChatTab::Construct(const FArguments& InArgs)
 	{
 		UnrealAiChatUi_LoadPersistedThreadIntoUi(BackendRegistry, Session, MessageListWidget);
 	}
+	UnrealAiChatUi_MaybeInjectLlmSetupNotice(BackendRegistry, MessageListWidget);
 
 	RefreshChatChrome();
 	const TWeakPtr<SUnrealAiEditorChatTab> WeakChatForChrome = SharedThis(this);
