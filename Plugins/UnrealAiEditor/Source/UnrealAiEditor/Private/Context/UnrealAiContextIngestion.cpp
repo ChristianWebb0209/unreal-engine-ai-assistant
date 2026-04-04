@@ -70,7 +70,7 @@ namespace UnrealAiContextIngestion
 				|| T.Contains(TEXT("snapshot"))
 				|| T == TEXT("editor_get_selection")
 				|| T == TEXT("asset_registry_query")
-				|| T == TEXT("blueprint_export_ir");
+				|| T == TEXT("blueprint_graph_introspect");
 		}
 
 		static bool HasLikelyActionablePath(const FString& Text)

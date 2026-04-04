@@ -2,7 +2,7 @@
 
 {{CODE_TYPE_PREFERENCE}}
 
-The project targets **gameplay Blueprint** workflows on **UE 5.7**. **Before following any playbook below:** the **tiered tool appendix** for this request is the source of truth (`04-tool-calling-contract.md`). On the **default main Agent**, Blueprint **graph mutations** are often **not** listed—use **`<unreal_ai_build_blueprint>`** with the right **`target_kind`** (`12-build-blueprint-delegation.md`) for substantive graph edits, compile-after-patch flows, and format-graph passes. When **`blueprint_graph_patch`**, **`blueprint_apply_ir`**, **`blueprint_compile`**, etc. **are** in the appendix (Blueprint Builder sub-turn or power-user roster), apply the full gameplay depth below.
+The project targets **gameplay Blueprint** workflows on **UE 5.7**. **Before following any playbook below:** the **tiered tool appendix** for this request is the source of truth (`04-tool-calling-contract.md`). On the **default main Agent**, Blueprint **graph mutations** are often **not** listed—use **`<unreal_ai_build_blueprint>`** with the right **`target_kind`** (`12-build-blueprint-delegation.md`) for substantive graph edits, compile-after-patch flows, and format-graph passes. When **`blueprint_graph_patch`**, **`blueprint_compile`**, etc. **are** in the appendix (Blueprint Builder sub-turn or power-user roster), apply the full gameplay depth below.
 
 ## Principles
 
@@ -14,16 +14,16 @@ The project targets **gameplay Blueprint** workflows on **UE 5.7**. **Before fol
 
 ### Read path (main agent–friendly)
 
-- Resolve a concrete Blueprint **`/Game/...`** via `asset_index_fuzzy_search` or `asset_registry_query`, then use **read-only** tools that appear in the appendix (**`blueprint_export_ir`**, **`blueprint_get_graph_summary`**, **`blueprint_graph_list_pins`** when listed). **Do not** assume you can patch or compile because this chunk mentions it—check the appendix.
+- Resolve a concrete Blueprint **`/Game/...`** via `asset_index_fuzzy_search` or `asset_registry_query`, then use **read-only** tools that appear in the appendix (**`blueprint_graph_introspect`**, **`blueprint_get_graph_summary`**, **`blueprint_graph_list_pins`** when listed). **Do not** assume you can patch or compile because this chunk mentions it—check the appendix.
 
 ### Write path (appendix-gated)
 
-- **When graph mutation tools are listed:** for **writes**, use **`blueprint_graph_patch`** for arbitrary nodes and wiring; use **`blueprint_apply_ir`** when the compact op set is sufficient (see **`04-tool-calling-contract.md`**). When user policy is C++-only, skip Blueprint writes. Use `create_if_missing` only when intentionally creating a new Blueprint. Follow **`merge_policy`** / **`event_tick`** / **`event_begin_play`** with **`blueprint_apply_ir`** when staying on IR. Keep **`auto_layout`** on (default) and choose **`layout_scope`** (`ir_nodes` vs `full_graph`) per **`04`**. Follow with **`blueprint_compile`** when available; use **`format_graphs: true`** or **`blueprint_format_graph`** when those tools are listed. Split large graph work into **several** **`blueprint_graph_patch`** calls if args would be huge. Use **`class_path` + `function_name`** correctly for **`call_function`** (see **`04`**).
+- **When graph mutation tools are listed:** for **writes**, use **`blueprint_graph_patch`** for all Kismet nodes and wiring (`semantic_kind` or `k2_class`, explicit **`connect`**). When user policy is C++-only, skip Blueprint writes. New Blueprint assets: **`asset_create`** with correct factory / **`parent_class`**, then patch graphs. Keep **`auto_layout`** on (default) and choose **`layout_scope`** (`patched_nodes` vs `full_graph`) per catalog. Follow with **`blueprint_compile`** / **`blueprint_verify_graph`** when available; use **`format_graphs: true`** or **`blueprint_format_graph`** (`format_scope` `full_graph` or `selection`) when listed. Split large graph work into **several** patches or use **`ops_json_path`**. Use **`class_path` + `function_name`** correctly for **`call_function`** (see **`04`**).
 - **When graph mutation tools are not listed:** after reads and asset creates, emit **`<unreal_ai_build_blueprint>`** with paths and goals—do not narrate graph edits you cannot invoke.
 
 - **“That blueprint” with no path:** If the user refers to “that blueprint” / “this BP” **without** a `/Game/...` **object_path**, do **not** assume tutorial names (`BP_Player`, etc.). Use **`editor_get_selection`** and/or **`asset_index_fuzzy_search`**, then use **returned** `object_path` / matches **before** any Blueprint read/write tool.
 - **Multiple fuzzy/registry matches:** After **`asset_index_fuzzy_search`** or **`asset_registry_query`**, **only** pass **`object_path`** / **`blueprint_path`** strings that **appear in that tool’s result**. **Never** invent a `/Game/...` path that was not returned.
-- **Common Blueprint IR mistakes to avoid:** do not emit intent labels as `op` values (`launch_character`, `play_sound`, `event_overlap`, etc.); use supported ops only. For callable gameplay actions, route through **`call_function`** with native `/Script/...` `class_path` + `function_name`.
+- **Common Blueprint patch mistakes to avoid:** do not invent `k2_class` paths or pin names—ground them in **`blueprint_graph_introspect`**. For callable gameplay actions, use **`create_node`** with **`semantic_kind`** **`call_library_function`** or **`K2Node_CallFunction`** with native `/Script/...` `class_path` + `function_name`.
 - **Generic `/Game` assets:** **`asset_create`** (class path + package) → **`asset_export_properties`** / **`asset_apply_properties`** for reflection-driven edits on that **asset UObject** when there is no specialized tool. **Actor Blueprint component defaults:** **`blueprint_set_component_default`** when listed in the appendix; otherwise note the need for a handoff or blocker.
 - **`asset_create` argument contract:** always provide `package_path`, `asset_name`, and `asset_class` (`class_path` alias allowed). Keep `package_path` under `/Game/...`; do not pass `{}`.
 - **Scene:** **`actor_spawn_from_class`**, **`actor_set_transform`**, **`actor_destroy`**, **`scene_fuzzy_search`** when listed.
@@ -38,8 +38,8 @@ Use the **Notes** column: where it says **handoff**, use **`<unreal_ai_build_blu
 
 | Goal (from tool-goals) | Primary tools | Notes |
 |------------------------|---------------|------|
-| Collectible / interaction / overlap | `asset_create`, `actor_spawn_from_class`, `pie_start`; graph: `blueprint_apply_ir` / patch **or handoff** | EventGraph logic often **handoff** on default Agent. |
-| Third-person character | `asset_create` (Blueprint asset class); graph: `blueprint_apply_ir` **or handoff** | Parent Character class may be **`apply_ir`** only if listed; else create asset + handoff. |
+| Collectible / interaction / overlap | `asset_create`, `actor_spawn_from_class`, `pie_start`; graph: `blueprint_graph_patch` **or handoff** | EventGraph logic often **handoff** on default Agent. |
+| Third-person character | `asset_create` (Blueprint asset class); graph: `blueprint_graph_patch` **or handoff** | Set parent class via factory params on create, then hand off or patch when tools are listed. |
 | Doors, triggers, spawners, AI chase | `actor_spawn_from_class`, `scene_fuzzy_search`; graph **or handoff** | Same split. |
 | Health, UI bar, pickups | `asset_create` (Widget Blueprint), `asset_apply_properties`; widget/graph **or handoff** | **UMG layout** weakly automated. |
 | Day/night, audio, footsteps | `actor_set_transform`, `audio_component_preview`, `asset_create` (SoundCue); graph **or handoff** | |

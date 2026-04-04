@@ -4,7 +4,7 @@
 
 **Designer**
 
-- **UMG Designer** hierarchy/visual placement is **not** covered by **`blueprint_apply_ir`** (see main catalog). Use **`widget_*`** / editor tools when exposed, or manual layout.
+- **UMG Designer** hierarchy/visual placement is **not** covered by **`blueprint_graph_patch`** for visual widgets. Use **`widget_*`** / editor tools when exposed, or manual layout.
 
 **Handoff**
 

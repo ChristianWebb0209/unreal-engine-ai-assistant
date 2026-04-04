@@ -29,7 +29,7 @@ Optional per-tool metadata: `tools[].tool_surface.domain_tags` (see `meta.tool_s
 - **Handoff:** the main agent emits **`<unreal_ai_build_blueprint>`** with YAML **`target_kind`**; the harness runs a **Blueprint Builder** sub-turn with the builder prompt stack and domain-filtered tools (`UnrealAiBuildBlueprintTag`, `FUnrealAiAgentHarness`, `UnrealAiBlueprintBuilderToolSurface`).
 - **Escape hatch:** when **`bOmitMainAgentBlueprintMutationTools`** is **false**, surface gating is bypassed so power users can expose graph tools on the main roster.
 
-Implementation: **`UnrealAiBlueprintToolGate.cpp`**, **`UnrealAiToolSurfaceCompatibility.cpp`**, prompts under **`Plugins/UnrealAiEditor/prompts/chunks/`** (especially **`04`**, **`10`**, **`12`**, **`blueprint-builder/**`**).
+Implementation: **`UnrealAiAgentToolGate.cpp`**, **`UnrealAiToolSurfaceCompatibility.cpp`**, prompts under **`Plugins/UnrealAiEditor/prompts/chunks/`** (especially **`04`**, **`10`**, **`12`**, **`14`**, **`blueprint-builder/**`**, **`environment-builder/**`**). PCG/landscape/foliage tool defs: **`Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalogFragmentPcgEnvironment.json`** (merged at load).
 
 ---
 

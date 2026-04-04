@@ -24,7 +24,10 @@ This folder holds **semantic fragments** the harness assembles into **system** a
 | [`chunks/04-tool-calling-contract.md`](chunks/04-tool-calling-contract.md) | ✓ (read tools only) | ✓ | ✓ | General tool discipline; **appendix-first** routing; Blueprint IR/patch/compile details apply when those tools are on the roster. |
 | [`chunks/12-build-blueprint-delegation.md`](chunks/12-build-blueprint-delegation.md) | ✓ | ✓ | ✓ | **Always loaded** (C++); prose targets Agent Blueprint delegation / `<unreal_ai_build_blueprint>`; Ask/Plan can ignore irrelevant lines. |
 | [`chunks/13-blueprint-builder-resume.md`](chunks/13-blueprint-builder-resume.md) | — | ✓ (one-shot after builder result) | — | `bInjectBlueprintBuilderResumeChunk`; pairs with structured builder `user` message. |
+| [`chunks/14-build-environment-delegation.md`](chunks/14-build-environment-delegation.md) | ✓ | ✓ | ✓ | **Always loaded** (C++); Environment/PCG delegation / `<unreal_ai_build_environment>`. |
+| [`chunks/15-environment-builder-resume.md`](chunks/15-environment-builder-resume.md) | — | ✓ (one-shot after builder result) | — | `bInjectEnvironmentBuilderResumeChunk`. |
 | [`chunks/blueprint-builder/`](chunks/blueprint-builder/) | — | **sub-turn only** | — | Alternate stack when `bBlueprintBuilderTurn` (deterministic loop, architecture notes, fail-safe). |
+| [`chunks/environment-builder/`](chunks/environment-builder/) | — | **sub-turn only** | — | Alternate stack when `bEnvironmentBuilderTurn` (PCG / landscape / foliage). |
 | [`chunks/05-context-and-editor.md`](chunks/05-context-and-editor.md) | ✓ | ✓ | ✓ | Attachments, snapshot, `@` mentions. |
 | [`chunks/10-mvp-gameplay-and-tooling.md`](chunks/10-mvp-gameplay-and-tooling.md) | ✓ | ✓ | ✓ | MVP gameplay flows, PIE, matrix `ok:false` semantics (`UnrealAiPromptBuilder` after `05`). |
 | [`chunks/plan-node/`](chunks/plan-node/) | — | when thread `*_plan_*` | — | Serial plan DAG node turns (`UnrealAiPromptAssemblyStrategy`). |
@@ -46,7 +49,7 @@ The editor builds the system/developer string at LLM time:
 
 Source: [`FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent`](../Source/UnrealAiEditor/Private/Prompt/UnrealAiPromptAssemblyStrategy.cpp). If you change load order there, update this section.
 
-### Main / Ask / Agent / Plan stack (`!bBlueprintBuilderMode`)
+### Main / Ask / Agent / Plan stack (`!bBlueprintBuilderMode && !bEnvironmentBuilderMode`)
 
 | Step | Chunk(s) | Condition |
 |------|-----------|-----------|
@@ -56,16 +59,18 @@ Source: [`FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent`](.
 | 4 | `04-tool-calling-contract.md` | always |
 | 5 | `12-build-blueprint-delegation.md` | always (**Agent** graph delegation; Ask/Plan still receive file — chunk is scoped in prose) |
 | 6 | `13-blueprint-builder-resume.md` | `bInjectBlueprintBuilderResumeChunk` |
-| 7 | `05-context-and-editor.md` | always |
-| 8 | `10-mvp-gameplay-and-tooling.md` | always |
-| 9 | `plan-node/01` … `03` | `bIncludePlanNodeExecutionChunk` |
-| 10 | `06-execution-subturn.md` | `bIncludeExecutionSubturnChunk` |
-| 11 | `07-safety-banned.md` | always |
-| 12 | `08-output-style.md` | always |
-| 13 | `plan/01` … `04` | `bIncludePlanDagChunk` |
+| 7 | `14-build-environment-delegation.md` | always |
+| 8 | `15-environment-builder-resume.md` | `bInjectEnvironmentBuilderResumeChunk` |
+| 9 | `05-context-and-editor.md` | always |
+| 10 | `10-mvp-gameplay-and-tooling.md` | always |
+| 11 | `plan-node/01` … `03` | `bIncludePlanNodeExecutionChunk` |
+| 12 | `06-execution-subturn.md` | `bIncludeExecutionSubturnChunk` |
+| 13 | `07-safety-banned.md` | always |
+| 14 | `08-output-style.md` | always |
+| 15 | `plan/01` … `04` | `bIncludePlanDagChunk` |
 | — | `ApplyTemplateTokens` | then prepend optional `SystemOrDeveloperBlock` |
 
-**On-disk chunk files not in the table above:** only `blueprint-builder/**` (builder stack) and `00-template-tokens.md` (authoring doc, not loaded).
+**On-disk chunk files not in the table above:** `blueprint-builder/**`, `environment-builder/**`, and `00-template-tokens.md` (authoring doc, not loaded in main stack).
 
 ### Blueprint Builder sub-turn (`bBlueprintBuilderMode`)
 
@@ -80,15 +85,29 @@ Source: [`FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent`](.
 | 12 | `08-output-style.md` |
 | — | `ApplyTemplateTokens`; prepend optional `SystemOrDeveloperBlock` |
 
-### Main Agent vs Blueprint Builder (product)
+### Environment Builder sub-turn (`bEnvironmentBuilderMode`)
 
-- **Default Agent** turns use `bOmitMainAgentBlueprintMutationTools` + per-tool `agent_surfaces` in [`UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json); [`UnrealAiBlueprintToolGate`](../Source/UnrealAiEditor/Private/Tools/UnrealAiBlueprintToolGate.cpp) filters the **tiered tool appendix**.
+| Step | Chunk(s) |
+|------|-----------|
+| 1 | `01-identity.md` |
+| 2 | `02-operating-modes.md` (mode slice) |
+| 3–8 | `environment-builder/00-overview.md` … `06-verification-ladder.md` (fixed order) |
+| 9 | `environment-builder/kinds/<target_kind>.md` from handoff YAML (`EUnrealAiEnvironmentBuilderTargetKind`) |
+| 10 | `05-context-and-editor.md` |
+| 11 | `07-safety-banned.md` |
+| 12 | `08-output-style.md` |
+| — | `ApplyTemplateTokens`; prepend optional `SystemOrDeveloperBlock` |
+
+### Main Agent vs Builder surfaces (product)
+
+- **Default Agent** turns use `bOmitMainAgentBlueprintMutationTools` + per-tool `agent_surfaces` in [`UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json) (plus optional fragments e.g. [`UnrealAiToolCatalogFragmentPcgEnvironment.json`](../Resources/UnrealAiToolCatalogFragmentPcgEnvironment.json)); [`UnrealAiAgentToolGate`](../Source/UnrealAiEditor/Private/Tools/UnrealAiAgentToolGate.cpp) filters the **tiered tool appendix**.
 - **Substantive Blueprint graph mutations** on the default path: **`<unreal_ai_build_blueprint>`** with YAML **`target_kind`** → builder stack + domain-filtered tools.
+- **PCG / landscape / foliage mutators** on the default path: **`<unreal_ai_build_environment>`** with YAML **`target_kind`** → Environment Builder stack.
 - **Escape hatch:** when `bOmitMainAgentBlueprintMutationTools` is false, surface gating is bypassed (power users).
 
 ## Typical assembly (summary)
 
-**System message (conceptual, main stack):** `01` → `02` slice → `03` → `04` → `12` → optional `13` → `05` → `10` → optional `plan-node/*` → optional `06` → `07` → `08` → optional `plan/*` → template substitution. Optional **`StaticSystemPrefix`** prepended via `SystemOrDeveloperBlock`. **`{{CONTEXT_SERVICE_OUTPUT}}`** is substituted inside chunks such as `03` / `05` from `BuildContextWindow`.
+**System message (conceptual, main stack):** `01` → `02` slice → `03` → `04` → `12` → optional `13` → `14` → optional `15` → `05` → `10` → optional `plan-node/*` → optional `06` → `07` → `08` → optional `plan/*` → template substitution. Optional **`StaticSystemPrefix`** prepended via `SystemOrDeveloperBlock`. **`{{CONTEXT_SERVICE_OUTPUT}}`** is substituted inside chunks such as `03` / `05` from `BuildContextWindow`.
 
 **Tools array:** Built from the catalog by mode (`BuildLlmToolsJsonArrayForMode`, chat-completions function tools); optional **narrow packs** per task—see [`tools/by-category.md`](tools/by-category.md) for human-readable grouping and [`tools/core-pack.md`](tools/core-pack.md) for default "always in core" IDs.
 

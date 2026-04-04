@@ -73,7 +73,7 @@ All handlers live in `UnrealAi.RunStrictAssertions` unless noted.
 | `tool_result_number_gte` / `tool_result_number_lte` | numeric comparisons at `path` |
 | `tool_result_bool_equals` | bool at `path` |
 | `tool_result_string_nonempty` | string at `path` non-empty |
-| `blueprint_export_ir_node_count_min` | `blueprint_path`, `min_nodes`, optional `graph_name` |
+| `blueprint_export_ir_node_count_min` | `blueprint_path`, `min_nodes`, optional `graph_name` — implemented with **`blueprint_graph_introspect`** (`nodes[]` count); assertion id kept for suite JSON compatibility |
 | `run_jsonl_last_tool_finish` | `tool`, `success` (bool), optional `result_preview_contains`, optional `run_jsonl_relative_path` (default `run.jsonl`) — last matching `tool_finish` line in the turn’s JSONL |
 | `run_jsonl_enforcement_event` | `event_type`, optional `detail_contains`, optional `run_jsonl_relative_path` — first matching `enforcement_event` |
 | `run_jsonl_substring` | `substring`, optional `run_jsonl_relative_path` — file body contains substring |

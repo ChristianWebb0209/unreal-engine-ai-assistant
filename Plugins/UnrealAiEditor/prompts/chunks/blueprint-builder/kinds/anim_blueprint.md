@@ -9,4 +9,4 @@
 
 **Cautions**
 
-- Do not assume every graph in an AnimBlueprint is a K2 graph suitable for **`blueprint_graph_import_t3d`**. **AnimGraph**, state machine, and transition graphs often return **`CanImportNodesFromText`** false—use **`blueprint_get_graph_summary`**, edit **`EventGraph`** with **`blueprint_graph_patch`** / **`blueprint_apply_ir`** when valid, or state that anim-graph wiring is manual.
+- Do not assume every graph in an AnimBlueprint is a K2 graph suitable for clipboard import. **AnimGraph**, state machine, and transition graphs are often fragile for bulk text import—use **`blueprint_get_graph_summary`**, edit **`EventGraph`** with **`blueprint_graph_patch`** when valid, or state that anim-graph wiring is manual.

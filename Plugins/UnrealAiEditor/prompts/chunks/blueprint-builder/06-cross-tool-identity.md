@@ -1,33 +1,17 @@
-# Cross-tool identity: T3D placeholders vs graph_patch vs IR
+# Cross-tool identity: graph_patch node refs
 
-Three different mechanisms address **node identity** in Blueprint graphs. Mixing them causes confusing failures.
+**Kismet graph edits use `blueprint_graph_patch` only.** Node references must be one of:
 
-## `__UAI_G_NNNNNN__` (T3D / import only)
+- **`patch_id`** from an earlier **`create_node`** in the **same** `ops[]` batch (wire as `myId.PinName`).
+- **`guid:AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE`** using the real **`node_guid`** from **`blueprint_graph_introspect`**.
+- **Bare UUID** (same as `guid:` form) when the catalog allows it.
 
-- Valid **only** in text passed to **`blueprint_t3d_preflight_validate`** and **`blueprint_graph_import_t3d`** (and in T3D you author before import).
-- The editor resolves these tokens to real `FGuid`s during **`ImportNodesFromText`**.
-- **Do not** put `__UAI_G_*` tokens inside **`blueprint_graph_patch`** ops (`guid:...`, `move_node`, `connect`, etc.). Patch resolves **`guid:<uuid>`** with a real Unreal GUID string, **`patch_id`** from the same patch batch, or a bare UUID — see tool catalog for `blueprint_graph_patch`.
+**Do not** use legacy **`__UAI_G_*`** tokens in patch ops — they were for removed T3D tooling and are rejected with a clear error.
 
-## `blueprint_graph_patch` references
-
-- Use **`guid:AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE`** (real node GUID from **`blueprint_graph_introspect`** / **`blueprint_export_ir`**), or **`patch_id`** from an earlier op in the **same** `ops[]` batch.
-- If you only have T3D placeholders, run **`blueprint_graph_import_t3d`** first, then introspect for real GUIDs before patching.
-
-**Example `connect`:** after introspect shows `node_guid` `A1B2C3D4-...` with an exec input named `Execute` and a new branch node `patch_id` `n_if`, a valid op is:
+**Example `connect`:** after introspect shows `node_guid` `A1B2C3D4-...` with an exec input named `Execute` and a new branch node `patch_id` `n_if`:
 
 `{ "op":"connect", "from":"n_if.Then", "to":"guid:A1B2C3D4-E5F6-7890-ABCD-EF1234567890.Execute" }`
 
-(Paste the real GUID and pin names from tool output—pin names vary by node type.)
+(Paste the real GUID and pin names from tool output.)
 
-## `blueprint_apply_ir`
-
-- Uses **`node_id`** strings **you** assign in the IR JSON, plus **`links`** as `node_id.PinName` → `node_id.PinName`.
-- Not the same as T3D placeholders; do not paste `__UAI_G_*` into `node_id`.
-
-## Quick decision
-
-| Goal | Prefer |
-|------|--------|
-| Bulk shape / paste-like edits | T3D export → edit → preflight → import |
-| Small surgical K2 edits | `blueprint_graph_patch` with real GUIDs or patch_ids |
-| Compact structured nodes (supported ops) | `blueprint_apply_ir` with valid `nodes[]` / `links[]` |
+For uncertain pin names on an existing node, call **`blueprint_graph_list_pins`** first.

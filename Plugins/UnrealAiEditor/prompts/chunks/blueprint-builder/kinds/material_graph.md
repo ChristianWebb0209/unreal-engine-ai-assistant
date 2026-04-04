@@ -12,7 +12,7 @@
 
 **`add_expression` without `connect` / `connect_material_input` leaves unwired nodes** (same class of bug as sparse K2 T3D).
 
-**Do not** call `blueprint_graph_patch`, `blueprint_apply_ir`, `blueprint_graph_import_t3d`, `blueprint_compile`, or other **K2** mutators — they target Blueprint graphs, not Materials.
+**Do not** call `blueprint_graph_patch`, `blueprint_compile`, or other **K2** mutators — they target Blueprint graphs, not Materials.
 
 ## Workflow
 
