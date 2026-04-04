@@ -2,6 +2,7 @@
 
 #include "Tools/UnrealAiToolDispatch_Actors.h"
 #include "Tools/UnrealAiToolDispatch_AssetsMaterials.h"
+#include "Tools/UnrealAiToolDispatch_MaterialGraph.h"
 #include "Tools/UnrealAiToolDispatch_Console.h"
 #include "Tools/UnrealAiToolDispatch_ContentBrowserEx.h"
 #include "Tools/UnrealAiToolDispatch_Context.h"
@@ -302,6 +303,26 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_MaterialGetUsageSummary(A);
 	}
+	if (ToolId == TEXT("material_graph_summarize"))
+	{
+		return UnrealAiDispatch_MaterialGraphSummarize(A);
+	}
+	if (ToolId == TEXT("material_graph_export"))
+	{
+		return UnrealAiDispatch_MaterialGraphExport(A);
+	}
+	if (ToolId == TEXT("material_graph_patch"))
+	{
+		return UnrealAiDispatch_MaterialGraphPatch(A);
+	}
+	if (ToolId == TEXT("material_graph_compile"))
+	{
+		return UnrealAiDispatch_MaterialGraphCompile(A);
+	}
+	if (ToolId == TEXT("material_graph_validate"))
+	{
+		return UnrealAiDispatch_MaterialGraphValidate(A);
+	}
 	if (ToolId == TEXT("material_instance_set_scalar_parameter"))
 	{
 		return UnrealAiDispatch_MaterialInstanceSetScalarParameter(A);
@@ -461,6 +482,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	if (ToolId == TEXT("blueprint_apply_ir"))
 	{
 		return UnrealAiDispatch_BlueprintApplyIr(A);
+	}
+	if (ToolId == TEXT("blueprint_composite_lifecycle_print"))
+	{
+		return UnrealAiDispatch_BlueprintCompositeLifecyclePrint(A);
 	}
 	if (ToolId == TEXT("blueprint_graph_patch"))
 	{
