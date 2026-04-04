@@ -335,7 +335,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameSelection(const TSha
 		return UnrealAiToolJson::Error(
 			TEXT("Empty selection or not enough geometry to frame. "
 				 "Select actors in the level first, or use scene_fuzzy_search + viewport_frame_actors with concrete paths. "
-				 "For camera position/FOV or dolly/orbit tasks, use viewport_camera_get_transform / viewport_camera_dolly / viewport_camera_orbit instead of framing."));
+				 "For camera position/FOV or dolly/orbit tasks, use viewport_camera_control (operation get_transform, dolly, or orbit) instead of framing."));
 	}
 	bool bUiSuppressed = false;
 	if (FUnrealAiEditorModule::IsEditorFocusEnabled())

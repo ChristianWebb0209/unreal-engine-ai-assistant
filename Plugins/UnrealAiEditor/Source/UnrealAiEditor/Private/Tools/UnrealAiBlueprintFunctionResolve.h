@@ -5,7 +5,7 @@
 class UClass;
 class UFunction;
 
-/** Shared Blueprint call_function resolution for graph_patch and blueprint_apply_ir. */
+/** Shared Blueprint call_function resolution for blueprint_graph_patch. */
 namespace UnrealAiBlueprintFunctionResolve
 {
 	/**

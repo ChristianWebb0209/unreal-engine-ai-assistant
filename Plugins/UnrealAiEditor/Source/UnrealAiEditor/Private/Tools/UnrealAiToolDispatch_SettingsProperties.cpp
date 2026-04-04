@@ -247,7 +247,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SettingsGet(const TSharedPtr<FJso
 		O->SetStringField(TEXT("value"), Value);
 		return UnrealAiToolJson::Ok(O);
 	}
-	return UnrealAiToolJson::Error(TEXT("Unsupported scope/key pair for settings_get"));
+	return UnrealAiToolJson::Error(TEXT("Unsupported scope/key pair for setting_query"));
 }
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_SettingsSet(const TSharedPtr<FJsonObject>& Args)
@@ -358,7 +358,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SettingsSet(const TSharedPtr<FJso
 		{
 			return UnrealAiToolJson::Error(
 				FString::Printf(
-					TEXT("project-scope engine INI key '%s:%s' is not allowlisted for settings_set. "
+					TEXT("project-scope engine INI key '%s:%s' is not allowlisted for setting_apply. "
 						 "Prefer drafts under Saved/UnrealAiEditorAgent/ or extend UnrealAiProjectIniSettingsAllowlist.cpp."),
 					*Section,
 					*Name));
@@ -386,5 +386,5 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SettingsSet(const TSharedPtr<FJso
 		O->SetStringField(TEXT("value"), ValueString);
 		return UnrealAiToolJson::Ok(O);
 	}
-	return UnrealAiToolJson::Error(TEXT("Unsupported scope/key pair for settings_set"));
+	return UnrealAiToolJson::Error(TEXT("Unsupported scope/key pair for setting_apply"));
 }

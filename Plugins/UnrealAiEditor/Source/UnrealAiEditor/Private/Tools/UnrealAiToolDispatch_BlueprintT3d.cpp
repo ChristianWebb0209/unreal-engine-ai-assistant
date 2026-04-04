@@ -9,7 +9,6 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
-#include "EdGraphUtilities.h"
 #include "Animation/AnimBlueprint.h"
 #include "Engine/Blueprint.h"
 #include "Internationalization/Regex.h"
@@ -21,11 +20,9 @@
 #include "K2Node_IfThenElse.h"
 #include "K2Node_Knot.h"
 #include "K2Node_Timeline.h"
-#include "BlueprintFormat/UnrealAiBlueprintFormatterBridge.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "ScopedTransaction.h"
 #include "UObject/Class.h"
-#include "UnrealAiEditorSettings.h"
 
 namespace UnrealAiBlueprintT3d
 {
@@ -237,193 +234,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphIntrospect(const TS
 	O->SetArrayField(TEXT("nodes"), Nodes);
 	O->SetNumberField(TEXT("node_count"), static_cast<double>(Nodes.Num()));
 	const FString Md = FString::Printf(TEXT("### blueprint_graph_introspect\n- Graph: **%s**\n- Nodes: **%d**\n"), *Graph->GetName(), Nodes.Num());
-	return UnrealAiToolJson::OkWithEditorPresentation(
-		O,
-		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Path, Graph->GetName(), Md));
-}
-
-FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportGraphT3d(const TSharedPtr<FJsonObject>& Args)
-{
-	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
-	FString Path;
-	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
-	{
-		return UnrealAiToolJson::Error(TEXT("blueprint_path is required."));
-	}
-	FString GraphName;
-	Args->TryGetStringField(TEXT("graph_name"), GraphName);
-	int32 MaxChars = 500000;
-	Args->TryGetNumberField(TEXT("max_chars"), MaxChars);
-	MaxChars = FMath::Clamp(MaxChars, 4096, 2000000);
-
-	UnrealAiNormalizeBlueprintObjectPath(Path);
-	UBlueprint* BP = UnrealAiBlueprintTools_LoadBlueprintGame(Path);
-	if (!BP)
-	{
-		return UnrealAiToolJson::Error(
-			FString::Printf(TEXT("Could not load Blueprint at %s. Resolve path via asset search first."), *Path));
-	}
-	FString GErr;
-	UEdGraph* Graph = UnrealAiBlueprintT3d::ResolveTargetGraph(BP, GraphName, GErr);
-	if (!Graph)
-	{
-		return UnrealAiToolJson::Error(GErr);
-	}
-
-	TSet<UObject*> ExportSet;
-	for (UEdGraphNode* N : Graph->Nodes)
-	{
-		if (N)
-		{
-			ExportSet.Add(N);
-		}
-	}
-	FString T3d;
-	FEdGraphUtilities::ExportNodesToText(ExportSet, T3d);
-	const bool bTruncated = T3d.Len() > MaxChars;
-	if (bTruncated)
-	{
-		T3d.LeftInline(MaxChars);
-	}
-	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
-	O->SetBoolField(TEXT("ok"), true);
-	O->SetStringField(TEXT("blueprint_path"), Path);
-	O->SetStringField(TEXT("graph_name"), Graph->GetName());
-	O->SetStringField(TEXT("t3d_text"), T3d);
-	O->SetNumberField(TEXT("t3d_chars"), static_cast<double>(T3d.Len()));
-	O->SetBoolField(TEXT("truncated"), bTruncated);
-	O->SetNumberField(TEXT("max_chars"), static_cast<double>(MaxChars));
-	const FString Md = FString::Printf(
-		TEXT("### blueprint_export_graph_t3d\n- Exported **%d** chars (`truncated=%s`).\n"),
-		T3d.Len(),
-		bTruncated ? TEXT("true") : TEXT("false"));
-	return UnrealAiToolJson::OkWithEditorPresentation(
-		O,
-		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Path, Graph->GetName(), Md));
-}
-
-FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintT3dPreflightValidate(const TSharedPtr<FJsonObject>& Args)
-{
-	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
-	FString Path;
-	FString T3dIn;
-	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
-	{
-		return UnrealAiToolJson::Error(TEXT("blueprint_path is required."));
-	}
-	if (!Args->TryGetStringField(TEXT("t3d_text"), T3dIn) || T3dIn.IsEmpty())
-	{
-		return UnrealAiToolJson::Error(TEXT("t3d_text is required."));
-	}
-	FString GraphName;
-	Args->TryGetStringField(TEXT("graph_name"), GraphName);
-	UnrealAiNormalizeBlueprintObjectPath(Path);
-	UBlueprint* BP = UnrealAiBlueprintTools_LoadBlueprintGame(Path);
-	if (!BP)
-	{
-		return UnrealAiToolJson::Error(
-			FString::Printf(TEXT("Could not load Blueprint at %s. Resolve path via asset search first."), *Path));
-	}
-	FString GErr;
-	UEdGraph* Graph = UnrealAiBlueprintT3d::ResolveTargetGraph(BP, GraphName, GErr);
-	if (!Graph)
-	{
-		return UnrealAiToolJson::Error(GErr);
-	}
-	FString Resolved = T3dIn;
-	FString PErr;
-	if (!UnrealAiBlueprintT3d::CollectAndResolvePlaceholders(Resolved, PErr))
-	{
-		return UnrealAiToolJson::Error(PErr);
-	}
-	const bool bCan = FEdGraphUtilities::CanImportNodesFromText(Graph, Resolved);
-	if (!bCan)
-	{
-		FString Msg = TEXT("CanImportNodesFromText returned false for this graph + resolved T3D. Fix payload or graph target.");
-		Msg += UnrealAiBlueprintT3d::DescribeT3dImportBlockerHint(Graph, BP);
-		return UnrealAiToolJson::Error(Msg);
-	}
-	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
-	O->SetBoolField(TEXT("ok"), true);
-	O->SetBoolField(TEXT("can_import"), true);
-	O->SetStringField(TEXT("blueprint_path"), Path);
-	O->SetStringField(TEXT("graph_name"), Graph->GetName());
-	return UnrealAiToolJson::Ok(O);
-}
-
-FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphImportT3d(const TSharedPtr<FJsonObject>& Args)
-{
-	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
-	FString Path;
-	FString T3dIn;
-	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
-	{
-		return UnrealAiToolJson::Error(TEXT("blueprint_path is required."));
-	}
-	if (!Args->TryGetStringField(TEXT("t3d_text"), T3dIn) || T3dIn.IsEmpty())
-	{
-		return UnrealAiToolJson::Error(TEXT("t3d_text is required."));
-	}
-	FString GraphName;
-	Args->TryGetStringField(TEXT("graph_name"), GraphName);
-	if (!UnrealAiBlueprintTools_IsGameWritableBlueprintPath(Path))
-	{
-		return UnrealAiToolJson::Error(TEXT("blueprint_path must be a writable /Game Blueprint path."));
-	}
-	UnrealAiNormalizeBlueprintObjectPath(Path);
-	UBlueprint* BP = UnrealAiBlueprintTools_LoadBlueprintGame(Path);
-	if (!BP)
-	{
-		return UnrealAiToolJson::Error(
-			FString::Printf(TEXT("Could not load Blueprint at %s. Resolve path via asset search first."), *Path));
-	}
-	FString GErr;
-	UEdGraph* Graph = UnrealAiBlueprintT3d::ResolveTargetGraph(BP, GraphName, GErr);
-	if (!Graph)
-	{
-		return UnrealAiToolJson::Error(GErr);
-	}
-	FString Resolved = T3dIn;
-	FString PErr;
-	if (!UnrealAiBlueprintT3d::CollectAndResolvePlaceholders(Resolved, PErr))
-	{
-		return UnrealAiToolJson::Error(PErr);
-	}
-	if (!FEdGraphUtilities::CanImportNodesFromText(Graph, Resolved))
-	{
-		FString Msg = TEXT("Preflight failed: CanImportNodesFromText is false. Fix T3D text or use blueprint_graph_patch on a Kismet graph.");
-		Msg += UnrealAiBlueprintT3d::DescribeT3dImportBlockerHint(Graph, BP);
-		return UnrealAiToolJson::Error(Msg);
-	}
-	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnBpT3dImport", "Unreal AI: blueprint_graph_import_t3d"));
-	BP->Modify();
-	Graph->Modify();
-	TSet<UEdGraphNode*> Imported;
-	FEdGraphUtilities::ImportNodesFromText(Graph, Resolved, Imported);
-	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
-
-	bool bSkipPostImportFormat = false;
-	Args->TryGetBoolField(TEXT("skip_post_import_format"), bSkipPostImportFormat);
-	FUnrealBlueprintGraphFormatResult PostImportFormat;
-	if (!bSkipPostImportFormat && Imported.Num() > 0)
-	{
-		UnrealAiBlueprintFormatterBridge::EnsureFormatterModuleLoaded(nullptr);
-		const FUnrealBlueprintGraphFormatOptions FmtOpts =
-			UnrealAiBlueprintTools_MakeFormatOptionsFromSettings(GetDefault<UUnrealAiEditorSettings>());
-		PostImportFormat = UnrealAiBlueprintFormatterBridge::TryLayoutEntireGraph(Graph, true, FmtOpts);
-	}
-
-	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
-	O->SetBoolField(TEXT("ok"), true);
-	O->SetStringField(TEXT("blueprint_path"), Path);
-	O->SetStringField(TEXT("graph_name"), Graph->GetName());
-	O->SetNumberField(TEXT("imported_node_count"), static_cast<double>(Imported.Num()));
-	O->SetBoolField(TEXT("post_import_format_ran"), !bSkipPostImportFormat && Imported.Num() > 0);
-	O->SetNumberField(TEXT("post_import_layout_nodes_moved"), static_cast<double>(PostImportFormat.NodesMoved));
-	O->SetNumberField(TEXT("post_import_knots_inserted"), static_cast<double>(PostImportFormat.KnotsInserted));
-	const FString Md = FString::Printf(
-		TEXT("### blueprint_graph_import_t3d\n- Imported nodes: **%d**\n"),
-		Imported.Num());
 	return UnrealAiToolJson::OkWithEditorPresentation(
 		O,
 		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Path, Graph->GetName(), Md));

@@ -14,9 +14,4 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_EditorStateSnapshotRead(
 	const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_ContentBrowserSyncAsset(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_EngineMessageLogRead(const TSharedPtr<FJsonObject>& Args);
-FUnrealAiToolInvocationResult UnrealAiDispatch_AgentEmitTodoPlan(
-	FUnrealAiBackendRegistry* Registry,
-	const FString& ProjectId,
-	const FString& ThreadId,
-	const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_ToolAuditAppend(const TSharedPtr<FJsonObject>& Args);

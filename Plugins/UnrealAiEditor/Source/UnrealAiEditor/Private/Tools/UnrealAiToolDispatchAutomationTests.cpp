@@ -153,7 +153,7 @@ bool FUnrealAiToolResolverCompositeRoutingTest::RunTest(const FString& Parameter
 
 		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("setting_query"), Args);
 		TestTrue(TEXT("setting_query resolves"), Resolved.bResolved);
-		TestEqual(TEXT("setting_query legacy tool"), Resolved.LegacyToolId, FString(TEXT("settings_get")));
+		TestEqual(TEXT("setting_query routes as canonical tool id"), Resolved.LegacyToolId, FString(TEXT("setting_query")));
 		FString Scope;
 		TestTrue(TEXT("setting_query maps domain to scope"), Resolved.ResolvedArguments->TryGetStringField(TEXT("scope"), Scope));
 		TestEqual(TEXT("setting_query scope value"), Scope, FString(TEXT("editor")));
@@ -172,7 +172,7 @@ bool FUnrealAiToolResolverCompositeRoutingTest::RunTest(const FString& Parameter
 
 		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("material_instance_set_parameter"), Args);
 		TestTrue(TEXT("material_instance_set_parameter resolves"), Resolved.bResolved);
-		TestEqual(TEXT("material_instance_set_parameter legacy tool"), Resolved.LegacyToolId, FString(TEXT("material_instance_set_vector_parameter")));
+		TestEqual(TEXT("material_instance_set_parameter routes as canonical tool id"), Resolved.LegacyToolId, FString(TEXT("material_instance_set_parameter")));
 		FString MaterialPath;
 		TestTrue(TEXT("material path canonicalized"), Resolved.ResolvedArguments->TryGetStringField(TEXT("material_path"), MaterialPath));
 		TestEqual(TEXT("material path preserved"), MaterialPath, FString(TEXT("/Game/MI_Test.MI_Test")));
@@ -185,7 +185,7 @@ bool FUnrealAiToolResolverCompositeRoutingTest::RunTest(const FString& Parameter
 
 		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("asset_graph_query"), Args);
 		TestTrue(TEXT("asset_graph_query resolves"), Resolved.bResolved);
-		TestEqual(TEXT("asset_graph_query legacy tool"), Resolved.LegacyToolId, FString(TEXT("asset_get_dependencies")));
+		TestEqual(TEXT("asset_graph_query routes as canonical tool id"), Resolved.LegacyToolId, FString(TEXT("asset_graph_query")));
 	}
 
 	{
@@ -221,7 +221,7 @@ bool FUnrealAiToolResolverCompositeRoutingTest::RunTest(const FString& Parameter
 		Args->SetStringField(TEXT("operation"), TEXT("get_transform"));
 		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("viewport_camera_control"), Args);
 		TestTrue(TEXT("viewport_camera_control explicit operation resolves"), Resolved.bResolved);
-		TestEqual(TEXT("viewport_camera_control get_transform legacy"), Resolved.LegacyToolId, FString(TEXT("viewport_camera_get_transform")));
+		TestEqual(TEXT("viewport_camera_control routes as canonical tool id"), Resolved.LegacyToolId, FString(TEXT("viewport_camera_control")));
 	}
 
 	{
@@ -1024,16 +1024,16 @@ bool FUnrealAiBlueprintGraphPatchContractTest::RunTest(const FString& Parameters
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FUnrealAiBlueprintApplyIrContractTest,
-	"UnrealAiEditor.Tools.BlueprintApplyIrContract",
+	FUnrealAiRemovedCatalogToolsDispatchContractTest,
+	"UnrealAiEditor.Tools.RemovedCatalogToolsDispatchContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FUnrealAiBlueprintApplyIrContractTest::RunTest(const FString& Parameters)
+bool FUnrealAiRemovedCatalogToolsDispatchContractTest::RunTest(const FString& Parameters)
 {
 	(void)Parameters;
 	TestTrue(TEXT("Runs on game thread (tool dispatch requirement)"), IsInGameThread());
 
-	auto ExpectCatalogDeprecated = [this](const TCHAR* ToolId, const TCHAR* Desc)
+	auto ExpectNotImplemented = [this](const TCHAR* ToolId, const TCHAR* Desc)
 	{
 		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
 			ToolId,
@@ -1046,30 +1046,22 @@ bool FUnrealAiBlueprintApplyIrContractTest::RunTest(const FString& Parameters)
 		TSharedPtr<FJsonObject> O;
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
 		TestTrue(FString::Printf(TEXT("%s: JSON parse"), Desc), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-		TestFalse(FString::Printf(TEXT("%s: ok field"), Desc), O->GetBoolField(TEXT("ok")));
 		FString Status;
 		TestTrue(FString::Printf(TEXT("%s: status"), Desc), O->TryGetStringField(TEXT("status"), Status));
-		TestEqual(FString::Printf(TEXT("%s: status value"), Desc), Status, FString(TEXT("tool_deprecated")));
-		TestTrue(FString::Printf(TEXT("%s: suggested_correct_call"), Desc), O->HasField(TEXT("suggested_correct_call")));
-		const TSharedPtr<FJsonObject>* Sug = nullptr;
-		TestTrue(
-			FString::Printf(TEXT("%s: suggested parse"), Desc),
-			O->TryGetObjectField(TEXT("suggested_correct_call"), Sug) && Sug && (*Sug).IsValid());
-		TestEqual(
-			FString::Printf(TEXT("%s: suggested.tool_id"), Desc),
-			(*Sug)->GetStringField(TEXT("tool_id")),
-			FString(TEXT("blueprint_graph_patch")));
+		TestEqual(FString::Printf(TEXT("%s: status value"), Desc), Status, FString(TEXT("not_implemented")));
 	};
 
-	ExpectCatalogDeprecated(TEXT("blueprint_apply_ir"), TEXT("blueprint_apply_ir"));
-	ExpectCatalogDeprecated(TEXT("blueprint_export_ir"), TEXT("blueprint_export_ir"));
-	ExpectCatalogDeprecated(TEXT("blueprint_add_variable"), TEXT("blueprint_add_variable"));
-	ExpectCatalogDeprecated(TEXT("blueprint_format_selection"), TEXT("blueprint_format_selection"));
-	ExpectCatalogDeprecated(TEXT("blueprint_open_graph_tab"), TEXT("blueprint_open_graph_tab"));
-	ExpectCatalogDeprecated(TEXT("blueprint_composite_lifecycle_print"), TEXT("blueprint_composite_lifecycle_print"));
-	ExpectCatalogDeprecated(TEXT("blueprint_export_graph_t3d"), TEXT("blueprint_export_graph_t3d"));
-	ExpectCatalogDeprecated(TEXT("blueprint_t3d_preflight_validate"), TEXT("blueprint_t3d_preflight_validate"));
-	ExpectCatalogDeprecated(TEXT("blueprint_graph_import_t3d"), TEXT("blueprint_graph_import_t3d"));
+	ExpectNotImplemented(TEXT("blueprint_apply_ir"), TEXT("blueprint_apply_ir"));
+	ExpectNotImplemented(TEXT("blueprint_export_ir"), TEXT("blueprint_export_ir"));
+	ExpectNotImplemented(TEXT("blueprint_add_variable"), TEXT("blueprint_add_variable"));
+	ExpectNotImplemented(TEXT("blueprint_open_graph_tab"), TEXT("blueprint_open_graph_tab"));
+	ExpectNotImplemented(TEXT("blueprint_composite_lifecycle_print"), TEXT("blueprint_composite_lifecycle_print"));
+	ExpectNotImplemented(TEXT("blueprint_export_graph_t3d"), TEXT("blueprint_export_graph_t3d"));
+	ExpectNotImplemented(TEXT("blueprint_t3d_preflight_validate"), TEXT("blueprint_t3d_preflight_validate"));
+	ExpectNotImplemented(TEXT("blueprint_graph_import_t3d"), TEXT("blueprint_graph_import_t3d"));
+	ExpectNotImplemented(TEXT("agent_emit_todo_plan"), TEXT("agent_emit_todo_plan"));
+	ExpectNotImplemented(TEXT("settings_get"), TEXT("settings_get"));
+	ExpectNotImplemented(TEXT("viewport_camera_dolly"), TEXT("viewport_camera_dolly"));
 
 	return true;
 }
@@ -1204,72 +1196,74 @@ bool FUnrealAiGenericAssetToolsContractTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("asset_export_properties missing object_path: has suggested_correct_call"), O->HasField(TEXT("suggested_correct_call")));
 	}
 
-	// asset_find_referencers: non-existent object_path should fail with suggested_correct_call to asset_index_fuzzy_search.
+	// asset_graph_query referencers: non-existent object_path should fail with suggested_correct_call to asset_index_fuzzy_search.
 	{
 		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("relation"), TEXT("referencers"));
 		Args->SetStringField(TEXT("object_path"), TEXT("/Game/__unreal_ai_missing_asset_for_referencers.__unreal_ai_missing_asset_for_referencers__"));
 
 		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("asset_find_referencers"),
+			TEXT("asset_graph_query"),
 			Args,
 			nullptr,
 			nullptr,
 			FString(),
 			FString());
-		TestFalse(TEXT("asset_find_referencers missing asset: bOk"), R.bOk);
+		TestFalse(TEXT("asset_graph_query referencers missing asset: bOk"), R.bOk);
 
 		TSharedPtr<FJsonObject> O;
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("asset_find_referencers missing asset: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-		TestTrue(TEXT("asset_find_referencers missing asset: has suggested_correct_call"), O->HasField(TEXT("suggested_correct_call")));
+		TestTrue(TEXT("asset_graph_query referencers missing asset: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+		TestTrue(TEXT("asset_graph_query referencers missing asset: has suggested_correct_call"), O->HasField(TEXT("suggested_correct_call")));
 
 		const TSharedPtr<FJsonObject>* SuggestedObj = nullptr;
 		TestTrue(
-			TEXT("asset_find_referencers suggested_correct_call parseable"),
+			TEXT("asset_graph_query referencers suggested_correct_call parseable"),
 			O->TryGetObjectField(TEXT("suggested_correct_call"), SuggestedObj) && SuggestedObj && SuggestedObj->IsValid());
 
-		TestEqual(TEXT("asset_find_referencers suggested tool_id"), SuggestedObj->Get()->GetStringField(TEXT("tool_id")), FString(TEXT("asset_index_fuzzy_search")));
+		TestEqual(TEXT("asset_graph_query referencers suggested tool_id"), SuggestedObj->Get()->GetStringField(TEXT("tool_id")), FString(TEXT("asset_index_fuzzy_search")));
 		const TSharedPtr<FJsonObject>* InnerArgs = nullptr;
 		TestTrue(
-			TEXT("asset_find_referencers suggested arguments parseable"),
+			TEXT("asset_graph_query referencers suggested arguments parseable"),
 			SuggestedObj->Get()->TryGetObjectField(TEXT("arguments"), InnerArgs) && InnerArgs && InnerArgs->IsValid());
 		FString PathPrefix;
-		TestTrue(TEXT("asset_find_referencers suggested path_prefix field"), InnerArgs->Get()->TryGetStringField(TEXT("path_prefix"), PathPrefix) && !PathPrefix.IsEmpty());
-		TestEqual(TEXT("asset_find_referencers suggested path_prefix value"), PathPrefix, FString(TEXT("/Game")));
+		TestTrue(TEXT("asset_graph_query referencers suggested path_prefix field"), InnerArgs->Get()->TryGetStringField(TEXT("path_prefix"), PathPrefix) && !PathPrefix.IsEmpty());
+		TestEqual(TEXT("asset_graph_query referencers suggested path_prefix value"), PathPrefix, FString(TEXT("/Game")));
 	}
 
-	// asset_get_dependencies: non-existent object_path should fail with suggested_correct_call to asset_index_fuzzy_search.
+	// asset_graph_query dependencies: non-existent object_path should fail with suggested_correct_call to asset_index_fuzzy_search.
 	{
 		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("relation"), TEXT("dependencies"));
 		Args->SetStringField(TEXT("object_path"), TEXT("/Game/__unreal_ai_missing_asset_for_dependencies.__unreal_ai_missing_asset_for_dependencies__"));
 
 		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("asset_get_dependencies"),
+			TEXT("asset_graph_query"),
 			Args,
 			nullptr,
 			nullptr,
 			FString(),
 			FString());
-		TestFalse(TEXT("asset_get_dependencies missing asset: bOk"), R.bOk);
+		TestFalse(TEXT("asset_graph_query dependencies missing asset: bOk"), R.bOk);
 
 		TSharedPtr<FJsonObject> O;
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("asset_get_dependencies missing asset: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-		TestTrue(TEXT("asset_get_dependencies missing asset: has suggested_correct_call"), O->HasField(TEXT("suggested_correct_call")));
+		TestTrue(TEXT("asset_graph_query dependencies missing asset: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+		TestTrue(TEXT("asset_graph_query dependencies missing asset: has suggested_correct_call"), O->HasField(TEXT("suggested_correct_call")));
 
 		const TSharedPtr<FJsonObject>* SuggestedObj = nullptr;
 		TestTrue(
-			TEXT("asset_get_dependencies suggested_correct_call parseable"),
+			TEXT("asset_graph_query dependencies suggested_correct_call parseable"),
 			O->TryGetObjectField(TEXT("suggested_correct_call"), SuggestedObj) && SuggestedObj && SuggestedObj->IsValid());
 
-		TestEqual(TEXT("asset_get_dependencies suggested tool_id"), SuggestedObj->Get()->GetStringField(TEXT("tool_id")), FString(TEXT("asset_index_fuzzy_search")));
+		TestEqual(TEXT("asset_graph_query dependencies suggested tool_id"), SuggestedObj->Get()->GetStringField(TEXT("tool_id")), FString(TEXT("asset_index_fuzzy_search")));
 		const TSharedPtr<FJsonObject>* InnerArgs = nullptr;
 		TestTrue(
-			TEXT("asset_get_dependencies suggested arguments parseable"),
+			TEXT("asset_graph_query dependencies suggested arguments parseable"),
 			SuggestedObj->Get()->TryGetObjectField(TEXT("arguments"), InnerArgs) && InnerArgs && InnerArgs->IsValid());
 		FString PathPrefix;
-		TestTrue(TEXT("asset_get_dependencies suggested path_prefix field"), InnerArgs->Get()->TryGetStringField(TEXT("path_prefix"), PathPrefix) && !PathPrefix.IsEmpty());
-		TestEqual(TEXT("asset_get_dependencies suggested path_prefix value"), PathPrefix, FString(TEXT("/Game")));
+		TestTrue(TEXT("asset_graph_query dependencies suggested path_prefix field"), InnerArgs->Get()->TryGetStringField(TEXT("path_prefix"), PathPrefix) && !PathPrefix.IsEmpty());
+		TestEqual(TEXT("asset_graph_query dependencies suggested path_prefix value"), PathPrefix, FString(TEXT("/Game")));
 	}
 
 	// asset_rename: non-loadable from_path should fail with suggested_correct_call to asset_index_fuzzy_search.
@@ -1526,13 +1520,13 @@ bool FUnrealAiGenericSettingsPropertiesContractTest::RunTest(const FString& Para
 
 	{
 		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("settings_get"),
+			TEXT("setting_query"),
 			MakeShared<FJsonObject>(),
 			nullptr,
 			nullptr,
 			FString(),
 			FString());
-		TestFalse(TEXT("settings_get missing required fields: bOk"), R.bOk);
+		TestFalse(TEXT("setting_query missing required fields: bOk"), R.bOk);
 	}
 
 	{
@@ -1542,13 +1536,13 @@ bool FUnrealAiGenericSettingsPropertiesContractTest::RunTest(const FString& Para
 		// UE Json strings implement TryGetBool (via ToBool); use a JSON array so the value is the wrong shape.
 		Args->SetArrayField(TEXT("value"), TArray<TSharedPtr<FJsonValue>>());
 		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("settings_set"),
+			TEXT("setting_apply"),
 			Args,
 			nullptr,
 			nullptr,
 			FString(),
 			FString());
-		TestFalse(TEXT("settings_set editor_focus wrong type: bOk"), R.bOk);
+		TestFalse(TEXT("setting_apply editor_focus wrong type: bOk"), R.bOk);
 	}
 
 	{
@@ -1557,25 +1551,25 @@ bool FUnrealAiGenericSettingsPropertiesContractTest::RunTest(const FString& Para
 		SetArgs->SetStringField(TEXT("key"), TEXT("editor_focus"));
 		SetArgs->SetBoolField(TEXT("value"), true);
 		const FUnrealAiToolInvocationResult SetR = UnrealAiDispatchTool(
-			TEXT("settings_set"),
+			TEXT("setting_apply"),
 			SetArgs,
 			nullptr,
 			nullptr,
 			FString(),
 			FString());
-		TestTrue(TEXT("settings_set editor_focus bool value: bOk"), SetR.bOk);
+		TestTrue(TEXT("setting_apply editor_focus bool value: bOk"), SetR.bOk);
 
 		TSharedPtr<FJsonObject> GetArgs = MakeShared<FJsonObject>();
 		GetArgs->SetStringField(TEXT("scope"), TEXT("editor"));
 		GetArgs->SetStringField(TEXT("key"), TEXT("editor_focus"));
 		const FUnrealAiToolInvocationResult GetR = UnrealAiDispatchTool(
-			TEXT("settings_get"),
+			TEXT("setting_query"),
 			GetArgs,
 			nullptr,
 			nullptr,
 			FString(),
 			FString());
-		TestTrue(TEXT("settings_get editor_focus: bOk"), GetR.bOk);
+		TestTrue(TEXT("setting_query editor_focus: bOk"), GetR.bOk);
 	}
 
 	{
@@ -1599,15 +1593,15 @@ bool FUnrealAiGenericSettingsPropertiesContractTest::RunTest(const FString& Para
 		Args->SetStringField(TEXT("key"), TEXT("/Script/Engine.Engine:GameEngineClassName"));
 		Args->SetStringField(TEXT("value"), TEXT("/Script/Engine.GameEngine"));
 		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("settings_set"),
+			TEXT("setting_apply"),
 			Args,
 			nullptr,
 			nullptr,
 			FString(),
 			FString());
-		TestFalse(TEXT("settings_set project scope: denied without allowlist"), R.bOk);
+		TestFalse(TEXT("setting_apply project scope: denied without allowlist"), R.bOk);
 		TestTrue(
-			TEXT("settings_set project scope: error explains allowlist"),
+			TEXT("setting_apply project scope: error explains allowlist"),
 			R.ErrorMessage.Contains(TEXT("allowlist")) || R.ContentForModel.Contains(TEXT("allowlist")));
 	}
 
@@ -1680,22 +1674,13 @@ bool FUnrealAiTodoPlanContractTest::RunTest(const FString& Parameters)
 			nullptr,
 			FString(),
 			FString());
-		TestFalse(TEXT("agent_emit_todo_plan missing steps: bOk"), R.bOk);
+		TestFalse(TEXT("agent_emit_todo_plan removed: bOk"), R.bOk);
 		TSharedPtr<FJsonObject> O;
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("agent_emit_todo_plan missing steps: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-		TestTrue(TEXT("agent_emit_todo_plan missing steps: has suggestion"), O->HasField(TEXT("suggested_correct_call")));
-	}
-
-	{
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("agent_emit_todo_plan"),
-			MakeShared<FJsonObject>(),
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-		TestFalse(TEXT("agent_emit_todo_plan missing title: bOk"), R.bOk);
+		TestTrue(TEXT("agent_emit_todo_plan removed: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+		FString Status;
+		TestTrue(TEXT("agent_emit_todo_plan removed: status"), O->TryGetStringField(TEXT("status"), Status));
+		TestEqual(TEXT("agent_emit_todo_plan removed: not_implemented"), Status, FString(TEXT("not_implemented")));
 	}
 
 	return true;
@@ -1944,7 +1929,7 @@ bool FUnrealAiBlueprintIrTier1GoldenRoundTripTest::RunTest(const FString& Parame
 		TSharedPtr<FJsonObject> O;
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
 		TestTrue(TEXT("Tier-1 golden IR via dispatch: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-		TestEqual(TEXT("Tier-1 golden IR via dispatch: status"), O->GetStringField(TEXT("status")), FString(TEXT("tool_deprecated")));
+		TestEqual(TEXT("Tier-1 golden IR via dispatch: status"), O->GetStringField(TEXT("status")), FString(TEXT("not_implemented")));
 	}
 
 	// Introspect stability: two consecutive blueprint_graph_introspect calls return the same node count (StrictTests harness only).

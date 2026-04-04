@@ -20,7 +20,7 @@ void UnrealAiNormalizeBlueprintObjectPath(FString& BlueprintObjectPath);
 UBlueprint* UnrealAiBlueprintTools_LoadBlueprintGame(const FString& BlueprintObjectPath);
 bool UnrealAiBlueprintTools_IsGameWritableBlueprintPath(const FString& BlueprintObjectPath);
 UEdGraph* UnrealAiBlueprintTools_FindGraphByName(UBlueprint* BP, const FString& GraphName);
-/** Preferred for `add_variable`: returns false if the token is not recognized (no silent Boolean fallback). */
+/** Pin-type parsing for internal Blueprint helpers; returns false if the token is not recognized (no silent Boolean fallback). */
 bool UnrealAiBlueprintTools_TryParsePinTypeFromString(const FString& TypeStr, FEdGraphPinType& OutType);
 /** Legacy: unknown tokens map to Boolean (preserves older callers); prefer TryParse for strict validation. */
 FEdGraphPinType UnrealAiBlueprintTools_ParsePinTypeFromString(const FString& TypeStr);
@@ -35,11 +35,6 @@ void UnrealAiFocusBlueprintEditor(const FString& BlueprintObjectPath, const FStr
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompile(const TSharedPtr<FJsonObject>& Args);
 /** Set a reflected property on a named Actor component instance on the Blueprint generated class default (CDO), then compile. */
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintSetComponentDefault(const TSharedPtr<FJsonObject>& Args);
-/** Serialize a Blueprint graph to blueprint_apply_ir-compatible JSON (lossy for unknown node types). */
-FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportIr(const TSharedPtr<FJsonObject>& Args);
-FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr<FJsonObject>& Args);
-/** Composite: append PrintString after ReceiveBeginPlay or ReceiveTick using internal Tier-1 IR (small stable contract). */
-FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompositeLifecyclePrint(const TSharedPtr<FJsonObject>& Args);
 /** Run bundled graph layout on one script graph (default: first ubergraph); supports full_graph vs selection. */
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintFormatGraph(const TSharedPtr<FJsonObject>& Args);
 /** Same as blueprint_format_graph with format_scope forced to selection (Blueprint editor must be open). */
@@ -56,11 +51,5 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphListPins(const TSha
 
 /** Pin audit + node map for Blueprint graph (builder / read paths). */
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphIntrospect(const TSharedPtr<FJsonObject>& Args);
-/** Export graph nodes as Unreal T3D clipboard text. */
-FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportGraphT3d(const TSharedPtr<FJsonObject>& Args);
-/** Resolve __UAI_G_NNNNNN__ placeholders and run CanImportNodesFromText. */
-FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintT3dPreflightValidate(const TSharedPtr<FJsonObject>& Args);
-/** Atomic ImportNodesFromText after placeholder resolution. */
-FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphImportT3d(const TSharedPtr<FJsonObject>& Args);
 /** Post-edit link sanity checks (extensible steps[]). */
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintVerifyGraph(const TSharedPtr<FJsonObject>& Args);

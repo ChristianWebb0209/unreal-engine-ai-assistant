@@ -10,7 +10,7 @@
 class UEdGraph;
 class UEdGraphNode;
 
-/** Per-node layout hint from Unreal AI blueprint_apply_ir (matches IR node_id + x/y). */
+/** Per-node layout hint from graph patch / IR-shaped payloads (matches node_id + x/y). */
 struct FUnrealBlueprintIrNodeLayoutHint
 {
 	FString NodeId;
