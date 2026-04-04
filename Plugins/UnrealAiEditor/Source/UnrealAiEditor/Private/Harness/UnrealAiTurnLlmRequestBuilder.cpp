@@ -146,6 +146,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	}
 	P.bIncludePlanDagChunk = (Request.Mode == EUnrealAiAgentMode::Plan);
 	P.bBlueprintBuilderMode = Request.bBlueprintBuilderTurn;
+	P.BlueprintBuilderTargetKind = Request.BlueprintBuilderTargetKind;
 
 	const bool bResumeChunk = Request.bInjectBlueprintBuilderResumeChunk;
 	Request.bInjectBlueprintBuilderResumeChunk = false;
@@ -195,7 +196,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 
 	const auto ToolSurfaceFilter = [&](const FString& Tid) -> bool
 	{
-		return UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Request, Tid);
+		return UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Request, Tid, Catalog);
 	};
 
 	FString ToolsJson;

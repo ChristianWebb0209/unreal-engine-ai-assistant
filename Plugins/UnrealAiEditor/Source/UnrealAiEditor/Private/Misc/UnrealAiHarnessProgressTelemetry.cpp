@@ -100,6 +100,25 @@ namespace UnrealAiHarnessProgressTelemetry
 		++GPlanSubTurnCompleteCount;
 	}
 
+	static double CombinedAssistantThinkingIdleSec(const double NowSec)
+	{
+		const double A = AgeSec(GLastAssistantDeltaSec, NowSec);
+		const double T = AgeSec(GLastThinkingDeltaSec, NowSec);
+		if (A < 0.0 && T < 0.0)
+		{
+			return -1.0;
+		}
+		if (A < 0.0)
+		{
+			return T;
+		}
+		if (T < 0.0)
+		{
+			return A;
+		}
+		return (A < T) ? A : T;
+	}
+
 	void GetStreamIdleSeconds(double& OutAssistantIdleSec, double& OutHttpIdleSec, double& OutLlmSubmitIdleSec)
 	{
 		FScopeLock Lock(&Mutex);
@@ -107,6 +126,20 @@ namespace UnrealAiHarnessProgressTelemetry
 		OutAssistantIdleSec = AgeSec(GLastAssistantDeltaSec, NowSec);
 		OutHttpIdleSec = AgeSec(GLastHttpResponseCompleteSec, NowSec);
 		OutLlmSubmitIdleSec = AgeSec(GLastLlmSubmitSec, NowSec);
+	}
+
+	void GetAssistantOrThinkingIdleSeconds(double& OutCombinedIdleSec)
+	{
+		FScopeLock Lock(&Mutex);
+		const double NowSec = FPlatformTime::Seconds();
+		OutCombinedIdleSec = CombinedAssistantThinkingIdleSec(NowSec);
+	}
+
+	void GetToolFinishIdleSeconds(double& OutToolFinishIdleSec)
+	{
+		FScopeLock Lock(&Mutex);
+		const double NowSec = FPlatformTime::Seconds();
+		OutToolFinishIdleSec = AgeSec(GLastToolFinishSec, NowSec);
 	}
 
 	void SetIdleAbortSkipReason(const TCHAR* Reason)
@@ -131,6 +164,8 @@ namespace UnrealAiHarnessProgressTelemetry
 		double NowSec = 0.0;
 		double RunStartSec = 0.0;
 		double LastAssistant = 0.0;
+		double LastThinking = 0.0;
+		double LastToolFinish = 0.0;
 		double LastHttp = 0.0;
 		double LastLlm = 0.0;
 		int32 PlanSubTurnCount = 0;
@@ -139,10 +174,14 @@ namespace UnrealAiHarnessProgressTelemetry
 			NowSec = FPlatformTime::Seconds();
 			RunStartSec = GRunStartSec;
 			LastAssistant = GLastAssistantDeltaSec;
+			LastThinking = GLastThinkingDeltaSec;
+			LastToolFinish = GLastToolFinishSec;
 			LastHttp = GLastHttpResponseCompleteSec;
 			LastLlm = GLastLlmSubmitSec;
 			PlanSubTurnCount = GPlanSubTurnCompleteCount;
 		}
+		double CombinedStreamIdleSec = -1.0;
+		GetAssistantOrThinkingIdleSeconds(CombinedStreamIdleSec);
 
 		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 		O->SetStringField(TEXT("type"), TEXT("harness_sync_idle_abort_diagnostic"));
@@ -156,11 +195,14 @@ namespace UnrealAiHarnessProgressTelemetry
 		O->SetNumberField(TEXT("run_start_sec"), RunStartSec);
 		SetNumberOrNegOne(O, TEXT("seconds_since_run_start"), RunStartSec > 0.0 ? (NowSec - RunStartSec) : -1.0);
 		SetNumberOrNegOne(O, TEXT("seconds_since_last_assistant_delta"), AgeSec(LastAssistant, NowSec));
+		SetNumberOrNegOne(O, TEXT("seconds_since_last_thinking_delta"), AgeSec(LastThinking, NowSec));
+		SetNumberOrNegOne(O, TEXT("seconds_since_last_assistant_or_thinking_delta"), CombinedStreamIdleSec);
+		SetNumberOrNegOne(O, TEXT("seconds_since_last_tool_finish"), AgeSec(LastToolFinish, NowSec));
 		SetNumberOrNegOne(O, TEXT("seconds_since_last_http_response_complete"), AgeSec(LastHttp, NowSec));
 		SetNumberOrNegOne(O, TEXT("seconds_since_last_llm_submit"), AgeSec(LastLlm, NowSec));
 		O->SetStringField(
 			TEXT("interpretation_notes"),
-			TEXT("Idle abort: turn still non-terminal, transport request finished, harness not suppressing, and stream telemetry idle exceeded idle_abort_ms."));
+			TEXT("Idle abort: turn still non-terminal, transport request finished, harness not suppressing, and combined assistant+thinking stream idle exceeded idle_abort_ms."));
 		return O;
 	}
 
@@ -171,15 +213,18 @@ namespace UnrealAiHarnessProgressTelemetry
 		const bool bHasActiveLlmTransport,
 		const bool bSuppressIdleAbort)
 	{
-		double Asst = -1.0, Http = -1.0, Llm = -1.0;
-		GetStreamIdleSeconds(Asst, Http, Llm);
+		double RawAsst = -1.0, Http = -1.0, Llm = -1.0;
+		double CombinedStream = -1.0;
+		GetStreamIdleSeconds(RawAsst, Http, Llm);
+		GetAssistantOrThinkingIdleSeconds(CombinedStream);
 		return FString::Printf(
 			TEXT("UnrealAi harness: sync_idle_abort diagnostic mode=%s plan=%s idle_abort_ms=%u "
-				 "age_sec(assistant=%.2f http=%.2f llm_submit=%.2f) active_http=%s suppress=%s"),
+				 "age_sec(stream_asst_or_think=%.2f assistant_raw=%.2f http=%.2f llm_submit=%.2f) active_http=%s suppress=%s"),
 			*AgentModeLabel,
 			bPlanMode ? TEXT("yes") : TEXT("no"),
 			IdleAbortMs,
-			Asst,
+			CombinedStream,
+			RawAsst,
 			Http,
 			Llm,
 			bHasActiveLlmTransport ? TEXT("yes") : TEXT("no"),

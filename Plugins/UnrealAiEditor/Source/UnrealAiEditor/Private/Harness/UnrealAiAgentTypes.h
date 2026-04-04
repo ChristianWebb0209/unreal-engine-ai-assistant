@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Context/AgentContextTypes.h"
+#include "UnrealAiBlueprintBuilderTargetKind.h"
 
 /** Stable run identifiers for observability (parent/child workers). */
 struct FUnrealAiRunIds
@@ -158,6 +159,12 @@ struct FUnrealAiAgentTurnRequest
 	 * Set by the harness when chaining after `<unreal_ai_build_blueprint>...</unreal_ai_build_blueprint>` from the main agent.
 	 */
 	bool bBlueprintBuilderTurn = false;
+
+	/**
+	 * Parsed from handoff frontmatter (`target_kind:`) for the active builder sub-turn.
+	 * Drives conditional prompt chunks + `builder_domains` tool merging. Reset when the builder result is consumed.
+	 */
+	EUnrealAiBlueprintBuilderTargetKind BlueprintBuilderTargetKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
 
 	/**
 	 * When true (default) on Agent turns that are NOT bBlueprintBuilderTurn, graph mutation tools

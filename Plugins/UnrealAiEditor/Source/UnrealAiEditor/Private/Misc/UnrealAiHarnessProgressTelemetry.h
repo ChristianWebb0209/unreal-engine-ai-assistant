@@ -25,8 +25,20 @@ namespace UnrealAiHarnessProgressTelemetry
 	void SetIdleAbortSkipReason(const TCHAR* Reason);
 	FString GetIdleAbortSkipReason();
 
-	/** Age in seconds since last assistant delta / HTTP complete / LLM submit; -1 if that event never occurred this run. */
+	/**
+	 * Age in seconds since last assistant delta / HTTP complete / LLM submit; -1 if that event never occurred this run.
+	 * OutAssistantIdleSec is raw assistant-only (diagnostics).
+	 */
 	void GetStreamIdleSeconds(double& OutAssistantIdleSec, double& OutHttpIdleSec, double& OutLlmSubmitIdleSec);
+
+	/**
+	 * For idle-abort / no-finish grace: age since the more recent of assistant or thinking delta (min of ages).
+	 * -1 only if neither stream has produced a delta this run.
+	 */
+	void GetAssistantOrThinkingIdleSeconds(double& OutCombinedIdleSec);
+
+	/** Age since last tool_finish telemetry; -1 if none this run. */
+	void GetToolFinishIdleSeconds(double& OutToolFinishIdleSec);
 
 	TSharedPtr<FJsonObject> BuildHarnessSyncIdleAbortDiagnosticJson(
 		const FString& AgentModeLabel,

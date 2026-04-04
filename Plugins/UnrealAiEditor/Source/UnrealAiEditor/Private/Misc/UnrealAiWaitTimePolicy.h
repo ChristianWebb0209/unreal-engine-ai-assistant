@@ -18,9 +18,9 @@ namespace UnrealAiWaitTime
 	/**
 	 * Headed harness: if the turn is still non-terminal but HTTP is complete and stream telemetry is idle
 	 * for this long (no active tool work), cancel early instead of waiting the full HarnessSyncWaitMs.
-	 * 0 = disabled. Run-29 step_03: post-tool assistant replies need more than 3s on slow models; 12s reduces false idle-abort before run_finished.
+	 * 0 = disabled. Run-29 step_03: post-tool assistant replies need more than 3s on slow models; qualitative headed runs need extra headroom after tool failures before the assistant streams again.
 	 */
-	inline constexpr uint32 HarnessSyncIdleAbortMs = 12000;
+	inline constexpr uint32 HarnessSyncIdleAbortMs = 22000;
 
 	/**
 	 * Headed scenario sync: when a plan pipeline is active (planner + serial node turns), post-tool / post-token
@@ -107,6 +107,18 @@ namespace UnrealAiWaitTime
 	 * ShouldRetryTransientTransportError (timeouts, cancellation). Generic Agent turns keep 0.
 	 */
 	inline constexpr int32 PlanNodeTransientHttpMaxRetries = 1;
+
+	/**
+	 * Headed `RunAgentTurnSync` agent turns (non-plan-node): max `DispatchLlm(true)` retries per LLM round when HTTP
+	 * completes without a stream Finish (truncated SSE). Capped at 1 in harness. 0 = legacy (idle-abort / long sync wait only).
+	 */
+	inline constexpr int32 HeadedAgentStreamNoFinishMaxRetries = 1;
+
+	/**
+	 * When > 0, headed sync agent turns use this instead of HarnessStreamNoFinishGraceMs for the no-finish idle gate.
+	 * 0 = use HarnessStreamNoFinishGraceMs (5s default).
+	 */
+	inline constexpr uint32 HeadedAgentStreamNoFinishGraceMs = 0;
 
 	/**
 	 * Plan-node agent threads: fail fast when the same validation-style tool failure signature repeats this many times.
