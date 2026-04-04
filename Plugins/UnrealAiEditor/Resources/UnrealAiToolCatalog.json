@@ -25,7 +25,7 @@
       "exec",
       "settings_properties"
     ],
-    "tool_count": 99,
+    "tool_count": 106,
     "retrieval_index": {
       "bm25_document_formula": "tool_id + summary + category + tags + tool_surface.domain_tags",
       "indexed_fields": [
@@ -70,14 +70,25 @@
       "description": "Optional per-tool overrides under tools[].tool_surface — domain_tags, centrality, worst_case_cost, requires_strict_args (tools-expansion.md). Tiered eligibility, usage prior, JSONL logging, and repair nudges are toggled in source: Plugins/UnrealAiEditor/.../Misc/UnrealAiRuntimeDefaults.h (not environment variables).",
       "runtime_defaults_header": "Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h"
     },
+    "agent_surfaces": {
+      "description": "Optional per-tool array tools[].agent_surfaces lists which agent pipelines may surface or invoke the tool. Orthogonal to modes (ask/agent/plan) and to builder_domains / blueprint_builder_core. Parsed in UnrealAiToolSurfaceCompatibility; enforced in UnrealAiBlueprintToolGate when Agent mode and bOmitMainAgentBlueprintMutationTools is true.",
+      "tokens": {
+        "all": "Single entry [\"all\"] (any case) or missing/empty field: no surface restriction (same eligibility as pre-tag catalogs).",
+        "main_agent": "Main agent turn (not a Blueprint Builder sub-turn).",
+        "blueprint_builder": "Blueprint Builder sub-turn after build-blueprint handoff."
+      },
+      "escape_hatch": "When bOmitMainAgentBlueprintMutationTools is false, surface gating is bypassed for power users."
+    },
     "resolver_contract": {
-      "version": "2.1.0",
+      "version": "2.2.0",
       "architecture_doc": "docs/planning/new-tools-schema/resolver-architecture.md",
-      "notes": "No resolver inference for operation/capture_kind/target/value_kind; explicit catalog required fields only. No Levenshtein tool_id autocorrect (suggestions only). Alias table + path canonicalization only. Validates before dispatch; resolver_audit on results."
+      "notes": "Catalog tools may declare tools[].agent_surfaces for surface compatibility (main_agent / blueprint_builder / all); omit_from_main_agent_surface removed. No resolver inference for operation/capture_kind/target/value_kind; explicit catalog required fields only. No Levenshtein tool_id autocorrect (suggestions only). Alias table + path canonicalization only. Validates before dispatch; resolver_audit on results."
     },
     "invocation": {
       "focused_flag": "Optional JSON field \"focused\": true on supported tools. Stripped before handlers; after a successful run the editor opens or foregrounds the related Blueprint, asset, Content Browser selection, or project source file in the IDE. Tools list this property explicitly where the catalog schema is strict (additionalProperties: false)."
-    }
+    },
+    "tool_catalog_fragments": [],
+    "tool_catalog_fragments_notes": "Optional array: each entry is a string (path under Resources/) or object { path, retrieval_bundle }. Fragment files must be { \"tools\": [ ... ] }. Merged tools may receive retrieval_bundle; main Agent tiered BM25 omits retrieval_bundle=blueprint_builder (Blueprint Builder sub-turns still see the full merged catalog)."
   },
   "tools": [
     {
@@ -1036,7 +1047,7 @@
     },
     {
       "tool_id": "blueprint_add_variable",
-      "summary": "Add member variable to Blueprint.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Add member variable to Blueprint.",
       "category": "blueprints",
       "tags": [
         "blueprint"
@@ -1047,6 +1058,9 @@
         "agent": true,
         "plan": true
       },
+      "agent_surfaces": [
+        "blueprint_builder"
+      ],
       "context_selector": {
         "priority": 20,
         "always_include_in_core_pack": false,
@@ -1100,7 +1114,7 @@
     },
     {
       "tool_id": "blueprint_compile",
-      "summary": "Compile a Blueprint and return diagnostics. Use after blueprint_graph_patch, blueprint_apply_ir, or other graph edits to validate/fix compile state; not for graph discovery (use blueprint_get_graph_summary or blueprint_export_ir). Use format_graphs to run in-process graph layout on script graphs before compile when graphs should be laid out.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Compile a Blueprint and return diagnostics. Use after blueprint_graph_patch, blueprint_apply_ir, or other graph edits to validate/fix compile state; not for graph discovery (use blueprint_get_graph_summary or blueprint_export_ir). Use format_graphs to run in-process graph layout on script graphs before compile when graphs should be laid out.",
       "category": "blueprints",
       "tags": [
         "blueprint"
@@ -1111,6 +1125,9 @@
         "agent": true,
         "plan": true
       },
+      "agent_surfaces": [
+        "blueprint_builder"
+      ],
       "context_selector": {
         "priority": 50,
         "always_include_in_core_pack": false,
@@ -1148,8 +1165,70 @@
       "status": "implemented"
     },
     {
+      "tool_id": "blueprint_composite_lifecycle_print",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Composite (Tier-1): wires UKismetSystemLibrary::PrintString after ReceiveBeginPlay or ReceiveTick without authoring raw IR. Parameters: blueprint_path, optional graph_name (default EventGraph), lifecycle begin_play|tick, optional message. Implemented via internal blueprint_apply_ir — same merge/append rules as manual IR.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "composite",
+        "write"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "blueprint_builder"
+      ],
+      "context_selector": {
+        "priority": 69,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Blueprint asset object path under /Game."
+          },
+          "graph_name": {
+            "type": "string",
+            "description": "Defaults to EventGraph."
+          },
+          "lifecycle": {
+            "type": "string",
+            "enum": [
+              "begin_play",
+              "tick"
+            ],
+            "description": "Which built-in event to hook: ReceiveBeginPlay or ReceiveTick."
+          },
+          "message": {
+            "type": "string",
+            "description": "String passed to PrintString InString."
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "UnrealAiDispatch_BlueprintApplyIr",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
       "tool_id": "blueprint_graph_patch",
-      "summary": "Primary UE 5.7 graph mutator: ops[] on blueprint_path (/Game) and graph_name. create_node (UK2Node), create_comment (boxes + member_node_refs), connect, break_link (splice/reroute), splice_on_link (break + wire through insert_patch_id), set_pin_default, add_variable, remove_node, move_node. auto_layout defaults true with layout_scope patched_nodes (only nodes created this batch); layout_scope full_graph reformats entire script graph; layout_mode / wire_knots match blueprint_apply_ir. Insert-between flow: create_node middle → break_link or splice_on_link → connect data pins as needed, all in one ops[]. Response adds layout_applied, layout_nodes_positioned, formatter_available.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Anti-pattern: T3D placeholders __UAI_G_NNNNNN__ are invalid here — use real guid:UUID from blueprint_graph_introspect or patch_id from this batch. Primary UE 5.7 graph mutator: ops[] on blueprint_path (/Game) and graph_name. create_node (UK2Node), create_comment (boxes + member_node_refs), connect, break_link (splice/reroute), splice_on_link (break + wire through insert_patch_id), set_pin_default, add_variable, remove_node, move_node. auto_layout defaults true with layout_scope patched_nodes (only nodes created this batch); layout_scope full_graph reformats entire script graph; layout_mode / wire_knots match blueprint_apply_ir. Insert-between flow: create_node middle → break_link or splice_on_link → connect data pins as needed, all in one ops[]. Response adds layout_applied, layout_nodes_positioned, formatter_available.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -1163,6 +1242,9 @@
         "agent": true,
         "plan": true
       },
+      "agent_surfaces": [
+        "blueprint_builder"
+      ],
       "context_selector": {
         "priority": 74,
         "always_include_in_core_pack": false,
@@ -1841,7 +1923,7 @@
     },
     {
       "tool_id": "blueprint_set_component_default",
-      "summary": "Set one reflected property on a named Actor component on the Blueprint class default (CDO), then compile. Use for gameplay tuning that lives on component defaults (e.g. CharacterMovement.JumpZVelocity) instead of asset_apply_properties on the UBlueprint asset object. Requires blueprint_path under /Game, component name (e.g. CharacterMovement), property name (e.g. JumpZVelocity), and value (number/bool/string per property type). Does not replace blueprint_graph_patch / blueprint_apply_ir for EventGraph logic.",
+      "summary": "Blueprint Builder sub-turn only (not default main Agent). Set one reflected property on a named Actor component on the Blueprint class default (CDO), then compile. Use for gameplay tuning that lives on component defaults (e.g. CharacterMovement.JumpZVelocity) instead of asset_apply_properties on the UBlueprint asset object. Requires blueprint_path under /Game, component name (e.g. CharacterMovement), property name (e.g. JumpZVelocity), and value (number/bool/string per property type). Does not replace blueprint_graph_patch / blueprint_apply_ir for EventGraph logic.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -1854,6 +1936,9 @@
         "agent": true,
         "plan": true
       },
+      "agent_surfaces": [
+        "blueprint_builder"
+      ],
       "context_selector": {
         "priority": 52,
         "always_include_in_core_pack": false,
@@ -1900,7 +1985,7 @@
     },
     {
       "tool_id": "blueprint_apply_ir",
-      "summary": "Optional compact Blueprint IR DSL: materialize/wire EventGraph nodes for supported op types (overlap, timers, variables, calls, etc.). Prefer blueprint_graph_patch for arbitrary UK2Node types or when IR ops/merge_policy are awkward; use this when the compact op set matches. blueprint_path must be an object_path from asset_index_fuzzy_search or asset_registry_query—never a guessed name when multiple assets matched. Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Minimal shape: blueprint_path + nodes[] + links[]. Optional layout_mode (single_row|multi_strand) and wire_knots override defaults when auto_layout runs. blueprint_path must be a Blueprint asset path (/Game/...Asset.Asset), not a level actor path. Not for UMG Designer layout.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; omitted from default main Agent). Never call with empty {}. Tier-1 IR: event_begin_play, event_tick, call_function, branch, sequence, variables, links with node_id.PinName endpoints. Optional compact Blueprint IR DSL: materialize/wire EventGraph nodes for supported op types (overlap, timers, variables, calls, etc.). Prefer blueprint_graph_patch for arbitrary UK2Node types or when IR ops/merge_policy are awkward; use this when the compact op set matches. blueprint_path must be an object_path from asset_index_fuzzy_search or asset_registry_query—never a guessed name when multiple assets matched. Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Minimal shape: blueprint_path + nodes[] + links[]. Optional layout_mode (single_row|multi_strand) and wire_knots override defaults when auto_layout runs. blueprint_path must be a Blueprint asset path (/Game/...Asset.Asset), not a level actor path. Not for UMG Designer layout.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -1913,6 +1998,9 @@
         "agent": true,
         "plan": true
       },
+      "agent_surfaces": [
+        "blueprint_builder"
+      ],
       "context_selector": {
         "priority": 68,
         "always_include_in_core_pack": false,
@@ -2131,7 +2219,7 @@
     },
     {
       "tool_id": "blueprint_format_graph",
-      "summary": "Run in-process layout on a Blueprint script graph: full graph or current selection, optional single-row vs multi-strand exec layout, data-wire knots, and comment reflow. Default format_scope is full_graph.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Run in-process layout on a Blueprint script graph: full graph or current selection, optional single-row vs multi-strand exec layout, data-wire knots, and comment reflow. Default format_scope is full_graph.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -2144,6 +2232,9 @@
         "agent": true,
         "plan": true
       },
+      "agent_surfaces": [
+        "blueprint_builder"
+      ],
       "context_selector": {
         "priority": 67,
         "always_include_in_core_pack": false,
@@ -2205,7 +2296,7 @@
     },
     {
       "tool_id": "blueprint_format_selection",
-      "summary": "Same layout pipeline as blueprint_format_graph but always targets the editor’s current graph selection (Blueprint graph tab must be open with nodes selected). Optional layout_mode and wire_knots override project defaults.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Same layout pipeline as blueprint_format_graph but always targets the editor’s current graph selection (Blueprint graph tab must be open with nodes selected). Optional layout_mode and wire_knots override project defaults.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -2219,6 +2310,9 @@
         "agent": true,
         "plan": true
       },
+      "agent_surfaces": [
+        "blueprint_builder"
+      ],
       "context_selector": {
         "priority": 66,
         "always_include_in_core_pack": false,
@@ -2275,7 +2369,7 @@
     },
     {
       "tool_id": "blueprint_get_graph_summary",
-      "summary": "Read-only: bounded summary of Blueprint graph(s) for an existing asset. `blueprint_path` is required and must be a concrete /Game Blueprint object_path (prefer reuse from asset_index_fuzzy_search/asset_registry_query results; do not guess names). Optional graph_name narrows to one graph; omit to summarize ubergraph + functions + macros.",
+      "summary": "Read-only (main Agent + builder): bounded summary of Blueprint graph(s) for an existing asset. `blueprint_path` is required and must be a concrete /Game Blueprint object_path (prefer reuse from asset_index_fuzzy_search/asset_registry_query results; do not guess names). Optional graph_name narrows to one graph; omit to summarize ubergraph + functions + macros.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -3516,6 +3610,276 @@
       "status": "implemented"
     },
     {
+      "tool_id": "material_graph_summarize",
+      "summary": "Read-only inventory of a base Material's expression graph (class + editor position + stable expression GUID per node). Prefer material_graph_export for links to material inputs and between nodes. For Material Instances, use the parent Material path or material_instance_* parameter tools.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "graph",
+        "read",
+        "expressions"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "main_agent",
+        "blueprint_builder"
+      ],
+      "context_selector": {
+        "priority": 57,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string",
+            "description": "Object path of a base Material (UMaterial), not a Material Instance."
+          },
+          "max_expressions": {
+            "type": "number",
+            "description": "Cap on rows returned (default 200, max 2000)."
+          }
+        },
+        "required": [
+          "material_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UMaterial::GetExpressionCollection",
+      "threading": "game_thread",
+      "failure_modes": [
+        "material_path is a Material Instance: load the parent Material asset or use MI parameter tools.",
+        "Very large graphs: raise max_expressions or filter in follow-up tooling."
+      ],
+      "doc_links": [],
+      "status": "implemented",
+      "builder_domains": [
+        "material_graph"
+      ]
+    },
+    {
+      "tool_id": "material_graph_export",
+      "summary": "Blueprint Builder material_graph: structured export of base Material expressions (GUID, class, editor position), per-node FExpressionInput links (to_input + from_expression_guid + from_output_index), and material_inputs[] root slot wiring (BaseColor, Normal, …). Pair with material_graph_patch and material_graph_compile.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "graph",
+        "read",
+        "export"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "main_agent",
+        "blueprint_builder"
+      ],
+      "context_selector": {
+        "priority": 58,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string",
+            "description": "Object path of a base Material (UMaterial)."
+          },
+          "max_expressions": {
+            "type": "number",
+            "description": "Cap on expressions returned (default 500, max 4000)."
+          }
+        },
+        "required": [
+          "material_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UMaterial, UMaterialExpression reflection",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Material Instance path: use parent Material or MI parameter tools."
+      ],
+      "doc_links": [],
+      "status": "implemented",
+      "builder_domains": [
+        "material_graph"
+      ]
+    },
+    {
+      "tool_id": "material_graph_patch",
+      "summary": "Blueprint Builder material_graph only: batched ops on a base Material — add_expression (class_path), delete_expression, connect (expression↔expression via pin property names), connect_material_input / disconnect_material_input (root slots e.g. BaseColor, MaterialAttributes, CustomizedUVs_0), disconnect_input, set_editor_position, set_constant3vector. Optional recompile:true runs UMaterialEditingLibrary::RecompileMaterial after ops.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "graph",
+        "write"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "blueprint_builder"
+      ],
+      "context_selector": {
+        "priority": 76,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string",
+            "description": "Base Material object path."
+          },
+          "ops": {
+            "type": "array",
+            "description": "Ordered patch operations; see tool summary for op kinds."
+          },
+          "recompile": {
+            "type": "boolean",
+            "description": "When true, recompile the material after all ops (same as material_graph_compile)."
+          }
+        },
+        "required": [
+          "material_path",
+          "ops"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "UMaterialEditingLibrary",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Invalid class_path for add_expression.",
+        "connect: wrong to_input / from_output pin names.",
+        "Unknown material_input slot name."
+      ],
+      "doc_links": [],
+      "status": "implemented",
+      "builder_domains": [
+        "material_graph"
+      ]
+    },
+    {
+      "tool_id": "material_graph_compile",
+      "summary": "Blueprint Builder material_graph: recompile a base Material after graph edits (UMaterialEditingLibrary::RecompileMaterial). Returns compile_error_or_pending from IsCompilingOrHadCompileError for the current RHI shader platform.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "compile"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "blueprint_builder"
+      ],
+      "context_selector": {
+        "priority": 75,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_path"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "UMaterialEditingLibrary::RecompileMaterial",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Shader compile errors: inspect Material Editor and adjust graph."
+      ],
+      "doc_links": [],
+      "status": "implemented",
+      "builder_domains": [
+        "material_graph"
+      ]
+    },
+    {
+      "tool_id": "material_graph_validate",
+      "summary": "Blueprint Builder material_graph: list orphan expressions (not reachable from any material root input via wired inputs) and report compile_error_or_pending (IsCompilingOrHadCompileError). Read-only; does not modify the graph.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "graph",
+        "validate"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "main_agent",
+        "blueprint_builder"
+      ],
+      "context_selector": {
+        "priority": 55,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UMaterial graph traversal",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented",
+      "builder_domains": [
+        "material_graph"
+      ]
+    },
+    {
       "tool_id": "material_instance_get_scalar_parameter",
       "summary": "Read one scalar parameter value from a Material Instance.",
       "category": "materials_rendering",
@@ -3560,7 +3924,7 @@
     },
     {
       "tool_id": "material_instance_set_parameter",
-      "summary": "Set a scalar or vector parameter on a Material Instance. You must pass value_kind (scalar|vector) explicitly with material_path and parameter_name; include value or linear_color per branch. No silent value_kind inference.",
+      "summary": "Set a scalar or vector parameter on a Material Instance (main Agent and builder; not a Blueprint graph mutator). Pass value_kind (scalar|vector) with material_path and parameter_name; include value or linear_color per branch. No silent value_kind inference.",
       "category": "materials_rendering",
       "tags": [
         "material",
@@ -3646,7 +4010,10 @@
         "Base Material path: use asset_open_editor on the Material, duplicate to MI, then pass the MI path."
       ],
       "doc_links": [],
-      "status": "implemented"
+      "status": "implemented",
+      "builder_domains": [
+        "material_instance"
+      ]
     },
     {
       "tool_id": "material_instance_set_scalar_parameter",
@@ -3661,6 +4028,9 @@
         "agent": false,
         "plan": false
       },
+      "agent_surfaces": [
+        "blueprint_builder"
+      ],
       "context_selector": {
         "priority": 48,
         "always_include_in_core_pack": false,
@@ -6099,7 +6469,7 @@
     },
     {
       "tool_id": "blueprint_export_ir",
-      "summary": "Read-only: export Blueprint graph IR for an existing Blueprint asset path. blueprint_path must come from discovery (asset_index_fuzzy_search / asset_registry_query object_path). Unknown node kinds include k2_class and node_guid for round-tripping with blueprint_graph_patch and blueprint_graph_list_pins. Use before blueprint_graph_patch or blueprint_apply_ir when planning edits.",
+      "summary": "Read-only (available on main Agent and builder): export Blueprint graph IR for an existing Blueprint asset path. blueprint_path must come from discovery (asset_index_fuzzy_search / asset_registry_query object_path). Unknown node kinds include k2_class and node_guid for round-tripping with blueprint_graph_patch and blueprint_graph_list_pins. Use before blueprint_graph_patch or blueprint_apply_ir when planning edits.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -6149,7 +6519,7 @@
     },
     {
       "tool_id": "blueprint_graph_introspect",
-      "summary": "Read-only: enumerate nodes in a Blueprint graph with node_guid, class, title, and pins (name, direction, category). Use before T3D authoring.",
+      "summary": "Read-only: enumerate nodes with node_guid, class, title, and pins (name, direction, category, linked_to[] of {node_guid, pin_name} per wire). Use with blueprint_graph_patch connect or blueprint_export_ir links; empty linked_to means unwired.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -6196,7 +6566,7 @@
     },
     {
       "tool_id": "blueprint_export_graph_t3d",
-      "summary": "Read-only: export graph nodes as Unreal T3D clipboard text. Optional max_chars (default 500000).",
+      "summary": "Read-only: export graph nodes as Unreal T3D clipboard text (includes pin CustomProperties / LinkedTo wiring—preserve these when editing). Exact tool_id is blueprint_export_graph_t3d (not blueprint_graph_export_graph_t3d). Optional max_chars (default 500000).",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -6247,7 +6617,7 @@
     },
     {
       "tool_id": "blueprint_t3d_preflight_validate",
-      "summary": "Resolve __UAI_G_NNNNNN__ placeholders in t3d_text and run CanImportNodesFromText without mutating the graph.",
+      "summary": "Resolve __UAI_G_NNNNNN__ placeholders in t3d_text and run CanImportNodesFromText without mutating the graph. Sparse T3D without export-style pin connection lines imports unwired nodes. Kismet/script graphs only—AnimGraph and many non-K2 graphs fail; use blueprint_graph_patch on EventGraph or see tool error hints.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -6296,7 +6666,7 @@
     },
     {
       "tool_id": "blueprint_graph_import_t3d",
-      "summary": "Atomic graph mutation: resolve __UAI_G_NNNNNN__ placeholders then ImportNodesFromText on the target graph. Writable /Game path only.",
+      "summary": "Atomic graph mutation: resolve __UAI_G_NNNNNN__ placeholders then ImportNodesFromText on the target Kismet graph. Wiring is only restored if t3d_text includes the same pin/connection CustomProperties as a native export; otherwise nodes spawn disconnected—use blueprint_apply_ir connect ops or start from blueprint_export_graph_t3d. Writable /Game path only. Not for AnimGraph/state-machine graphs—use blueprint_graph_patch on EventGraph when preflight says CanImportNodesFromText is false.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -6309,6 +6679,9 @@
         "agent": true,
         "plan": true
       },
+      "agent_surfaces": [
+        "blueprint_builder"
+      ],
       "context_selector": {
         "priority": 72,
         "always_include_in_core_pack": false,
