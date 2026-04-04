@@ -42,9 +42,10 @@
       "assertions": [
         {
           "type": "tool_invoke_ok",
-          "tool": "blueprint_export_ir",
+          "tool": "blueprint_graph_introspect",
           "arguments": {
-            "blueprint_path": "/Game/Blueprints/StrictTests/Strict_BP01.Strict_BP01"
+            "blueprint_path": "/Game/Blueprints/StrictTests/Strict_BP01.Strict_BP01",
+            "graph_name": "EventGraph"
           }
         }
       ]
