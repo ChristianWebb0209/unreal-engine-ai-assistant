@@ -13,6 +13,12 @@ Three different mechanisms address **node identity** in Blueprint graphs. Mixing
 - Use **`guid:AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE`** (real node GUID from **`blueprint_graph_introspect`** / **`blueprint_export_ir`**), or **`patch_id`** from an earlier op in the **same** `ops[]` batch.
 - If you only have T3D placeholders, run **`blueprint_graph_import_t3d`** first, then introspect for real GUIDs before patching.
 
+**Example `connect`:** after introspect shows `node_guid` `A1B2C3D4-...` with an exec input named `Execute` and a new branch node `patch_id` `n_if`, a valid op is:
+
+`{ "op":"connect", "from":"n_if.Then", "to":"guid:A1B2C3D4-E5F6-7890-ABCD-EF1234567890.Execute" }`
+
+(Paste the real GUID and pin names from tool output—pin names vary by node type.)
+
 ## `blueprint_apply_ir`
 
 - Uses **`node_id`** strings **you** assign in the IR JSON, plus **`links`** as `node_id.PinName` → `node_id.PinName`.

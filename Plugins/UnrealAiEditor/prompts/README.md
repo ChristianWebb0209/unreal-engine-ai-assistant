@@ -73,7 +73,7 @@ Source: [`FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent`](.
 |------|-----------|
 | 1 | `01-identity.md` |
 | 2 | `02-operating-modes.md` (mode slice) |
-| 3–8 | `blueprint-builder/00-overview.md` … `06-cross-tool-identity.md` (fixed order) |
+| 3–9 | `blueprint-builder/00-overview.md` … `07-graph-patch-canonical.md` (fixed order) |
 | 9 | `blueprint-builder/kinds/<target_kind>.md` from handoff YAML (`UnrealAiBlueprintBuilderTargetKind`) |
 | 10 | `05-context-and-editor.md` |
 | 11 | `07-safety-banned.md` |

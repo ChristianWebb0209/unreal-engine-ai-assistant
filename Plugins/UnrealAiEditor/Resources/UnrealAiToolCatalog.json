@@ -25,7 +25,7 @@
       "exec",
       "settings_properties"
     ],
-    "tool_count": 106,
+    "tool_count": 110,
     "retrieval_index": {
       "bm25_document_formula": "tool_id + summary + category + tags + tool_surface.domain_tags",
       "indexed_fields": [
@@ -1228,7 +1228,7 @@
     },
     {
       "tool_id": "blueprint_graph_patch",
-      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Anti-pattern: T3D placeholders __UAI_G_NNNNNN__ are invalid here — use real guid:UUID from blueprint_graph_introspect or patch_id from this batch. Primary UE 5.7 graph mutator: ops[] on blueprint_path (/Game) and graph_name. create_node (UK2Node), create_comment (boxes + member_node_refs), connect, break_link (splice/reroute), splice_on_link (break + wire through insert_patch_id), set_pin_default, add_variable, remove_node, move_node. auto_layout defaults true with layout_scope patched_nodes (only nodes created this batch); layout_scope full_graph reformats entire script graph. Formatter spacing, knots, preserve-existing, comments, and reflow follow Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting. Insert-between flow: create_node middle → break_link or splice_on_link → connect data pins as needed, all in one ops[]. Response adds layout_applied, layout_nodes_positioned, formatter_available.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Atomic: if any op fails, the transaction is cancelled (nothing persists; applied_partial is always []). Failure JSON: status patch_errors, errors[], error_codes[], suggested_correct_call, note. Anti-pattern: T3D placeholders __UAI_G_NNNNNN__ — use guid:UUID from blueprint_graph_introspect or patch_id from this batch. For very large op lists, use ops_json_path (project-relative UTF-8 file: root JSON array of ops) under Saved/ or harness_step/ — mutually exclusive with inline ops[]. Resolver preflight repairs create_node k2_class aliases, connect link_from/link_to and split from_node+from_pin into from/to before schema validation. Primary UE 5.7 graph mutator: ops[] or ops_json_path on blueprint_path (/Game) and graph_name. create_node (UK2Node), create_comment, connect, break_link, splice_on_link, set_pin_default, add_variable, remove_node, move_node. auto_layout defaults true with layout_scope patched_nodes; full_graph reformats entire script graph. Formatter follows Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -1278,12 +1278,17 @@
               "patched_nodes",
               "full_graph"
             ],
-            "description": "patched_nodes: layout only nodes created in this patch (create_node/create_comment). full_graph: LayoutEntireGraph on the script graph—use only when an explicit reformat is intended."
+            "description": "patched_nodes: layout only nodes created in this patch (create_node/create_comment), then translate cluster using node bounding boxes and push any overlapping non-patch script nodes right (AABB + gap). full_graph: LayoutEntireGraph on the script graph—use only when an explicit reformat is intended."
+          },
+          "ops_json_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Project-relative path to a UTF-8 JSON file whose root value is an array of patch op objects (same schema as ops[]). Must start with Saved/ or harness_step/. Mutually exclusive with non-empty inline ops[]; use for very large patches that should not be embedded in the tool-call stream."
           },
           "ops": {
             "type": "array",
-            "minItems": 1,
-            "description": "Ordered operations. NodeRef for connect/break_link/splice: patch_id from this batch, guid:uuid, or bare node_guid from blueprint_export_ir. `self` is not a graph node—use blueprint_graph_list_pins for VariableSet Target pins.",
+            "minItems": 0,
+            "description": "Ordered operations (non-empty unless ops_json_path is set). NodeRef for connect/break_link/splice: patch_id from this batch, guid:uuid, or bare node_guid from blueprint_export_ir. `self` is not a graph node—use blueprint_graph_list_pins for VariableSet Target pins.",
             "items": {
               "oneOf": [
                 {
@@ -1511,11 +1516,35 @@
                     },
                     "from": {
                       "type": "string",
-                      "description": "Source NodeRef.Pin: patchId.pinName, export node_guid.pinName (bare UUID allowed), or guid:uuid.pinName. Pin aliases: Execute/Exec/Execution, True→Then, False→Else, inputObject→Target on many nodes, returnValue→ReturnValue."
+                      "description": "Output pin NodeRef.Pin (patchId.pin, guid:uuid.pin, or export node_guid.pin). Must resolve to an OUTPUT pin; `to` must be an INPUT. Reversed refs fail with an explicit error (no silent swap). Prefer pin `name` from blueprint_graph_introspect. Aliases: Execute/Exec/Execution, True→Then, False→Else, inputObject→Target, returnValue→ReturnValue."
                     },
                     "to": {
                       "type": "string",
-                      "description": "Target NodeRef.Pin; same as from. Do not use `self` as a node id."
+                      "description": "Input pin NodeRef.Pin. Must resolve to an INPUT pin. Do not use `self` as a node id."
+                    },
+                    "link_from": {
+                      "type": "string",
+                      "description": "Resolver folds into `from` before validation when `from` is omitted (same NodeRef.Pin format)."
+                    },
+                    "link_to": {
+                      "type": "string",
+                      "description": "Resolver folds into `to` before validation when `to` is omitted."
+                    },
+                    "from_node": {
+                      "type": "string",
+                      "description": "Optional split ref: combined with `from_pin` into `from` by resolver (then removed)."
+                    },
+                    "from_pin": {
+                      "type": "string",
+                      "description": "Optional split ref for `from`."
+                    },
+                    "to_node": {
+                      "type": "string",
+                      "description": "Optional split ref: combined with `to_pin` into `to` by resolver."
+                    },
+                    "to_pin": {
+                      "type": "string",
+                      "description": "Optional split ref for `to`."
                     }
                   },
                   "required": [
@@ -1695,6 +1724,28 @@
                     "to": {
                       "type": "string",
                       "description": "NodeRef.Pin of the other end."
+                    },
+                    "link_from": {
+                      "type": "string",
+                      "description": "Resolver folds into `from` when `from` is omitted."
+                    },
+                    "link_to": {
+                      "type": "string",
+                      "description": "Resolver folds into `to` when `to` is omitted."
+                    },
+                    "from_node": {
+                      "type": "string",
+                      "description": "Split ref with `from_pin` → `from` (resolver)."
+                    },
+                    "from_pin": {
+                      "type": "string"
+                    },
+                    "to_node": {
+                      "type": "string",
+                      "description": "Split ref with `to_pin` → `to` (resolver)."
+                    },
+                    "to_pin": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -1728,6 +1779,20 @@
                     "link_to": {
                       "type": "string",
                       "description": "Alias of to for splice_on_link / break_link / connect."
+                    },
+                    "from_node": {
+                      "type": "string",
+                      "description": "Split ref with `from_pin` → `from` (resolver)."
+                    },
+                    "from_pin": {
+                      "type": "string"
+                    },
+                    "to_node": {
+                      "type": "string",
+                      "description": "Split ref with `to_pin` → `to` (resolver)."
+                    },
+                    "to_pin": {
+                      "type": "string"
                     },
                     "insert_patch_id": {
                       "type": "string",
@@ -1801,8 +1866,7 @@
           }
         },
         "required": [
-          "blueprint_path",
-          "ops"
+          "blueprint_path"
         ]
       },
       "side_effects": "compile",
@@ -1811,12 +1875,14 @@
       "threading": "game_thread",
       "failure_modes": [
         "Non-/Game blueprint_path rejected.",
+        "ops_json_path must be project-relative under Saved/ or harness_step/; file root must be a non-empty JSON array of op objects; mutually exclusive with non-empty inline ops[].",
         "Unknown op or invalid fields per op (see parameters schema).",
         "k2_class missing or not a UK2Node; symbol not found for call_function.",
-        "Connection rejected (pin types/direction); inspect pins with blueprint_graph_list_pins.",
+        "connect: `from` must be an output pin and `to` an input pin (swap if the error says dir=in/out); ambiguous duplicate pin display names fail deterministically.",
+        "Connection rejected (pin types); inspect pins with blueprint_graph_list_pins.",
         "break_link: pins not directly linked.",
         "splice_on_link: insert_patch_id missing, wrong exec pins, or reconnect fails after break.",
-        "Partial ops: status patch_errors, errors[], applied_partial[].",
+        "Any op failure: transaction cancelled; status patch_errors, errors[], error_codes[], applied_partial always [], suggested_correct_call.",
         "Compile errors after patch: follow with blueprint_compile for structured diagnostics."
       ],
       "doc_links": [
