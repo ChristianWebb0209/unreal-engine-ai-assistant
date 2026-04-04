@@ -71,24 +71,30 @@
       "runtime_defaults_header": "Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h"
     },
     "agent_surfaces": {
-      "description": "Optional per-tool array tools[].agent_surfaces lists which agent pipelines may surface or invoke the tool. Orthogonal to modes (ask/agent/plan) and to builder_domains / blueprint_builder_core. Parsed in UnrealAiToolSurfaceCompatibility; enforced in UnrealAiBlueprintToolGate when Agent mode and bOmitMainAgentBlueprintMutationTools is true.",
+      "description": "Optional per-tool array tools[].agent_surfaces lists which agent pipelines may surface or invoke the tool. Orthogonal to modes (ask/agent/plan) and to builder_domains / blueprint_builder_core / environment_builder_core. Parsed in UnrealAiToolSurfaceCompatibility; enforced in UnrealAiAgentToolGate when Agent mode and bOmitMainAgentBlueprintMutationTools is true.",
       "tokens": {
         "all": "Single entry [\"all\"] (any case) or missing/empty field: no surface restriction (same eligibility as pre-tag catalogs).",
-        "main_agent": "Main agent turn (not a Blueprint Builder sub-turn).",
-        "blueprint_builder": "Blueprint Builder sub-turn after build-blueprint handoff."
+        "main_agent": "Main agent turn (not a Blueprint or Environment Builder sub-turn).",
+        "blueprint_builder": "Blueprint Builder sub-turn after build-blueprint handoff.",
+        "environment_builder": "Environment / PCG Builder sub-turn after build-environment handoff."
       },
       "escape_hatch": "When bOmitMainAgentBlueprintMutationTools is false, surface gating is bypassed for power users."
     },
     "resolver_contract": {
       "version": "2.2.0",
       "architecture_doc": "docs/planning/new-tools-schema/resolver-architecture.md",
-      "notes": "Catalog tools may declare tools[].agent_surfaces for surface compatibility (main_agent / blueprint_builder / all); omit_from_main_agent_surface removed. No resolver inference for operation/capture_kind/target/value_kind; explicit catalog required fields only. No Levenshtein tool_id autocorrect (suggestions only). Alias table + path canonicalization only. Validates before dispatch; resolver_audit on results."
+      "notes": "Catalog tools may declare tools[].agent_surfaces for surface compatibility (main_agent / blueprint_builder / environment_builder / all); omit_from_main_agent_surface removed. No resolver inference for operation/capture_kind/target/value_kind; explicit catalog required fields only. No Levenshtein tool_id autocorrect (suggestions only). Alias table + path canonicalization only. Validates before dispatch; resolver_audit on results."
     },
     "invocation": {
       "focused_flag": "Optional JSON field \"focused\": true on supported tools. Stripped before handlers; after a successful run the editor opens or foregrounds the related Blueprint, asset, Content Browser selection, or project source file in the IDE. Tools list this property explicitly where the catalog schema is strict (additionalProperties: false)."
     },
-    "tool_catalog_fragments": [],
-    "tool_catalog_fragments_notes": "Optional array: each entry is a string (path under Resources/) or object { path, retrieval_bundle }. Fragment files must be { \"tools\": [ ... ] }. Merged tools may receive retrieval_bundle; main Agent tiered BM25 omits retrieval_bundle=blueprint_builder (Blueprint Builder sub-turns still see the full merged catalog)."
+    "tool_catalog_fragments": [
+      {
+        "path": "UnrealAiToolCatalogFragmentPcgEnvironment.json",
+        "retrieval_bundle": "environment_builder"
+      }
+    ],
+    "tool_catalog_fragments_notes": "Optional array: each entry is a string (path under Resources/) or object { path, retrieval_bundle }. Fragment files must be { \"tools\": [ ... ] }. Merged tools may receive retrieval_bundle; main Agent tiered BM25 omits retrieval_bundle=blueprint_builder and =environment_builder (builder sub-turns still see the full merged catalog). PCG/landscape/foliage tools live in UnrealAiToolCatalogFragmentPcgEnvironment.json."
   },
   "tools": [
     {
@@ -1228,7 +1234,7 @@
     },
     {
       "tool_id": "blueprint_graph_patch",
-      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Atomic: if any op fails, the transaction is cancelled (nothing persists; applied_partial is always []). Failure JSON: status patch_errors, errors[], error_codes[], suggested_correct_call, note. Anti-pattern: T3D placeholders __UAI_G_NNNNNN__ — use guid:UUID from blueprint_graph_introspect or patch_id from this batch. For very large op lists, use ops_json_path (project-relative UTF-8 file: root JSON array of ops) under Saved/ or harness_step/ — mutually exclusive with inline ops[]. Resolver preflight repairs create_node k2_class aliases, connect link_from/link_to and split from_node+from_pin into from/to before schema validation. Primary UE 5.7 graph mutator: ops[] or ops_json_path on blueprint_path (/Game) and graph_name. create_node (UK2Node), create_comment, connect, break_link, splice_on_link, set_pin_default, add_variable, remove_node, move_node. auto_layout defaults true with layout_scope patched_nodes; full_graph reformats entire script graph. Formatter follows Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Atomic: if any op fails, the transaction is cancelled (nothing persists; applied_partial is always []). Failure JSON: status patch_errors (or patch_validate_errors when validate_only), errors[], error_codes[], failed_op_index, optional failed_op or failed_op_json snippet, suggested_correct_call (error-kind-specific: e.g. list_pins for bad links, Character Jump/Landed pattern for event_override / missing CallFunction — not a generic IfThenElse default), note. Anti-pattern: T3D placeholders __UAI_G_NNNNNN__ — use guid:UUID from blueprint_graph_introspect or patch_id from this batch. For very large op lists, use ops_json_path (project-relative UTF-8 file: root JSON array of ops) under Saved/ or harness_step/ — mutually exclusive with inline ops[]. Resolver preflight repairs create_node k2_class aliases, event_override hoisting, Character Jump/Landed call targets, connect link_from/link_to and split from_node+from_pin into from/to, add_variable type aliases; resolver_audit may list graph_patch_repairs. Primary UE 5.7 graph mutator: ops[] or ops_json_path on blueprint_path (/Game) and graph_name. create_node (UK2Node), create_comment, connect, break_link, splice_on_link, set_pin_default, add_variable, remove_node, move_node. auto_layout defaults true with layout_scope patched_nodes; full_graph reformats entire script graph. Formatter follows Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -3452,48 +3458,6 @@
       "status": "implemented"
     },
     {
-      "tool_id": "foliage_paint_instances",
-      "summary": "Add foliage instances in radius.",
-      "category": "landscape_foliage_pcg",
-      "tags": [
-        "foliage"
-      ],
-      "tier": "future",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 18,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "foliage_type": {
-            "type": "string"
-          },
-          "radius": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "foliage_type",
-          "radius"
-        ]
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "Foliage edit APIs",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "future"
-    },
-    {
       "tool_id": "global_tab_focus",
       "summary": "Bring a registered dock tab to front.",
       "category": "editor_ui_navigation",
@@ -3531,44 +3495,6 @@
       "failure_modes": [],
       "doc_links": [],
       "status": "implemented"
-    },
-    {
-      "tool_id": "landscape_import_heightmap",
-      "summary": "Import heightmap to landscape.",
-      "category": "landscape_foliage_pcg",
-      "tags": [
-        "landscape"
-      ],
-      "tier": "future",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 18,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "heightmap_path": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "heightmap_path"
-        ]
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "ALandscape",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "future"
     },
     {
       "tool_id": "material_get_usage_summary",
@@ -4313,44 +4239,6 @@
       "side_effects": "exec",
       "permission": "exec",
       "ue_entry_points": "UAT package",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "future"
-    },
-    {
-      "tool_id": "pcg_generate",
-      "summary": "Execute PCG graph in editor.",
-      "category": "landscape_foliage_pcg",
-      "tags": [
-        "pcg"
-      ],
-      "tier": "future",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 18,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "actor_path": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "actor_path"
-        ]
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "UPCGComponent",
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
