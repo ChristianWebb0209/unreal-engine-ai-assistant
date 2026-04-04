@@ -3208,6 +3208,87 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 		UnrealAiToolEditorNoteBuilders::MakeBlueprintToolNote(Ir.BlueprintPath, Ir.GraphName, ToolMarkdown));
 }
 
+FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompositeLifecyclePrint(const TSharedPtr<FJsonObject>& Args)
+{
+	if (!Args.IsValid())
+	{
+		return UnrealAiToolJson::Error(TEXT("arguments required"));
+	}
+	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
+	FString Path;
+	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("blueprint_path is required"));
+	}
+	FString GraphName(TEXT("EventGraph"));
+	Args->TryGetStringField(TEXT("graph_name"), GraphName);
+	FString Lifecycle(TEXT("begin_play"));
+	Args->TryGetStringField(TEXT("lifecycle"), Lifecycle);
+	Lifecycle.TrimStartAndEndInline();
+	FString Message(TEXT("Hello from Unreal AI"));
+	Args->TryGetStringField(TEXT("message"), Message);
+
+	FString EventOp;
+	if (Lifecycle.Equals(TEXT("begin_play"), ESearchCase::IgnoreCase))
+	{
+		EventOp = TEXT("event_begin_play");
+	}
+	else if (Lifecycle.Equals(TEXT("tick"), ESearchCase::IgnoreCase))
+	{
+		EventOp = TEXT("event_tick");
+	}
+	else
+	{
+		return UnrealAiToolJson::Error(TEXT("lifecycle must be begin_play or tick"));
+	}
+
+	TSharedPtr<FJsonObject> Ir = MakeShared<FJsonObject>();
+	Ir->SetStringField(TEXT("blueprint_path"), Path);
+	Ir->SetStringField(TEXT("graph_name"), GraphName);
+	Ir->SetStringField(TEXT("merge_policy"), TEXT("append_to_existing"));
+	Ir->SetBoolField(TEXT("auto_layout"), true);
+
+	TArray<TSharedPtr<FJsonValue>> Nodes;
+	{
+		TSharedPtr<FJsonObject> N1 = MakeShared<FJsonObject>();
+		N1->SetStringField(TEXT("node_id"), TEXT("uai_ev"));
+		N1->SetStringField(TEXT("op"), EventOp);
+		N1->SetNumberField(TEXT("x"), 0);
+		N1->SetNumberField(TEXT("y"), 0);
+		Nodes.Add(MakeShareable(new FJsonValueObject(N1.ToSharedRef())));
+		TSharedPtr<FJsonObject> N2 = MakeShared<FJsonObject>();
+		N2->SetStringField(TEXT("node_id"), TEXT("uai_print"));
+		N2->SetStringField(TEXT("op"), TEXT("call_function"));
+		N2->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.KismetSystemLibrary"));
+		N2->SetStringField(TEXT("function_name"), TEXT("PrintString"));
+		N2->SetNumberField(TEXT("x"), 400);
+		N2->SetNumberField(TEXT("y"), 0);
+		Nodes.Add(MakeShareable(new FJsonValueObject(N2.ToSharedRef())));
+	}
+	Ir->SetArrayField(TEXT("nodes"), Nodes);
+
+	TArray<TSharedPtr<FJsonValue>> Links;
+	{
+		TSharedPtr<FJsonObject> L = MakeShared<FJsonObject>();
+		L->SetStringField(TEXT("from"), TEXT("uai_ev.Then"));
+		L->SetStringField(TEXT("to"), TEXT("uai_print.execute"));
+		Links.Add(MakeShareable(new FJsonValueObject(L.ToSharedRef())));
+	}
+	Ir->SetArrayField(TEXT("links"), Links);
+
+	TArray<TSharedPtr<FJsonValue>> Defs;
+	{
+		TSharedPtr<FJsonObject> D = MakeShared<FJsonObject>();
+		D->SetStringField(TEXT("node_id"), TEXT("uai_print"));
+		D->SetStringField(TEXT("pin"), TEXT("InString"));
+		D->SetStringField(TEXT("value"), Message);
+		Defs.Add(MakeShareable(new FJsonValueObject(D.ToSharedRef())));
+	}
+	Ir->SetArrayField(TEXT("defaults"), Defs);
+
+	return UnrealAiDispatch_BlueprintApplyIr(Ir);
+}
+
 static FUnrealAiToolInvocationResult DispatchBlueprintFormatLayout(
 	const TSharedPtr<FJsonObject>& Args,
 	bool bForceSelectionScope)

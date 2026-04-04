@@ -40,6 +40,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintSetComponentDefault(cons
 /** Serialize a Blueprint graph to blueprint_apply_ir-compatible JSON (lossy for unknown node types). */
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportIr(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr<FJsonObject>& Args);
+/** Composite: append PrintString after ReceiveBeginPlay or ReceiveTick using internal Tier-1 IR (small stable contract). */
+FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompositeLifecyclePrint(const TSharedPtr<FJsonObject>& Args);
 /** Run bundled graph layout on one script graph (default: first ubergraph); supports full_graph vs selection. */
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintFormatGraph(const TSharedPtr<FJsonObject>& Args);
 /** Same as blueprint_format_graph with format_scope forced to selection (Blueprint editor must be open). */

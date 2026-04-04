@@ -10,6 +10,7 @@
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
 #include "EdGraphUtilities.h"
+#include "Animation/AnimBlueprint.h"
 #include "Engine/Blueprint.h"
 #include "Internationalization/Regex.h"
 #include "K2Node.h"
@@ -104,6 +105,33 @@ namespace UnrealAiBlueprintT3d
 		OutErr = TEXT("Blueprint has no EventGraph (ubergraph). Pass graph_name explicitly.");
 		return nullptr;
 	}
+
+	/** Appended to CanImportNodesFromText=false errors so the model stops retrying T3D on the wrong graph kind. */
+	static FString DescribeT3dImportBlockerHint(UEdGraph* Graph, UBlueprint* BP)
+	{
+		if (!Graph)
+		{
+			return FString();
+		}
+		const UEdGraphSchema* Schema = Graph->GetSchema();
+		if (Schema && !Schema->IsA(UEdGraphSchema_K2::StaticClass()))
+		{
+			return TEXT(
+				" T3D batch import applies to Kismet script graphs (EdGraphSchema_K2). This graph uses a different schema—use "
+				"blueprint_graph_patch or blueprint_apply_ir on EventGraph (or another K2 graph), or edit animation/state graphs manually.");
+		}
+		if (BP && BP->IsA(UAnimBlueprint::StaticClass()))
+		{
+			const FString GN = Graph->GetName();
+			if (GN.Contains(TEXT("AnimGraph"), ESearchCase::IgnoreCase) || GN.Contains(TEXT("StateMachine"), ESearchCase::IgnoreCase)
+				|| GN.Contains(TEXT("Transition"), ESearchCase::IgnoreCase))
+			{
+				return TEXT(
+					" Animation Blueprint graphs such as AnimGraph/state machines often reject ImportNodesFromText. Prefer EventGraph with blueprint_graph_patch / blueprint_apply_ir, or state that anim-graph editing is manual.");
+			}
+		}
+		return FString();
+	}
 } // namespace UnrealAiBlueprintT3d
 
 namespace UnrealAiBlueprintVerifyGraphPriv
@@ -179,6 +207,24 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphIntrospect(const TS
 			P->SetStringField(TEXT("name"), Pin->PinName.ToString());
 			P->SetStringField(TEXT("direction"), Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
 			P->SetStringField(TEXT("category"), Pin->PinType.PinCategory.ToString());
+			TArray<TSharedPtr<FJsonValue>> LinkedToArr;
+			for (UEdGraphPin* LP : Pin->LinkedTo)
+			{
+				if (!LP)
+				{
+					continue;
+				}
+				UEdGraphNode* Peer = LP->GetOwningNode();
+				if (!Peer)
+				{
+					continue;
+				}
+				TSharedPtr<FJsonObject> L = MakeShared<FJsonObject>();
+				L->SetStringField(TEXT("node_guid"), LexToString(Peer->NodeGuid));
+				L->SetStringField(TEXT("pin_name"), LP->PinName.ToString());
+				LinkedToArr.Add(MakeShareable(new FJsonValueObject(L.ToSharedRef())));
+			}
+			P->SetArrayField(TEXT("linked_to"), LinkedToArr);
 			Pins.Add(MakeShareable(new FJsonValueObject(P.ToSharedRef())));
 		}
 		No->SetArrayField(TEXT("pins"), Pins);
@@ -289,8 +335,9 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintT3dPreflightValidate(con
 	const bool bCan = FEdGraphUtilities::CanImportNodesFromText(Graph, Resolved);
 	if (!bCan)
 	{
-		return UnrealAiToolJson::Error(
-			TEXT("CanImportNodesFromText returned false for this graph + resolved T3D. Fix payload or graph target."));
+		FString Msg = TEXT("CanImportNodesFromText returned false for this graph + resolved T3D. Fix payload or graph target.");
+		Msg += UnrealAiBlueprintT3d::DescribeT3dImportBlockerHint(Graph, BP);
+		return UnrealAiToolJson::Error(Msg);
 	}
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
@@ -340,8 +387,9 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphImportT3d(const TSh
 	}
 	if (!FEdGraphUtilities::CanImportNodesFromText(Graph, Resolved))
 	{
-		return UnrealAiToolJson::Error(
-			TEXT("Preflight failed: CanImportNodesFromText is false. Run blueprint_t3d_preflight_validate and fix T3D."));
+		FString Msg = TEXT("Preflight failed: CanImportNodesFromText is false. Run blueprint_t3d_preflight_validate and fix T3D.");
+		Msg += UnrealAiBlueprintT3d::DescribeT3dImportBlockerHint(Graph, BP);
+		return UnrealAiToolJson::Error(Msg);
 	}
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnBpT3dImport", "Unreal AI: blueprint_graph_import_t3d"));
 	BP->Modify();

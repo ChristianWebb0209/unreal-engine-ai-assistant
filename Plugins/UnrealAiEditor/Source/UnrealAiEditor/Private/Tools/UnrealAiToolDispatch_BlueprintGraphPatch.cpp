@@ -220,8 +220,18 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		NodePart.TrimStartAndEndInline();
 		if (NodePart.StartsWith(TEXT("guid:"), ESearchCase::IgnoreCase))
 		{
+			const FString GuidBody = NodePart.Mid(5).TrimStartAndEnd();
+			// T3D authoring tokens are not valid FGuids; catch early with one recovery story.
+			if (GuidBody.Contains(TEXT("__UAI_G_")))
+			{
+				Err = FString::Printf(
+					TEXT("T3D placeholder in graph_patch node ref: %s. __UAI_G_NNNNNN__ is only for blueprint_t3d_preflight_validate / blueprint_graph_import_t3d. "
+						 "Use guid:<real-uuid> from blueprint_graph_introspect (or blueprint_export_ir node_guid), or patch_id from this ops[] batch."),
+					*NodePart);
+				return nullptr;
+			}
 			FGuid G;
-			if (!FGuid::Parse(NodePart.Mid(5).TrimStartAndEnd(), G))
+			if (!FGuid::Parse(GuidBody, G))
 			{
 				Err = FString::Printf(TEXT("Invalid guid ref: %s"), *NodePart);
 				return nullptr;
