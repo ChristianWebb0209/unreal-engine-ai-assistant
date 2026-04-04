@@ -4,6 +4,7 @@
 #include "Dom/JsonValue.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Interfaces/IPluginManager.h"
+#include "Logging/LogMacros.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -119,6 +120,112 @@ bool FUnrealAiToolCatalog::LoadFromPlugin()
 			continue;
 		}
 		ToolById.Add(Tid, Obj);
+	}
+
+	const FString ResourcesDir = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Resources"));
+	const TSharedPtr<FJsonObject>* MetaObj = nullptr;
+	if (Parsed->TryGetObjectField(TEXT("meta"), MetaObj) && MetaObj && (*MetaObj).IsValid())
+	{
+		const TArray<TSharedPtr<FJsonValue>>* FragSpecs = nullptr;
+		if ((*MetaObj)->TryGetArrayField(TEXT("tool_catalog_fragments"), FragSpecs) && FragSpecs)
+		{
+			for (const TSharedPtr<FJsonValue>& SpecVal : *FragSpecs)
+			{
+				if (!SpecVal.IsValid())
+				{
+					continue;
+				}
+				FString RelPath;
+				FString FragmentRetrievalBundle;
+				if (SpecVal->Type == EJson::String)
+				{
+					RelPath = SpecVal->AsString();
+				}
+				else if (SpecVal->Type == EJson::Object)
+				{
+					const TSharedPtr<FJsonObject> SpecObj = SpecVal->AsObject();
+					if (!SpecObj.IsValid())
+					{
+						continue;
+					}
+					SpecObj->TryGetStringField(TEXT("path"), RelPath);
+					if (RelPath.IsEmpty())
+					{
+						SpecObj->TryGetStringField(TEXT("relative_path"), RelPath);
+					}
+					SpecObj->TryGetStringField(TEXT("retrieval_bundle"), FragmentRetrievalBundle);
+				}
+				RelPath.TrimStartAndEndInline();
+				FragmentRetrievalBundle.TrimStartAndEndInline();
+				if (RelPath.IsEmpty())
+				{
+					continue;
+				}
+
+				const FString FragFullPath = FPaths::Combine(ResourcesDir, RelPath);
+				FString FragJson;
+				if (!FFileHelper::LoadFileToString(FragJson, *FragFullPath))
+				{
+					UE_LOG(LogTemp, Warning, TEXT("UnrealAiToolCatalog: failed to load tool_catalog_fragments entry '%s'"), *FragFullPath);
+					continue;
+				}
+				TSharedPtr<FJsonObject> FragRoot;
+				const TSharedRef<TJsonReader<>> FragReader = TJsonReaderFactory<>::Create(FragJson);
+				if (!FJsonSerializer::Deserialize(FragReader, FragRoot) || !FragRoot.IsValid())
+				{
+					UE_LOG(LogTemp, Warning, TEXT("UnrealAiToolCatalog: invalid JSON in fragment '%s'"), *FragFullPath);
+					continue;
+				}
+				const TArray<TSharedPtr<FJsonValue>>* FragTools = nullptr;
+				if (!FragRoot->TryGetArrayField(TEXT("tools"), FragTools) || !FragTools)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("UnrealAiToolCatalog: fragment '%s' missing tools[] array"), *FragFullPath);
+					continue;
+				}
+				for (const TSharedPtr<FJsonValue>& FV : *FragTools)
+				{
+					const TSharedPtr<FJsonObject> Obj = FV.IsValid() ? FV->AsObject() : nullptr;
+					if (!Obj.IsValid())
+					{
+						continue;
+					}
+					FString Tid;
+					if (!Obj->TryGetStringField(TEXT("tool_id"), Tid) || Tid.IsEmpty())
+					{
+						continue;
+					}
+					if (ToolById.Contains(Tid))
+					{
+						UE_LOG(LogTemp, Warning, TEXT("UnrealAiToolCatalog: fragment '%s' overrides tool_id '%s'"), *RelPath, *Tid);
+					}
+					if (!FragmentRetrievalBundle.IsEmpty() && !Obj->HasField(TEXT("retrieval_bundle")))
+					{
+						Obj->SetStringField(TEXT("retrieval_bundle"), FragmentRetrievalBundle);
+					}
+					ToolById.FindOrAdd(Tid) = Obj;
+				}
+			}
+		}
+	}
+
+	// Keep Root.tools[] and meta.tool_count consistent with the merged ToolById map (harnesses may read JSON).
+	TArray<FString> SortedIds;
+	ToolById.GetKeys(SortedIds);
+	SortedIds.Sort();
+	TArray<TSharedPtr<FJsonValue>> MergedTools;
+	MergedTools.Reserve(SortedIds.Num());
+	for (const FString& Tid : SortedIds)
+	{
+		const TSharedPtr<FJsonObject>* Def = ToolById.Find(Tid);
+		if (Def && Def->IsValid())
+		{
+			MergedTools.Add(MakeShared<FJsonValueObject>(*Def));
+		}
+	}
+	Parsed->SetArrayField(TEXT("tools"), MergedTools);
+	if (MetaObj && (*MetaObj).IsValid())
+	{
+		(*MetaObj)->SetNumberField(TEXT("tool_count"), static_cast<double>(ToolById.Num()));
 	}
 
 	Root = Parsed;

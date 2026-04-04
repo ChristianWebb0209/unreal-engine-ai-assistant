@@ -148,7 +148,50 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 
 	{
 
-		return UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Request, Tid);
+		if (!UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Request, Tid, Catalog))
+
+		{
+
+			return false;
+
+		}
+
+		// Main Agent tiered surface: drop tools that belong only to the Blueprint Builder retrieval bundle so BM25
+		// ranks a smaller editor-centric pool; Blueprint Builder sub-turns still pass the full merged catalog.
+
+		if (!Request.bBlueprintBuilderTurn && Catalog)
+
+		{
+
+			const TSharedPtr<FJsonObject> Def = Catalog->FindToolDefinition(Tid);
+
+			if (Def.IsValid())
+
+			{
+
+				FString Bundle;
+
+				if (Def->TryGetStringField(TEXT("retrieval_bundle"), Bundle))
+
+				{
+
+					Bundle.TrimStartAndEndInline();
+
+					if (Bundle.Equals(TEXT("blueprint_builder"), ESearchCase::IgnoreCase))
+
+					{
+
+						return false;
+
+					}
+
+				}
+
+			}
+
+		}
+
+		return true;
 
 	};
 
@@ -483,6 +526,8 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 			ToolFilter,
 
 			GuardrailIds,
+
+			Request.BlueprintBuilderTargetKind,
 
 			Ordered);
 

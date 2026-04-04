@@ -406,7 +406,12 @@ namespace UnrealAiToolResolverPriv
 		}
 		else if (ToolId == TEXT("content_browser_sync_asset"))
 		{
+			// Global CanonicalizeToolArguments maps path -> object_path first; this tool's JSON schema
+			// canonicalizes on `path` only (additionalProperties: false). Copy object_path -> path, then
+			// strip alias keys so schema validation does not fail with a stray object_path field.
 			CanonicalizeAliasKeys(Args, Audit, TEXT("path"), {TEXT("object_path"), TEXT("asset_path")});
+			Args->RemoveField(TEXT("object_path"));
+			Args->RemoveField(TEXT("asset_path"));
 		}
 		else if (ToolId == TEXT("editor_set_selection"))
 		{

@@ -66,6 +66,13 @@ namespace UnrealAiToolBm25IndexPriv
 				}
 			}
 		}
+		FString RetrievalBundle;
+		Obj->TryGetStringField(TEXT("retrieval_bundle"), RetrievalBundle);
+		if (!RetrievalBundle.IsEmpty())
+		{
+			TagStr += RetrievalBundle;
+			TagStr += TEXT(' ');
+		}
 		return FString::Printf(TEXT("%s %s %s %s"), *ToolId, *Summary, *Cat, *TagStr);
 	}
 } // namespace UnrealAiToolBm25IndexPriv
