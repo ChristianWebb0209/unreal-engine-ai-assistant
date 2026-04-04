@@ -2,25 +2,39 @@
 
 #include "Context/AgentContextTypes.h"
 #include "Harness/UnrealAiAgentTypes.h"
+#include "Tools/UnrealAiToolCatalog.h"
+#include "Tools/UnrealAiToolSurfaceCompatibility.h"
 
-bool UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(const FUnrealAiAgentTurnRequest& Request, const FString& ToolId)
+bool UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(
+	const FUnrealAiAgentTurnRequest& Request,
+	const FString& ToolId,
+	const FUnrealAiToolCatalog* CatalogOpt)
 {
 	if (Request.Mode != EUnrealAiAgentMode::Agent)
 	{
 		return true;
 	}
-	if (Request.bBlueprintBuilderTurn || !Request.bOmitMainAgentBlueprintMutationTools)
+	if (!Request.bOmitMainAgentBlueprintMutationTools)
+	{
+		return true;
+	}
+	if (!CatalogOpt)
 	{
 		return true;
 	}
 
-	static const TSet<FString> MainAgentHiddenBlueprintTools = {
-		TEXT("blueprint_graph_patch"),
-		TEXT("blueprint_format_graph"),
-		TEXT("blueprint_format_selection"),
-		TEXT("blueprint_compile"),
-		TEXT("blueprint_add_variable"),
-	};
+	const TSharedPtr<FJsonObject> Def = CatalogOpt->FindToolDefinition(ToolId);
+	if (!Def.IsValid())
+	{
+		return true;
+	}
 
-	return !MainAgentHiddenBlueprintTools.Contains(ToolId);
+	TSet<FString> SurfaceTokens;
+	bool bAllSurfaces = false;
+	UnrealAiToolSurfaceCompatibility::ParseAgentSurfaces(*Def, SurfaceTokens, bAllSurfaces);
+
+	const EUnrealAiToolSurfaceKind Kind = Request.bBlueprintBuilderTurn ? EUnrealAiToolSurfaceKind::BlueprintBuilder
+																		 : EUnrealAiToolSurfaceKind::MainAgent;
+
+	return UnrealAiToolSurfaceCompatibility::ToolAllowedOnSurface(SurfaceTokens, bAllSurfaces, Kind);
 }

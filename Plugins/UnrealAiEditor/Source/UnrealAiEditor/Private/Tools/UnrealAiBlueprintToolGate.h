@@ -3,12 +3,18 @@
 #include "CoreMinimal.h"
 
 struct FUnrealAiAgentTurnRequest;
+class FUnrealAiToolCatalog;
 
 /**
- * Controls which Blueprint graph-mutation tools appear in the LLM tool index.
- * Main Agent turns omit tools that are reserved for automated Blueprint Builder sub-turns.
+ * Controls which tools appear in the tiered LLM tool index and which invocations the harness allows,
+ * using catalog tools[].agent_surfaces (orthogonal to modes: ask/agent/plan).
+ *
+ * When Catalog is null, all tools pass (backward compatible).
  */
 namespace UnrealAiBlueprintToolGate
 {
-	bool PassesToolSurfaceFilter(const FUnrealAiAgentTurnRequest& Request, const FString& ToolId);
+	bool PassesToolSurfaceFilter(
+		const FUnrealAiAgentTurnRequest& Request,
+		const FString& ToolId,
+		const FUnrealAiToolCatalog* CatalogOpt = nullptr);
 }
