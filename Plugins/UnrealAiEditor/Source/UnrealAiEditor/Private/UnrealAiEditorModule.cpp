@@ -1458,20 +1458,31 @@ void FUnrealAiEditorModule::StartupModule()
 			UE_LOG(LogTemp, Display, TEXT("Context ranking policy:"));
 			UE_LOG(LogTemp, Display, TEXT("  weights mention=%.1f semantic=%.1f recency=%.1f freshness=%.1f safety_penalty=%.1f active=%.1f thread=%.1f frequency=%.1f"),
 				W.MentionHit, W.HeuristicSemantic, W.Recency, W.FreshnessReliability, W.SafetyPenalty, W.ActiveBonus, W.ThreadOverlayBonus, W.Frequency);
-			UE_LOG(LogTemp, Display, TEXT("  base_importance recent_tab=%.1f attachment=%.1f tool_result=%.1f editor_snapshot=%.1f todo=%.1f plan=%.1f"),
+			UE_LOG(LogTemp, Display, TEXT("  base_importance engine=%.1f recent=%.1f attachment=%.1f tool=%.1f snapshot=%.1f memory=%.1f retrieval=%.1f todo=%.1f plan=%.1f tree=%.1f working_set=%.1f l1=%.1f"),
+				GetBaseTypeImportance(ECandidateType::EngineHeader),
 				GetBaseTypeImportance(ECandidateType::RecentTab),
 				GetBaseTypeImportance(ECandidateType::Attachment),
 				GetBaseTypeImportance(ECandidateType::ToolResult),
 				GetBaseTypeImportance(ECandidateType::EditorSnapshotField),
+				GetBaseTypeImportance(ECandidateType::MemorySnippet),
+				GetBaseTypeImportance(ECandidateType::RetrievalSnippet),
 				GetBaseTypeImportance(ECandidateType::TodoState),
-				GetBaseTypeImportance(ECandidateType::PlanState));
-			UE_LOG(LogTemp, Display, TEXT("  caps recent=%d attachment=%d tool=%d snapshot=%d todo=%d plan=%d"),
+				GetBaseTypeImportance(ECandidateType::PlanState),
+				GetBaseTypeImportance(ECandidateType::ProjectTreeSummary),
+				GetBaseTypeImportance(ECandidateType::WorkingSetAsset),
+				GetBaseTypeImportance(ECandidateType::ThreadAssetL1Blurb));
+			UE_LOG(LogTemp, Display, TEXT("  caps recent=%d attachment=%d tool=%d snapshot=%d memory=%d retrieval=%d todo=%d plan=%d tree=%d working_set=%d l1=%d"),
 				GetPerTypeCap(ECandidateType::RecentTab),
 				GetPerTypeCap(ECandidateType::Attachment),
 				GetPerTypeCap(ECandidateType::ToolResult),
 				GetPerTypeCap(ECandidateType::EditorSnapshotField),
+				GetPerTypeCap(ECandidateType::MemorySnippet),
+				GetPerTypeCap(ECandidateType::RetrievalSnippet),
 				GetPerTypeCap(ECandidateType::TodoState),
-				GetPerTypeCap(ECandidateType::PlanState));
+				GetPerTypeCap(ECandidateType::PlanState),
+				GetPerTypeCap(ECandidateType::ProjectTreeSummary),
+				GetPerTypeCap(ECandidateType::WorkingSetAsset),
+				GetPerTypeCap(ECandidateType::ThreadAssetL1Blurb));
 		}),
 		ECVF_Default);
 

@@ -89,6 +89,7 @@ namespace UnrealAiContextCandidates
 		const FAgentContextBuildOptions& Options,
 		IUnrealAiMemoryService* MemoryService,
 		const TArray<FUnrealAiRetrievalSnippet>* RetrievalSnippets,
+		const FProjectTreeSummary* ProjectTreeForIngestion,
 		TArray<FContextCandidateEnvelope>& OutCandidates);
 
 	void FilterHardPolicy(
@@ -110,5 +111,6 @@ namespace UnrealAiContextCandidates
 		const FAgentContextBuildOptions& Options,
 		IUnrealAiMemoryService* MemoryService,
 		const TArray<FUnrealAiRetrievalSnippet>* RetrievalSnippets,
-		int32 BudgetChars);
+		int32 BudgetChars,
+		const FProjectTreeSummary* ProjectTreeForIngestion = nullptr);
 }

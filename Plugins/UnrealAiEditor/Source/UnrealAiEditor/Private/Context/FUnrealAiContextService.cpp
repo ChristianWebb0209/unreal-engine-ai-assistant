@@ -8,6 +8,7 @@
 #include "Context/UnrealAiEditorContextQueries.h"
 #include "Context/UnrealAiProjectTreeSampler.h"
 #include "Context/UnrealAiStartupOpsStatus.h"
+#include "Context/UnrealAiContextWorkingSet.h"
 #include "Context/UnrealAiRecentUiRanking.h"
 #include "Memory/IUnrealAiMemoryService.h"
 #include "Observability/UnrealAiBackgroundOpsLog.h"
@@ -200,6 +201,14 @@ void FUnrealAiContextService::AddAttachment(const FContextAttachment& Attachment
 	}
 	FAgentContextState* S = FindOrAddState(ActiveProjectId, ActiveThreadId);
 	S->Attachments.Add(Attachment);
+	if (Attachment.Type == EContextAttachmentType::AssetPath || Attachment.Type == EContextAttachmentType::ContentFolder)
+	{
+		UnrealAiContextWorkingSet::Touch(
+			*S,
+			Attachment.Payload,
+			Attachment.IconClassPath,
+			EThreadAssetTouchSource::Attachment);
+	}
 	ScheduleSave(ActiveProjectId, ActiveThreadId);
 }
 
@@ -276,6 +285,7 @@ void FUnrealAiContextService::RecordToolResult(
 		E.TruncatedResult = E.TruncatedResult.Left(Policy.MaxStoredCharsPerResult);
 	}
 	E.Timestamp = FDateTime::UtcNow();
+	UnrealAiContextWorkingSet::TouchFromToolResult(*S, ToolName, E.TruncatedResult);
 	S->ToolResults.Add(MoveTemp(E));
 	RegisterActionReferencesFromToolResult(ActiveProjectId, SessionKey(ActiveProjectId, ActiveThreadId), Result);
 	ScheduleSave(ActiveProjectId, ActiveThreadId);
@@ -544,6 +554,14 @@ void FUnrealAiContextService::RefreshEditorSnapshotFromEngine()
 		S->ThreadRecentUiOverlay = ThreadOverlay;
 	}
 	SetEditorSnapshot(Snap);
+	if (!ActiveProjectId.IsEmpty() && !ActiveThreadId.IsEmpty())
+	{
+		if (FAgentContextState* St = FindOrAddState(ActiveProjectId, ActiveThreadId))
+		{
+			UnrealAiContextWorkingSet::TouchFromEditorSnapshot(*St, Snap);
+			ScheduleSave(ActiveProjectId, ActiveThreadId);
+		}
+	}
 #endif
 }
 
@@ -782,9 +800,53 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 		}
 	}
 
+	FProjectTreeSummary CachedTreeForIngestion;
+	{
+		const FDateTime PrevUpdated = ProjectTreeByProjectId.Contains(ActiveProjectId)
+			? ProjectTreeByProjectId[ActiveProjectId].UpdatedUtc
+			: FDateTime::MinValue();
+		const FProjectTreeSummary& SharedSummary = UnrealAiProjectTreeSampler::GetOrRefreshProjectSummary(ActiveProjectId, false);
+		CachedTreeForIngestion = SharedSummary;
+		UnrealAiProjectTreeSampler::ApplyRetrievalHintsToSummary(CachedTreeForIngestion, RetrievalSnippets);
+		const bool bRefreshed = CachedTreeForIngestion.UpdatedUtc != FDateTime::MinValue() && CachedTreeForIngestion.UpdatedUtc > PrevUpdated;
+		ProjectTreeByProjectId.FindOrAdd(ActiveProjectId) = CachedTreeForIngestion;
+		Working.ProjectTreeSummary = CachedTreeForIngestion;
+		if (FAgentContextState* ActiveState = FindOrAddState(ActiveProjectId, ActiveThreadId))
+		{
+			ActiveState->ProjectTreeSummary = CachedTreeForIngestion;
+		}
+		if (bRefreshed)
+		{
+			ScheduleSave(ActiveProjectId, ActiveThreadId);
+			const FString Detail = UnrealAiBackgroundOpsLog::BuildDetailJson(
+				TEXT("project_tree_sample"),
+				TEXT("ok"),
+				ActiveProjectId,
+				ActiveThreadId,
+				CachedTreeForIngestion.LastQueryDurationMs,
+				[&CachedTreeForIngestion](const TSharedPtr<FJsonObject>& O)
+				{
+					O->SetStringField(TEXT("sampler_version"), CachedTreeForIngestion.SamplerVersion);
+					O->SetStringField(TEXT("query_status"), CachedTreeForIngestion.LastQueryStatus);
+					O->SetNumberField(TEXT("top_folder_count"), CachedTreeForIngestion.TopLevelFolders.Num());
+				});
+			UnrealAiBackgroundOpsLog::EmitLogLine(TEXT("project_tree_sample"), TEXT("ok"), CachedTreeForIngestion.LastQueryDurationMs, Detail);
+			Result.UserVisibleMessages.Add(FString::Printf(TEXT("Background query ran: %s"), *Detail));
+		}
+		const FString StartupOpsLine = UnrealAiStartupOpsStatus::BuildCompactLine(
+			UnrealAiStartupOpsStatus::BuildStatus(RetrievalService, CachedTreeForIngestion, ActiveProjectId));
+		const bool bStartupBootstrapped = CachedTreeForIngestion.LastQueryStatus.Contains(TEXT("startup_bootstrap"));
+		const bool bFreshStartupSample = CachedTreeForIngestion.UpdatedUtc != FDateTime::MinValue()
+			&& (FDateTime::UtcNow() - CachedTreeForIngestion.UpdatedUtc).GetTotalMinutes() <= 5.0;
+		if (bRefreshed || (bStartupBootstrapped && bFreshStartupSample))
+		{
+			Result.UserVisibleMessages.Add(StartupOpsLine);
+		}
+	}
+
 	FString Block;
 	const UnrealAiContextCandidates::FUnifiedContextBuildResult Unified =
-		UnrealAiContextCandidates::BuildUnifiedContext(Working, EffectiveOptions, MemoryService, &RetrievalSnippets, Budget);
+		UnrealAiContextCandidates::BuildUnifiedContext(Working, EffectiveOptions, MemoryService, &RetrievalSnippets, Budget, &CachedTreeForIngestion);
 	for (const FString& Line : Unified.TraceLines)
 	{
 		AddTraceLine(Line);
@@ -814,50 +876,6 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 	Block = Unified.ContextBlock;
 	RegisterPackedEntityState(SessionKey(ActiveProjectId, ActiveThreadId), Unified.Packed);
 	UpdateRetrievalUtilityCounters(ActiveProjectId, SessionKey(ActiveProjectId, ActiveThreadId), Unified.Packed, Unified.Dropped);
-	{
-		const FDateTime PrevUpdated = ProjectTreeByProjectId.Contains(ActiveProjectId)
-			? ProjectTreeByProjectId[ActiveProjectId].UpdatedUtc
-			: FDateTime::MinValue();
-		const FProjectTreeSummary& SharedSummary = UnrealAiProjectTreeSampler::GetOrRefreshProjectSummary(ActiveProjectId, false);
-		FProjectTreeSummary Cached = SharedSummary;
-		UnrealAiProjectTreeSampler::ApplyRetrievalHintsToSummary(Cached, RetrievalSnippets);
-		const bool bRefreshed = Cached.UpdatedUtc != FDateTime::MinValue() && Cached.UpdatedUtc > PrevUpdated;
-		ProjectTreeByProjectId.FindOrAdd(ActiveProjectId) = Cached;
-		Working.ProjectTreeSummary = Cached;
-		if (FAgentContextState* ActiveState = FindOrAddState(ActiveProjectId, ActiveThreadId))
-		{
-			ActiveState->ProjectTreeSummary = Cached;
-		}
-		if (bRefreshed)
-		{
-			ScheduleSave(ActiveProjectId, ActiveThreadId);
-			const FString Detail = UnrealAiBackgroundOpsLog::BuildDetailJson(
-				TEXT("project_tree_sample"),
-				TEXT("ok"),
-				ActiveProjectId,
-				ActiveThreadId,
-				Cached.LastQueryDurationMs,
-				[&Cached](const TSharedPtr<FJsonObject>& O)
-				{
-					O->SetStringField(TEXT("sampler_version"), Cached.SamplerVersion);
-					O->SetStringField(TEXT("query_status"), Cached.LastQueryStatus);
-					O->SetNumberField(TEXT("top_folder_count"), Cached.TopLevelFolders.Num());
-				});
-			UnrealAiBackgroundOpsLog::EmitLogLine(TEXT("project_tree_sample"), TEXT("ok"), Cached.LastQueryDurationMs, Detail);
-			Result.UserVisibleMessages.Add(FString::Printf(TEXT("Background query ran: %s"), *Detail));
-		}
-		const FString StartupOpsLine = UnrealAiStartupOpsStatus::BuildCompactLine(
-			UnrealAiStartupOpsStatus::BuildStatus(RetrievalService, Cached, ActiveProjectId));
-		const bool bStartupBootstrapped = Cached.LastQueryStatus.Contains(TEXT("startup_bootstrap"));
-		const bool bFreshStartupSample = Cached.UpdatedUtc != FDateTime::MinValue()
-			&& (FDateTime::UtcNow() - Cached.UpdatedUtc).GetTotalMinutes() <= 5.0;
-		if (bRefreshed || (bStartupBootstrapped && bFreshStartupSample))
-		{
-			Result.UserVisibleMessages.Add(StartupOpsLine);
-		}
-		Block += TEXT("\n\n");
-		Block += UnrealAiProjectTreeSampler::BuildContextBlurb(Cached);
-	}
 	Result.bTruncated = Unified.bTruncated;
 	Result.Warnings.Append(Unified.Warnings);
 	AddTraceLine(TEXT("[Ranker] emission=unified"));
