@@ -62,6 +62,7 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
                 toolUsagePrior = component "Operational Usage Prior" "Session-only ok/fail rates per tool_id; 0.7/0.3 blend default\n(ToolUsagePriorEnabled in UnrealAiRuntimeDefaults.h).\nOperational signal only, not user satisfaction." "UnrealAiToolUsagePrior" "Core"
                 toolUsageEventLogger = component "Tool Usage Event Logger" "Append (query_hash, tool_id, operational_ok) JSONL for offline prior training\n(ToolUsageLogEnabled in UnrealAiRuntimeDefaults.h)." "UnrealAiToolUsageEventLogger" "Core"
                 executionHost = component "Tool Execution Host" "Permission checks, dispatch invocation, result envelope shaping." "FUnrealAiToolExecutionHost" "Core"
+                blueprintSurfaceGate = component "Blueprint surface gate + builder roster" "Main Agent: UnrealAiBlueprintToolGate + agent_surfaces omit graph mutators when bOmitMainAgentBlueprintMutationTools.\nBuilder: UnrealAiBlueprintBuilderToolSurface expands roster/appendix.\nHandoff: unreal_ai_build_blueprint tag + target_kind in harness." "UnrealAiBlueprintToolGate" "Core"
                 dispatchActors = component "Actors + World Dispatch" "Actor/transform/world operations." "UnrealAiToolDispatch_Actors" "Core"
                 dispatchAssets = component "Assets + Content Dispatch" "Asset CRUD, browser sync/navigation, metadata." "UnrealAiToolDispatch_*Assets*" "Core"
                 dispatchBlueprint = component "Blueprint Dispatch" "Blueprint summary/export/edit helpers and graph operations." "UnrealAiToolDispatch_BlueprintTools" "Core"
@@ -161,7 +162,9 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
         plugin.tools.toolSurfacePipeline -> plugin.tools.toolUsagePrior "Optional 0.7/0.3 blend"
         plugin.tools.toolSurfacePipeline -> plugin.tools.toolDynamicKPolicy "Margin-based K inside caps"
         plugin.tools.toolSurfacePipeline -> plugin.tools.catalogLoader "Tiered markdown + schemas"
+        plugin.tools.toolSurfacePipeline -> plugin.tools.blueprintSurfaceGate "Filter eligible Blueprint tools (agent_surfaces)"
         plugin.tools.toolSurfacePipeline -> plugin.contextService "Read thread state for bias (not docs retrieval)"
+        plugin.harness.workerOrchestration -> plugin.tools.blueprintSurfaceGate "Build-blueprint sub-turn handoff"
         plugin.harness.toolLoop -> plugin.tools.toolUsageEventLogger "Log operational_ok per invoke"
         plugin.harness.toolLoop -> plugin.tools.toolUsagePrior "Update session counts"
         plugin.harness -> plugin.contextService "Record bounded tool results"
@@ -263,6 +266,7 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
             include plugin.tools.toolUsagePrior
             include plugin.tools.toolUsageEventLogger
             include plugin.tools.catalogLoader
+            include plugin.tools.blueprintSurfaceGate
             include plugin.requestBuilder.messageBudgeter
             include plugin.contextService.editorSnapshot
             include plugin.harness.toolLoop
@@ -464,12 +468,12 @@ BEGIN_README_MAP context-components
 Context owns **`context.json`** and planning artifacts that live beside it; it does **not** own the chat API message list (that is the **harness** + `conversation.json`). Optional local **vector retrieval** adds `retrieval_snippet` candidates into the **same** ranker when enabledâ€”see [`docs/context/context-management.md`](docs/context/context-management.md) and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 2.2.
 END_README_MAP
 BEGIN_README_MAP harness-components
-**Agent harness** decomposition: **turn loop**, **tool loop** (streaming tool calls, execution host, telemetry such as `tool_surface_metrics`, session **usage prior** updates, optional **repair** nudge after bad `unreal_ai_dispatch` unwrap), **continuation rails**, **Plan-mode DAG execution** (`Private/Planning/FUnrealAiPlanExecutor` driving serial node turns), and **run artifact** sinks (`FAgentRunFileSink`) for harness diagnostics.
+**Agent harness** decomposition: **turn loop**, **tool loop** (streaming tool calls, execution host, telemetry such as `tool_surface_metrics`, session **usage prior** updates, optional **repair** nudge after bad `unreal_ai_dispatch` unwrap), **continuation rails**, **Blueprint Builder handoff** (`unreal_ai_build_blueprint` + `target_kind` sub-turn), **Plan-mode DAG execution** (`Private/Planning/FUnrealAiPlanExecutor` driving serial node turns), and **run artifact** sinks (`FAgentRunFileSink`) for harness diagnostics.
 
 This is where **`conversation.json`** is read/written, LLM rounds are bounded, and tool rounds connect to dispatch. For iteration, artifacts, and what â€œgoodâ€ looks like in tests, see [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](docs/tooling/AGENT_HARNESS_HANDOFF.md).
 END_README_MAP
 BEGIN_README_MAP tooling-components
-**Tool catalog, execution host, and dispatch** split by concern: **catalog loader** (`UnrealAiToolCatalog.json`), **tool surface pipeline** entry (for eligibility when enabled), **execution host** (permissions + invocation), and **dispatch** modules (actors/world, assets, Blueprint, editor UI, search, PIE, etc.).
+**Tool catalog, execution host, and dispatch** split by concern: **catalog loader** (`UnrealAiToolCatalog.json`), **tool surface pipeline** entry (for eligibility when enabled), **Blueprint surface gate** (`UnrealAiBlueprintToolGate` / builder roster), **execution host** (permissions + invocation), and **dispatch** modules (actors/world, assets, Blueprint, editor UI, search, PIE, etc.).
 
 Narrowing **which tools appear** and **tiered markdown** for `unreal_ai_dispatch` is a separate pipeline from **docs vector retrieval**â€”see [`docs/tooling/tools-expansion.md`](docs/tooling/tools-expansion.md) and the companion view **Tool surface graph**. Narrative catalog: [`docs/tooling/tool-registry.md`](docs/tooling/tool-registry.md).
 END_README_MAP

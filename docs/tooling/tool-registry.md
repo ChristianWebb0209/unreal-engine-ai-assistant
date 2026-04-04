@@ -23,6 +23,14 @@ The catalog is still the **single schema source**, but **how much** of it reache
 
 Optional per-tool metadata: `tools[].tool_surface.domain_tags` (see `meta.tool_surface` in the catalog JSON). **Docs/project vector retrieval** (`Retrieval Service`) is unrelated; it feeds **context**, not the tool roster.
 
+### Main Agent vs Blueprint Builder (default product path)
+
+- **Default Agent** (`Mode == Agent` with `bOmitMainAgentBlueprintMutationTools`): the tiered tool roster is filtered by **`tools[].agent_surfaces`** (see `meta.agent_surfaces` in the catalog). Graph mutators such as **`blueprint_graph_patch`**, **`blueprint_apply_ir`**, **`blueprint_compile`**, **`blueprint_format_graph`**, and **`blueprint_add_variable`** are **`blueprint_builder`–only** unless the field is missing/empty/`["all"]`.
+- **Handoff:** the main agent emits **`<unreal_ai_build_blueprint>`** with YAML **`target_kind`**; the harness runs a **Blueprint Builder** sub-turn with the builder prompt stack and domain-filtered tools (`UnrealAiBuildBlueprintTag`, `FUnrealAiAgentHarness`, `UnrealAiBlueprintBuilderToolSurface`).
+- **Escape hatch:** when **`bOmitMainAgentBlueprintMutationTools`** is **false**, surface gating is bypassed so power users can expose graph tools on the main roster.
+
+Implementation: **`UnrealAiBlueprintToolGate.cpp`**, **`UnrealAiToolSurfaceCompatibility.cpp`**, prompts under **`Plugins/UnrealAiEditor/prompts/chunks/`** (especially **`04`**, **`10`**, **`12`**, **`blueprint-builder/**`**).
+
 ---
 
 ## How this document was produced
@@ -56,7 +64,7 @@ Every tool below follows this schema (suitable for export to JSON for OpenAI/Ant
 | **`status`** | Authoritative values and meanings: [`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) `meta.status_legend` (`implemented`, `future`, `designed`, `deprecated`). The per-tool **status** cells in the tables below are not auto-synced—prefer the JSON for each `tool_id`. |
 
 **Ask mode:** Only tools with `permission: read` (and optionally explicit read-only context tools).  
-**Agent / Plan:** Full catalog subject to profile **allow-lists**.
+**Agent / Plan:** Catalog entries allowed by mode flags, then **tiered eligibility** and **`agent_surfaces`** (main Agent vs Blueprint Builder) further narrow what appears in the tool appendix—see [Main Agent vs Blueprint Builder](#main-agent-vs-blueprint-builder-default-product-path) above.
 
 ---
 
