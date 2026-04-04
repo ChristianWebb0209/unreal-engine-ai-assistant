@@ -58,6 +58,39 @@ namespace UnrealAiToolDispatchInternal
 		return R;
 	}
 
+	/** Removed from UnrealAiToolCatalog.json; still callable for stale clients — deterministic migration hint. */
+	static FUnrealAiToolInvocationResult BlueprintToolDeprecatedCatalogRemoved(const FString& ToolId)
+	{
+		static const TCHAR* Msg =
+			TEXT("Removed from the agent tool catalog. Mutate Kismet graphs with blueprint_graph_patch (add_variable op for new members; validate_only for dry-runs). "
+				 "Read node GUIDs and pins with blueprint_graph_introspect or blueprint_graph_list_pins. Layout: blueprint_format_graph (format_scope full_graph or selection).");
+		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+		O->SetBoolField(TEXT("ok"), false);
+		O->SetStringField(TEXT("status"), TEXT("tool_deprecated"));
+		O->SetStringField(TEXT("tool_id"), ToolId);
+		O->SetStringField(TEXT("message"), Msg);
+		TSharedPtr<FJsonObject> Sug = MakeShared<FJsonObject>();
+		Sug->SetStringField(TEXT("tool_id"), TEXT("blueprint_graph_patch"));
+		TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+		A->SetStringField(TEXT("blueprint_path"), TEXT("/Game/YourPath/YourBP"));
+		A->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+		A->SetBoolField(TEXT("validate_only"), true);
+		TArray<TSharedPtr<FJsonValue>> Ops;
+		TSharedPtr<FJsonObject> Op1 = MakeShared<FJsonObject>();
+		Op1->SetStringField(TEXT("op"), TEXT("add_variable"));
+		Op1->SetStringField(TEXT("name"), TEXT("MyVar"));
+		Op1->SetStringField(TEXT("type"), TEXT("int"));
+		Ops.Add(MakeShareable(new FJsonValueObject(Op1.ToSharedRef())));
+		A->SetArrayField(TEXT("ops"), Ops);
+		Sug->SetObjectField(TEXT("arguments"), A);
+		O->SetObjectField(TEXT("suggested_correct_call"), Sug);
+		FUnrealAiToolInvocationResult R;
+		R.bOk = false;
+		R.ErrorMessage = FString::Printf(TEXT("%s: tool deprecated (removed from catalog)"), *ToolId);
+		R.ContentForModel = UnrealAiToolJson::SerializeObject(O);
+		return R;
+	}
+
 	static FString ResolveProjectId(const FString& Session)
 	{
 		return Session.IsEmpty() ? UnrealAiProjectId::GetCurrentProjectId() : Session;
@@ -478,15 +511,15 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	}
 	if (ToolId == TEXT("blueprint_export_ir"))
 	{
-		return UnrealAiDispatch_BlueprintExportIr(A);
+		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
 	}
 	if (ToolId == TEXT("blueprint_apply_ir"))
 	{
-		return UnrealAiDispatch_BlueprintApplyIr(A);
+		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
 	}
 	if (ToolId == TEXT("blueprint_composite_lifecycle_print"))
 	{
-		return UnrealAiDispatch_BlueprintCompositeLifecyclePrint(A);
+		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
 	}
 	if (ToolId == TEXT("blueprint_graph_patch"))
 	{
@@ -502,7 +535,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	}
 	if (ToolId == TEXT("blueprint_format_selection"))
 	{
-		return UnrealAiDispatch_BlueprintFormatSelection(A);
+		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
 	}
 	if (ToolId == TEXT("blueprint_get_graph_summary"))
 	{
@@ -510,11 +543,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	}
 	if (ToolId == TEXT("blueprint_open_graph_tab"))
 	{
-		return UnrealAiDispatch_BlueprintOpenGraphTab(A);
+		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
 	}
 	if (ToolId == TEXT("blueprint_add_variable"))
 	{
-		return UnrealAiDispatch_BlueprintAddVariable(A);
+		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
 	}
 	if (ToolId == TEXT("blueprint_graph_introspect"))
 	{
@@ -522,15 +555,15 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	}
 	if (ToolId == TEXT("blueprint_export_graph_t3d"))
 	{
-		return UnrealAiDispatch_BlueprintExportGraphT3d(A);
+		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
 	}
 	if (ToolId == TEXT("blueprint_t3d_preflight_validate"))
 	{
-		return UnrealAiDispatch_BlueprintT3dPreflightValidate(A);
+		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
 	}
 	if (ToolId == TEXT("blueprint_graph_import_t3d"))
 	{
-		return UnrealAiDispatch_BlueprintGraphImportT3d(A);
+		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
 	}
 	if (ToolId == TEXT("blueprint_verify_graph"))
 	{

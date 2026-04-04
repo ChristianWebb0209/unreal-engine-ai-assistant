@@ -2122,7 +2122,7 @@ FUnrealBlueprintGraphFormatOptions UnrealAiBlueprintTools_MakeFormatOptionsFromS
 static FString UnrealAiBlueprintLoadHint(const FString& BlueprintPath)
 {
 	return FString::Printf(
-		TEXT("Could not load Blueprint '%s'. Expected a Blueprint asset object path under /Game (for example /Game/Blueprints/MyBP or /Game/Blueprints/MyBP.MyBP). If this is a new asset, create it first with asset_create or set create_if_missing:true in blueprint_apply_ir."),
+		TEXT("Could not load Blueprint '%s'. Expected a Blueprint asset object path under /Game (for example /Game/Blueprints/MyBP or /Game/Blueprints/MyBP.MyBP). If this is a new asset, create it first with asset_create, then edit graphs with blueprint_graph_patch."),
 		*BlueprintPath);
 }
 
@@ -2487,7 +2487,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportIr(const TSharedPt
 		SuggestedArgs->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
 		return UnrealAiToolJson::ErrorWithSuggestedCall(
 			TEXT("blueprint_path is required. Discover Blueprints with asset_index_fuzzy_search (query + path_prefix) or asset_registry_query with path_filter/class_name."),
-			TEXT("blueprint_export_ir"),
+			TEXT("blueprint_graph_introspect"),
 			SuggestedArgs);
 	}
 	FString GraphName;
@@ -2512,8 +2512,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintExportIr(const TSharedPt
 		SuggestedArgs->SetStringField(TEXT("blueprint_path"), Path);
 		SuggestedArgs->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
 		return UnrealAiToolJson::ErrorWithSuggestedCall(
-			TEXT("Graph not found. Call blueprint_get_graph_summary first to discover valid graph names, then retry blueprint_export_ir with one concrete graph_name."),
-			TEXT("blueprint_export_ir"),
+			TEXT("Graph not found. Call blueprint_get_graph_summary first to discover valid graph names, then retry blueprint_graph_introspect with one concrete graph_name."),
+			TEXT("blueprint_graph_introspect"),
 			SuggestedArgs);
 	}
 
@@ -2626,10 +2626,9 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 	TArray<FIrError> ParseErrors;
 	if (!TryParseIr(Args, Ir, ParseErrors))
 	{
-		// When the model omits `nodes` (or sends `nodes: []`), the correct recovery is usually
-		// to first call blueprint_export_ir, then apply that exported IR.
+		// When the model omits `nodes` (or sends `nodes: []`), recover by reading the live graph.
 		TSharedPtr<FJsonObject> SuggestedArgs = Normalization.bApplied ? Args : nullptr;
-		const TCHAR* SuggestedToolId = TEXT("blueprint_apply_ir");
+		const TCHAR* SuggestedToolId = TEXT("");
 		{
 			bool bMissingNodes = false;
 			for (const FIrError& E : ParseErrors)
@@ -2656,7 +2655,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 					ExportArgs->SetStringField(TEXT("blueprint_path"), BlueprintPath);
 					ExportArgs->SetStringField(TEXT("graph_name"), GraphName);
 					SuggestedArgs = ExportArgs;
-					SuggestedToolId = TEXT("blueprint_export_ir");
+					SuggestedToolId = TEXT("blueprint_graph_introspect");
 				}
 			}
 		}
@@ -2714,7 +2713,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 			Normalization.Notes,
 			Normalization.DeprecatedFieldsSeen,
 			SuggestedArgs,
-			TEXT("blueprint_apply_ir"));
+			TEXT(""));
 	}
 	if (!Ir.ParentClassPath.IsEmpty() && BP->ParentClass == nullptr)
 	{
@@ -2781,7 +2780,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 			Normalization.Notes,
 			Normalization.DeprecatedFieldsSeen,
 			SuggestedArgs,
-			TEXT("blueprint_apply_ir"));
+			TEXT(""));
 	}
 
 	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnBpApplyIr", "Unreal AI: apply blueprint IR"));
@@ -2990,11 +2989,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintApplyIr(const TSharedPtr
 		}
 		if (bHasUnsupportedOp)
 		{
-			// Deterministic recovery for unknown op loops:
-			// ask model to read existing graph IR first, then re-apply with supported ops only.
 			SuggestedArgs = MakeShared<FJsonObject>();
 			SuggestedArgs->SetStringField(TEXT("blueprint_path"), Ir.BlueprintPath);
-			SuggestedToolId = TEXT("blueprint_export_ir");
+			SuggestedArgs->SetStringField(TEXT("graph_name"), Ir.GraphName);
+			SuggestedToolId = TEXT("blueprint_graph_introspect");
 		}
 		return MakeIrErrorResult(
 			TEXT("apply_failed"),
@@ -3499,11 +3497,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintOpenGraphTab(const TShar
 		if (Path.IsEmpty() || GraphName.IsEmpty())
 		{
 			TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
-			SuggestedArgs->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
-			SuggestedArgs->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+			SuggestedArgs->SetStringField(TEXT("object_path"), TEXT("/Game/Blueprints/MyBP.MyBP"));
 			return UnrealAiToolJson::ErrorWithSuggestedCall(
 				TEXT("blueprint_path and graph_name are required (aliases: object_path/asset_path, graph)."),
-				TEXT("blueprint_open_graph_tab"),
+				TEXT("asset_open_editor"),
 				SuggestedArgs);
 		}
 	}

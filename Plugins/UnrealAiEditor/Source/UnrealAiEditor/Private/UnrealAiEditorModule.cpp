@@ -945,6 +945,7 @@ void FUnrealAiEditorModule::StartupModule()
 				}
 
 				// ---- Assertion: blueprint_export_ir_node_count_min ----
+				// (Name kept for strict-test JSON compatibility; implementation uses blueprint_graph_introspect.)
 				if (Type == TEXT("blueprint_export_ir_node_count_min"))
 				{
 					FString BlueprintPath;
@@ -963,7 +964,6 @@ void FUnrealAiEditorModule::StartupModule()
 						MinNodes = FMath::Max(0, static_cast<int32>(MinNodesD));
 					}
 
-					// Prepare args for blueprint_export_ir.
 					TSharedPtr<FJsonObject> ArgsObj = MakeShared<FJsonObject>();
 					ArgsObj->SetStringField(TEXT("blueprint_path"), BlueprintPath);
 					if (!GraphName.TrimStartAndEnd().IsEmpty())
@@ -975,16 +975,16 @@ void FUnrealAiEditorModule::StartupModule()
 						const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ArgsJson);
 						if (!FJsonSerializer::Serialize(ArgsObj.ToSharedRef(), Writer))
 						{
-							TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("failed to serialize tool args for blueprint_export_ir"));
+							TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("failed to serialize tool args for blueprint_graph_introspect"));
 							AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
 							continue;
 						}
 					}
 
-					const FUnrealAiToolInvocationResult Inv = Tools->InvokeTool(TEXT("blueprint_export_ir"), ArgsJson, FString());
+					const FUnrealAiToolInvocationResult Inv = Tools->InvokeTool(TEXT("blueprint_graph_introspect"), ArgsJson, FString());
 					if (!Inv.bOk)
 					{
-						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("blueprint_export_ir failed: %s"), *Inv.ErrorMessage));
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("blueprint_graph_introspect failed: %s"), *Inv.ErrorMessage));
 						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
 						continue;
 					}
@@ -994,7 +994,7 @@ void FUnrealAiEditorModule::StartupModule()
 						const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Inv.ContentForModel);
 						if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
 						{
-							TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("failed to parse blueprint_export_ir JSON output"));
+							TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("failed to parse blueprint_graph_introspect JSON output"));
 							AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
 							continue;
 						}
@@ -1008,7 +1008,6 @@ void FUnrealAiEditorModule::StartupModule()
 					}
 					else
 					{
-						// Some tools return { "ok": true, "ir": { ... "nodes": [...] } }
 						const TSharedPtr<FJsonObject>* IrObj = nullptr;
 						if (Root->TryGetObjectField(TEXT("ir"), IrObj) && IrObj && (*IrObj).IsValid())
 						{
@@ -1023,7 +1022,7 @@ void FUnrealAiEditorModule::StartupModule()
 						const FString Prefix = Inv.ContentForModel.Left(600);
 						TSharedPtr<FJsonObject> R = FailOne(
 							Type,
-							FString::Printf(TEXT("blueprint_export_ir JSON missing nodes[] (searched root and ir.nodes); content_prefix=%s"), *Prefix));
+							FString::Printf(TEXT("blueprint_graph_introspect JSON missing nodes[] (searched root and ir.nodes); content_prefix=%s"), *Prefix));
 						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
 						continue;
 					}

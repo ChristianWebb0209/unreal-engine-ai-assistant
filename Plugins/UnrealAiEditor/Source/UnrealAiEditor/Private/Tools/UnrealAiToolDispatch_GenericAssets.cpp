@@ -465,7 +465,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetCreate(const TSharedPtr<FJso
 		SuggestedArgs->SetStringField(TEXT("asset_name"), AssetName.IsEmpty() ? TEXT("MyCharacterBP") : AssetName);
 		SuggestedArgs->SetStringField(TEXT("asset_class"), TEXT("/Script/Engine.Blueprint"));
 		return UnrealAiToolJson::ErrorWithSuggestedCall(
-			TEXT("asset_create expects an asset class (UObject type), not an actor gameplay class. For Character/Pawn gameplay assets, create a Blueprint asset (/Script/Engine.Blueprint) and set parent_class in blueprint_apply_ir."),
+			TEXT("asset_create expects an asset class (UObject type), not an actor gameplay class. For Character/Pawn gameplay assets, create a Blueprint asset (/Script/Engine.Blueprint) with the desired parent_class in factory parameters, then edit graphs with blueprint_graph_patch."),
 			TEXT("asset_create"),
 			SuggestedArgs);
 	}

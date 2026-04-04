@@ -18,6 +18,7 @@
 #include "K2Node_CustomEvent.h"
 #include "K2Node_Event.h"
 #include "K2Node_FunctionEntry.h"
+#include "K2Node_IfThenElse.h"
 #include "K2Node_Knot.h"
 #include "K2Node_Timeline.h"
 #include "BlueprintFormat/UnrealAiBlueprintFormatterBridge.h"
@@ -121,7 +122,7 @@ namespace UnrealAiBlueprintT3d
 		{
 			return TEXT(
 				" T3D batch import applies to Kismet script graphs (EdGraphSchema_K2). This graph uses a different schema—use "
-				"blueprint_graph_patch or blueprint_apply_ir on EventGraph (or another K2 graph), or edit animation/state graphs manually.");
+				"blueprint_graph_patch on EventGraph (or another K2 graph), or edit animation/state graphs manually.");
 		}
 		if (BP && BP->IsA(UAnimBlueprint::StaticClass()))
 		{
@@ -130,7 +131,7 @@ namespace UnrealAiBlueprintT3d
 				|| GN.Contains(TEXT("Transition"), ESearchCase::IgnoreCase))
 			{
 				return TEXT(
-					" Animation Blueprint graphs such as AnimGraph/state machines often reject ImportNodesFromText. Prefer EventGraph with blueprint_graph_patch / blueprint_apply_ir, or state that anim-graph editing is manual.");
+					" Animation Blueprint graphs such as AnimGraph/state machines often reject ImportNodesFromText. Prefer EventGraph with blueprint_graph_patch, or state that anim-graph editing is manual.");
 			}
 		}
 		return FString();
@@ -390,7 +391,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphImportT3d(const TSh
 	}
 	if (!FEdGraphUtilities::CanImportNodesFromText(Graph, Resolved))
 	{
-		FString Msg = TEXT("Preflight failed: CanImportNodesFromText is false. Run blueprint_t3d_preflight_validate and fix T3D.");
+		FString Msg = TEXT("Preflight failed: CanImportNodesFromText is false. Fix T3D text or use blueprint_graph_patch on a Kismet graph.");
 		Msg += UnrealAiBlueprintT3d::DescribeT3dImportBlockerHint(Graph, BP);
 		return UnrealAiToolJson::Error(Msg);
 	}
@@ -486,11 +487,15 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintVerifyGraph(const TShare
 
 	TArray<TSharedPtr<FJsonValue>> Issues;
 
-	auto AddIssue = [&Issues](const FString& Code, const FString& Msg)
+	auto AddIssue = [&Issues](const FString& Code, const FString& Msg, const FString& NodeGuidOpt = FString())
 	{
 		TSharedPtr<FJsonObject> I = MakeShared<FJsonObject>();
 		I->SetStringField(TEXT("code"), Code);
 		I->SetStringField(TEXT("message"), Msg);
+		if (!NodeGuidOpt.IsEmpty())
+		{
+			I->SetStringField(TEXT("node_guid"), NodeGuidOpt);
+		}
 		Issues.Add(MakeShareable(new FJsonValueObject(I.ToSharedRef())));
 	};
 
@@ -516,7 +521,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintVerifyGraph(const TShare
 					{
 						if (!L)
 						{
-							AddIssue(TEXT("null_linked_pin"), FString::Printf(TEXT("Pin %s on node %s has null link entry."), *Pin->PinName.ToString(), *LexToString(N->NodeGuid)));
+							AddIssue(
+								TEXT("null_linked_pin"),
+								FString::Printf(
+									TEXT("Pin %s on node %s has null link entry."),
+									*Pin->PinName.ToString(),
+									*LexToString(N->NodeGuid)),
+								LexToString(N->NodeGuid));
 						}
 						else
 						{
@@ -527,7 +538,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintVerifyGraph(const TShare
 									TEXT("external_graph_link"),
 									FString::Printf(
 										TEXT("Pin %s links outside the inspected graph."),
-										*Pin->PinName.ToString()));
+										*Pin->PinName.ToString()),
+									LexToString(N->NodeGuid));
 							}
 						}
 					}
@@ -568,7 +580,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintVerifyGraph(const TShare
 							TEXT("Required exec input '%s' has no incoming link on node %s (%s)."),
 							*Pin->PinName.ToString(),
 							*K2->GetName(),
-							*LexToString(K2->NodeGuid)));
+							*LexToString(K2->NodeGuid)),
+						LexToString(K2->NodeGuid));
 				}
 			}
 		}
@@ -589,7 +602,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintVerifyGraph(const TShare
 							TEXT("NodeGuid %s reused by '%s' and '%s'."),
 							*LexToString(N->NodeGuid),
 							*(*Found)->GetName(),
-							*N->GetName()));
+							*N->GetName()),
+						LexToString(N->NodeGuid));
 				}
 				else
 				{
@@ -623,7 +637,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintVerifyGraph(const TShare
 							FString::Printf(
 								TEXT("CallFunction '%s' exec output '%s' has no outgoing link."),
 								*Call->GetName(),
-								*Pin->PinName.ToString()));
+								*Pin->PinName.ToString()),
+							LexToString(Call->NodeGuid));
 					}
 				}
 			}
@@ -671,9 +686,52 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintVerifyGraph(const TShare
 										*N->GetName(),
 										*Pin->PinName.ToString(),
 										Other->GetOwningNode() ? *Other->GetOwningNode()->GetName() : TEXT("?"),
-										*Other->PinName.ToString()));
+										*Other->PinName.ToString()),
+									LexToString(N->NodeGuid));
 							}
 						}
+					}
+				}
+			}
+		}
+		else if (Step == TEXT("trivial_branch_conditions"))
+		{
+			for (UEdGraphNode* N : Graph->Nodes)
+			{
+				UK2Node_IfThenElse* Br = Cast<UK2Node_IfThenElse>(N);
+				if (!Br)
+				{
+					continue;
+				}
+				for (UEdGraphPin* P : Br->Pins)
+				{
+					if (!P || P->Direction != EGPD_Input)
+					{
+						continue;
+					}
+					if (P->PinName != UEdGraphSchema_K2::PN_Condition)
+					{
+						continue;
+					}
+					if (P->LinkedTo.Num() > 0)
+					{
+						continue;
+					}
+					FString Dv = P->DefaultValue;
+					Dv.TrimStartAndEndInline();
+					if (Dv.Equals(TEXT("true"), ESearchCase::IgnoreCase))
+					{
+						AddIssue(
+							TEXT("branch_condition_literal_always_true"),
+							TEXT("Branch Condition is literal true with no data link (Else branch is dead)."),
+							LexToString(Br->NodeGuid));
+					}
+					else if (Dv.Equals(TEXT("false"), ESearchCase::IgnoreCase))
+					{
+						AddIssue(
+							TEXT("branch_condition_literal_always_false"),
+							TEXT("Branch Condition is literal false with no data link (Then branch is dead)."),
+							LexToString(Br->NodeGuid));
 					}
 				}
 			}

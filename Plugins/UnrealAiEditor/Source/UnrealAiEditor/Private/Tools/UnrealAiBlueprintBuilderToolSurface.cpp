@@ -172,7 +172,7 @@ FString UnrealAiBlueprintBuilderToolSurface::BuildAutomatedSubturnHarnessPreambl
 	FString Header = FString::Printf(
 		TEXT("[Blueprint Builder — automated sub-turn]\n")
 		TEXT("The main agent delegated work using `<unreal_ai_build_blueprint>` with **target_kind: %s**. ")
-		TEXT("Target assets MUST already exist at the paths referenced below. Follow the **domain chunk** in the system prompt for this kind — Kismet/T3D loops apply to **script_blueprint** (and compatible graphs); other domains use different tool subsets.\n")
+		TEXT("Target assets MUST already exist at the paths referenced below. Follow the **domain chunk** in the system prompt for this kind — Kismet `blueprint_graph_patch` workflows apply to **script_blueprint** (and compatible graphs); other domains use different tool subsets.\n")
 		TEXT("\n"),
 		*Domain);
 	Header += TEXT(
@@ -192,20 +192,17 @@ FString UnrealAiBlueprintBuilderToolSurface::BuildAutomatedSubturnHarnessPreambl
 			"`disconnect_*`, `delete_expression`, `set_editor_position`. Use **expression_guid** from export / add_expression results — not Blueprint T3D.\n"
 			"3. `material_graph_compile` (or `recompile: true` on the last patch) then `material_graph_validate` (orphans + compile flag).\n"
 			"\n"
-			"**Do not** use `blueprint_graph_patch`, `blueprint_apply_ir`, `blueprint_graph_import_t3d`, or other K2 Blueprint graph mutators on Materials.\n"
+			"**Do not** use `blueprint_graph_patch` or other K2 Blueprint graph mutators on Materials.\n"
 			"\n");
 	}
 	else
 	{
 		Header += TEXT(
 			"**Preferred graph loop (Kismet / script Blueprints — skip if your domain chunk says otherwise):**\n"
-			"1. Read: `blueprint_graph_introspect` (pins include `linked_to` peers), `blueprint_export_graph_t3d`, `blueprint_export_ir`, or `blueprint_get_graph_summary`.\n"
-			"2. **Wiring is explicit:** `blueprint_apply_ir` **`links[]`** and/or `blueprint_graph_patch` **`connect`** in the **same** batch as new nodes; **T3D** must keep export-style pin connection lines — create-only payloads yield **floating nodes**.\n"
-			"3. T3D path: placeholders **`__UAI_G_NNNNNN__`** (six digits) — do **not** invent raw `FGuid` literals; `blueprint_t3d_preflight_validate` → `blueprint_graph_import_t3d`.\n"
-			"4. `blueprint_compile` then `blueprint_verify_graph` e.g. `[\"links\",\"orphan_pins\",\"duplicate_node_guids\",\"dead_exec_outputs\",\"pin_type_mismatch\"]` — fix and retry until clean when possible.\n"
-			"5. Layout: `blueprint_format_graph` / `blueprint_format_selection` / IR `auto_layout` — spacing, knots, preserve-existing, and comments follow **Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting** (toolbar combo next to AI format buttons). Prefer `layout_scope: ir_nodes` / `patched_nodes` unless a full-graph reformat is intended; large IR applies may auto-promote to full-graph layout.\n"
-			"\n"
-			"**Fallback** when T3D is a poor fit: `blueprint_apply_ir` / `blueprint_graph_patch` (still require explicit links/connect ops).\n"
+			"1. Read: `blueprint_graph_introspect` (full nodes + pins + `linked_to`) and/or `blueprint_get_graph_summary` (multi-graph index / optional layout stats). For one node’s pins without the full graph, `blueprint_graph_list_pins`.\n"
+			"2. Mutate: **`blueprint_graph_patch`** only — `ops[]` or `ops_json_path`; prefer `semantic_kind`; use **`add_variable`** in the same batch before VariableGet/Set; include **`connect`** (or `break_link` / `splice_on_link`) with new nodes so nothing is left floating. Large batches: `validate_only:true` first.\n"
+			"3. `blueprint_compile` then `blueprint_verify_graph` e.g. `[\"links\",\"orphan_pins\",\"duplicate_node_guids\",\"dead_exec_outputs\",\"pin_type_mismatch\",\"trivial_branch_conditions\"]` — fix and retry until clean when possible.\n"
+			"4. Layout: `blueprint_format_graph` with `format_scope` **`full_graph`** or **`selection`** — spacing, knots, preserve-existing, and comments follow **Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting**.\n"
 			"\n");
 	}
 
