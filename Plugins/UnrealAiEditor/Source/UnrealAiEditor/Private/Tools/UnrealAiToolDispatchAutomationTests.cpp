@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Tools/UnrealAiToolDispatch.h"
 #include "Tools/UnrealAiToolDispatch_ArgRepair.h"
@@ -231,6 +232,27 @@ bool FUnrealAiToolResolverCompositeRoutingTest::RunTest(const FString& Parameter
 			Resolved.FailureResult.ErrorMessage.Contains(TEXT("viewport_camera_control")) || Resolved.FailureResult.ContentForModel.Contains(TEXT("viewport_camera_control")));
 	}
 
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/TestBp.TestBp"));
+		TSharedPtr<FJsonObject> Op = MakeShared<FJsonObject>();
+		Op->SetStringField(TEXT("op"), TEXT("create_node"));
+		Op->SetStringField(TEXT("patch_id"), TEXT("n1"));
+		Op->SetStringField(TEXT("k2_class"), TEXT("/Script/BlueprintGraph.K2Node_IfThenElse"));
+		TArray<TSharedPtr<FJsonValue>> Ops;
+		Ops.Add(MakeShared<FJsonValueObject>(Op.ToSharedRef()));
+		Args->SetArrayField(TEXT("ops"), Ops);
+		Args->SetStringField(TEXT("ops_json_path"), TEXT("Saved/UnrealAi/x.json"));
+		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("blueprint_graph_patch"), Args);
+		TestFalse(TEXT("blueprint_graph_patch ops + ops_json_path rejected by resolver"), Resolved.bResolved);
+	}
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/TestBp.TestBp"));
+		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("blueprint_graph_patch"), Args);
+		TestFalse(TEXT("blueprint_graph_patch missing ops and ops_json_path rejected by resolver"), Resolved.bResolved);
+	}
+
 	return true;
 }
 
@@ -300,6 +322,99 @@ bool FUnrealAiBlueprintGraphPatchArgRepairTest::RunTest(const FString& Parameter
 	TestEqual(TEXT("bare K2Node expanded"), K2b, FString(TEXT("/Script/BlueprintGraph.K2Node_CallFunction")));
 	TestFalse(TEXT("class_name removed"), (*Fixed2)->HasField(TEXT("class_name")));
 
+	TSharedPtr<FJsonObject> OpC = MakeShared<FJsonObject>();
+	OpC->SetStringField(TEXT("op"), TEXT("connect"));
+	OpC->SetStringField(TEXT("link_from"), TEXT("a.Then"));
+	OpC->SetStringField(TEXT("link_to"), TEXT("b.Execute"));
+	TArray<TSharedPtr<FJsonValue>> OpsC;
+	OpsC.Add(MakeShared<FJsonValueObject>(OpC.ToSharedRef()));
+	TSharedPtr<FJsonObject> ArgsC = MakeShared<FJsonObject>();
+	ArgsC->SetArrayField(TEXT("ops"), OpsC);
+	UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(ArgsC);
+	const TArray<TSharedPtr<FJsonValue>>* OutOpsC = nullptr;
+	TestTrue(TEXT("opsC"), ArgsC->TryGetArrayField(TEXT("ops"), OutOpsC) && OutOpsC && OutOpsC->Num() == 1);
+	const TSharedPtr<FJsonObject>* FixedC = nullptr;
+	TestTrue(TEXT("opC object"), (*OutOpsC)[0]->TryGetObject(FixedC) && FixedC && (*FixedC).IsValid());
+	FString FromC, ToC;
+	TestTrue(TEXT("link_from folded"), (*FixedC)->TryGetStringField(TEXT("from"), FromC));
+	TestEqual(TEXT("from value"), FromC, FString(TEXT("a.Then")));
+	TestTrue(TEXT("link_to folded"), (*FixedC)->TryGetStringField(TEXT("to"), ToC));
+	TestEqual(TEXT("to value"), ToC, FString(TEXT("b.Execute")));
+	TestFalse(TEXT("link_from stripped"), (*FixedC)->HasField(TEXT("link_from")));
+
+	TSharedPtr<FJsonObject> OpD = MakeShared<FJsonObject>();
+	OpD->SetStringField(TEXT("op"), TEXT("connect"));
+	OpD->SetStringField(TEXT("from_node"), TEXT("guid:11111111-1111-1111-1111-111111111111"));
+	OpD->SetStringField(TEXT("from_pin"), TEXT("Then"));
+	OpD->SetStringField(TEXT("to_node"), TEXT("n2"));
+	OpD->SetStringField(TEXT("to_pin"), TEXT("Execute"));
+	TArray<TSharedPtr<FJsonValue>> OpsD;
+	OpsD.Add(MakeShared<FJsonValueObject>(OpD.ToSharedRef()));
+	TSharedPtr<FJsonObject> ArgsD = MakeShared<FJsonObject>();
+	ArgsD->SetArrayField(TEXT("ops"), OpsD);
+	UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(ArgsD);
+	const TArray<TSharedPtr<FJsonValue>>* OutOpsD = nullptr;
+	TestTrue(TEXT("opsD"), ArgsD->TryGetArrayField(TEXT("ops"), OutOpsD) && OutOpsD && OutOpsD->Num() == 1);
+	const TSharedPtr<FJsonObject>* FixedD = nullptr;
+	TestTrue(TEXT("opD object"), (*OutOpsD)[0]->TryGetObject(FixedD) && FixedD && (*FixedD).IsValid());
+	FString FromD, ToD;
+	TestTrue(TEXT("split from"), (*FixedD)->TryGetStringField(TEXT("from"), FromD));
+	TestTrue(TEXT("split to"), (*FixedD)->TryGetStringField(TEXT("to"), ToD));
+	TestTrue(TEXT("from has dot"), FromD.Contains(TEXT(".")));
+	TestTrue(TEXT("to has dot"), ToD.Contains(TEXT(".")));
+
+	// k2_class alias: hallucinated Sequence -> K2Node_ExecutionSequence
+	TSharedPtr<FJsonObject> OpSeq = MakeShared<FJsonObject>();
+	OpSeq->SetStringField(TEXT("op"), TEXT("create_node"));
+	OpSeq->SetStringField(TEXT("patch_id"), TEXT("seq1"));
+	OpSeq->SetStringField(TEXT("k2_class"), TEXT("/Script/BlueprintGraph.K2Node_Sequence"));
+	TArray<TSharedPtr<FJsonValue>> OpsSeq;
+	OpsSeq.Add(MakeShared<FJsonValueObject>(OpSeq.ToSharedRef()));
+	TSharedPtr<FJsonObject> ArgsSeq = MakeShared<FJsonObject>();
+	ArgsSeq->SetArrayField(TEXT("ops"), OpsSeq);
+	UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(ArgsSeq);
+	const TArray<TSharedPtr<FJsonValue>>* OutSeq = nullptr;
+	TestTrue(TEXT("opsSeq"), ArgsSeq->TryGetArrayField(TEXT("ops"), OutSeq) && OutSeq && OutSeq->Num() == 1);
+	const TSharedPtr<FJsonObject>* FixSeq = nullptr;
+	TestTrue(TEXT("opSeq obj"), (*OutSeq)[0]->TryGetObject(FixSeq) && FixSeq && (*FixSeq).IsValid());
+	FString K2Seq;
+	TestTrue(TEXT("seq k2"), (*FixSeq)->TryGetStringField(TEXT("k2_class"), K2Seq));
+	TestEqual(TEXT("K2Node_Sequence alias"), K2Seq, FString(TEXT("/Script/BlueprintGraph.K2Node_ExecutionSequence")));
+
+	TSharedPtr<FJsonObject> OpBare = MakeShared<FJsonObject>();
+	OpBare->SetStringField(TEXT("op"), TEXT("create_node"));
+	OpBare->SetStringField(TEXT("patch_id"), TEXT("seq2"));
+	OpBare->SetStringField(TEXT("k2_class"), TEXT("Sequence"));
+	TArray<TSharedPtr<FJsonValue>> OpsBare;
+	OpsBare.Add(MakeShared<FJsonValueObject>(OpBare.ToSharedRef()));
+	TSharedPtr<FJsonObject> ArgsBare = MakeShared<FJsonObject>();
+	ArgsBare->SetArrayField(TEXT("ops"), OpsBare);
+	UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(ArgsBare);
+	const TArray<TSharedPtr<FJsonValue>>* OutBare = nullptr;
+	TestTrue(TEXT("opsBare"), ArgsBare->TryGetArrayField(TEXT("ops"), OutBare) && OutBare && OutBare->Num() == 1);
+	const TSharedPtr<FJsonObject>* FixBare = nullptr;
+	TestTrue(TEXT("opBare obj"), (*OutBare)[0]->TryGetObject(FixBare) && FixBare && (*FixBare).IsValid());
+	FString K2Bare;
+	TestTrue(TEXT("bare seq k2"), (*FixBare)->TryGetStringField(TEXT("k2_class"), K2Bare));
+	TestEqual(TEXT("bare Sequence alias"), K2Bare, FString(TEXT("/Script/BlueprintGraph.K2Node_ExecutionSequence")));
+
+	TSharedPtr<FJsonObject> OpMath = MakeShared<FJsonObject>();
+	OpMath->SetStringField(TEXT("op"), TEXT("create_node"));
+	OpMath->SetStringField(TEXT("patch_id"), TEXT("m1"));
+	OpMath->SetStringField(TEXT("k2_class"), TEXT("K2Node_IntLess"));
+	TArray<TSharedPtr<FJsonValue>> OpsMath;
+	OpsMath.Add(MakeShared<FJsonValueObject>(OpMath.ToSharedRef()));
+	TSharedPtr<FJsonObject> ArgsMath = MakeShared<FJsonObject>();
+	ArgsMath->SetArrayField(TEXT("ops"), OpsMath);
+	UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(ArgsMath);
+	const TArray<TSharedPtr<FJsonValue>>* OutMath = nullptr;
+	TestTrue(TEXT("opsMath"), ArgsMath->TryGetArrayField(TEXT("ops"), OutMath) && OutMath && OutMath->Num() == 1);
+	const TSharedPtr<FJsonObject>* FixMath = nullptr;
+	TestTrue(TEXT("opMath obj"), (*OutMath)[0]->TryGetObject(FixMath) && FixMath && (*FixMath).IsValid());
+	FString K2Math;
+	TestTrue(TEXT("math k2"), (*FixMath)->TryGetStringField(TEXT("k2_class"), K2Math));
+	TestEqual(TEXT("K2Node_IntLess -> CallFunction"), K2Math, FString(TEXT("/Script/BlueprintGraph.K2Node_CallFunction")));
+
 	return true;
 }
 
@@ -313,7 +428,7 @@ bool FUnrealAiBlueprintGraphPatchContractTest::RunTest(const FString& Parameters
 	(void)Parameters;
 	TestTrue(TEXT("Runs on game thread (tool dispatch requirement)"), IsInGameThread());
 
-	// blueprint_graph_patch requires blueprint_path and ops
+	// blueprint_graph_patch requires blueprint_path and non-empty ops[] or ops_json_path
 	{
 		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
 			TEXT("blueprint_graph_patch"),
@@ -346,6 +461,44 @@ bool FUnrealAiBlueprintGraphPatchContractTest::RunTest(const FString& Parameters
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
 		TestTrue(TEXT("blueprint_graph_patch empty ops: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
 		TestTrue(TEXT("blueprint_graph_patch empty ops: error"), O->HasTypedField<EJson::String>(TEXT("error")));
+	}
+
+	{
+		TSharedPtr<FJsonObject> ArgsBoth = MakeShared<FJsonObject>();
+		ArgsBoth->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Nonexistent/XP.XP"));
+		ArgsBoth->SetStringField(TEXT("ops_json_path"), TEXT("Saved/UnrealAi/x.json"));
+		TSharedPtr<FJsonObject> OpBoth = MakeShared<FJsonObject>();
+		OpBoth->SetStringField(TEXT("op"), TEXT("create_node"));
+		OpBoth->SetStringField(TEXT("patch_id"), TEXT("n1"));
+		OpBoth->SetStringField(TEXT("k2_class"), TEXT("/Script/BlueprintGraph.K2Node_IfThenElse"));
+		TArray<TSharedPtr<FJsonValue>> OpsBoth;
+		OpsBoth.Add(MakeShared<FJsonValueObject>(OpBoth.ToSharedRef()));
+		ArgsBoth->SetArrayField(TEXT("ops"), OpsBoth);
+		const FUnrealAiToolInvocationResult RB = UnrealAiDispatchTool(
+			TEXT("blueprint_graph_patch"),
+			ArgsBoth,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_graph_patch ops + ops_json_path dispatch: bOk"), RB.bOk);
+	}
+
+	{
+		TSharedPtr<FJsonObject> ArgsBad = MakeShared<FJsonObject>();
+		ArgsBad->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Nonexistent/XP.XP"));
+		ArgsBad->SetStringField(TEXT("ops_json_path"), TEXT("Content/not_allowed.json"));
+		const FUnrealAiToolInvocationResult RBad = UnrealAiDispatchTool(
+			TEXT("blueprint_graph_patch"),
+			ArgsBad,
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+		TestFalse(TEXT("blueprint_graph_patch ops_json_path bad prefix: bOk"), RBad.bOk);
+		TestTrue(
+			TEXT("blueprint_graph_patch ops_json_path bad prefix: hint"),
+			RBad.ErrorMessage.Contains(TEXT("Saved/")) || RBad.ContentForModel.Contains(TEXT("Saved/")));
 	}
 
 	{
@@ -465,7 +618,174 @@ bool FUnrealAiBlueprintGraphPatchContractTest::RunTest(const FString& Parameters
 			TestTrue(TEXT("graph_patch UAI placeholder: first error string"), (*Errs)[0]->TryGetString(FirstErr));
 			TestTrue(TEXT("graph_patch UAI placeholder: mentions T3D placeholder"), FirstErr.Contains(TEXT("T3D placeholder")));
 			TestTrue(TEXT("graph_patch UAI placeholder: mentions introspect"), FirstErr.Contains(TEXT("blueprint_graph_introspect")));
+			const TArray<TSharedPtr<FJsonValue>>* Partial = nullptr;
+			TestTrue(TEXT("graph_patch UAI: applied_partial empty"), O->TryGetArrayField(TEXT("applied_partial"), Partial) && Partial && Partial->Num() == 0);
+			const TArray<TSharedPtr<FJsonValue>>* Codes = nullptr;
+			TestTrue(TEXT("graph_patch UAI: error_codes"), O->TryGetArrayField(TEXT("error_codes"), Codes) && Codes && Codes->Num() > 0);
+			const TSharedPtr<FJsonObject>* Sug = nullptr;
+			TestTrue(TEXT("graph_patch UAI: suggested_correct_call"), O->TryGetObjectField(TEXT("suggested_correct_call"), Sug) && Sug && (*Sug).IsValid());
 		}
+	}
+
+	// Atomic rollback + minimal successful create_node (StrictTests harness only).
+	{
+		UBlueprint* BpAtomic = LoadObject<UBlueprint>(nullptr, TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+		if (BpAtomic)
+		{
+			const int32 VarCountBefore = BpAtomic->NewVariables.Num();
+			TSharedPtr<FJsonObject> OpV = MakeShared<FJsonObject>();
+			OpV->SetStringField(TEXT("op"), TEXT("add_variable"));
+			OpV->SetStringField(TEXT("name"), TEXT("UaiAtomicRollbackProbeVar"));
+			OpV->SetStringField(TEXT("type"), TEXT("int"));
+			TSharedPtr<FJsonObject> OpBad = MakeShared<FJsonObject>();
+			OpBad->SetStringField(TEXT("op"), TEXT("connect"));
+			OpBad->SetStringField(TEXT("from"), TEXT("not_a_real_patch_id.Then"));
+			OpBad->SetStringField(TEXT("to"), TEXT("also_fake.Execute"));
+			TArray<TSharedPtr<FJsonValue>> OpsRb;
+			OpsRb.Add(MakeShared<FJsonValueObject>(OpV.ToSharedRef()));
+			OpsRb.Add(MakeShared<FJsonValueObject>(OpBad.ToSharedRef()));
+			TSharedPtr<FJsonObject> ArgsRb = MakeShared<FJsonObject>();
+			ArgsRb->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+			ArgsRb->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+			ArgsRb->SetArrayField(TEXT("ops"), OpsRb);
+			ArgsRb->SetBoolField(TEXT("compile"), false);
+			ArgsRb->SetBoolField(TEXT("auto_layout"), false);
+			const FUnrealAiToolInvocationResult RRb = UnrealAiDispatchTool(
+				TEXT("blueprint_graph_patch"),
+				ArgsRb,
+				nullptr,
+				nullptr,
+				FString(),
+				FString());
+			TestFalse(TEXT("graph_patch atomic rollback: bOk"), RRb.bOk);
+			TestEqual(TEXT("graph_patch atomic: variable count restored"), BpAtomic->NewVariables.Num(), VarCountBefore);
+
+			TSharedPtr<FJsonObject> OpOk = MakeShared<FJsonObject>();
+			OpOk->SetStringField(TEXT("op"), TEXT("create_node"));
+			OpOk->SetStringField(TEXT("patch_id"), TEXT("uai_contract_ok_if"));
+			OpOk->SetStringField(TEXT("k2_class"), TEXT("/Script/BlueprintGraph.K2Node_IfThenElse"));
+			OpOk->SetNumberField(TEXT("x"), -30000);
+			OpOk->SetNumberField(TEXT("y"), -30000);
+			TArray<TSharedPtr<FJsonValue>> OpsOk;
+			OpsOk.Add(MakeShared<FJsonValueObject>(OpOk.ToSharedRef()));
+			TSharedPtr<FJsonObject> ArgsOk = MakeShared<FJsonObject>();
+			ArgsOk->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+			ArgsOk->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+			ArgsOk->SetArrayField(TEXT("ops"), OpsOk);
+			ArgsOk->SetBoolField(TEXT("compile"), false);
+			ArgsOk->SetBoolField(TEXT("auto_layout"), false);
+			const FUnrealAiToolInvocationResult ROk = UnrealAiDispatchTool(
+				TEXT("blueprint_graph_patch"),
+				ArgsOk,
+				nullptr,
+				nullptr,
+				FString(),
+				FString());
+			TestTrue(TEXT("graph_patch create_node happy: bOk"), ROk.bOk);
+			TSharedPtr<FJsonObject> OOk;
+			TSharedRef<TJsonReader<>> ReaderOk = TJsonReaderFactory<>::Create(ROk.ContentForModel);
+			TestTrue(TEXT("graph_patch happy: JSON parse"), FJsonSerializer::Deserialize(ReaderOk, OOk) && OOk.IsValid());
+			TestTrue(TEXT("graph_patch happy: ok field"), OOk->GetBoolField(TEXT("ok")));
+			FString CreatedGuid;
+			const TArray<TSharedPtr<FJsonValue>>* Ap = nullptr;
+			if (OOk->TryGetArrayField(TEXT("applied"), Ap) && Ap && Ap->Num() > 0)
+			{
+				const TSharedPtr<FJsonObject>* A0 = nullptr;
+				if ((*Ap)[0]->TryGetObject(A0) && A0 && (*A0).IsValid())
+				{
+					(*A0)->TryGetStringField(TEXT("node_guid"), CreatedGuid);
+				}
+			}
+			if (!CreatedGuid.IsEmpty())
+			{
+				TSharedPtr<FJsonObject> OpRm = MakeShared<FJsonObject>();
+				OpRm->SetStringField(TEXT("op"), TEXT("remove_node"));
+				OpRm->SetStringField(TEXT("node_guid"), CreatedGuid);
+				TArray<TSharedPtr<FJsonValue>> OpsRm;
+				OpsRm.Add(MakeShared<FJsonValueObject>(OpRm.ToSharedRef()));
+				TSharedPtr<FJsonObject> ArgsRm = MakeShared<FJsonObject>();
+				ArgsRm->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+				ArgsRm->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+				ArgsRm->SetArrayField(TEXT("ops"), OpsRm);
+				ArgsRm->SetBoolField(TEXT("compile"), false);
+				ArgsRm->SetBoolField(TEXT("auto_layout"), false);
+				const FUnrealAiToolInvocationResult RRm = UnrealAiDispatchTool(
+					TEXT("blueprint_graph_patch"),
+					ArgsRm,
+					nullptr,
+					nullptr,
+					FString(),
+					FString());
+				TestTrue(TEXT("graph_patch cleanup remove_node: bOk"), RRm.bOk);
+			}
+		}
+	}
+
+	{
+		const FString OpsAbs = FPaths::ProjectSavedDir() / TEXT("UnrealAi/UaiOpsJsonPathContract.json");
+		IFileManager::Get().MakeDirectory(*(FPaths::GetPath(OpsAbs)), true);
+		const FString Body =
+			TEXT("[{\"op\":\"create_node\",\"patch_id\":\"uai_opsfile_contract\",\"k2_class\":\"/Script/BlueprintGraph.K2Node_IfThenElse\",\"x\":-32500,\"y\":-32500}]");
+		TestTrue(
+			TEXT("ops_json_path contract: write test file"),
+			FFileHelper::SaveStringToFile(Body, *OpsAbs, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+
+		UBlueprint* BpFile = LoadObject<UBlueprint>(nullptr, TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+		if (BpFile)
+		{
+			TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+			A->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+			A->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+			A->SetStringField(TEXT("ops_json_path"), TEXT("Saved/UnrealAi/UaiOpsJsonPathContract.json"));
+			A->SetBoolField(TEXT("compile"), false);
+			A->SetBoolField(TEXT("auto_layout"), false);
+			const FUnrealAiToolInvocationResult Rf = UnrealAiDispatchTool(
+				TEXT("blueprint_graph_patch"),
+				A,
+				nullptr,
+				nullptr,
+				FString(),
+				FString());
+			TestTrue(TEXT("blueprint_graph_patch ops_json_path: bOk"), Rf.bOk);
+			TSharedPtr<FJsonObject> Parsed;
+			TSharedRef<TJsonReader<>> Rdr = TJsonReaderFactory<>::Create(Rf.ContentForModel);
+			FString Ng;
+			if (FJsonSerializer::Deserialize(Rdr, Parsed) && Parsed.IsValid() && Parsed->GetBoolField(TEXT("ok")))
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Apf = nullptr;
+				if (Parsed->TryGetArrayField(TEXT("applied"), Apf) && Apf && Apf->Num() > 0)
+				{
+					const TSharedPtr<FJsonObject>* A0 = nullptr;
+					if ((*Apf)[0]->TryGetObject(A0) && A0 && (*A0).IsValid())
+					{
+						(*A0)->TryGetStringField(TEXT("node_guid"), Ng);
+					}
+				}
+			}
+			if (!Ng.IsEmpty())
+			{
+				TSharedPtr<FJsonObject> Orm = MakeShared<FJsonObject>();
+				Orm->SetStringField(TEXT("op"), TEXT("remove_node"));
+				Orm->SetStringField(TEXT("node_guid"), Ng);
+				TArray<TSharedPtr<FJsonValue>> OrmOps;
+				OrmOps.Add(MakeShared<FJsonValueObject>(Orm.ToSharedRef()));
+				TSharedPtr<FJsonObject> Arm = MakeShared<FJsonObject>();
+				Arm->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+				Arm->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+				Arm->SetArrayField(TEXT("ops"), OrmOps);
+				Arm->SetBoolField(TEXT("compile"), false);
+				Arm->SetBoolField(TEXT("auto_layout"), false);
+				const FUnrealAiToolInvocationResult Rrm = UnrealAiDispatchTool(
+					TEXT("blueprint_graph_patch"),
+					Arm,
+					nullptr,
+					nullptr,
+					FString(),
+					FString());
+				TestTrue(TEXT("blueprint_graph_patch ops_json_path cleanup remove_node: bOk"), Rrm.bOk);
+			}
+		}
+		IFileManager::Get().Delete(*OpsAbs, false);
 	}
 
 	return true;

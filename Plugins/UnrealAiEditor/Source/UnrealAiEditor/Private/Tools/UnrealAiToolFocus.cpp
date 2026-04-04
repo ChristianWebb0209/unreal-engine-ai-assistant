@@ -3,6 +3,7 @@
 #include "Tools/UnrealAiToolDispatch_BlueprintTools.h"
 #include "Tools/Presentation/UnrealAiEditorNavigation.h"
 #include "Tools/UnrealAiToolProjectPathAllowlist.h"
+#include "Misc/UnrealAiRecentUiTracker.h"
 
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -53,10 +54,12 @@ namespace UnrealAiToolFocusPriv
 
 	static void FocusObjectPathGeneric(const FString& ObjectPath)
 	{
-		if (!ObjectPath.IsEmpty())
+		if (ObjectPath.IsEmpty())
 		{
-			UnrealAiEditorNavigation::NavigateToAssetObjectPath(ObjectPath);
+			return;
 		}
+		UnrealAiEditorNavigation::NavigateToAssetObjectPath(ObjectPath);
+		FUnrealAiRecentUiTracker::RecordAgentToolNavigationToAssetPath(ObjectPath);
 	}
 
 	static void TryFocusAssetCreate(const TSharedPtr<FJsonObject>& Args, const FUnrealAiToolInvocationResult& Result)

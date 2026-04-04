@@ -43,6 +43,7 @@
 #include "ScopedTransaction.h"
 #include "Misc/PackageName.h"
 #include "Tools/Presentation/UnrealAiEditorNavigation.h"
+#include "Misc/UnrealAiRecentUiTracker.h"
 #include "UObject/Class.h"
 #include "UObject/Script.h"
 #include "UObject/Field.h"
@@ -3632,6 +3633,7 @@ void UnrealAiFocusBlueprintEditor(const FString& BlueprintObjectPath, const FStr
 		return;
 	}
 	UnrealAiEditorNavigation::OpenAssetEditorPreferDocked(BP);
+	FUnrealAiRecentUiTracker::RecordAgentToolNavigationToAssetPath(BlueprintObjectPath);
 
 	FString FocusGraph = GraphName.TrimStartAndEnd();
 	if (FocusGraph.IsEmpty())

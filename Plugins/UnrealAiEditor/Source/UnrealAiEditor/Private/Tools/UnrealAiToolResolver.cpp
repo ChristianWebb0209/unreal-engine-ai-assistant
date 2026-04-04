@@ -860,6 +860,33 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 	if (Result.CanonicalToolId == TEXT("blueprint_graph_patch"))
 	{
 		UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Result.ResolvedArguments);
+		FString OpsJsonRel;
+		Result.ResolvedArguments->TryGetStringField(TEXT("ops_json_path"), OpsJsonRel);
+		OpsJsonRel.TrimStartAndEndInline();
+		const TArray<TSharedPtr<FJsonValue>>* OpsInline = nullptr;
+		Result.ResolvedArguments->TryGetArrayField(TEXT("ops"), OpsInline);
+		const int32 InlineCount = OpsInline ? OpsInline->Num() : 0;
+		const bool bHasPath = !OpsJsonRel.IsEmpty();
+		if (bHasPath && InlineCount > 0)
+		{
+			Result.FailureResult = BuildResolverError(
+				Result.Audit,
+				TEXT("blueprint_graph_patch: pass either ops[] or ops_json_path, not both."),
+				Result.CanonicalToolId,
+				nullptr);
+			Result.Audit->SetNumberField(TEXT("latency_ms"), (FPlatformTime::Seconds() - ResolveStartSeconds) * 1000.0);
+			return Result;
+		}
+		if (!bHasPath && InlineCount == 0)
+		{
+			Result.FailureResult = BuildResolverError(
+				Result.Audit,
+				TEXT("blueprint_graph_patch: provide non-empty ops[] or ops_json_path (UTF-8 JSON array of op objects under Saved/ or harness_step/)."),
+				Result.CanonicalToolId,
+				nullptr);
+			Result.Audit->SetNumberField(TEXT("latency_ms"), (FPlatformTime::Seconds() - ResolveStartSeconds) * 1000.0);
+			return Result;
+		}
 	}
 
 	if (Result.CanonicalToolId == TEXT("settings_get") || Result.CanonicalToolId == TEXT("settings_set"))

@@ -30,9 +30,10 @@ namespace UnrealAiToolDispatchArgRepair
 	void RepairBlueprintAssetPathArgs(const TSharedPtr<FJsonObject>& Args);
 
 	/**
-	 * Pre-schema fixes for blueprint_graph_patch: normalize k2_class strings (UK2Node_*, bare K2Node_*),
-	 * strip LLM-only keys that break additionalProperties (e.g. node_guid on create_node),
-	 * copy class_name -> k2_class when k2_class is empty.
+	 * Pre-schema fixes for blueprint_graph_patch: normalize k2_class (UK2Node_*, bare K2Node_*),
+	 * strip node_guid on create_node, copy class_name/node_class/kind -> k2_class,
+	 * fold connect/break_link/splice link_from|link_to and split from_node+from_pin / to_node+to_pin into from|to,
+	 * fold typ|pin_type|variable_type -> type on add_variable.
 	 */
 	void RepairBlueprintGraphPatchToolArgs(const TSharedPtr<FJsonObject>& Args);
 
