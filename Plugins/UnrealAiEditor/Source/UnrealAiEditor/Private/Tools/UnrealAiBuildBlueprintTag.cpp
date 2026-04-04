@@ -1,4 +1,60 @@
 #include "Tools/UnrealAiBuildBlueprintTag.h"
+#include "UnrealAiBlueprintBuilderTargetKind.h"
+
+void UnrealAiBuildBlueprintTag::ParseAndStripHandoffMetadata(FString& InOutInner, EUnrealAiBlueprintBuilderTargetKind& OutKind)
+{
+	OutKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+	FString S = InOutInner;
+	S.TrimStartAndEndInline();
+	if (S.IsEmpty())
+	{
+		InOutInner.Reset();
+		return;
+	}
+
+	// YAML frontmatter: --- ... ---
+	if (S.StartsWith(TEXT("---")))
+	{
+		const int32 Close = S.Find(TEXT("---"), ESearchCase::CaseSensitive, ESearchDir::FromStart, 3);
+		if (Close != INDEX_NONE && Close > 3)
+		{
+			const FString Front = S.Mid(3, Close - 3).TrimStartAndEnd();
+			FString Rest = S.Mid(Close + 3).TrimStartAndEnd();
+			TArray<FString> Lines;
+			Front.ParseIntoArrayLines(Lines);
+			for (const FString& Line : Lines)
+			{
+				FString L = Line.TrimStartAndEnd();
+				if (L.StartsWith(TEXT("target_kind:"), ESearchCase::IgnoreCase))
+				{
+					const FString Val = L.Mid(12).TrimStartAndEnd();
+					OutKind = UnrealAiBlueprintBuilderTargetKind::ParseFromString(Val);
+					break;
+				}
+			}
+			InOutInner = Rest;
+			return;
+		}
+	}
+
+	// Single-line header: target_kind: domain
+	TArray<FString> Lines;
+	S.ParseIntoArrayLines(Lines);
+	if (Lines.Num() > 0)
+	{
+		FString L0 = Lines[0].TrimStartAndEnd();
+		if (L0.StartsWith(TEXT("target_kind:"), ESearchCase::IgnoreCase))
+		{
+			const FString Val = L0.Mid(12).TrimStartAndEnd();
+			OutKind = UnrealAiBlueprintBuilderTargetKind::ParseFromString(Val);
+			Lines.RemoveAt(0, 1, EAllowShrinking::No);
+			InOutInner = FString::Join(Lines, TEXT("\n")).TrimStartAndEnd();
+			return;
+		}
+	}
+
+	InOutInner = S;
+}
 
 bool UnrealAiBuildBlueprintTag::TryConsume(const FString& Content, FString& OutInnerSpec, FString& OutVisibleWithoutTags)
 {
@@ -21,6 +77,33 @@ bool UnrealAiBuildBlueprintTag::TryConsume(const FString& Content, FString& OutI
 	const FString After = Content.Mid(E + End.Len());
 	OutVisibleWithoutTags = (Before + After).TrimStartAndEnd();
 	return true;
+}
+
+void UnrealAiBuildBlueprintTag::StripProtocolMarkersForUi(FString& InOutText)
+{
+	if (InOutText.IsEmpty())
+	{
+		return;
+	}
+	static const TCHAR* const Markers[] = {
+		TEXT("<unreal_ai_build_blueprint>"),
+		TEXT("</unreal_ai_build_blueprint>"),
+		TEXT("<unreal_ai_blueprint_builder_result>"),
+		TEXT("</unreal_ai_blueprint_builder_result>"),
+	};
+	for (const TCHAR* const M : Markers)
+	{
+		for (;;)
+		{
+			const int32 LenBefore = InOutText.Len();
+			InOutText.ReplaceInline(M, TEXT(""), ESearchCase::IgnoreCase);
+			if (InOutText.Len() == LenBefore)
+			{
+				break;
+			}
+		}
+	}
+	InOutText.TrimStartAndEndInline();
 }
 
 bool UnrealAiBlueprintBuilderResultTag::TryConsume(const FString& Content, FString& OutInnerPayload, FString& OutVisibleWithoutTags)

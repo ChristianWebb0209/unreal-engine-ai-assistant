@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Context/AgentContextTypes.h"
+#include "UnrealAiBlueprintBuilderTargetKind.h"
 
 class FUnrealAiToolCatalog;
 struct FUnrealAiModelCapabilities;
@@ -29,6 +30,7 @@ namespace UnrealAiBlueprintBuilderToolSurface
 		const FUnrealAiToolPackOptions* PackOptions,
 		TFunctionRef<bool(const FString& ToolId)> ToolFilter,
 		const TSet<FString>& GuardrailIds,
+		EUnrealAiBlueprintBuilderTargetKind BuilderTargetKind,
 		TArray<FString>& InOutOrdered);
 
 	/**
@@ -56,5 +58,5 @@ namespace UnrealAiBlueprintBuilderToolSurface
 		int32& OutParametersExcerptMaxChars);
 
 	/** Long harness user preamble for the automated sub-turn (before the inner spec). */
-	FString BuildAutomatedSubturnHarnessPreamble();
+	FString BuildAutomatedSubturnHarnessPreamble(EUnrealAiBlueprintBuilderTargetKind BuilderTargetKind);
 }

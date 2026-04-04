@@ -2,6 +2,34 @@
 
 #include "Misc/UnrealAiRuntimeDefaults.h"
 #include "Tools/UnrealAiToolCatalog.h"
+#include "UnrealAiBlueprintBuilderTargetKind.h"
+
+namespace UnrealAiBlueprintBuilderToolSurfacePriv
+{
+	static bool DefMatchesBuilderDomain(const TSharedPtr<FJsonObject>& Def, EUnrealAiBlueprintBuilderTargetKind Kind)
+	{
+		const FString Want = UnrealAiBlueprintBuilderTargetKind::ToDomainString(Kind);
+		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+		if (Def->TryGetArrayField(TEXT("builder_domains"), Arr) && Arr && Arr->Num() > 0)
+		{
+			for (const TSharedPtr<FJsonValue>& V : *Arr)
+			{
+				FString S;
+				if (V.IsValid() && V->TryGetString(S))
+				{
+					S.TrimStartAndEndInline();
+					if (S.Equals(Want, ESearchCase::IgnoreCase))
+					{
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+		// Legacy catalog entries: no builder_domains => script_blueprint (K2 stack) only.
+		return Kind == EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+	}
+} // namespace UnrealAiBlueprintBuilderToolSurfacePriv
 
 bool UnrealAiBlueprintBuilderToolSurface::TryComputeAppendixBudgetFromModelContext(
 	int32 MaxContextTokens,
@@ -42,7 +70,8 @@ bool UnrealAiBlueprintBuilderToolSurface::TryComputeAppendixBudgetFromModelConte
 void UnrealAiBlueprintBuilderToolSurface::AugmentHybridRetrievalQuery(FString& InOutHybrid)
 {
 	InOutHybrid += TEXT(
-		" blueprint blueprint_graph blueprint_compile blueprint_export blueprint_import t3d k2 node graph pin guid patch apply_ir verify compile asset ");
+		" blueprint blueprint_graph blueprint_compile blueprint_export blueprint_import t3d k2 node graph pin guid patch apply_ir verify compile asset "
+		"material_graph material_graph_export material_graph_patch material_graph_compile material_graph_validate UMaterial expression ");
 }
 
 FString UnrealAiBlueprintBuilderToolSurface::SurfaceProfileTelemetryId()
@@ -57,6 +86,7 @@ void UnrealAiBlueprintBuilderToolSurface::MergeBlueprintCoreToolsAfterGuardrails
 	const FUnrealAiToolPackOptions* PackOptions,
 	TFunctionRef<bool(const FString& ToolId)> ToolFilter,
 	const TSet<FString>& GuardrailIds,
+	EUnrealAiBlueprintBuilderTargetKind BuilderTargetKind,
 	TArray<FString>& InOutOrdered)
 {
 	TArray<FString> CoreInsert;
@@ -73,7 +103,7 @@ void UnrealAiBlueprintBuilderToolSurface::MergeBlueprintCoreToolsAfterGuardrails
 			{
 				(*Ctx)->TryGetBoolField(TEXT("blueprint_builder_core"), bCore);
 			}
-			if (bCore)
+			if (bCore && UnrealAiBlueprintBuilderToolSurfacePriv::DefMatchesBuilderDomain(Def, BuilderTargetKind))
 			{
 				CoreInsert.Add(Tid);
 			}
@@ -135,27 +165,53 @@ void UnrealAiBlueprintBuilderToolSurface::GetVerboseAppendixSettings(
 	OutParametersExcerptMaxChars = UnrealAiRuntimeDefaults::BlueprintBuilderToolParamsExcerptMaxChars;
 }
 
-FString UnrealAiBlueprintBuilderToolSurface::BuildAutomatedSubturnHarnessPreamble()
+FString UnrealAiBlueprintBuilderToolSurface::BuildAutomatedSubturnHarnessPreamble(
+	const EUnrealAiBlueprintBuilderTargetKind BuilderTargetKind)
 {
-	return TEXT(
-		"[Blueprint Builder — automated sub-turn]\n"
-		"The main agent delegated work using `<unreal_ai_build_blueprint>`. Target Blueprint assets MUST already exist at the paths referenced below.\n"
-		"\n"
+	const FString Domain = UnrealAiBlueprintBuilderTargetKind::ToDomainString(BuilderTargetKind);
+	FString Header = FString::Printf(
+		TEXT("[Blueprint Builder — automated sub-turn]\n")
+		TEXT("The main agent delegated work using `<unreal_ai_build_blueprint>` with **target_kind: %s**. ")
+		TEXT("Target assets MUST already exist at the paths referenced below. Follow the **domain chunk** in the system prompt for this kind — Kismet/T3D loops apply to **script_blueprint** (and compatible graphs); other domains use different tool subsets.\n")
+		TEXT("\n"),
+		*Domain);
+	Header += TEXT(
 		"You are in a **verbose tool context**: the system message includes an **expanded** tool roster (summaries + parameter schema excerpts). "
 		"The roster is filled **up to a budget** derived from this model profile's **context window** (see plugin defaults: fraction of window, min budget); "
 		"if the catalog is larger than that budget, trailing tools may be omitted from the appendix — prefer IDs you see listed. "
-		"Prefer the curated Blueprint/T3D tools; use other tools (assets, search, project files, etc.) when the spec requires them.\n"
-		"\n"
-		"**Preferred graph loop (deterministic):**\n"
-		"1. `blueprint_graph_introspect` / `blueprint_export_graph_t3d` (or `blueprint_export_ir` / `blueprint_get_graph_summary`) to ground pins and structure.\n"
-		"2. Author or edit **T3D** using placeholder node GUIDs **`__UAI_G_NNNNNN__`** (six digits) — do **not** invent raw Unreal `FGuid` literals.\n"
-		"3. `blueprint_t3d_preflight_validate` → `blueprint_graph_import_t3d` (atomic `ImportNodesFromText`).\n"
-		"4. `blueprint_compile` then `blueprint_verify_graph` with steps such as `[\"links\",\"orphan_pins\",\"duplicate_node_guids\"]`.\n"
-		"5. Optional layout: `blueprint_format_graph` / `blueprint_format_selection`.\n"
-		"\n"
-		"**Fallback** when T3D is a poor fit: `blueprint_apply_ir` / `blueprint_graph_patch` in coherent batches.\n"
-		"\n"
+		"Prefer tools marked for this `target_kind`; use other tools (assets, search, project files, etc.) when the spec requires them.\n"
+		"\n");
+
+	if (BuilderTargetKind == EUnrealAiBlueprintBuilderTargetKind::MaterialGraph)
+	{
+		Header += TEXT(
+			"**Preferred graph loop (base Material / `material_graph` — not K2):**\n"
+			"1. `material_graph_export` on the **UMaterial** object path (use `material_graph_summarize` only for a lightweight node list).\n"
+			"2. Plan `material_graph_patch` **ops[]** batches: `add_expression` (`class_path` e.g. `/Script/Engine.MaterialExpressionConstant3Vector`), "
+			"`connect` / `connect_material_input` (root slots: `BaseColor`, `Normal`, `MaterialAttributes`, `CustomizedUVs_0`, …), `set_constant3vector`, "
+			"`disconnect_*`, `delete_expression`, `set_editor_position`. Use **expression_guid** from export / add_expression results — not Blueprint T3D.\n"
+			"3. `material_graph_compile` (or `recompile: true` on the last patch) then `material_graph_validate` (orphans + compile flag).\n"
+			"\n"
+			"**Do not** use `blueprint_graph_patch`, `blueprint_apply_ir`, `blueprint_graph_import_t3d`, or other K2 Blueprint graph mutators on Materials.\n"
+			"\n");
+	}
+	else
+	{
+		Header += TEXT(
+			"**Preferred graph loop (Kismet / script Blueprints — skip if your domain chunk says otherwise):**\n"
+			"1. Read: `blueprint_graph_introspect` (pins include `linked_to` peers), `blueprint_export_graph_t3d`, `blueprint_export_ir`, or `blueprint_get_graph_summary`.\n"
+			"2. **Wiring is explicit:** `blueprint_apply_ir` **`links[]`** and/or `blueprint_graph_patch` **`connect`** in the **same** batch as new nodes; **T3D** must keep export-style pin connection lines — create-only payloads yield **floating nodes**.\n"
+			"3. T3D path: placeholders **`__UAI_G_NNNNNN__`** (six digits) — do **not** invent raw `FGuid` literals; `blueprint_t3d_preflight_validate` → `blueprint_graph_import_t3d`.\n"
+			"4. `blueprint_compile` then `blueprint_verify_graph` e.g. `[\"links\",\"orphan_pins\",\"duplicate_node_guids\"]` — fix and retry until clean when possible.\n"
+			"5. Optional layout: `blueprint_format_graph` / `blueprint_format_selection`.\n"
+			"\n"
+			"**Fallback** when T3D is a poor fit: `blueprint_apply_ir` / `blueprint_graph_patch` (still require explicit links/connect ops).\n"
+			"\n");
+	}
+
+	Header += TEXT(
 		"When finished or blocked, emit `<unreal_ai_blueprint_builder_result>...</unreal_ai_blueprint_builder_result>` for the main agent.\n"
 		"\n"
 		"--- Delegated specification (verbatim from main agent) ---\n");
+	return Header;
 }
