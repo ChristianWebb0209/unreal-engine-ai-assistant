@@ -10,7 +10,9 @@
 
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
+#include "EdGraph/EdGraphPin.h"
 #include "EdGraphNode_Comment.h"
+#include "EdGraphSchema_K2.h"
 
 namespace UnrealBlueprintFormatServicePriv
 {
@@ -558,6 +560,245 @@ namespace UnrealBlueprintFormatServicePriv
 			}
 		}
 	}
+
+	static bool UnionRectsOfNodes(const TArray<UEdGraphNode*>& Nodes, FNodeRect& OutUnion)
+	{
+		bool bAny = false;
+		for (UEdGraphNode* N : Nodes)
+		{
+			if (!N)
+			{
+				continue;
+			}
+			const FNodeRect R = GetNodeRect(N);
+			if (!bAny)
+			{
+				OutUnion = R;
+				bAny = true;
+			}
+			else
+			{
+				OutUnion.MinX = FMath::Min(OutUnion.MinX, R.MinX);
+				OutUnion.MinY = FMath::Min(OutUnion.MinY, R.MinY);
+				OutUnion.MaxX = FMath::Max(OutUnion.MaxX, R.MaxX);
+				OutUnion.MaxY = FMath::Max(OutUnion.MaxY, R.MaxY);
+			}
+		}
+		return bAny;
+	}
+
+	static UEdGraphNode* FirstMaterializedAnchorForGap(
+		const TArray<UEdGraphNode*>& MaterializedNodes)
+	{
+		for (UEdGraphNode* N : MaterializedNodes)
+		{
+			if (N && TakesPartInScriptLayout(N))
+			{
+				return N;
+			}
+		}
+		for (UEdGraphNode* N : MaterializedNodes)
+		{
+			if (N)
+			{
+				return N;
+			}
+		}
+		return nullptr;
+	}
+
+	/**
+	 * Push non-patch script nodes to the right until none overlap the materialized cluster (AABB + pairwise gap).
+	 * Iterates so chains of outside nodes clear each other.
+	 */
+	static void PushNonMaterializedScriptNodesClearingCluster(
+		UEdGraph* Graph,
+		const TSet<const UEdGraphNode*>& MSet,
+		const TArray<UEdGraphNode*>& MaterializedNodes)
+	{
+		if (!Graph)
+		{
+			return;
+		}
+		UEdGraphNode* const AnchorMat = FirstMaterializedAnchorForGap(MaterializedNodes);
+		constexpr int32 MaxPasses = 96;
+		for (int32 Pass = 0; Pass < MaxPasses; ++Pass)
+		{
+			FNodeRect Cluster;
+			if (!UnionRectsOfNodes(MaterializedNodes, Cluster))
+			{
+				return;
+			}
+			bool bMoved = false;
+			for (UEdGraphNode* U : Graph->Nodes)
+			{
+				if (!U || MSet.Contains(U) || !TakesPartInScriptLayout(U))
+				{
+					continue;
+				}
+				const FNodeRect Ur = GetNodeRect(U);
+				const int32 G = AnchorMat ? PairwiseSeparationGap(AnchorMat, U) : 64;
+				if (!NodeRectsOverlapWithGap(Cluster, Ur, G))
+				{
+					continue;
+				}
+				const int32 Dx = (Cluster.MaxX + G) - Ur.MinX;
+				if (Dx > 0)
+				{
+					U->NodePosX += Dx;
+					bMoved = true;
+				}
+			}
+			if (!bMoved)
+			{
+				break;
+			}
+		}
+	}
+
+	/**
+	 * After laying out only patch/IR materialized nodes, the layered strip layout often has no "entry" event inside
+	 * that subset (e.g. Enhanced Input node is outside the patch). Nodes then pack at X≈0, far from the real graph.
+	 * Shift the whole cluster so it sits next to wired neighbors (exec predecessors first, else successors, else any link).
+	 * Then push any non-materialized script nodes whose bounds overlap the cluster (full graph, not only an exec Y-slab).
+	 *
+	 * @param bRepositionCluster When false (explicit per-node x/y hints were applied), only run overlap push — do not add DX/DY,
+	 *        so agent/introspect coordinates are preserved and we never pull hinted nodes to the origin or past a bogus succ anchor.
+	 */
+	static void TranslateMaterializedClusterTowardGraphNeighbors(
+		UEdGraph* Graph,
+		const TArray<UEdGraphNode*>& MaterializedNodes,
+		const bool bRepositionCluster)
+	{
+		if (MaterializedNodes.Num() == 0)
+		{
+			return;
+		}
+		TSet<const UEdGraphNode*> MSet;
+		for (UEdGraphNode* N : MaterializedNodes)
+		{
+			if (N)
+			{
+				MSet.Add(N);
+			}
+		}
+
+		FNodeRect ClusterRect;
+		if (!UnionRectsOfNodes(MaterializedNodes, ClusterRect))
+		{
+			return;
+		}
+
+		auto IsExec = [](const UEdGraphPin* P) -> bool
+		{
+			return P && P->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec;
+		};
+
+		int32 MaxPredRight = MIN_int32;
+		int32 PredCyAccum = 0;
+		int32 PredYCount = 0;
+		int32 MinSuccLeft = MAX_int32;
+		double AnyCx = 0.0;
+		double AnyCy = 0.0;
+		int32 AnyCnt = 0;
+
+		for (UEdGraphNode* N : MaterializedNodes)
+		{
+			if (!N)
+			{
+				continue;
+			}
+			for (UEdGraphPin* Pin : N->Pins)
+			{
+				if (!Pin)
+				{
+					continue;
+				}
+				for (UEdGraphPin* L : Pin->LinkedTo)
+				{
+					if (!L)
+					{
+						continue;
+					}
+					UEdGraphNode* O = L->GetOwningNode();
+					if (!O || MSet.Contains(O))
+					{
+						continue;
+					}
+					const FNodeRect Or = GetNodeRect(O);
+					const int32 OCx = (Or.MinX + Or.MaxX) / 2;
+					const int32 OCy = (Or.MinY + Or.MaxY) / 2;
+					AnyCx += OCx;
+					AnyCy += OCy;
+					++AnyCnt;
+
+					if (Pin->Direction == EGPD_Input && IsExec(Pin))
+					{
+						MaxPredRight = FMath::Max(MaxPredRight, Or.MaxX);
+						PredCyAccum += OCy;
+						++PredYCount;
+					}
+					if (Pin->Direction == EGPD_Output && IsExec(Pin) && !Pin->bHidden)
+					{
+						MinSuccLeft = FMath::Min(MinSuccLeft, Or.MinX);
+					}
+				}
+			}
+		}
+
+		constexpr int32 GapPred = 400;
+		constexpr int32 GapSucc = 360;
+
+		int32 DX = 0;
+		int32 DY = 0;
+		if (bRepositionCluster && AnyCnt > 0)
+		{
+			const int32 ClusterMinX = ClusterRect.MinX;
+			const int32 ClusterMaxX = ClusterRect.MaxX;
+			const int32 ClusterMinY = ClusterRect.MinY;
+			const int32 ClusterMidX = (ClusterMinX + ClusterMaxX) / 2;
+
+			if (MaxPredRight != MIN_int32)
+			{
+				DX = (MaxPredRight + GapPred) - ClusterMinX;
+			}
+			else if (MinSuccLeft != MAX_int32 && MinSuccLeft > ClusterMaxX + 32)
+			{
+				DX = (MinSuccLeft - GapSucc) - ClusterMaxX;
+			}
+			else
+			{
+				const int32 TargetX = FMath::RoundToInt(AnyCx / AnyCnt) + GapPred;
+				DX = TargetX - ClusterMidX;
+			}
+
+			if (PredYCount > 0)
+			{
+				DY = (PredCyAccum / PredYCount) - ClusterMinY;
+			}
+			else
+			{
+				DY = FMath::RoundToInt(AnyCy / AnyCnt) - ClusterMinY;
+			}
+
+			if (DX != 0 || DY != 0)
+			{
+				for (UEdGraphNode* N : MaterializedNodes)
+				{
+					if (N)
+					{
+						N->NodePosX += DX;
+						N->NodePosY += DY;
+					}
+				}
+			}
+		}
+
+		if (Graph)
+		{
+			PushNonMaterializedScriptNodesClearingCluster(Graph, MSet, MaterializedNodes);
+		}
+	}
 }
 
 FUnrealBlueprintGraphFormatResult FUnrealBlueprintGraphFormatService::LayoutAfterAiIrApply(
@@ -598,6 +839,7 @@ FUnrealBlueprintGraphFormatResult FUnrealBlueprintGraphFormatService::LayoutAfte
 			N->NodePosY = Hints[i].Y;
 			++R.NodesPositioned;
 		}
+		UnrealBlueprintFormatServicePriv::TranslateMaterializedClusterTowardGraphNeighbors(Graph, MaterializedNodes, false);
 		UnrealBlueprintFormatServicePriv::EnforceCommentContainmentAfterMove(Graph, MaterializedNodes, BeforePositions);
 		UnrealBlueprintFormatServicePriv::RunPostLayoutPasses(Graph, Options, R);
 		UnrealBlueprintFormatServicePriv::AccumulateMoveStats(BeforePositions, MaterializedNodes, R);
@@ -614,6 +856,7 @@ FUnrealBlueprintGraphFormatResult FUnrealBlueprintGraphFormatService::LayoutAfte
 		}
 	}
 	UnrealBlueprintFormatServicePriv::RunScriptStripLayout(Graph, Copy, Options, R);
+	UnrealBlueprintFormatServicePriv::TranslateMaterializedClusterTowardGraphNeighbors(Graph, MaterializedNodes, true);
 	UnrealBlueprintFormatServicePriv::EnforceCommentContainmentAfterMove(Graph, MaterializedNodes, BeforePositions);
 	UnrealBlueprintFormatServicePriv::RunPostLayoutPasses(Graph, Options, R);
 	return R;
