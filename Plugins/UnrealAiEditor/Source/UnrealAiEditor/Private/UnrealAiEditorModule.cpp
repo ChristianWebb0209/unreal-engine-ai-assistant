@@ -272,7 +272,7 @@ void FUnrealAiEditorModule::StartupModule()
 
 	GUnrealAiRunStrictAssertionsConsole = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("UnrealAi.RunStrictAssertions"),
-		TEXT("Run deterministic strict assertions using editor-side tools/state. Args: <AssertionsJsonPath> <OutputDirStepOrFolder>. Writes <OutputDir>/strict_assertions_result.json."),
+		TEXT("Run deterministic strict assertions using editor-side tools/state and optional run.jsonl checks. Args: <AssertionsJsonPath> <OutputDirStepOrFolder>. Writes <OutputDir>/strict_assertions_result.json. See tests/strict-tests/README.md for assertion types."),
 		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 		{
 			if (Args.Num() < 2 || Args[0].IsEmpty() || Args[1].IsEmpty())
@@ -1037,6 +1037,227 @@ void FUnrealAiEditorModule::StartupModule()
 						continue;
 					}
 					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, FString::Printf(TEXT("node_count ok: %d >= %d"), NodeCount, MinNodes)).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: run_jsonl_last_tool_finish ----
+				// Reads harness step run.jsonl under OutDir; matches the last tool_finish line for tool_id.
+				if (Type == TEXT("run_jsonl_last_tool_finish"))
+				{
+					FString ToolId;
+					if (!Obj->TryGetStringField(TEXT("tool"), ToolId) || ToolId.TrimStartAndEnd().IsEmpty())
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("run_jsonl_last_tool_finish requires tool"));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					ToolId.TrimStartAndEndInline();
+					bool bWantSuccess = false;
+					if (!Obj->TryGetBoolField(TEXT("success"), bWantSuccess))
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("run_jsonl_last_tool_finish requires success (bool)"));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					FString PreviewContains;
+					Obj->TryGetStringField(TEXT("result_preview_contains"), PreviewContains);
+					PreviewContains.TrimStartAndEndInline();
+
+					FString RelPath(TEXT("run.jsonl"));
+					Obj->TryGetStringField(TEXT("run_jsonl_relative_path"), RelPath);
+					if (RelPath.TrimStartAndEnd().IsEmpty())
+					{
+						RelPath = TEXT("run.jsonl");
+					}
+					const FString JsonlPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(OutDir, RelPath));
+					FString FileBody;
+					if (!FFileHelper::LoadFileToString(FileBody, *JsonlPath))
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("cannot read %s"), *JsonlPath));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					TArray<FString> Lines;
+					FileBody.ParseIntoArrayLines(Lines);
+					bool bFound = false;
+					bool bLastSuccess = false;
+					FString LastPreview;
+					for (const FString& Line : Lines)
+					{
+						FString Trim = Line;
+						Trim.TrimStartAndEndInline();
+						if (Trim.IsEmpty())
+						{
+							continue;
+						}
+						TSharedPtr<FJsonObject> Ev;
+						const TSharedRef<TJsonReader<>> EvReader = TJsonReaderFactory<>::Create(Trim);
+						if (!FJsonSerializer::Deserialize(EvReader, Ev) || !Ev.IsValid())
+						{
+							continue;
+						}
+						FString EvType;
+						if (!Ev->TryGetStringField(TEXT("type"), EvType) || EvType != TEXT("tool_finish"))
+						{
+							continue;
+						}
+						FString EvTool;
+						if (!Ev->TryGetStringField(TEXT("tool"), EvTool) || EvTool != ToolId)
+						{
+							continue;
+						}
+						bFound = true;
+						Ev->TryGetBoolField(TEXT("success"), bLastSuccess);
+						Ev->TryGetStringField(TEXT("result_preview"), LastPreview);
+					}
+					if (!bFound)
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("no tool_finish for tool=%s in %s"), *ToolId, *JsonlPath));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					if (bLastSuccess != bWantSuccess)
+					{
+						TSharedPtr<FJsonObject> R = FailOne(
+							Type,
+							FString::Printf(
+								TEXT("tool_finish success mismatch for %s: got %s want %s preview=%s"),
+								*ToolId,
+								bLastSuccess ? TEXT("true") : TEXT("false"),
+								bWantSuccess ? TEXT("true") : TEXT("false"),
+								*LastPreview.Left(220)));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					if (!PreviewContains.IsEmpty() && !LastPreview.Contains(PreviewContains))
+					{
+						TSharedPtr<FJsonObject> R = FailOne(
+							Type,
+							FString::Printf(
+								TEXT("result_preview missing substring for %s: want '%s' in preview=%s"),
+								*ToolId,
+								*PreviewContains,
+								*LastPreview.Left(400)));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(
+						OkOne(Type, FString::Printf(TEXT("run_jsonl_last_tool_finish ok tool=%s success=%s"), *ToolId, bLastSuccess ? TEXT("true") : TEXT("false")))
+							.ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: run_jsonl_enforcement_event ----
+				if (Type == TEXT("run_jsonl_enforcement_event"))
+				{
+					FString WantEvent;
+					if (!Obj->TryGetStringField(TEXT("event_type"), WantEvent) || WantEvent.TrimStartAndEnd().IsEmpty())
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("run_jsonl_enforcement_event requires event_type"));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					WantEvent.TrimStartAndEndInline();
+					FString DetailContains;
+					Obj->TryGetStringField(TEXT("detail_contains"), DetailContains);
+					DetailContains.TrimStartAndEndInline();
+
+					FString RelPath(TEXT("run.jsonl"));
+					Obj->TryGetStringField(TEXT("run_jsonl_relative_path"), RelPath);
+					if (RelPath.TrimStartAndEnd().IsEmpty())
+					{
+						RelPath = TEXT("run.jsonl");
+					}
+					const FString JsonlPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(OutDir, RelPath));
+					FString FileBody;
+					if (!FFileHelper::LoadFileToString(FileBody, *JsonlPath))
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("cannot read %s"), *JsonlPath));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					TArray<FString> Lines;
+					FileBody.ParseIntoArrayLines(Lines);
+					bool bMatched = false;
+					FString LastDetail;
+					for (const FString& Line : Lines)
+					{
+						FString Trim = Line;
+						Trim.TrimStartAndEndInline();
+						if (Trim.IsEmpty())
+						{
+							continue;
+						}
+						TSharedPtr<FJsonObject> Ev;
+						const TSharedRef<TJsonReader<>> EvReader = TJsonReaderFactory<>::Create(Trim);
+						if (!FJsonSerializer::Deserialize(EvReader, Ev) || !Ev.IsValid())
+						{
+							continue;
+						}
+						FString EvType;
+						if (!Ev->TryGetStringField(TEXT("type"), EvType) || EvType != TEXT("enforcement_event"))
+						{
+							continue;
+						}
+						FString Et;
+						if (!Ev->TryGetStringField(TEXT("event_type"), Et) || Et != WantEvent)
+						{
+							continue;
+						}
+						FString Detail;
+						Ev->TryGetStringField(TEXT("detail"), Detail);
+						if (!DetailContains.IsEmpty() && !Detail.Contains(DetailContains))
+						{
+							continue;
+						}
+						bMatched = true;
+						LastDetail = Detail;
+						break;
+					}
+					if (!bMatched)
+					{
+						TSharedPtr<FJsonObject> R = FailOne(
+							Type,
+							FString::Printf(TEXT("no enforcement_event event_type=%s (detail_contains='%s') in %s"), *WantEvent, *DetailContains, *JsonlPath));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(
+						OkOne(Type, FString::Printf(TEXT("saw enforcement_event %s detail=%s"), *WantEvent, *LastDetail.Left(200))).ToSharedRef()));
+					continue;
+				}
+
+				// ---- Assertion: run_jsonl_substring ----
+				if (Type == TEXT("run_jsonl_substring"))
+				{
+					FString Substr;
+					if (!Obj->TryGetStringField(TEXT("substring"), Substr) || Substr.IsEmpty())
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, TEXT("run_jsonl_substring requires substring"));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					FString RelPath(TEXT("run.jsonl"));
+					Obj->TryGetStringField(TEXT("run_jsonl_relative_path"), RelPath);
+					if (RelPath.TrimStartAndEnd().IsEmpty())
+					{
+						RelPath = TEXT("run.jsonl");
+					}
+					const FString JsonlPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(OutDir, RelPath));
+					FString FileBody;
+					if (!FFileHelper::LoadFileToString(FileBody, *JsonlPath))
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("cannot read %s"), *JsonlPath));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					if (!FileBody.Contains(Substr))
+					{
+						TSharedPtr<FJsonObject> R = FailOne(Type, FString::Printf(TEXT("substring not found in %s"), *JsonlPath));
+						AssertionResults.Add(MakeShared<FJsonValueObject>(R.ToSharedRef()));
+						continue;
+					}
+					AssertionResults.Add(MakeShared<FJsonValueObject>(OkOne(Type, TEXT("substring found")).ToSharedRef()));
 					continue;
 				}
 
