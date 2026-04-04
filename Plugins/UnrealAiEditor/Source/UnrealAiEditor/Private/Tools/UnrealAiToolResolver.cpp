@@ -395,16 +395,6 @@ namespace UnrealAiToolResolverPriv
 		{
 			CanonicalizeAliasKeys(Args, Audit, TEXT("object_path"), {TEXT("path"), TEXT("asset_path")});
 		}
-		else if (ToolId == TEXT("blueprint_add_variable"))
-		{
-			CanonicalizeAliasKeys(Args, Audit, TEXT("name"), {TEXT("variable_name")});
-			CanonicalizeAliasKeys(Args, Audit, TEXT("type"), {TEXT("variable_type")});
-		}
-		else if (ToolId == TEXT("blueprint_open_graph_tab"))
-		{
-			CanonicalizeAliasKeys(Args, Audit, TEXT("blueprint_path"), {TEXT("object_path"), TEXT("path")});
-			CanonicalizeAliasKeys(Args, Audit, TEXT("graph_name"), {TEXT("graph")});
-		}
 		else if (ToolId == TEXT("content_browser_sync_asset"))
 		{
 			// Global CanonicalizeToolArguments maps path -> object_path first; this tool's JSON schema
@@ -859,7 +849,7 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 
 	if (Result.CanonicalToolId == TEXT("blueprint_graph_patch"))
 	{
-		UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Result.ResolvedArguments);
+		UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Result.ResolvedArguments, Result.Audit);
 		FString OpsJsonRel;
 		Result.ResolvedArguments->TryGetStringField(TEXT("ops_json_path"), OpsJsonRel);
 		OpsJsonRel.TrimStartAndEndInline();

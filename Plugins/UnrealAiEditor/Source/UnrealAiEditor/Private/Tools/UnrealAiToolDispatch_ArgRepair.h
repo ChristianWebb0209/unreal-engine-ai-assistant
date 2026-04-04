@@ -31,11 +31,14 @@ namespace UnrealAiToolDispatchArgRepair
 
 	/**
 	 * Pre-schema fixes for blueprint_graph_patch: normalize k2_class (UK2Node_*, bare K2Node_*),
-	 * strip node_guid on create_node, copy class_name/node_class/kind -> k2_class,
+	 * strip node_guid on create_node, copy class_name/node_class -> k2_class (semantic_kind is not aliased here),
 	 * fold connect/break_link/splice link_from|link_to and split from_node+from_pin / to_node+to_pin into from|to,
-	 * fold typ|pin_type|variable_type -> type on add_variable.
+	 * fold typ|pin_type|variable_type -> type on add_variable,
+	 * hoist event_override fields, repair Character Jump/Landed call targets, optional graph_patch_repairs on Audit.
 	 */
-	void RepairBlueprintGraphPatchToolArgs(const TSharedPtr<FJsonObject>& Args);
+	void RepairBlueprintGraphPatchToolArgs(
+		const TSharedPtr<FJsonObject>& Args,
+		const TSharedPtr<FJsonObject>& Audit = nullptr);
 
 	static bool TryGetStringFieldCanonical(
 		const TSharedPtr<FJsonObject>& Args,

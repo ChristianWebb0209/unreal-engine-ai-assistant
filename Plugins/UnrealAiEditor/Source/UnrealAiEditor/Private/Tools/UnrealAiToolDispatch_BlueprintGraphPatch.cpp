@@ -289,8 +289,8 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		if (NodePart.Contains(TEXT("__UAI_G_")))
 		{
 			Err = FString::Printf(
-				TEXT("T3D placeholder in node ref \"%s\". __UAI_G_NNNNNN__ is only for blueprint_graph_import_t3d. "
-					 "Use guid:<uuid> from blueprint_export_ir / blueprint_graph_introspect, or patch_id from this ops[] batch."),
+				TEXT("Legacy __UAI_G_* placeholder in node ref \"%s\" is not valid in blueprint_graph_patch. "
+					 "Use guid:<uuid> from blueprint_graph_introspect, or patch_id from this ops[] batch."),
 				*NodePartIn);
 			return nullptr;
 		}
@@ -301,8 +301,7 @@ namespace UnrealAiBlueprintGraphPatchPriv
 			if (GuidBody.Contains(TEXT("__UAI_G_")))
 			{
 				Err = FString::Printf(
-					TEXT("T3D placeholder in graph_patch node ref: %s. __UAI_G_NNNNNN__ is only for blueprint_t3d_preflight_validate / blueprint_graph_import_t3d. "
-						 "Use guid:<real-uuid> from blueprint_graph_introspect (or blueprint_export_ir node_guid), or patch_id from this ops[] batch."),
+					TEXT("Legacy __UAI_G_* in graph_patch node ref: %s. Use guid:<real-uuid> from blueprint_graph_introspect, or patch_id from this ops[] batch."),
 					*NodePart);
 				return nullptr;
 			}
@@ -334,9 +333,92 @@ namespace UnrealAiBlueprintGraphPatchPriv
 			return nullptr;
 		}
 		Err = FString::Printf(
-			TEXT("Unknown node ref \"%s\" — use a patch_id from this batch, guid:..., or export node_guid"),
+			TEXT("Unknown node ref \"%s\" — use a patch_id from this batch, guid:..., or node_guid from blueprint_graph_introspect"),
 			*NodePart);
 		return nullptr;
+	}
+
+	/** validate_only: resolve guid/bare-guid to graph nodes, or patch_id if listed in VirtualPatchIds (earlier create_node in batch). */
+	static bool TryResolveNodePartValidateOnly(
+		const FString& NodePartIn,
+		const TSet<FString>& VirtualPatchIds,
+		UEdGraph* Graph,
+		UEdGraphNode*& OutRealNode,
+		bool& bOutVirtualPatchRef,
+		FString& Err)
+	{
+		OutRealNode = nullptr;
+		bOutVirtualPatchRef = false;
+		FString NodePart = NodePartIn;
+		NodePart.TrimStartAndEndInline();
+		if (NodePart.Contains(TEXT("__UAI_G_")))
+		{
+			Err = FString::Printf(
+				TEXT("Legacy __UAI_G_* placeholder in node ref \"%s\" is not valid in blueprint_graph_patch. "
+					 "Use guid:<uuid> from blueprint_graph_introspect, or patch_id from this ops[] batch."),
+				*NodePartIn);
+			return false;
+		}
+		if (NodePart.StartsWith(TEXT("guid:"), ESearchCase::IgnoreCase))
+		{
+			const FString GuidBody = NodePart.Mid(5).TrimStartAndEnd();
+			if (GuidBody.Contains(TEXT("__UAI_G_")))
+			{
+				Err = FString::Printf(
+					TEXT("Legacy __UAI_G_* in graph_patch node ref: %s. Use guid:<real-uuid> from blueprint_graph_introspect, or patch_id from this ops[] batch."),
+					*NodePart);
+				return false;
+			}
+			FGuid G;
+			if (!FGuid::Parse(GuidBody, G))
+			{
+				Err = FString::Printf(TEXT("Invalid guid ref: %s"), *NodePart);
+				return false;
+			}
+			if (UEdGraphNode* Found = FindNodeByGraphGuid(Graph, G))
+			{
+				OutRealNode = Found;
+				return true;
+			}
+			Err = FString::Printf(TEXT("Node guid not found in graph: %s"), *NodePart);
+			return false;
+		}
+		if (VirtualPatchIds.Contains(NodePart))
+		{
+			bOutVirtualPatchRef = true;
+			return true;
+		}
+		FGuid BareGuid;
+		if (FGuid::Parse(NodePart, BareGuid))
+		{
+			if (UEdGraphNode* GNode = FindNodeByGraphGuid(Graph, BareGuid))
+			{
+				OutRealNode = GNode;
+				return true;
+			}
+			Err = FString::Printf(TEXT("Node guid not found in graph: %s"), *NodePart);
+			return false;
+		}
+		Err = FString::Printf(
+			TEXT("Unknown node ref \"%s\" — use a patch_id from earlier in this batch, guid:..., or export node_guid"),
+			*NodePart);
+		return false;
+	}
+
+	static bool PinsAreDirectlyLinked(UEdGraphPin* PA, UEdGraphPin* PB)
+	{
+		if (!PA || !PB)
+		{
+			return false;
+		}
+		for (UEdGraphPin* L : PA->LinkedTo)
+		{
+			if (L == PB)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	static UEdGraphPin* FindPin(UEdGraphNode* Node, const FString& PinName, FString* OutError = nullptr)
@@ -515,6 +597,72 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		return nullptr;
 	}
 
+	/** When k2_class is set it wins; otherwise semantic_kind maps to a canonical UK2Node class path. */
+	static bool TryResolveCreateNodeK2ClassPath(const TSharedPtr<FJsonObject>& Op, FString& OutK2Path, TArray<FString>& OutErrors)
+	{
+		OutK2Path.Reset();
+		Op->TryGetStringField(TEXT("k2_class"), OutK2Path);
+		OutK2Path.TrimStartAndEndInline();
+		if (!OutK2Path.IsEmpty())
+		{
+			return true;
+		}
+		FString Sk;
+		Op->TryGetStringField(TEXT("semantic_kind"), Sk);
+		Sk.TrimStartAndEndInline();
+		if (Sk.IsEmpty())
+		{
+			OutErrors.Add(TEXT(
+				"create_node requires k2_class or semantic_kind (branch, execution_sequence, call_library_function, variable_get, variable_set, event_override, custom_event, dynamic_cast)"));
+			return false;
+		}
+		const FString L = Sk.ToLower();
+		if (L == TEXT("branch"))
+		{
+			OutK2Path = TEXT("/Script/BlueprintGraph.K2Node_IfThenElse");
+			return true;
+		}
+		if (L == TEXT("execution_sequence"))
+		{
+			OutK2Path = TEXT("/Script/BlueprintGraph.K2Node_ExecutionSequence");
+			return true;
+		}
+		if (L == TEXT("call_library_function"))
+		{
+			OutK2Path = TEXT("/Script/BlueprintGraph.K2Node_CallFunction");
+			return true;
+		}
+		if (L == TEXT("variable_get"))
+		{
+			OutK2Path = TEXT("/Script/BlueprintGraph.K2Node_VariableGet");
+			return true;
+		}
+		if (L == TEXT("variable_set"))
+		{
+			OutK2Path = TEXT("/Script/BlueprintGraph.K2Node_VariableSet");
+			return true;
+		}
+		if (L == TEXT("event_override") || L == TEXT("event"))
+		{
+			OutK2Path = TEXT("/Script/BlueprintGraph.K2Node_Event");
+			return true;
+		}
+		if (L == TEXT("custom_event"))
+		{
+			OutK2Path = TEXT("/Script/BlueprintGraph.K2Node_CustomEvent");
+			return true;
+		}
+		if (L == TEXT("dynamic_cast"))
+		{
+			OutK2Path = TEXT("/Script/BlueprintGraph.K2Node_DynamicCast");
+			return true;
+		}
+		OutErrors.Add(FString::Printf(
+			TEXT("Unknown semantic_kind '%s'. Use k2_class for uncommon UK2Node types, or a supported semantic_kind."),
+			*Sk));
+		return false;
+	}
+
 	static UK2Node* CreateNodeFromPatchOp(
 		UBlueprint* BP,
 		UEdGraph* Graph,
@@ -528,11 +676,8 @@ namespace UnrealAiBlueprintGraphPatchPriv
 			return nullptr;
 		}
 		FString K2ClassPath;
-		Op->TryGetStringField(TEXT("k2_class"), K2ClassPath);
-		K2ClassPath.TrimStartAndEndInline();
-		if (K2ClassPath.IsEmpty())
+		if (!TryResolveCreateNodeK2ClassPath(Op, K2ClassPath, OutErrors))
 		{
-			OutErrors.Add(TEXT("create_node requires k2_class (e.g. /Script/BlueprintGraph.K2Node_IfThenElse)"));
 			return nullptr;
 		}
 		UClass* NodeClass = LoadObject<UClass>(nullptr, *K2ClassPath);
@@ -598,10 +743,17 @@ namespace UnrealAiBlueprintGraphPatchPriv
 			UFunction* Fn = UnrealAiBlueprintFunctionResolve::ResolveCallFunction(Cls, FnName);
 			if (!Fn)
 			{
+				FString Extra;
+				const FString FnLow = FnName.ToLower();
+				if (FnLow == TEXT("jump") || FnLow == TEXT("landed"))
+				{
+					Extra = TEXT(" Character movement: use class_path /Script/Engine.Character (not CharacterMovementComponent) for Jump/Landed.");
+				}
 				OutErrors.Add(FString::Printf(
-					TEXT("Function not found on %s (after resolving name '%s'). Use class_path of the declaring UClass (e.g. /Script/Engine.Actor + GetActorLocation; /Script/Engine.KismetMathLibrary + RandomFloatInRange; /Script/Engine.KismetSystemLibrary + Delay)."),
+					TEXT("Function not found on %s (after resolving name '%s'). Use class_path of the declaring UClass (e.g. /Script/Engine.Actor + GetActorLocation; /Script/Engine.KismetMathLibrary + RandomFloatInRange; /Script/Engine.KismetSystemLibrary + Delay).%s"),
 					*ClsPath,
-					*FnName));
+					*FnName,
+					*Extra));
 				Graph->RemoveNode(Node);
 				return nullptr;
 			}
@@ -635,10 +787,17 @@ namespace UnrealAiBlueprintGraphPatchPriv
 			UFunction* Fn = UnrealAiBlueprintFunctionResolve::ResolveCallFunction(Cls, FnName);
 			if (!Fn)
 			{
+				FString Extra;
+				const FString FnLow = FnName.ToLower();
+				if (FnLow == TEXT("jump") || FnLow == TEXT("landed"))
+				{
+					Extra = TEXT(" Character movement: use class_path /Script/Engine.Character (not CharacterMovementComponent) for Jump/Landed.");
+				}
 				OutErrors.Add(FString::Printf(
-					TEXT("Function not found on %s (after resolving name '%s'). See KismetMathLibrary for math, Actor for GetActorLocation, KismetSystemLibrary for Delay/PrintString."),
+					TEXT("Function not found on %s (after resolving name '%s'). See KismetMathLibrary for math, Actor for GetActorLocation, KismetSystemLibrary for Delay/PrintString.%s"),
 					*ClsPath,
-					*FnName));
+					*FnName,
+					*Extra));
 				Graph->RemoveNode(Node);
 				return nullptr;
 			}
@@ -699,7 +858,7 @@ namespace UnrealAiBlueprintGraphPatchPriv
 			if (!OC || FnStr.IsEmpty())
 			{
 				OutErrors.Add(TEXT(
-					"event_override requires function_name and outer_class_path (e.g. ReceiveBeginPlay + /Script/Engine.Actor). Common lifecycle events default outer_class_path when omitted."));
+					"event_override requires function_name and outer_class_path (e.g. ReceiveBeginPlay + /Script/Engine.Actor; Jump or Landed + /Script/Engine.Character). Common lifecycle events default outer_class_path when omitted."));
 				Graph->RemoveNode(Node);
 				return nullptr;
 			}
@@ -770,6 +929,185 @@ namespace UnrealAiBlueprintGraphPatchPriv
 			(void)BP;
 		}
 		return Node;
+	}
+
+	/** Dry-run: structural checks for create_node without mutating the graph (see also semantic_kind path). */
+	static FString ValidateCreateNodeForPatchDryRun(const TSharedPtr<FJsonObject>& Op, FString& OutPatchId)
+	{
+		OutPatchId.Reset();
+		FString PatchId;
+		if (!Op->TryGetStringField(TEXT("patch_id"), PatchId) || PatchId.IsEmpty())
+		{
+			return TEXT("create_node requires patch_id");
+		}
+		OutPatchId = PatchId;
+		FString K2ClassPath;
+		TArray<FString> Tmp;
+		if (!TryResolveCreateNodeK2ClassPath(Op, K2ClassPath, Tmp))
+		{
+			return Tmp.Num() > 0 ? Tmp[0] : TEXT("create_node validation failed");
+		}
+		UClass* NodeClass = LoadObject<UClass>(nullptr, *K2ClassPath);
+		if (!NodeClass || !NodeClass->IsChildOf(UK2Node::StaticClass()))
+		{
+			FString Hint;
+			const FString Low = K2ClassPath.ToLower();
+			if (Low.Contains(TEXT("intless")) || Low.Contains(TEXT("intadd")) || Low.Contains(TEXT("less_int"))
+				|| Low.Contains(TEXT("add_int")) || Low.Contains(TEXT("k2node_math")))
+			{
+				Hint = TEXT(
+					" Integer math/compare nodes are usually K2Node_CallFunction: class_path /Script/Engine.KismetMathLibrary, function_name Less_IntInt | Add_IntInt | Greater_IntInt | EqualEqual_IntInt.");
+			}
+			else if (Low.Contains(TEXT("literal")))
+			{
+				Hint = TEXT(" Literal ints: K2Node_CallFunction with KismetMathLibrary.MakeLiteralInt, or set_pin_default on an int input.");
+			}
+			return FString::Printf(TEXT("k2_class not a UK2Node: %s.%s"), *K2ClassPath, *Hint);
+		}
+
+		const TSharedPtr<FJsonObject>* CFObj = nullptr;
+		if (Op->TryGetObjectField(TEXT("call_function"), CFObj) && CFObj && (*CFObj).IsValid())
+		{
+			if (!NodeClass->IsChildOf(UK2Node_CallFunction::StaticClass()))
+			{
+				return TEXT("call_function init requires K2Node_CallFunction k2_class");
+			}
+			FString ClsPath, FnName;
+			(*CFObj)->TryGetStringField(TEXT("class_path"), ClsPath);
+			(*CFObj)->TryGetStringField(TEXT("function_name"), FnName);
+			UnrealAiBlueprintFunctionResolve::SplitCombinedClassPathAndFunctionName(ClsPath, FnName);
+			UClass* Cls = ClsPath.IsEmpty() ? nullptr : LoadObject<UClass>(nullptr, *ClsPath);
+			if (!Cls || FnName.IsEmpty())
+			{
+				return TEXT("call_function requires class_path and function_name (split class::func if merged).");
+			}
+			if (!UnrealAiBlueprintFunctionResolve::ResolveCallFunction(Cls, FnName))
+			{
+				return FString::Printf(
+					TEXT("Function not found on %s (after resolving name '%s'). Use class_path of the declaring UClass."),
+					*ClsPath,
+					*FnName);
+			}
+			return FString();
+		}
+		if (NodeClass->IsChildOf(UK2Node_CallFunction::StaticClass()))
+		{
+			FString ClsPath, FnName;
+			Op->TryGetStringField(TEXT("class_path"), ClsPath);
+			Op->TryGetStringField(TEXT("function_name"), FnName);
+			ClsPath.TrimStartAndEndInline();
+			FnName.TrimStartAndEndInline();
+			UnrealAiBlueprintFunctionResolve::SplitCombinedClassPathAndFunctionName(ClsPath, FnName);
+			if (ClsPath.IsEmpty() || FnName.IsEmpty())
+			{
+				return TEXT(
+					"K2Node_CallFunction requires class_path + function_name on the op (top-level) or call_function { class_path, function_name }.");
+			}
+			UClass* Cls = LoadObject<UClass>(nullptr, *ClsPath);
+			if (!Cls)
+			{
+				return FString::Printf(TEXT("class_path not found: %s"), *ClsPath);
+			}
+			if (!UnrealAiBlueprintFunctionResolve::ResolveCallFunction(Cls, FnName))
+			{
+				return FString::Printf(
+					TEXT("Function not found on %s (after resolving name '%s'). See KismetMathLibrary for math."),
+					*ClsPath,
+					*FnName);
+			}
+			return FString();
+		}
+		if (NodeClass->IsChildOf(UK2Node_CustomEvent::StaticClass()))
+		{
+			FString EvName;
+			Op->TryGetStringField(TEXT("event_name"), EvName);
+			if (EvName.IsEmpty())
+			{
+				Op->TryGetStringField(TEXT("custom_event_name"), EvName);
+			}
+			const TSharedPtr<FJsonObject>* CEObj = nullptr;
+			if (EvName.IsEmpty() && Op->TryGetObjectField(TEXT("custom_event"), CEObj) && CEObj && (*CEObj).IsValid())
+			{
+				(*CEObj)->TryGetStringField(TEXT("name"), EvName);
+				if (EvName.IsEmpty())
+				{
+					(*CEObj)->TryGetStringField(TEXT("event_name"), EvName);
+				}
+			}
+			if (EvName.IsEmpty())
+			{
+				Op->TryGetStringField(TEXT("name"), EvName);
+			}
+			if (EvName.IsEmpty())
+			{
+				return TEXT(
+					"K2Node_CustomEvent needs event_name (or custom_event.name). User-defined events use k2_class /Script/BlueprintGraph.K2Node_CustomEvent — not K2Node_Event.");
+			}
+			return FString();
+		}
+		if (NodeClass->IsChildOf(UK2Node_Event::StaticClass()))
+		{
+			const TSharedPtr<FJsonObject>* EvObj = nullptr;
+			if (!Op->TryGetObjectField(TEXT("event_override"), EvObj) || !EvObj || !(*EvObj).IsValid())
+			{
+				return TEXT(
+					"K2Node_Event requires event_override { function_name, outer_class_path }. For user-defined custom events use K2Node_CustomEvent + event_name.");
+			}
+			FString FnStr, OuterStr;
+			(*EvObj)->TryGetStringField(TEXT("function_name"), FnStr);
+			(*EvObj)->TryGetStringField(TEXT("outer_class_path"), OuterStr);
+			if (OuterStr.IsEmpty() && !FnStr.IsEmpty())
+			{
+				UnrealAiBlueprintFunctionResolve::TryDefaultOuterClassPathForK2Event(FnStr, OuterStr);
+			}
+			UClass* OC = OuterStr.IsEmpty() ? nullptr : LoadObject<UClass>(nullptr, *OuterStr);
+			if (!OC || FnStr.IsEmpty())
+			{
+				return TEXT(
+					"event_override requires function_name and outer_class_path (e.g. ReceiveBeginPlay + /Script/Engine.Actor; Jump or Landed + /Script/Engine.Character). Common lifecycle events default outer_class_path when omitted.");
+			}
+			return FString();
+		}
+		if (NodeClass->IsChildOf(UK2Node_VariableGet::StaticClass()))
+		{
+			FString VName;
+			Op->TryGetStringField(TEXT("variable_name"), VName);
+			if (VName.IsEmpty())
+			{
+				return TEXT("K2Node_VariableGet requires variable_name");
+			}
+			return FString();
+		}
+		if (NodeClass->IsChildOf(UK2Node_VariableSet::StaticClass()))
+		{
+			FString VName;
+			Op->TryGetStringField(TEXT("variable_name"), VName);
+			if (VName.IsEmpty())
+			{
+				return TEXT("K2Node_VariableSet requires variable_name");
+			}
+			return FString();
+		}
+		if (NodeClass->IsChildOf(UK2Node_DynamicCast::StaticClass()))
+		{
+			FString TgtPath;
+			Op->TryGetStringField(TEXT("cast_target_class"), TgtPath);
+			if (TgtPath.IsEmpty())
+			{
+				const TSharedPtr<FJsonObject>* CastObj = nullptr;
+				if (Op->TryGetObjectField(TEXT("dynamic_cast"), CastObj) && CastObj && (*CastObj).IsValid())
+				{
+					(*CastObj)->TryGetStringField(TEXT("class_path"), TgtPath);
+				}
+			}
+			UClass* Tgt = TgtPath.IsEmpty() ? nullptr : LoadObject<UClass>(nullptr, *TgtPath);
+			if (!Tgt)
+			{
+				return TEXT("K2Node_DynamicCast requires cast_target_class or dynamic_cast.class_path");
+			}
+			return FString();
+		}
+		return FString();
 	}
 
 	static void AppendPinsJson(UEdGraphNode* N, TArray<TSharedPtr<FJsonValue>>& OutArr)
@@ -850,6 +1188,10 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		{
 			return TEXT("node_guid_not_found");
 		}
+		if (Msg.Contains(TEXT("Unknown semantic_kind")))
+		{
+			return TEXT("invalid_semantic_kind");
+		}
 		if (Msg.Contains(TEXT("Unknown op:")))
 		{
 			return TEXT("unknown_op");
@@ -862,7 +1204,58 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		{
 			return TEXT("missing_op_field");
 		}
+		if (Msg.Contains(TEXT("K2Node_Event requires")) || Msg.Contains(TEXT("event_override requires")))
+		{
+			return TEXT("event_override_shape");
+		}
+		if (Msg.Contains(TEXT("Function not found on")))
+		{
+			return TEXT("call_function_not_found");
+		}
 		return TEXT("patch_error");
+	}
+
+	static void AppendFailedOpSnippetToPayload(
+		const TArray<TSharedPtr<FJsonValue>>* OpsArr,
+		int32 FailedIdx,
+		const TSharedPtr<FJsonObject>& Payload)
+	{
+		if (!Payload.IsValid() || FailedIdx == INDEX_NONE || !OpsArr || FailedIdx < 0 || FailedIdx >= OpsArr->Num())
+		{
+			return;
+		}
+		const TSharedPtr<FJsonValue>& V = (*OpsArr)[FailedIdx];
+		if (!V.IsValid())
+		{
+			return;
+		}
+		const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+		if (!V->TryGetObject(ObjPtr) || !ObjPtr || !(*ObjPtr).IsValid())
+		{
+			return;
+		}
+		const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+		FString JsonStr;
+		{
+			const TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&JsonStr);
+			FJsonSerializer::Serialize(Obj.ToSharedRef(), W);
+		}
+		static constexpr int32 kMaxFailedOpChars = 4096;
+		if (JsonStr.Len() <= kMaxFailedOpChars)
+		{
+			TSharedPtr<FJsonObject> Copy;
+			const TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(JsonStr);
+			if (FJsonSerializer::Deserialize(R, Copy) && Copy.IsValid())
+			{
+				Payload->SetObjectField(TEXT("failed_op"), Copy);
+			}
+		}
+		else
+		{
+			Payload->SetStringField(
+				TEXT("failed_op_json"),
+				JsonStr.Left(kMaxFailedOpChars) + TEXT("...<truncated>"));
+		}
 	}
 
 	static void AppendBlueprintGraphPatchSuggestedCorrectCall(
@@ -885,7 +1278,49 @@ namespace UnrealAiBlueprintGraphPatchPriv
 			A->SetStringField(TEXT("graph_name"), GraphName);
 			A->SetStringField(
 				TEXT("node_ref"),
-				TEXT("Replace with node_guid from blueprint_export_ir or blueprint_graph_introspect (bare UUID or guid:UUID)."));
+				TEXT("Replace with node_guid from blueprint_graph_introspect (bare UUID or guid:UUID)."));
+			Suggested->SetObjectField(TEXT("arguments"), A);
+		}
+		else if (FirstError.Contains(TEXT("K2Node_Event requires")) || FirstError.Contains(TEXT("event_override requires")))
+		{
+			Suggested->SetStringField(TEXT("tool_id"), TEXT("blueprint_graph_patch"));
+			TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+			A->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+			A->SetStringField(TEXT("graph_name"), GraphName);
+			A->SetBoolField(TEXT("validate_only"), true);
+			TArray<TSharedPtr<FJsonValue>> Ops;
+			TSharedPtr<FJsonObject> Op = MakeShared<FJsonObject>();
+			Op->SetStringField(TEXT("op"), TEXT("create_node"));
+			Op->SetStringField(TEXT("patch_id"), TEXT("n_evt"));
+			Op->SetStringField(TEXT("semantic_kind"), TEXT("event_override"));
+			Op->SetNumberField(TEXT("x"), 0);
+			Op->SetNumberField(TEXT("y"), 0);
+			TSharedPtr<FJsonObject> Ev = MakeShared<FJsonObject>();
+			Ev->SetStringField(TEXT("function_name"), TEXT("Landed"));
+			Ev->SetStringField(TEXT("outer_class_path"), TEXT("/Script/Engine.Character"));
+			Op->SetObjectField(TEXT("event_override"), Ev);
+			Ops.Add(MakeShareable(new FJsonValueObject(Op.ToSharedRef())));
+			A->SetArrayField(TEXT("ops"), Ops);
+			Suggested->SetObjectField(TEXT("arguments"), A);
+		}
+		else if (FirstError.Contains(TEXT("Function not found on")))
+		{
+			Suggested->SetStringField(TEXT("tool_id"), TEXT("blueprint_graph_patch"));
+			TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+			A->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+			A->SetStringField(TEXT("graph_name"), GraphName);
+			A->SetBoolField(TEXT("validate_only"), true);
+			TArray<TSharedPtr<FJsonValue>> Ops;
+			TSharedPtr<FJsonObject> Op = MakeShared<FJsonObject>();
+			Op->SetStringField(TEXT("op"), TEXT("create_node"));
+			Op->SetStringField(TEXT("patch_id"), TEXT("n_jump_call"));
+			Op->SetStringField(TEXT("k2_class"), TEXT("/Script/BlueprintGraph.K2Node_CallFunction"));
+			Op->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.Character"));
+			Op->SetStringField(TEXT("function_name"), TEXT("Jump"));
+			Op->SetNumberField(TEXT("x"), 0);
+			Op->SetNumberField(TEXT("y"), 0);
+			Ops.Add(MakeShareable(new FJsonValueObject(Op.ToSharedRef())));
+			A->SetArrayField(TEXT("ops"), Ops);
 			Suggested->SetObjectField(TEXT("arguments"), A);
 		}
 		else
@@ -947,13 +1382,11 @@ namespace UnrealAiBlueprintGraphPatchPriv
 			}
 			else
 			{
-				TSharedPtr<FJsonObject> Op = MakeShared<FJsonObject>();
-				Op->SetStringField(TEXT("op"), TEXT("create_node"));
-				Op->SetStringField(TEXT("patch_id"), TEXT("n_branch"));
-				Op->SetStringField(TEXT("k2_class"), TEXT("/Script/BlueprintGraph.K2Node_IfThenElse"));
-				Op->SetNumberField(TEXT("x"), 0);
-				Op->SetNumberField(TEXT("y"), 0);
-				Ops.Add(MakeShareable(new FJsonValueObject(Op.ToSharedRef())));
+				A->SetBoolField(TEXT("validate_only"), true);
+				A->SetStringField(
+					TEXT("hint"),
+					TEXT("Fix ops[failed_op_index] from the error payload; prefer validate_only:true on the full batch before applying."));
+				Ops.Reset();
 			}
 			A->SetArrayField(TEXT("ops"), Ops);
 			Suggested->SetObjectField(TEXT("arguments"), A);
@@ -1042,13 +1475,469 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		OutOps = Arr;
 		return true;
 	}
+
+	FUnrealAiToolInvocationResult RunBlueprintGraphPatchValidateOnly(
+		UBlueprint* BP,
+		UEdGraph* Graph,
+		const TArray<TSharedPtr<FJsonValue>>& OpsArr,
+		const FString& BlueprintPath,
+		const FString& InGraphName)
+	{
+		TSet<FString> VirtualPatchIds;
+		TArray<FString> Notes;
+		const UEdGraphSchema_K2* SchemaK2 = GetDefault<UEdGraphSchema_K2>();
+		for (int32 OpIdx = 0; OpIdx < OpsArr.Num(); ++OpIdx)
+		{
+			const TSharedPtr<FJsonValue>& OpVal = OpsArr[OpIdx];
+			const TSharedPtr<FJsonObject>* OpObj = nullptr;
+			if (!OpVal.IsValid() || !OpVal->TryGetObject(OpObj) || !OpObj || !(*OpObj).IsValid())
+			{
+				TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+				O->SetBoolField(TEXT("ok"), false);
+				O->SetStringField(TEXT("status"), TEXT("patch_validate_errors"));
+				O->SetNumberField(TEXT("failed_op_index"), OpIdx);
+				const FString E = TEXT("Each ops[] entry must be an object");
+				O->SetArrayField(TEXT("errors"), TArray<TSharedPtr<FJsonValue>>{MakeShareable(new FJsonValueString(E))});
+				O->SetArrayField(
+					TEXT("error_codes"),
+					TArray<TSharedPtr<FJsonValue>>{MakeShareable(new FJsonValueString(InferBlueprintGraphPatchErrorCode(E)))});
+				O->SetStringField(
+					TEXT("note"),
+					TEXT("validate_only: no graph changes were made. Fix the op at failed_op_index and retry."));
+				AppendFailedOpSnippetToPayload(&OpsArr, OpIdx, O);
+				AppendBlueprintGraphPatchSuggestedCorrectCall(BlueprintPath, InGraphName, E, O);
+				FUnrealAiToolInvocationResult R;
+				R.bOk = false;
+				R.ErrorMessage = UnrealAiToolJson::SerializeObject(O);
+				R.ContentForModel = R.ErrorMessage;
+				return R;
+			}
+			const TSharedPtr<FJsonObject>& Op = *OpObj;
+			FString OpName;
+			Op->TryGetStringField(TEXT("op"), OpName);
+			OpName.TrimStartAndEndInline();
+			if (OpName.IsEmpty())
+			{
+				TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+				O->SetBoolField(TEXT("ok"), false);
+				O->SetStringField(TEXT("status"), TEXT("patch_validate_errors"));
+				O->SetNumberField(TEXT("failed_op_index"), OpIdx);
+				const FString E = TEXT("ops[].op is required");
+				O->SetArrayField(TEXT("errors"), TArray<TSharedPtr<FJsonValue>>{MakeShareable(new FJsonValueString(E))});
+				O->SetArrayField(
+					TEXT("error_codes"),
+					TArray<TSharedPtr<FJsonValue>>{MakeShareable(new FJsonValueString(InferBlueprintGraphPatchErrorCode(E)))});
+				O->SetStringField(
+					TEXT("note"),
+					TEXT("validate_only: no graph changes were made. Fix the op at failed_op_index and retry."));
+				AppendFailedOpSnippetToPayload(&OpsArr, OpIdx, O);
+				AppendBlueprintGraphPatchSuggestedCorrectCall(BlueprintPath, InGraphName, E, O);
+				FUnrealAiToolInvocationResult R;
+				R.bOk = false;
+				R.ErrorMessage = UnrealAiToolJson::SerializeObject(O);
+				R.ContentForModel = R.ErrorMessage;
+				return R;
+			}
+
+			auto FailAt = [&](const FString& E) -> FUnrealAiToolInvocationResult
+			{
+				TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+				O->SetBoolField(TEXT("ok"), false);
+				O->SetStringField(TEXT("status"), TEXT("patch_validate_errors"));
+				O->SetNumberField(TEXT("failed_op_index"), OpIdx);
+				O->SetArrayField(TEXT("errors"), TArray<TSharedPtr<FJsonValue>>{MakeShareable(new FJsonValueString(E))});
+				O->SetArrayField(
+					TEXT("error_codes"),
+					TArray<TSharedPtr<FJsonValue>>{MakeShareable(new FJsonValueString(InferBlueprintGraphPatchErrorCode(E)))});
+				O->SetStringField(
+					TEXT("note"),
+					TEXT("validate_only: no graph changes were made. Fix the op at failed_op_index and retry."));
+				AppendFailedOpSnippetToPayload(&OpsArr, OpIdx, O);
+				AppendBlueprintGraphPatchSuggestedCorrectCall(BlueprintPath, InGraphName, E, O);
+				FUnrealAiToolInvocationResult R;
+				R.bOk = false;
+				R.ErrorMessage = UnrealAiToolJson::SerializeObject(O);
+				R.ContentForModel = R.ErrorMessage;
+				return R;
+			};
+
+			if (OpName.Equals(TEXT("create_node"), ESearchCase::IgnoreCase))
+			{
+				FString Pid;
+				const FString DryErr = ValidateCreateNodeForPatchDryRun(Op, Pid);
+				if (!DryErr.IsEmpty())
+				{
+					return FailAt(DryErr);
+				}
+				if (!Pid.IsEmpty())
+				{
+					VirtualPatchIds.Add(Pid);
+				}
+			}
+			else if (OpName.Equals(TEXT("add_variable"), ESearchCase::IgnoreCase))
+			{
+				FString Vn, Tstr;
+				Op->TryGetStringField(TEXT("name"), Vn);
+				if (Vn.IsEmpty())
+				{
+					Op->TryGetStringField(TEXT("variable_name"), Vn);
+				}
+				if (Vn.IsEmpty())
+				{
+					Op->TryGetStringField(TEXT("member_name"), Vn);
+				}
+				if (!PatchExtractVariableTypeString(Op, Tstr))
+				{
+					Tstr.Reset();
+				}
+				if (Vn.IsEmpty() || Tstr.IsEmpty())
+				{
+					return FailAt(TEXT(
+						"add_variable requires name and type — type may be a string (e.g. \"int\") or object { \"category\":\"int\", \"subcategory\":\"int32\" }"));
+				}
+				FEdGraphPinType Pt;
+				if (!UnrealAiBlueprintTools_TryParsePinTypeFromString(Tstr, Pt))
+				{
+					return FailAt(FString::Printf(
+						TEXT("add_variable: unknown or unsupported type \"%s\" (try int, float, bool, name, text, or /Script/... class path)"),
+						*Tstr));
+				}
+				(void)BP;
+			}
+			else if (OpName.Equals(TEXT("connect"), ESearchCase::IgnoreCase))
+			{
+				FString FromS, ToS;
+				Op->TryGetStringField(TEXT("from"), FromS);
+				Op->TryGetStringField(TEXT("to"), ToS);
+				if (FromS.IsEmpty())
+				{
+					Op->TryGetStringField(TEXT("link_from"), FromS);
+				}
+				if (ToS.IsEmpty())
+				{
+					Op->TryGetStringField(TEXT("link_to"), ToS);
+				}
+				FString NFrom, PFrom, NTo, PTo;
+				if (!SplitNodePinRef(FromS, NFrom, PFrom) || !SplitNodePinRef(ToS, NTo, PTo))
+				{
+					return FailAt(TEXT("connect requires from and to as NodeRef.Pin (e.g. n1.Then -> n2.execute)"));
+				}
+				UEdGraphNode *NA = nullptr, *NB = nullptr;
+				bool bFromV = false, bToV = false;
+				FString Err;
+				if (!TryResolveNodePartValidateOnly(NFrom, VirtualPatchIds, Graph, NA, bFromV, Err))
+				{
+					return FailAt(FString::Printf(TEXT("connect from: %s"), *Err));
+				}
+				if (!TryResolveNodePartValidateOnly(NTo, VirtualPatchIds, Graph, NB, bToV, Err))
+				{
+					return FailAt(FString::Printf(TEXT("connect to: %s"), *Err));
+				}
+				if (!bFromV && !bToV)
+				{
+					FString PErrA, PErrB;
+					UEdGraphPin* PA = FindPin(NA, PFrom, &PErrA);
+					UEdGraphPin* PB = FindPin(NB, PTo, &PErrB);
+					if (!PA)
+					{
+						return FailAt(!PErrA.IsEmpty()
+							? FString::Printf(TEXT("connect from pin %s: %s"), *FromS, *PErrA)
+							: FString::Printf(TEXT("connect pin not found (%s)"), *FromS));
+					}
+					if (!PB)
+					{
+						return FailAt(!PErrB.IsEmpty()
+							? FString::Printf(TEXT("connect to pin %s: %s"), *ToS, *PErrB)
+							: FString::Printf(TEXT("connect pin not found (%s)"), *ToS));
+					}
+					if (PA->Direction != EGPD_Output || PB->Direction != EGPD_Input)
+					{
+						return FailAt(FString::Printf(
+							TEXT("connect requires from=output and to=input; got %s -> %s (swap from/to or fix pin names)"),
+							*PinDebugSummary(PA),
+							*PinDebugSummary(PB)));
+					}
+					(void)SchemaK2;
+				}
+				else
+				{
+					Notes.Add(FString::Printf(
+						TEXT("Op %d (connect): skipped full pin/link checks because one end references a patch_id declared earlier in this batch."),
+						OpIdx));
+				}
+			}
+			else if (OpName.Equals(TEXT("break_link"), ESearchCase::IgnoreCase))
+			{
+				FString FromS, ToS;
+				Op->TryGetStringField(TEXT("from"), FromS);
+				Op->TryGetStringField(TEXT("to"), ToS);
+				if (FromS.IsEmpty())
+				{
+					Op->TryGetStringField(TEXT("link_from"), FromS);
+				}
+				if (ToS.IsEmpty())
+				{
+					Op->TryGetStringField(TEXT("link_to"), ToS);
+				}
+				FString NFrom, PFrom, NTo, PTo;
+				if (!SplitNodePinRef(FromS, NFrom, PFrom) || !SplitNodePinRef(ToS, NTo, PTo))
+				{
+					return FailAt(TEXT("break_link requires from and to as NodeRef.Pin"));
+				}
+				UEdGraphNode *NA = nullptr, *NB = nullptr;
+				bool bFromV = false, bToV = false;
+				FString Err;
+				if (!TryResolveNodePartValidateOnly(NFrom, VirtualPatchIds, Graph, NA, bFromV, Err))
+				{
+					return FailAt(FString::Printf(TEXT("break_link from: %s"), *Err));
+				}
+				if (!TryResolveNodePartValidateOnly(NTo, VirtualPatchIds, Graph, NB, bToV, Err))
+				{
+					return FailAt(FString::Printf(TEXT("break_link to: %s"), *Err));
+				}
+				if (bFromV || bToV)
+				{
+					return FailAt(TEXT("break_link requires both ends to reference existing graph nodes (guid), not batch-local patch_id placeholders"));
+				}
+				FString BrA, BrB;
+				UEdGraphPin* PA = FindPin(NA, PFrom, &BrA);
+				UEdGraphPin* PB = FindPin(NB, PTo, &BrB);
+				if (!PA || !PB)
+				{
+					return FailAt(TEXT("break_link: pin not found"));
+				}
+				if (!PinsAreDirectlyLinked(PA, PB) && !PinsAreDirectlyLinked(PB, PA))
+				{
+					return FailAt(TEXT("break_link: no link between those pins"));
+				}
+			}
+			else if (OpName.Equals(TEXT("set_pin_default"), ESearchCase::IgnoreCase))
+			{
+				FString Val;
+				Op->TryGetStringField(TEXT("value"), Val);
+				FString NPart, PName, Err;
+				FString RefCombined;
+				Op->TryGetStringField(TEXT("ref"), RefCombined);
+				if (!RefCombined.IsEmpty() && SplitNodePinRef(RefCombined, NPart, PName))
+				{
+				}
+				else
+				{
+					FString NodeRefCombined;
+					Op->TryGetStringField(TEXT("node_ref"), NodeRefCombined);
+					if (!NodeRefCombined.IsEmpty() && SplitNodePinRef(NodeRefCombined, NPart, PName))
+					{
+					}
+					else
+					{
+						Op->TryGetStringField(TEXT("patch_id"), NPart);
+						FString GuidOrCombined;
+						Op->TryGetStringField(TEXT("node_guid"), GuidOrCombined);
+						Op->TryGetStringField(TEXT("pin"), PName);
+						if (PName.IsEmpty())
+						{
+							Op->TryGetStringField(TEXT("pin_name"), PName);
+						}
+						if (NPart.IsEmpty() && !GuidOrCombined.IsEmpty())
+						{
+							if (GuidOrCombined.Contains(TEXT(".")) && SplitNodePinRef(GuidOrCombined, NPart, PName))
+							{
+							}
+							else if (GuidOrCombined.StartsWith(TEXT("guid:"), ESearchCase::IgnoreCase))
+							{
+								NPart = GuidOrCombined;
+							}
+							else
+							{
+								NPart = FString(TEXT("guid:")) + GuidOrCombined;
+							}
+						}
+					}
+				}
+				if (NPart.IsEmpty() || PName.IsEmpty())
+				{
+					return FailAt(TEXT(
+						"set_pin_default requires ref or node_ref as \"patchId.pin\" or \"guid:....pin\" OR patch_id+pin / node_guid+pin plus value"));
+				}
+				if (Val.IsEmpty())
+				{
+					return FailAt(TEXT("set_pin_default requires value"));
+				}
+				UEdGraphNode* N = nullptr;
+				bool bV = false;
+				if (!TryResolveNodePartValidateOnly(NPart, VirtualPatchIds, Graph, N, bV, Err))
+				{
+					return FailAt(Err);
+				}
+				if (bV)
+				{
+					Notes.Add(FString::Printf(
+						TEXT("Op %d (set_pin_default): skipped pin existence check for batch-local patch_id."),
+						OpIdx));
+				}
+				else
+				{
+					FString SpErr;
+					if (!FindPin(N, PName, &SpErr))
+					{
+						return FailAt(!SpErr.IsEmpty()
+							? FString::Printf(TEXT("set_pin_default: %s"), *SpErr)
+							: FString::Printf(TEXT("set_pin_default: pin %s not on node"), *PName));
+					}
+				}
+			}
+			else if (OpName.Equals(TEXT("create_comment"), ESearchCase::IgnoreCase))
+			{
+				FString Pid;
+				Op->TryGetStringField(TEXT("patch_id"), Pid);
+				if (Pid.IsEmpty())
+				{
+					return FailAt(TEXT("create_comment requires patch_id"));
+				}
+				VirtualPatchIds.Add(Pid);
+			}
+			else if (OpName.Equals(TEXT("remove_node"), ESearchCase::IgnoreCase)
+				|| OpName.Equals(TEXT("move_node"), ESearchCase::IgnoreCase))
+			{
+				FString Pid, GuidStr;
+				Op->TryGetStringField(TEXT("patch_id"), Pid);
+				Op->TryGetStringField(TEXT("node_guid"), GuidStr);
+				UEdGraphNode* N = nullptr;
+				bool bV = false;
+				FString E2;
+				if (!Pid.IsEmpty())
+				{
+					if (VirtualPatchIds.Contains(Pid))
+					{
+						return FailAt(FString::Printf(
+							TEXT("%s cannot target patch_id \"%s\" that only refers to nodes created earlier in this batch — use guid: for existing graph nodes."),
+							*OpName,
+							*Pid));
+					}
+					if (!TryResolveNodePartValidateOnly(Pid, VirtualPatchIds, Graph, N, bV, E2))
+					{
+						return FailAt(FString::Printf(TEXT("%s: %s"), *OpName, *E2));
+					}
+				}
+				else if (!GuidStr.IsEmpty())
+				{
+					FString G = GuidStr.TrimStartAndEnd();
+					if (!G.StartsWith(TEXT("guid:"), ESearchCase::IgnoreCase))
+					{
+						G = FString(TEXT("guid:")) + G;
+					}
+					if (!TryResolveNodePartValidateOnly(G, VirtualPatchIds, Graph, N, bV, E2))
+					{
+						return FailAt(FString::Printf(TEXT("%s: %s"), *OpName, *E2));
+					}
+				}
+				else
+				{
+					return FailAt(FString::Printf(TEXT("%s requires patch_id or node_guid"), *OpName));
+				}
+				if (bV || !N)
+				{
+					return FailAt(FString::Printf(TEXT("%s: could not resolve target node"), *OpName));
+				}
+			}
+			else if (OpName.Equals(TEXT("splice_on_link"), ESearchCase::IgnoreCase))
+			{
+				FString FromS, ToS, InsPid;
+				Op->TryGetStringField(TEXT("from"), FromS);
+				Op->TryGetStringField(TEXT("to"), ToS);
+				if (FromS.IsEmpty())
+				{
+					Op->TryGetStringField(TEXT("link_from"), FromS);
+				}
+				if (ToS.IsEmpty())
+				{
+					Op->TryGetStringField(TEXT("link_to"), ToS);
+				}
+				Op->TryGetStringField(TEXT("insert_patch_id"), InsPid);
+				FString InPinStr, OutPinStr;
+				Op->TryGetStringField(TEXT("insert_input_pin"), InPinStr);
+				Op->TryGetStringField(TEXT("insert_output_pin"), OutPinStr);
+				if (InPinStr.IsEmpty())
+				{
+					InPinStr = UEdGraphSchema_K2::PN_Execute.ToString();
+				}
+				if (OutPinStr.IsEmpty())
+				{
+					OutPinStr = UEdGraphSchema_K2::PN_Then.ToString();
+				}
+				FString NFrom, PFrom, NTo, PTo;
+				if (!SplitNodePinRef(FromS, NFrom, PFrom) || !SplitNodePinRef(ToS, NTo, PTo) || InsPid.IsEmpty())
+				{
+					return FailAt(TEXT("splice_on_link requires from, to (NodeRef.Pin), and insert_patch_id"));
+				}
+				if (!VirtualPatchIds.Contains(InsPid))
+				{
+					return FailAt(TEXT("splice_on_link: insert_patch_id not found in this patch batch (declare create_node earlier)"));
+				}
+				UEdGraphNode *UpNode = nullptr, *DownNode = nullptr;
+				bool bFU = false, bFD = false;
+				FString SErr;
+				if (!TryResolveNodePartValidateOnly(NFrom, VirtualPatchIds, Graph, UpNode, bFU, SErr))
+				{
+					return FailAt(FString::Printf(TEXT("splice_on_link from: %s"), *SErr));
+				}
+				if (!TryResolveNodePartValidateOnly(NTo, VirtualPatchIds, Graph, DownNode, bFD, SErr))
+				{
+					return FailAt(FString::Printf(TEXT("splice_on_link to: %s"), *SErr));
+				}
+				if (bFU || bFD)
+				{
+					return FailAt(TEXT("splice_on_link requires from/to to reference existing graph nodes (guid), not batch patch_id placeholders"));
+				}
+				FString SErrU, SErrD, SErrMi, SErrMo;
+				UEdGraphPin* UpPin = FindPin(UpNode, PFrom, &SErrU);
+				UEdGraphPin* DownPin = FindPin(DownNode, PTo, &SErrD);
+				if (!UpPin || !DownPin)
+				{
+					return FailAt(TEXT("splice_on_link: pin resolution failed on graph nodes"));
+				}
+				(void)InPinStr;
+				(void)OutPinStr;
+				if (!PinsAreDirectlyLinked(UpPin, DownPin) && !PinsAreDirectlyLinked(DownPin, UpPin))
+				{
+					return FailAt(TEXT("splice_on_link: no direct link between from and to pins"));
+				}
+			}
+			else
+			{
+				return FailAt(FString::Printf(TEXT("Unknown op: %s"), *OpName));
+			}
+		}
+
+		TSharedPtr<FJsonObject> Ok = MakeShared<FJsonObject>();
+		Ok->SetBoolField(TEXT("ok"), true);
+		Ok->SetStringField(TEXT("status"), TEXT("patch_validated"));
+		Ok->SetStringField(
+			TEXT("note"),
+			TEXT("validate_only: ops[] passed best-effort static checks; compile may still fail after apply."));
+		TArray<TSharedPtr<FJsonValue>> NoteVals;
+		for (const FString& N : Notes)
+		{
+			NoteVals.Add(MakeShareable(new FJsonValueString(N)));
+		}
+		Ok->SetArrayField(TEXT("validation_notes"), NoteVals);
+		TSharedPtr<FJsonObject> ArgsEcho = MakeShared<FJsonObject>();
+		ArgsEcho->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+		ArgsEcho->SetStringField(TEXT("graph_name"), InGraphName);
+		ArgsEcho->SetBoolField(TEXT("validate_only"), true);
+		Ok->SetObjectField(TEXT("arguments_echo"), ArgsEcho);
+		FUnrealAiToolInvocationResult R;
+		R.bOk = true;
+		R.ContentForModel = UnrealAiToolJson::SerializeObject(Ok);
+		return R;
+	}
 } // namespace UnrealAiBlueprintGraphPatchPriv
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TSharedPtr<FJsonObject>& Args)
 {
 	using namespace UnrealAiBlueprintGraphPatchPriv;
 	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
-	UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Args);
+	UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Args, nullptr);
 	FString Path;
 	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
 	{
@@ -1086,7 +1975,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			return UnrealAiToolJson::Error(LoadErr);
 		}
 		Args->SetArrayField(TEXT("ops"), Loaded);
-		UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Args);
+		UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Args, nullptr);
 		OpsArr = nullptr;
 		Args->TryGetArrayField(TEXT("ops"), OpsArr);
 	}
@@ -1106,6 +1995,16 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 	if (!Graph)
 	{
 		return UnrealAiToolJson::Error(FString::Printf(TEXT("Graph not found: %s"), *GraphName));
+	}
+
+	bool bValidateOnly = false;
+	if (Args->HasField(TEXT("validate_only")))
+	{
+		Args->TryGetBoolField(TEXT("validate_only"), bValidateOnly);
+	}
+	if (bValidateOnly)
+	{
+		return RunBlueprintGraphPatchValidateOnly(BP, Graph, *OpsArr, Path, GraphName);
 	}
 
 	bool bCompile = true;
@@ -1138,12 +2037,15 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 
 	const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
 
-	for (const TSharedPtr<FJsonValue>& OpVal : *OpsArr)
+	int32 FirstFailedOpIdx = INDEX_NONE;
+	for (int32 OpIdx = 0; OpIdx < OpsArr->Num(); ++OpIdx)
 	{
+		const TSharedPtr<FJsonValue>& OpVal = (*OpsArr)[OpIdx];
 		const TSharedPtr<FJsonObject>* OpObj = nullptr;
 		if (!OpVal->TryGetObject(OpObj) || !OpObj || !(*OpObj).IsValid())
 		{
 			Errors.Add(TEXT("Each ops[] entry must be an object"));
+			FirstFailedOpIdx = OpIdx;
 			break;
 		}
 		const TSharedPtr<FJsonObject>& Op = *OpObj;
@@ -1153,6 +2055,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 		if (OpName.IsEmpty())
 		{
 			Errors.Add(TEXT("ops[].op is required"));
+			FirstFailedOpIdx = OpIdx;
 			break;
 		}
 		if (OpName.Equals(TEXT("create_node"), ESearchCase::IgnoreCase))
@@ -1198,6 +2101,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			{
 				Errors.Add(TEXT(
 					"add_variable requires name and type — type may be a string (e.g. \"int\") or object { \"category\":\"int\", \"subcategory\":\"int32\" }"));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			FEdGraphPinType Pt;
@@ -1206,6 +2110,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 				Errors.Add(FString::Printf(
 					TEXT("add_variable: unknown or unsupported type \"%s\" (try int, float, bool, name, text, or /Script/... class path)"),
 					*Tstr));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			FBlueprintEditorUtils::AddMemberVariable(BP, FName(*Vn), Pt);
@@ -1231,18 +2136,21 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (!SplitNodePinRef(FromS, NFrom, PFrom) || !SplitNodePinRef(ToS, NTo, PTo))
 			{
 				Errors.Add(TEXT("connect requires from and to as NodeRef.Pin (e.g. n1.Then -> n2.execute)"));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			UEdGraphNode* NA = ResolveNodePart(NFrom, PatchMap, Graph, Err);
 			if (!NA)
 			{
 				Errors.Add(FString::Printf(TEXT("connect from: %s"), *Err));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			UEdGraphNode* NB = ResolveNodePart(NTo, PatchMap, Graph, Err);
 			if (!NB)
 			{
 				Errors.Add(FString::Printf(TEXT("connect to: %s"), *Err));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			FString PErrA, PErrB;
@@ -1253,6 +2161,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 				Errors.Add(!PErrA.IsEmpty()
 					? FString::Printf(TEXT("connect from pin %s: %s"), *FromS, *PErrA)
 					: FString::Printf(TEXT("connect pin not found (%s)"), *FromS));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			if (!PB)
@@ -1260,12 +2169,14 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 				Errors.Add(!PErrB.IsEmpty()
 					? FString::Printf(TEXT("connect to pin %s: %s"), *ToS, *PErrB)
 					: FString::Printf(TEXT("connect pin not found (%s)"), *ToS));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			FString LinkErr;
 			if (!TryCreateDirectedLink(PA, PB, Schema, &LinkErr))
 			{
 				Errors.Add(FString::Printf(TEXT("connect %s -> %s: %s"), *FromS, *ToS, *LinkErr));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			TSharedPtr<FJsonObject> Rec = MakeShared<FJsonObject>();
@@ -1323,17 +2234,20 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (NPart.IsEmpty() || PName.IsEmpty())
 			{
 				Errors.Add(TEXT("set_pin_default requires ref or node_ref as \"patchId.pin\" or \"guid:....pin\" OR patch_id+pin / node_guid+pin plus value"));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			if (Val.IsEmpty())
 			{
 				Errors.Add(TEXT("set_pin_default requires value"));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			UEdGraphNode* N = ResolveNodePart(NPart, PatchMap, Graph, Err);
 			if (!N)
 			{
 				Errors.Add(Err);
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			FString SpErr;
@@ -1343,6 +2257,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 				Errors.Add(!SpErr.IsEmpty()
 					? FString::Printf(TEXT("set_pin_default: %s"), *SpErr)
 					: FString::Printf(TEXT("set_pin_default: pin %s not on node"), *PName));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			P->DefaultValue = Val;
@@ -1369,18 +2284,21 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (!SplitNodePinRef(FromS, NFrom, PFrom) || !SplitNodePinRef(ToS, NTo, PTo))
 			{
 				Errors.Add(TEXT("break_link requires from and to as NodeRef.Pin"));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			UEdGraphNode* NA = ResolveNodePart(NFrom, PatchMap, Graph, Err);
 			if (!NA)
 			{
 				Errors.Add(FString::Printf(TEXT("break_link from: %s"), *Err));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			UEdGraphNode* NB = ResolveNodePart(NTo, PatchMap, Graph, Err);
 			if (!NB)
 			{
 				Errors.Add(FString::Printf(TEXT("break_link to: %s"), *Err));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			FString BrA, BrB;
@@ -1400,11 +2318,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 				{
 					Errors.Add(TEXT("break_link: pin not found"));
 				}
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			if (!TryBreakPinLink(PA, PB, Schema))
 			{
 				Errors.Add(TEXT("break_link: no link between those pins"));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			TSharedPtr<FJsonObject> Rec = MakeShared<FJsonObject>();
@@ -1441,24 +2361,28 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (!SplitNodePinRef(FromS, NFrom, PFrom) || !SplitNodePinRef(ToS, NTo, PTo) || InsPid.IsEmpty())
 			{
 				Errors.Add(TEXT("splice_on_link requires from, to (NodeRef.Pin), and insert_patch_id"));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			UEdGraphNode* UpNode = ResolveNodePart(NFrom, PatchMap, Graph, Err);
 			if (!UpNode)
 			{
 				Errors.Add(FString::Printf(TEXT("splice_on_link from: %s"), *Err));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			UEdGraphNode* DownNode = ResolveNodePart(NTo, PatchMap, Graph, Err);
 			if (!DownNode)
 			{
 				Errors.Add(FString::Printf(TEXT("splice_on_link to: %s"), *Err));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			UEdGraphNode* const* MidPtr = PatchMap.Find(InsPid);
 			if (!MidPtr || !*MidPtr)
 			{
 				Errors.Add(TEXT("splice_on_link: insert_patch_id not found in this patch batch"));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			FString SErrU, SErrD, SErrMi, SErrMo;
@@ -1488,11 +2412,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 				{
 					Errors.Add(TEXT("splice_on_link: pin resolution failed (check insert_input_pin / insert_output_pin)"));
 				}
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			if (!TryBreakPinLink(UpPin, DownPin, Schema))
 			{
 				Errors.Add(TEXT("splice_on_link: no direct link between from and to pins"));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			SeedInsertedNodeBetweenNeighbors(*MidPtr, UpNode, DownNode);
@@ -1509,11 +2435,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (!TryCreateDirectedLink(UpPin, MidIn, Schema, &ReErr))
 			{
 				Errors.Add(FString::Printf(TEXT("splice_on_link reconnect: %s"), *ReErr));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			if (!TryCreateDirectedLink(MidOut, DownPin, Schema, &ReErr))
 			{
 				Errors.Add(FString::Printf(TEXT("splice_on_link reconnect: %s"), *ReErr));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			TSharedPtr<FJsonObject> Rec = MakeShared<FJsonObject>();
@@ -1528,6 +2456,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (Pid.IsEmpty())
 			{
 				Errors.Add(TEXT("create_comment requires patch_id"));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			double CXD = 0, CYD = 0;
@@ -1618,6 +2547,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (!N)
 			{
 				Errors.Add(FString::Printf(TEXT("remove_node: %s"), *Err));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			FBlueprintEditorUtils::RemoveNode(BP, N, true);
@@ -1671,6 +2601,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (!N)
 			{
 				Errors.Add(FString::Printf(TEXT("move_node: %s"), *Err));
+				FirstFailedOpIdx = OpIdx;
 				break;
 			}
 			double XD = 0, YD = 0;
@@ -1689,6 +2620,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 		}
 		if (Errors.Num() > 0)
 		{
+			FirstFailedOpIdx = OpIdx;
 			break;
 		}
 	}
@@ -1700,6 +2632,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 		O->SetBoolField(TEXT("ok"), false);
 		O->SetStringField(TEXT("status"), TEXT("patch_errors"));
 		O->SetStringField(TEXT("note"), TEXT("Patch was not applied (transaction cancelled). applied_partial is always empty on failure."));
+		if (FirstFailedOpIdx != INDEX_NONE)
+		{
+			O->SetNumberField(TEXT("failed_op_index"), FirstFailedOpIdx);
+			AppendFailedOpSnippetToPayload(OpsArr, FirstFailedOpIdx, O);
+		}
 		TArray<TSharedPtr<FJsonValue>> EArr;
 		TArray<TSharedPtr<FJsonValue>> CodeArr;
 		for (const FString& E : Errors)
@@ -1820,7 +2757,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphListPins(const TSha
 	if (NodeRef.IsEmpty())
 	{
 		return UnrealAiToolJson::Error(
-			TEXT("node_ref or guid is required: pass the node's graph GUID from blueprint_export_ir (node_guid) or blueprint_graph_patch applied[].node_guid. "
+			TEXT("node_ref or guid is required: pass the node's graph GUID from blueprint_graph_introspect (node_guid) or blueprint_graph_patch applied[].node_guid. "
 				 "Ephemeral patch_id strings from a prior patch only work inside the same blueprint_graph_patch call, not as node_ref here."));
 	}
 	UBlueprint* BP = UnrealAiBlueprintTools_LoadBlueprintGame(Path);
@@ -1851,7 +2788,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphListPins(const TSha
 		else
 		{
 			N = nullptr;
-			Err = TEXT("node_ref must be a graph node GUID or guid:{uuid} (from blueprint_export_ir / create_node result)");
+			Err = TEXT("node_ref must be a graph node GUID or guid:{uuid} (from blueprint_graph_introspect / create_node result)");
 		}
 	}
 	if (!N)
