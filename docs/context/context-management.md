@@ -500,7 +500,7 @@ These are **context-managed** because they must survive thread reloads and feed 
 
 | Approach | Role |
 |----------|------|
-| **Deprecated (model)** | Tool **`agent_emit_todo_plan`** is not in the catalog tool list for Agent/Plan; new sessions do not call it from the LLM. |
+| **Legacy on-disk** | **`activeTodoPlan`** may still load from older saved context; there is no current catalog tool that writes it. |
 | **Legacy / disk** | Existing **`activeTodoPlan`** may still load; harness dispatch path validates **`unreal_ai.todo_plan`** if invoked. |
 | **Fallback** | Fenced JSON in assistant text — repair at most once; avoid as the main path |
 

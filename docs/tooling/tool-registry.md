@@ -25,11 +25,11 @@ Optional per-tool metadata: `tools[].tool_surface.domain_tags` (see `meta.tool_s
 
 ### Main Agent vs Blueprint Builder (default product path)
 
-- **Default Agent** (`Mode == Agent` with `bOmitMainAgentBlueprintMutationTools`): the tiered tool roster is filtered by **`tools[].agent_surfaces`** (see `meta.agent_surfaces` in the catalog). Graph mutators such as **`blueprint_graph_patch`**, **`blueprint_apply_ir`**, **`blueprint_compile`**, **`blueprint_format_graph`**, and **`blueprint_add_variable`** are **`blueprint_builder`–only** unless the field is missing/empty/`["all"]`.
+- **Default Agent** (`Mode == Agent` with `bOmitMainAgentBlueprintMutationTools`): the tiered tool roster is filtered by **`tools[].agent_surfaces`** (see `meta.agent_surfaces` in the catalog). Graph mutators such as **`blueprint_graph_patch`**, **`blueprint_compile`**, and **`blueprint_format_graph`** are **`blueprint_builder`–only** unless the field is missing/empty/`["all"]`.
 - **Handoff:** the main agent emits **`<unreal_ai_build_blueprint>`** with YAML **`target_kind`**; the harness runs a **Blueprint Builder** sub-turn with the builder prompt stack and domain-filtered tools (`UnrealAiBuildBlueprintTag`, `FUnrealAiAgentHarness`, `UnrealAiBlueprintBuilderToolSurface`).
 - **Escape hatch:** when **`bOmitMainAgentBlueprintMutationTools`** is **false**, surface gating is bypassed so power users can expose graph tools on the main roster.
 
-Implementation: **`UnrealAiAgentToolGate.cpp`**, **`UnrealAiToolSurfaceCompatibility.cpp`**, prompts under **`Plugins/UnrealAiEditor/prompts/chunks/`** (especially **`04`**, **`10`**, **`12`**, **`14`**, **`blueprint-builder/**`**, **`environment-builder/**`**). PCG/landscape/foliage tool defs: **`Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalogFragmentPcgEnvironment.json`** (merged at load).
+Implementation: **`UnrealAiAgentToolGate.cpp`**, **`UnrealAiToolSurfaceCompatibility.cpp`**, prompts under **`Plugins/UnrealAiEditor/prompts/chunks/`** (especially **`04`**, **`10`**, **`12`**, **`14`**, **`blueprint-builder/**`**, **`environment-builder/**`**). Subagent catalog fragments (merged at load): **`Plugins/UnrealAiEditor/Resources/tools.blueprint.json`**, **`Plugins/UnrealAiEditor/Resources/tools.environment.json`**, **`Plugins/UnrealAiEditor/Resources/tools.main.json`** (`retrieval_bundle`: blueprint_builder, environment_builder, main_agent).
 
 ---
 
@@ -680,33 +680,23 @@ These are the first implementation wave. Each row is expanded in its domain sect
 
 **Layout + merge (append new logic to existing events like Tick instead of duplicating):** in-process **`FUnrealBlueprintGraphFormatService`** (`Plugins/UnrealAiEditor/.../Private/BlueprintFormat/`) drives `auto_layout`, `layout_scope: full_graph`, and **`blueprint_format_graph`**.
 
-### `blueprint_export_ir`
+### `blueprint_graph_introspect`
 
 | Field | Value |
 |-------|--------|
-| **summary** | Lossy JSON export of a script graph (`nodes`, `links`, `defaults`) for planning edits with **`blueprint_apply_ir`** and/or **`blueprint_graph_patch`**. Unknown/custom nodes may include **`k2_class`** + **`node_guid`** for pin introspection and patching. |
+| **summary** | Read-only node map: **`node_guid`**, class, title, **`pins[]`** with **`linked_to[]`** for patch / review workflows. |
 | **parameters** | `blueprint_path`, optional `graph_name`. |
-| **returns** | `ir` object; `event_tick` and `event_begin_play` ops for matching `UK2Node_Event` nodes. |
+| **returns** | `ok`, `nodes[]`, `node_count`. |
 | **side_effects** | none |
 | **permission** | `read` |
-| **status** | `implemented` |
-
-### `blueprint_apply_ir`
-
-| Field | Value |
-|-------|--------|
-| **summary** | Materialize IR nodes and wire links; optional **`merge_policy`** (`append_to_existing` / `create_new`), **`layout_scope`** (`ir_nodes` / `full_graph`), **`event_tick`** op. |
-| **returns** | `merge_policy_used`, `layout_scope_used`, `anchors_reused[]`, `merge_warnings[]`, `layout_applied`, `formatter_hint` (if layout skipped). |
-| **side_effects** | asset; compile at end of apply. |
-| **permission** | `write` |
 | **status** | `implemented` |
 
 ### `blueprint_graph_patch`
 
 | Field | Value |
 |-------|--------|
-| **summary** | Structured **`ops[]`** on a **`/Game`** script graph: **`create_node`**, **`create_comment`** (`member_node_refs` + reflow like IR), **`connect`**, **`break_link`**, **`splice_on_link`** (insert on one exec edge), **`set_pin_default`**, **`add_variable`**, **`remove_node`**, **`move_node`**. Optional **`auto_layout`** (default **true**), **`layout_scope`** `patched_nodes` \| **`full_graph`**. Formatter options match **`blueprint_apply_ir`** (Editor Preferences → Unreal AI Editor → Blueprint Formatting). **`compile`** default true. |
-| **parameters** | Full JSON Schema **`oneOf`** per op in [`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json). **`patch_id`** is batch-local; disk nodes use **`guid:`** from export or **`applied[].node_guid`**. |
+| **summary** | Structured **`ops[]`** on a **`/Game`** script graph: **`create_node`**, **`create_comment`** (`member_node_refs` + reflow), **`connect`**, **`break_link`**, **`splice_on_link`** (insert on one exec edge), **`set_pin_default`**, **`add_variable`**, **`remove_node`**, **`move_node`**. Optional **`auto_layout`** (default **true**), **`layout_scope`** `patched_nodes` \| **`full_graph`**. Formatter options follow Editor Preferences → Unreal AI Editor → Blueprint Formatting. **`compile`** default true. |
+| **parameters** | Full JSON Schema **`oneOf`** per op in [`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json). **`patch_id`** is batch-local; disk nodes use **`guid:`** from **`blueprint_graph_introspect`** or **`applied[].node_guid`**. |
 | **returns** | Success: `ok`, `applied[]`, `blueprint_status`, `compiled`, **`auto_layout`**, **`layout_scope`**, **`layout_applied`**, **`layout_nodes_positioned`**, **`formatter_available`**. Failure: `status` **`patch_errors`**, `errors[]`, **`error_codes[]`**, **`applied_partial`** always **`[]`** (transaction cancelled), **`note`**, **`suggested_correct_call`**. |
 | **side_effects** | asset; layout; compile (optional) |
 | **permission** | `write` |
@@ -720,7 +710,7 @@ These are the first implementation wave. Each row is expanded in its domain sect
 | Field | Value |
 |-------|--------|
 | **summary** | Read-only **`pins[]`** for one graph node: pin **`name`**, **`direction`**, **`category`**, optional **`default_value`**. |
-| **parameters** | `blueprint_path`, optional `graph_name`, and **`node_ref` _or_ `guid`** (real graph GUID from export / patch output—not an ephemeral **`patch_id`** from another call). |
+| **parameters** | `blueprint_path`, optional `graph_name`, and **`node_ref` _or_ `guid`** (real graph GUID from **`blueprint_graph_introspect`** / patch output—not an ephemeral **`patch_id`** from another call). |
 | **returns** | `ok`, `node_guid`, `k2_class`, `pins[]`. |
 | **side_effects** | none |
 | **permission** | `read` |
@@ -767,67 +757,18 @@ These are the first implementation wave. Each row is expanded in its domain sect
 | **doc_links** | [UBlueprint](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/UBlueprint) |
 | **status** | `research` |
 
-### `blueprint_add_variable`
-
-| Field | Value |
-|-------|--------|
-| **summary** | Add a member variable to Blueprint (typed). |
-| **parameters** | `blueprint_path`, `name`, `type`, `category`. |
-| **returns** | `success`. |
-| **side_effects** | asset |
-| **permission** | `write` |
-| **ue_entry_points** | `FBlueprintEditorUtils::AddMemberVariable`, schema validation. |
-| **threading** | Game thread. |
-| **failure_modes** | Name clash; unsupported type. |
-| **doc_links** | [Blueprint editing](https://dev.epicgames.com/documentation/en-us/unreal-engine/blueprint-api-in-unreal-engine) |
-| **status** | `future` |
-
-### `blueprint_open_graph_tab`
-
-| Field | Value |
-|-------|--------|
-| **summary** | Open Blueprint editor focused on a specific graph. |
-| **parameters** | `blueprint_path`, `graph_name`. |
-| **returns** | `success`. |
-| **side_effects** | UI |
-| **permission** | `write` |
-| **ue_entry_points** | `UAssetEditorSubsystem`, `FKismetEditorUtilities`. |
-| **threading** | Game thread. |
-| **failure_modes** | Graph missing. |
-| **doc_links** | [Kismet utilities](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FKismetEditorUtilities) |
-| **status** | `research` |
-
 ---
 
 ## Materials & rendering
 
-### `material_instance_set_scalar_parameter`
+### `material_instance_set_parameter`
 
 | Field | Value |
 |-------|--------|
-| **summary** | Set scalar parameter on a `UMaterialInstanceConstant` (editor). |
-| **parameters** | `material_path`, `parameter_name`, `value`. |
-| **returns** | `success`. |
+| **summary** | Set scalar or vector parameter on a Material Instance; requires **`value_kind`** `scalar` \| `vector` plus `material_path`, `parameter_name`, and `value` or `linear_color[]`. |
 | **side_effects** | asset |
 | **permission** | `write` |
-| **ue_entry_points** | `UMaterialInstanceDynamic` / constant — `SetScalarParameterValueEditorOnly` patterns; mark package dirty. |
-| **threading** | Game thread. |
-| **failure_modes** | Parameter not found. |
-| **doc_links** | [Material Instances](https://dev.epicgames.com/documentation/en-us/unreal-engine/material-instance-in-unreal-engine) |
-| **status** | `research` |
-
-### `material_instance_set_vector_parameter`
-
-| Field | Value |
-|-------|--------|
-| **summary** | Set vector parameter on material instance. |
-| **parameters** | `material_path`, `parameter_name`, `linear_color`. |
-| **returns** | `success`. |
-| **side_effects** | asset |
-| **permission** | `write` |
-| **ue_entry_points** | Same as scalar, vector APIs. |
-| **threading** | Game thread. |
-| **status** | `research` |
+| **status** | `implemented` |
 
 ### `material_get_usage_summary`
 

@@ -1,6 +1,6 @@
 # T3D / IR authoring (deprecated for agent roster)
 
-**T3D export/import and Tier-1 IR apply are no longer in the agent tool catalog.** Stale clients may receive `tool_deprecated` from dispatch.
+**T3D export/import and Tier-1 IR apply are not in the agent tool catalog.** Unknown or removed tool ids are answered with `not_implemented` from dispatch.
 
 Use **`blueprint_graph_introspect`** for node GUIDs and wiring, **`blueprint_graph_patch`** for all Kismet mutations (including **`add_variable`** and **`connect`** in the same batch), then **`blueprint_compile`** / **`blueprint_verify_graph`**. See **`07-graph-patch-canonical.md`** and **`01-deterministic-loop.md`**.
 

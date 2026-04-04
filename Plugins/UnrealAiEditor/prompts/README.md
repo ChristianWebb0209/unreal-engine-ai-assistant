@@ -4,7 +4,7 @@
 
 **Location:** `Plugins/UnrealAiEditor/prompts/` (this plugin).
 
-This folder holds **semantic fragments** the harness assembles into **system** and **developer** messages. The canonical machine-readable tool definitions live in [`Resources/UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json); narrative specs in the repo docs: [`tool-registry.md`](../../../docs/tooling/tool-registry.md), context: [`context-management.md`](../../../docs/context/context-management.md). **Plan mode (DAG)** behavior is defined in **`chunks/plan/*.md`** (planner pass) and **`chunks/plan-node/*.md`** (executor turns), plus C++ under `Source/UnrealAiEditor/Private/Planning/`. The `agent_emit_todo_plan` tool is **deprecated** (not exposed to the model); legacy `activeTodoPlan` may still appear in context.
+This folder holds **semantic fragments** the harness assembles into **system** and **developer** messages. The canonical machine-readable tool definitions live in [`Resources/UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json); narrative specs in the repo docs: [`tool-registry.md`](../../../docs/tooling/tool-registry.md), context: [`context-management.md`](../../../docs/context/context-management.md). **Plan mode (DAG)** behavior is defined in **`chunks/plan/*.md`** (planner pass) and **`chunks/plan-node/*.md`** (executor turns), plus C++ under `Source/UnrealAiEditor/Private/Planning/`. Legacy persisted `activeTodoPlan` JSON may still appear in context from older sessions; there is no catalog tool to emit it anymore.
 
 ## Design rules
 
@@ -100,7 +100,7 @@ Source: [`FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent`](.
 
 ### Main Agent vs Builder surfaces (product)
 
-- **Default Agent** turns use `bOmitMainAgentBlueprintMutationTools` + per-tool `agent_surfaces` in [`UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json) (plus optional fragments e.g. [`UnrealAiToolCatalogFragmentPcgEnvironment.json`](../Resources/UnrealAiToolCatalogFragmentPcgEnvironment.json)); [`UnrealAiAgentToolGate`](../Source/UnrealAiEditor/Private/Tools/UnrealAiAgentToolGate.cpp) filters the **tiered tool appendix**.
+- **Default Agent** turns use `bOmitMainAgentBlueprintMutationTools` + per-tool `agent_surfaces` in [`UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json) (plus optional fragments e.g. [`tools.blueprint.json`](../Resources/tools.blueprint.json), [`tools.environment.json`](../Resources/tools.environment.json), [`tools.main.json`](../Resources/tools.main.json)); [`UnrealAiAgentToolGate`](../Source/UnrealAiEditor/Private/Tools/UnrealAiAgentToolGate.cpp) filters the **tiered tool appendix**.
 - **Substantive Blueprint graph mutations** on the default path: **`<unreal_ai_build_blueprint>`** with YAML **`target_kind`** → builder stack + domain-filtered tools.
 - **PCG / landscape / foliage mutators** on the default path: **`<unreal_ai_build_environment>`** with YAML **`target_kind`** → Environment Builder stack.
 - **Escape hatch:** when `bOmitMainAgentBlueprintMutationTools` is false, surface gating is bypassed (power users).
@@ -114,4 +114,4 @@ Source: [`FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent`](.
 ## Maintenance
 
 - When **`UnrealAiToolCatalog.json`** changes, refresh [`tools/by-category.md`](tools/by-category.md) and [`tools/catalog-snapshot.tsv`](tools/catalog-snapshot.tsv) (TSV is optional; can be regenerated from JSON).
-- **`agent_emit_todo_plan`** is deprecated in the catalog (not in the model tool list); legacy threads may still have `activeTodoPlan` on disk.
+- **`activeTodoPlan` on disk:** older threads may still carry this blob; it is not tied to a current catalog tool.

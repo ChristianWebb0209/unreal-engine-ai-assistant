@@ -8,15 +8,12 @@ actor_get_visibility	Read whether an actor is currently hidden in the editor.	wo
 actor_set_transform	Mutate/set actor transform in the loaded level. Use this after scene_fuzzy_search when you need a concrete position/rotation/scale change; do not use for discovery or status-only checks (use scene_fuz	world_actors	implemented
 actor_set_visibility	Toggle actor visibility.	world_actors	implemented
 actor_spawn_from_class	Spawn an actor in the editor world. Requires class_path + location[3] + rotation[3]. If exact transform is unknown, use explicit safe defaults (e.g. location [0,0,100], rotation [0,0,0]) instead of om	world_actors	implemented
-agent_emit_todo_plan	Deprecated: not exposed to the model. Persist unreal_ai.todo_plan via tool call (legacy). Use Plan chat mode for unreal_ai.plan_dag + executor instead.	exec	deprecated
 animation_blueprint_get_graph_summary	Summarize AnimBlueprint graphs.	animation_sequencer	future
 asset_apply_properties	Write/apply flat JSON property deltas on the loaded asset UObject under /Game (reflection / ImportText)—top-level keys only, no nested component objects. For Blueprint assets this targets the UBluepri	assets_content	implemented
 asset_create	Create a new asset under /Game via IAssetTools (asset_class path + optional factory_class). Use for Blueprint assets/materials/sounds/etc. `{}` is invalid: `package_path`, `asset_name`, and `asset_cla	assets_content	implemented
 asset_delete	Delete assets.	assets_content	implemented
 asset_duplicate	Duplicate asset to new path.	assets_content	implemented
 asset_export_properties	Read/export editable UObject properties under /Game as JSON (reflection). For a Blueprint asset, keys are properties on the UBlueprint editor object—not inherited component defaults on the generated c	assets_content	implemented
-asset_find_referencers	Compatibility-only asset graph branch. Prefer asset_graph_query with relation=referencers.	assets_content	deprecated
-asset_get_dependencies	Compatibility-only asset graph branch. Prefer asset_graph_query with relation=dependencies.	assets_content	deprecated
 asset_get_metadata	Read asset metadata and dependencies summary.	assets_content	implemented
 asset_graph_query	Read Asset Registry graph relations for one asset. Required: relation (referencers|dependencies) and object_path. Prefer over split referencers/dependencies tools.	assets_content	implemented
 asset_import	Import files via automated import pipeline.	assets_content	future
@@ -26,16 +23,16 @@ asset_registry_query	Query Asset Registry for deterministic listing by exact pat
 asset_rename	Rename/move asset and optionally fix references.	assets_content	implemented
 asset_save_packages	Persist dirty package changes to disk. Use after compile/edit/mutation passes so editor state matches files on disk; do not use for discovery or read-only status checks. When all_dirty is true, saves 	assets_content	implemented
 audio_component_preview	Preview sound in editor.	audio_metasounds	future
-blueprint_compile	Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Compile a Blueprint and return diagnostics. Use after blueprint_graph_patch to validate/fix compile stat	blueprints	implemented
+blueprint_compile	Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Compile a Blueprint and return diagnostics. Use after blueprint_graph_patch, blueprint_graph_patch, or o	blueprints	implemented
 blueprint_format_graph	Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Run in-process layered layout on a Blueprint script graph (full graph or current selection). Spacing, wire knots, preserve-existing	blueprints	implemented
 blueprint_get_graph_summary	Read-only (main Agent + builder): bounded summary of Blueprint graph(s) for an existing asset. `blueprint_path` is required and must be a concrete /Game Blueprint object_path (prefer reuse from asset_	blueprints	implemented
-blueprint_graph_introspect	Read-only: canonical graph discovery for patch workflows. Enumerates nodes with node_guid, class, title, and pins (name, direction, category, linked_to[] of {node_guid, pin_name} per wire). Pair with 	blueprints	implemented
+blueprint_graph_introspect	Read-only: enumerate nodes with node_guid, class, title, and pins (name, direction, category, linked_to[] of {node_guid, pin_name} per wire). Use with blueprint_graph_patch connect or blueprint_graph_	blueprints	implemented
 blueprint_graph_list_pins	Read-only: pins[] (name, direction, category, optional default_value). Needs blueprint_path and node_ref OR guid (real graph GUID). Does not resolve patch_id strings from other tool calls.	blueprints	implemented
-blueprint_graph_patch	Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Sole supported Kismet graph mutator: atomic ops[] or ops_json_path. If any op fails, the transaction is 	blueprints	implemented
+blueprint_graph_patch	Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Atomic: if any op fails, the transaction is cancelled (nothing persists; applied_partial is always []). 	blueprints	implemented
 blueprint_set_component_default	Blueprint Builder sub-turn only (not default main Agent). Set one reflected property on a named Actor component on the Blueprint class default (CDO), then compile. Use for gameplay tuning that lives o	blueprints	implemented
-blueprint_verify_graph	"Post-edit verification: optional steps (default [""links""]): links, orphan_pins, duplicate_node_guids, dead_exec_outputs, pin_type_mismatch, trivial_branch_conditions (IfThenElse Condition literal true"	blueprints	implemented
+blueprint_verify_graph	Post-edit verification: optional steps (default ["links"]): links (null/cross-graph pin links), orphan_pins (disconnected exec inputs on impure K2 nodes), duplicate_node_guids, dead_exec_outputs (Call	blueprints	implemented
 collision_trace_editor_world	Line/sphere trace in editor world (collision, raycast, hit from camera or points).	physics_collision	future
-console_command	"Run a bounded editor console exec via allow-list keys (default). command must be a key: stat_fps, stat_unit, stat_gpu (no args); r_vsync requires args ""0"" or ""1""; viewmode_lit | viewmode_unlit | viewm"	console_exec	implemented
+console_command	Run a bounded editor console exec via allow-list keys (default). command must be a key: stat_fps, stat_unit, stat_gpu (no args); r_vsync requires args "0" or "1"; viewmode_lit | viewmode_unlit | viewm	console_exec	implemented
 content_browser_navigate_folder	Navigate Content Browser to a folder.	editor_ui_navigation	implemented
 content_browser_sync_asset	Focus the Content Browser on a registered asset by object path (`path` / `object_path`). Resolves via the asset registry—use a full `/Game/.../Name.Name` (or equivalent) path. Folder-only strings are 	editor_ui_navigation	implemented
 cook_content_for_platform	Cook content for a platform (UAT).	build_packaging	future
@@ -48,9 +45,7 @@ editor_state_snapshot_read	Read a deterministic editor/world snapshot (JSON). Us
 engine_message_log_read	Read recent Message Log / log tail.	diagnostics_logs	implemented
 entity_get_property	Read a single allowlisted property from an entity (currently actor-focused). Prefer this for generic property reads when key-based access is requested.	properties_settings	implemented
 entity_set_property	Set a single allowlisted property on an entity (currently actor-focused). Prefer this for key-based property writes when exact property names are known.	properties_settings	implemented
-foliage_paint_instances	Add foliage instances in radius.	landscape_foliage_pcg	future
 global_tab_focus	Bring a registered dock tab to front.	editor_ui_navigation	implemented
-landscape_import_heightmap	Import heightmap to landscape.	landscape_foliage_pcg	future
 level_sequence_create_asset	Create a Level Sequence asset under /Game (typed shortcut over asset_create).	animation_sequencer	implemented
 material_get_usage_summary	List referencers for a material. If not found in the registry, the path may be wrong for this project—retry discovery with asset_index_fuzzy_search before concluding the asset is absent.	materials_rendering	implemented
 material_graph_compile	Blueprint Builder material_graph: recompile a base Material after graph edits (UMaterialEditingLibrary::RecompileMaterial). Returns compile_error_or_pending from IsCompilingOrHadCompileError for the c	materials_rendering	implemented
@@ -61,15 +56,12 @@ material_graph_validate	Blueprint Builder material_graph: list orphan expression
 material_instance_get_scalar_parameter	Read one scalar parameter value from a Material Instance.	materials_rendering	implemented
 material_instance_get_vector_parameter	Read one vector parameter value from a Material Instance.	materials_rendering	implemented
 material_instance_set_parameter	Set a scalar or vector parameter on a Material Instance (main Agent and builder; not a Blueprint graph mutator). Pass value_kind (scalar|vector) with material_path and parameter_name; include value or	materials_rendering	implemented
-material_instance_set_scalar_parameter	Compatibility-only scalar branch for Material Instance parameter writes. Prefer material_instance_set_parameter with value_kind=scalar.	materials_rendering	deprecated
-material_instance_set_vector_parameter	Compatibility-only vector branch for Material Instance parameter writes. Prefer material_instance_set_parameter with value_kind=vector.	materials_rendering	deprecated
 menu_command_invoke	Execute a pre-registered editor command ID.	editor_ui_navigation	implemented
 metasound_open_editor	Open MetaSound source.	audio_metasounds	future
 outliner_folder_move	Move actors to an outliner folder.	world_actors	implemented
 package_project	Full package build.	build_packaging	future
-pcg_generate	Execute PCG graph in editor.	landscape_foliage_pcg	future
 physics_impulse_actor	Apply impulse (PIE-oriented).	physics_collision	future
-pie_start	"Start Play-In-Editor. Optional mode: ""viewport"" (default, in-process PIE) or ""standalone"" (new process when supported). Use pie_status to verify running state and pair with pie_stop when finished."	pie_play	implemented
+pie_start	Start Play-In-Editor. Optional mode: "viewport" (default, in-process PIE) or "standalone" (new process when supported). Use pie_status to verify running state and pair with pie_stop when finished.	pie_play	implemented
 pie_status	Return PIE / play-session state: playing_in_editor, play_session_request_queued, play_session_in_progress. Use for status verification before/after pie_start or before deciding whether pie_stop is nee	pie_play	implemented
 pie_stop	Stop current PIE session started via pie_start. Use when playtest/run requests are complete or to cleanly end runtime checks.	pie_play	implemented
 project_file_move	Move or rename under the project. Source and destination must both be under Saved/UnrealAiEditorAgent/ unless confirm_project_critical:true. Binaries/, Intermediate/, DerivedDataCache/ blocked. confir	project_files_search	implemented
@@ -78,25 +70,13 @@ project_file_write_text	Write a text file under the project. Default safe locati
 render_target_readback_editor	Capture a UTextureRenderTarget2D to disk.	capture_vision	future
 scene_fuzzy_search	Fuzzy-search actors across the loaded editor world/level (not Content Browser assets). For /Game assets use asset_index_fuzzy_search. By default excludes engine streaming/HLOD/WorldPartition helper ac	world_actors	implemented
 sequencer_open	Open Level Sequence in Sequencer.	animation_sequencer	future
-setting_apply	Write one allowlisted setting using the domain/key settings envelope. Prefer this over settings_set; the resolver maps the envelope to the legacy settings backend today.	settings_properties	implemented
-setting_query	Read one allowlisted setting using the domain/key settings envelope. Prefer this over settings_get; the resolver maps the envelope to the legacy settings backend today.	settings_properties	implemented
-settings_get	Compatibility-only legacy settings reader. Prefer setting_query for model-facing retrieval and resolver-based repair.	settings_properties	deprecated
-settings_set	Compatibility-only legacy settings writer. Prefer setting_apply for model-facing retrieval and resolver-based repair.	settings_properties	deprecated
+setting_apply	Write one allowlisted setting using the domain/key settings envelope. Model-facing settings write; the resolver maps the envelope to the legacy internal settings backend.	settings_properties	implemented
+setting_query	Read one allowlisted setting using the domain/key settings envelope. Model-facing settings read; the resolver maps the envelope to the legacy internal settings backend.	settings_properties	implemented
 shader_compile_wait	Wait for shader compile completion.	build_packaging	future
 source_search_symbol	Fuzzy grep project text files under Source/, Config/, and Plugins/*/Source/ (Cursor-style): typo-tolerant; ranks paths and filenames even when the user misspells or only partially remembers a name. Re	project_files_search	implemented
 tool_audit_append	Append line to tool audit log file.	diagnostics_logs	designed
 viewport_camera_control	Unified viewport camera tool. Required: operation (dolly|orbit|pan|pilot|get_transform|set_transform) — explicit; no inference from payload shape. Prefer over branch-specific viewport_camera_* tools.	viewport_camera	implemented
-viewport_camera_dolly	Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=dolly.	viewport_camera	deprecated
-viewport_camera_get_transform	Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=get_transform.	viewport_camera	deprecated
-viewport_camera_orbit	Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=orbit.	viewport_camera	deprecated
-viewport_camera_pan	Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=pan.	viewport_camera	deprecated
-viewport_camera_pilot	Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=pilot.	viewport_camera	deprecated
-viewport_camera_set_transform	Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=set_transform.	viewport_camera	deprecated
 viewport_capture	Capture the editor viewport. Required: capture_kind immediate_png or after_frames (explicit; no inference). Prefer over legacy viewport_capture_* split tools.	capture_vision	implemented
-viewport_capture_delayed	Compatibility-only viewport capture branch. Prefer viewport_capture with capture_kind=after_frames.	capture_vision	deprecated
-viewport_capture_png	Compatibility-only viewport capture branch. Prefer viewport_capture with capture_kind=immediate_png.	capture_vision	deprecated
 viewport_frame	Frame the viewport on selection or explicit actors. Required: target selection or actors (explicit; no inference). Prefer over split viewport_frame_* tools.	selection_framing	implemented
-viewport_frame_actors	Compatibility-only viewport frame branch. Prefer viewport_frame with target=actors.	selection_framing	deprecated
-viewport_frame_selection	Compatibility-only viewport frame branch. Prefer viewport_frame with target=selection.	selection_framing	deprecated
 viewport_get_view_mode	Read the current editor viewport rendering mode.	viewport_camera	implemented
 viewport_set_view_mode	Switch editor viewport rendering mode (Lit, Wireframe, Unlit, …). Does not require actor selection or viewport framing—call this tool directly when the user asks to change view mode.	viewport_camera	implemented

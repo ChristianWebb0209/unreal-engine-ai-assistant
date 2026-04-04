@@ -19,8 +19,6 @@ Derived from `UnrealAiToolCatalog.json`. Table cells list **ask** and **agent**;
 | `asset_delete` | Delete assets. | destructive | implemented | ask=False agent=True |
 | `asset_duplicate` | Duplicate asset to new path. | write | implemented | ask=False agent=True |
 | `asset_export_properties` | Read/export editable UObject properties under /Game as JSON (reflection). For a Bluepri... | read | implemented | ask=True agent=True |
-| `asset_find_referencers` | Compatibility-only asset graph branch. Prefer asset_graph_query with relation=referencers. | read | deprecated | ask=False agent=False |
-| `asset_get_dependencies` | Compatibility-only asset graph branch. Prefer asset_graph_query with relation=dependenc... | read | deprecated | ask=False agent=False |
 | `asset_get_metadata` | Read asset metadata and dependencies summary. | read | implemented | ask=True agent=True |
 | `asset_graph_query` | Read Asset Registry graph relations for one asset. Required: relation (referencers\|depe... | read | implemented | ask=True agent=True |
 | `asset_import` | Import files via automated import pipeline. | write | future | ask=False agent=True |
@@ -67,8 +65,6 @@ _No catalog entries._ Placeholder tools for generic network access, raw exec str
 |---------|---------|------------|--------|-------|
 | `render_target_readback_editor` | Capture a UTextureRenderTarget2D to disk. | write | future | ask=False agent=True |
 | `viewport_capture` | Capture the editor viewport. Required: capture_kind immediate_png or after_frames (expl... | write | implemented | ask=False agent=True |
-| `viewport_capture_delayed` | Compatibility-only viewport capture branch. Prefer viewport_capture with capture_kind=a... | write | deprecated | ask=False agent=False |
-| `viewport_capture_png` | Compatibility-only viewport capture branch. Prefer viewport_capture with capture_kind=i... | write | deprecated | ask=False agent=False |
 
 ## `console_exec`
 
@@ -98,9 +94,7 @@ _No catalog entries._ Placeholder tools for generic network access, raw exec str
 
 ## `exec`
 
-| tool_id | Summary | permission | status | modes |
-|---------|---------|------------|--------|-------|
-| `agent_emit_todo_plan` | Deprecated: not exposed to the model. Persist unreal_ai.todo_plan via tool call (legacy... | write | deprecated | ask=False agent=False |
+_No catalog tools._ The legacy `agent_emit_todo_plan` id was removed from the catalog; persisted `activeTodoPlan` JSON may still exist on disk from older sessions.
 
 ## `landscape_foliage_pcg`
 
@@ -123,8 +117,6 @@ _No catalog entries._ Placeholder tools for generic network access, raw exec str
 | `material_instance_get_scalar_parameter` | Read one scalar parameter value from a Material Instance. | read | implemented | ask=True agent=True |
 | `material_instance_get_vector_parameter` | Read one vector parameter value from a Material Instance. | read | implemented | ask=True agent=True |
 | `material_instance_set_parameter` | Set a scalar or vector parameter on a Material Instance (main Agent and builder; not a ... | write | implemented | ask=False agent=True |
-| `material_instance_set_scalar_parameter` | Compatibility-only scalar branch for Material Instance parameter writes. Prefer materia... | write | deprecated | ask=False agent=False |
-| `material_instance_set_vector_parameter` | Compatibility-only vector branch for Material Instance parameter writes. Prefer materia... | write | deprecated | ask=False agent=False |
 
 ## `physics_collision`
 
@@ -165,8 +157,6 @@ _No catalog entries._ Placeholder tools for generic network access, raw exec str
 | `editor_get_selection` | Return only the current editor selection (paths and labels); may be empty. Do not use a... | read | implemented | ask=True agent=True |
 | `editor_set_selection` | Replace editor selection with level actors only. Paths must be world/level actor paths ... | write | implemented | ask=False agent=True |
 | `viewport_frame` | Frame the viewport on selection or explicit actors. Required: target selection or actor... | write | implemented | ask=False agent=True |
-| `viewport_frame_actors` | Compatibility-only viewport frame branch. Prefer viewport_frame with target=actors. | write | deprecated | ask=False agent=False |
-| `viewport_frame_selection` | Compatibility-only viewport frame branch. Prefer viewport_frame with target=selection. | write | deprecated | ask=False agent=False |
 
 ## `settings_properties`
 
@@ -174,20 +164,12 @@ _No catalog entries._ Placeholder tools for generic network access, raw exec str
 |---------|---------|------------|--------|-------|
 | `setting_apply` | Write one allowlisted setting using the domain/key settings envelope. Prefer this over ... | write | implemented | ask=False agent=True |
 | `setting_query` | Read one allowlisted setting using the domain/key settings envelope. Prefer this over s... | read | implemented | ask=True agent=True |
-| `settings_get` | Compatibility-only legacy settings reader. Prefer setting_query for model-facing retrie... | read | deprecated | ask=False agent=False |
-| `settings_set` | Compatibility-only legacy settings writer. Prefer setting_apply for model-facing retrie... | write | deprecated | ask=False agent=False |
 
 ## `viewport_camera`
 
 | tool_id | Summary | permission | status | modes |
 |---------|---------|------------|--------|-------|
 | `viewport_camera_control` | Unified viewport camera tool. Required: operation (dolly\|orbit\|pan\|pilot\|get_transform\|... | write | implemented | ask=True agent=True |
-| `viewport_camera_dolly` | Compatibility-only viewport camera branch. Prefer viewport_camera_control with operatio... | write | deprecated | ask=False agent=False |
-| `viewport_camera_get_transform` | Compatibility-only viewport camera branch. Prefer viewport_camera_control with operatio... | read | deprecated | ask=False agent=False |
-| `viewport_camera_orbit` | Compatibility-only viewport camera branch. Prefer viewport_camera_control with operatio... | write | deprecated | ask=False agent=False |
-| `viewport_camera_pan` | Compatibility-only viewport camera branch. Prefer viewport_camera_control with operatio... | write | deprecated | ask=False agent=False |
-| `viewport_camera_pilot` | Compatibility-only viewport camera branch. Prefer viewport_camera_control with operatio... | write | deprecated | ask=False agent=False |
-| `viewport_camera_set_transform` | Compatibility-only viewport camera branch. Prefer viewport_camera_control with operatio... | write | deprecated | ask=False agent=False |
 | `viewport_get_view_mode` | Read the current editor viewport rendering mode. | read | implemented | ask=True agent=True |
 | `viewport_set_view_mode` | Switch editor viewport rendering mode (Lit, Wireframe, Unlit, …). Does not require acto... | write | implemented | ask=False agent=True |
 
