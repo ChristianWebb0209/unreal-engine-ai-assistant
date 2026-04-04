@@ -49,6 +49,7 @@ namespace UnrealAiAgentContextJson
 		case ERecentUiSource::TabEvent: return TEXT("tab_event");
 		case ERecentUiSource::AssetEditorEvent: return TEXT("asset_editor_event");
 		case ERecentUiSource::PollFallback: return TEXT("poll_fallback");
+		case ERecentUiSource::AgentToolNavigation: return TEXT("agent_tool_navigation");
 		default: return TEXT("unknown");
 		}
 	}
@@ -59,7 +60,29 @@ namespace UnrealAiAgentContextJson
 		if (S == TEXT("tab_event")) return ERecentUiSource::TabEvent;
 		if (S == TEXT("asset_editor_event")) return ERecentUiSource::AssetEditorEvent;
 		if (S == TEXT("poll_fallback")) return ERecentUiSource::PollFallback;
+		if (S == TEXT("agent_tool_navigation")) return ERecentUiSource::AgentToolNavigation;
 		return ERecentUiSource::Unknown;
+	}
+
+	static FString TouchSourceToStr(const EThreadAssetTouchSource S)
+	{
+		switch (S)
+		{
+		case EThreadAssetTouchSource::OpenEditor: return TEXT("open_editor");
+		case EThreadAssetTouchSource::ContentBrowserSelection: return TEXT("content_browser");
+		case EThreadAssetTouchSource::ToolResult: return TEXT("tool_result");
+		case EThreadAssetTouchSource::Attachment: return TEXT("attachment");
+		default: return TEXT("unknown");
+		}
+	}
+
+	static EThreadAssetTouchSource StrToTouchSource(const FString& S)
+	{
+		if (S == TEXT("open_editor")) return EThreadAssetTouchSource::OpenEditor;
+		if (S == TEXT("content_browser")) return EThreadAssetTouchSource::ContentBrowserSelection;
+		if (S == TEXT("tool_result")) return EThreadAssetTouchSource::ToolResult;
+		if (S == TEXT("attachment")) return EThreadAssetTouchSource::Attachment;
+		return EThreadAssetTouchSource::Unknown;
 	}
 
 	static TSharedPtr<FJsonObject> RecentUiEntryToJson(const FRecentUiEntry& E)
@@ -270,6 +293,20 @@ namespace UnrealAiAgentContextJson
 			ThreadUiArr.Add(MakeShared<FJsonValueObject>(RecentUiEntryToJson(R).ToSharedRef()));
 		}
 		Root->SetArrayField(TEXT("threadRecentUiOverlay"), ThreadUiArr);
+		{
+			TArray<TSharedPtr<FJsonValue>> WsArr;
+			for (const FThreadAssetWorkingEntry& W : State.ThreadAssetWorkingSet)
+			{
+				TSharedPtr<FJsonObject> WO = MakeShared<FJsonObject>();
+				WO->SetStringField(TEXT("objectPath"), W.ObjectPath);
+				WO->SetStringField(TEXT("assetClassPath"), W.AssetClassPath);
+				WO->SetStringField(TEXT("lastTouchedUtc"), W.LastTouchedUtc.ToIso8601());
+				WO->SetStringField(TEXT("touchSource"), TouchSourceToStr(W.TouchSource));
+				WO->SetStringField(TEXT("lastToolName"), W.LastToolName);
+				WsArr.Add(MakeShared<FJsonValueObject>(WO.ToSharedRef()));
+			}
+			Root->SetArrayField(TEXT("threadAssetWorkingSet"), WsArr);
+		}
 		{
 			const FProjectTreeSummary& T = State.ProjectTreeSummary;
 			TSharedPtr<FJsonObject> PT = MakeShared<FJsonObject>();
@@ -499,6 +536,41 @@ namespace UnrealAiAgentContextJson
 				{
 					OutState.ThreadRecentUiOverlay.Add(MoveTemp(Entry));
 				}
+			}
+		}
+		const TArray<TSharedPtr<FJsonValue>>* WsArr = nullptr;
+		if (Root->TryGetArrayField(TEXT("threadAssetWorkingSet"), WsArr) && WsArr)
+		{
+			for (const TSharedPtr<FJsonValue>& V : *WsArr)
+			{
+				const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+				if (!V.IsValid() || !V->TryGetObject(ObjPtr) || !ObjPtr || !ObjPtr->IsValid())
+				{
+					continue;
+				}
+				const TSharedPtr<FJsonObject>& WO = *ObjPtr;
+				FThreadAssetWorkingEntry W;
+				WO->TryGetStringField(TEXT("objectPath"), W.ObjectPath);
+				WO->TryGetStringField(TEXT("assetClassPath"), W.AssetClassPath);
+				FString Ts;
+				if (WO->TryGetStringField(TEXT("lastTouchedUtc"), Ts))
+				{
+					FDateTime::ParseIso8601(*Ts, W.LastTouchedUtc);
+				}
+				FString Src;
+				if (WO->TryGetStringField(TEXT("touchSource"), Src))
+				{
+					W.TouchSource = StrToTouchSource(Src);
+				}
+				WO->TryGetStringField(TEXT("lastToolName"), W.LastToolName);
+				if (!W.ObjectPath.IsEmpty())
+				{
+					OutState.ThreadAssetWorkingSet.Add(MoveTemp(W));
+				}
+			}
+			while (OutState.ThreadAssetWorkingSet.Num() > 16)
+			{
+				OutState.ThreadAssetWorkingSet.Pop(EAllowShrinking::No);
 			}
 		}
 		if (const TSharedPtr<FJsonObject>* ProjectTreeObj = nullptr;

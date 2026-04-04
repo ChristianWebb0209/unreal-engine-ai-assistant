@@ -66,6 +66,13 @@ namespace UnrealAiToolBm25IndexPriv
 				}
 			}
 		}
+		FString RetrievalBundle;
+		Obj->TryGetStringField(TEXT("retrieval_bundle"), RetrievalBundle);
+		if (!RetrievalBundle.IsEmpty())
+		{
+			TagStr += RetrievalBundle;
+			TagStr += TEXT(' ');
+		}
 		return FString::Printf(TEXT("%s %s %s %s"), *ToolId, *Summary, *Cat, *TagStr);
 	}
 } // namespace UnrealAiToolBm25IndexPriv
@@ -75,6 +82,16 @@ void FUnrealAiToolBm25Index::RebuildForEnabledTools(
 	EUnrealAiAgentMode Mode,
 	const FUnrealAiModelCapabilities& Caps,
 	const FUnrealAiToolPackOptions* PackOptions)
+{
+	RebuildForEnabledTools(Catalog, Mode, Caps, PackOptions, [](const FString&) { return true; });
+}
+
+void FUnrealAiToolBm25Index::RebuildForEnabledTools(
+	const FUnrealAiToolCatalog& Catalog,
+	EUnrealAiAgentMode Mode,
+	const FUnrealAiModelCapabilities& Caps,
+	const FUnrealAiToolPackOptions* PackOptions,
+	TFunctionRef<bool(const FString& ToolId)> ToolIdFilter)
 {
 	Docs.Reset();
 	Idf.Reset();
@@ -88,6 +105,7 @@ void FUnrealAiToolBm25Index::RebuildForEnabledTools(
 		Mode,
 		Caps,
 		PackOptions,
+		ToolIdFilter,
 		[&](const FString& Tid, const TSharedPtr<FJsonObject>& Obj)
 		{
 			const FString DocText = UnrealAiToolBm25IndexPriv::BuildDocText(Obj, Tid);

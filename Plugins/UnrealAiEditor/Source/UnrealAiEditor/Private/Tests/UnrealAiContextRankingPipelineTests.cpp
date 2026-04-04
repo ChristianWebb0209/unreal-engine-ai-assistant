@@ -456,4 +456,39 @@ bool FUnrealAiExplicitNeighborExpansionTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiContextWorkingSetProjectTreeCandidatesTest,
+	"UnrealAiEditor.Context.Ranking.WorkingSetProjectTreeCandidates",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiContextWorkingSetProjectTreeCandidatesTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FAgentContextState State;
+	FThreadAssetWorkingEntry W;
+	W.ObjectPath = TEXT("/Game/MyBlueprints/BP_Test.BP_Test");
+	W.AssetClassPath = TEXT("/Script/Engine.Blueprint");
+	W.LastTouchedUtc = FDateTime::UtcNow();
+	W.TouchSource = EThreadAssetTouchSource::ToolResult;
+	W.LastToolName = TEXT("asset_open_editor");
+	State.ThreadAssetWorkingSet.Add(W);
+
+	FProjectTreeSummary Tree;
+	Tree.SamplerVersion = TEXT("test");
+	Tree.UpdatedUtc = FDateTime::UtcNow();
+	Tree.LastQueryStatus = TEXT("ok");
+	Tree.TopLevelFolders.Add(TEXT("/Game/Blueprints"));
+
+	FAgentContextBuildOptions Opt;
+	Opt.Mode = EUnrealAiAgentMode::Agent;
+	Opt.UserMessageForComplexity = TEXT("open the test blueprint");
+	Opt.MaxContextChars = 12000;
+
+	const UnrealAiContextCandidates::FUnifiedContextBuildResult R =
+		UnrealAiContextCandidates::BuildUnifiedContext(State, Opt, nullptr, nullptr, Opt.MaxContextChars, &Tree);
+	TestTrue(TEXT("Working set in packed context"), R.ContextBlock.Contains(TEXT("Working set (MRU):")));
+	TestTrue(TEXT("Project tree section competes in pack"), R.ContextBlock.Contains(TEXT("Project paths & conventions")));
+	return true;
+}
+
 #endif

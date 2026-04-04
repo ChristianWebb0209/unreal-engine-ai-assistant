@@ -1,5 +1,6 @@
 #include "Widgets/FUnrealAiChatRunSink.h"
 
+#include "Tools/UnrealAiBuildBlueprintTag.h"
 #include "Widgets/UnrealAiChatTranscript.h"
 #include "Widgets/UnrealAiToolUi.h"
 #include "Widgets/UnrealAiChatUiSession.h"
@@ -343,6 +344,14 @@ void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMess
 				B.AssistantText = LocalText;
 				B.AssistantText.TrimStartAndEndInline();
 				bModifiedAnyVisibleText = true;
+			}
+			{
+				const int32 LenBeforeProto = B.AssistantText.Len();
+				UnrealAiBuildBlueprintTag::StripProtocolMarkersForUi(B.AssistantText);
+				if (B.AssistantText.Len() != LenBeforeProto)
+				{
+					bModifiedAnyVisibleText = true;
+				}
 			}
 			if (UnrealAiStripChatNameTagsFromText(B.AssistantText, LocalName))
 			{

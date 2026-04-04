@@ -5,11 +5,13 @@ on:
     paths:
       - 'Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json'
       - 'scripts/Validate-UnrealAiToolCatalog.ps1'
+      - 'scripts/audit_tool_agent_surfaces.py'
       - '.github/workflows/validate-tool-catalog.yml'
   pull_request:
     paths:
       - 'Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json'
       - 'scripts/Validate-UnrealAiToolCatalog.ps1'
+      - 'scripts/audit_tool_agent_surfaces.py'
       - '.github/workflows/validate-tool-catalog.yml'
   workflow_dispatch:
 
@@ -23,3 +25,7 @@ jobs:
       - name: Validate UnrealAiToolCatalog.json
         shell: pwsh
         run: ./scripts/Validate-UnrealAiToolCatalog.ps1
+
+      - name: Audit agent_surfaces (main vs Blueprint Builder)
+        shell: bash
+        run: python scripts/audit_tool_agent_surfaces.py

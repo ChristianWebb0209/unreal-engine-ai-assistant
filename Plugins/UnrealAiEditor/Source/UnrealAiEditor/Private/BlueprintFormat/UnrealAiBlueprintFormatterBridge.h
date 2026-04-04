@@ -42,7 +42,5 @@ namespace UnrealAiBlueprintFormatterBridge
 		bool bWanted,
 		const FUnrealBlueprintGraphFormatOptions& Options = FUnrealBlueprintGraphFormatOptions());
 
-	int32 TryLayoutAllScriptGraphs(
-		UBlueprint* BP,
-		const FUnrealBlueprintGraphFormatOptions& Options = FUnrealBlueprintGraphFormatOptions());
+	int32 TryLayoutAllScriptGraphs(UBlueprint* BP, const FUnrealBlueprintGraphFormatOptions& Options);
 }

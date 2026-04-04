@@ -25,6 +25,12 @@ namespace UnrealAiContextRankingPolicy
 		RetrievalSnippet,
 		TodoState,
 		PlanState,
+		/** Project tree / create-path summary (ranked; replaces post-append blurb). */
+		ProjectTreeSummary,
+		/** Thread MRU asset touch line. */
+		WorkingSetAsset,
+		/** Compact path/class hint for top thread assets (no registry read). */
+		ThreadAssetL1Blurb,
 	};
 
 	struct FScoreWeights
@@ -55,6 +61,9 @@ namespace UnrealAiContextRankingPolicy
 		int32 MaxMemorySnippetShortPrompt = 2;
 		int32 MaxTodoState = 4;
 		int32 MaxPlanState = 10;
+		int32 MaxProjectTreeSummary = 2;
+		int32 MaxWorkingSetAsset = 8;
+		int32 MaxThreadAssetL1Blurb = 2;
 	};
 
 	inline constexpr int32 DefaultHardMaxCandidates = 256;
@@ -117,6 +126,12 @@ namespace UnrealAiContextRankingPolicy
 		case ECandidateType::PlanState:
 			// Active plan/todo state; useful during multi-step work; generally less critical in simple turns.
 			return 60.f;
+		case ECandidateType::ProjectTreeSummary:
+			return 62.f;
+		case ECandidateType::WorkingSetAsset:
+			return 72.f;
+		case ECandidateType::ThreadAssetL1Blurb:
+			return 58.f;
 		default:
 			return 40.f;
 		}
@@ -135,6 +150,9 @@ namespace UnrealAiContextRankingPolicy
 		case ECandidateType::RetrievalSnippet: return Caps.MaxRetrievalSnippet;
 		case ECandidateType::TodoState: return Caps.MaxTodoState;
 		case ECandidateType::PlanState: return Caps.MaxPlanState;
+		case ECandidateType::ProjectTreeSummary: return Caps.MaxProjectTreeSummary;
+		case ECandidateType::WorkingSetAsset: return Caps.MaxWorkingSetAsset;
+		case ECandidateType::ThreadAssetL1Blurb: return Caps.MaxThreadAssetL1Blurb;
 		case ECandidateType::EngineHeader: return 1;
 		default: return 8;
 		}
@@ -153,6 +171,9 @@ namespace UnrealAiContextRankingPolicy
 		case ECandidateType::RetrievalSnippet: return TEXT("retrieval_snippet");
 		case ECandidateType::TodoState: return TEXT("todo_state");
 		case ECandidateType::PlanState: return TEXT("plan_state");
+		case ECandidateType::ProjectTreeSummary: return TEXT("project_tree_summary");
+		case ECandidateType::WorkingSetAsset: return TEXT("working_set_asset");
+		case ECandidateType::ThreadAssetL1Blurb: return TEXT("thread_asset_l1_blurb");
 		default: return TEXT("unknown");
 		}
 	}

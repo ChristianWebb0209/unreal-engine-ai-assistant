@@ -14,7 +14,11 @@ struct FUnrealAiToolPackOptions
 	TArray<FString> AdditionalToolIds;
 };
 
-/** Loads Resources/UnrealAiToolCatalog.json from the UnrealAiEditor plugin (single file, meta + tools[]). */
+/**
+ * Loads Resources/UnrealAiToolCatalog.json plus optional meta.tool_catalog_fragments (JSON files under Resources/).
+ * Fragments append or override tools by tool_id; optional per-fragment retrieval_bundle is copied onto merged tools
+ * for main-agent BM25 filtering (see UnrealAiToolSurfacePipeline).
+ */
 class FUnrealAiToolCatalog
 {
 public:
@@ -49,6 +53,13 @@ public:
 		const FUnrealAiToolPackOptions* PackOptions,
 		FString& OutJsonArray) const;
 
+	void BuildLlmToolsJsonArrayForMode(
+		EUnrealAiAgentMode Mode,
+		const FUnrealAiModelCapabilities& Caps,
+		const FUnrealAiToolPackOptions* PackOptions,
+		TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
+		FString& OutJsonArray) const;
+
 	/**
 	 * Single wrapper tool `unreal_ai_dispatch` so the HTTP `tools` array stays tiny; pair with BuildCompactToolIndexAppendix in the system message.
 	 */
@@ -65,6 +76,13 @@ public:
 		const FUnrealAiToolPackOptions* PackOptions,
 		FString& OutMarkdown) const;
 
+	void BuildCompactToolIndexAppendix(
+		EUnrealAiAgentMode Mode,
+		const FUnrealAiModelCapabilities& Caps,
+		const FUnrealAiToolPackOptions* PackOptions,
+		TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
+		FString& OutMarkdown) const;
+
 	/**
 	 * Same filtering as BuildCompactToolIndexAppendix; invokes Fn once per enabled tool in deterministic tool_id order.
 	 */
@@ -74,8 +92,16 @@ public:
 		const FUnrealAiToolPackOptions* PackOptions,
 		TFunctionRef<void(const FString& ToolId, const TSharedPtr<FJsonObject>& Definition)> Fn) const;
 
+	/** Same as ForEachEnabledToolForMode, but skips tools when ToolIdFilter returns false. */
+	void ForEachEnabledToolForMode(
+		EUnrealAiAgentMode Mode,
+		const FUnrealAiModelCapabilities& Caps,
+		const FUnrealAiToolPackOptions* PackOptions,
+		TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
+		TFunctionRef<void(const FString& ToolId, const TSharedPtr<FJsonObject>& Definition)> Fn) const;
+
 	/**
-	 * Tiered markdown: first ExpandedCount tools include a compact JSON parameters excerpt; remaining tools are one line each.
+	 * Tiered markdown: first ExpandedCount tools include a JSON parameters excerpt (truncated when MaxParametersExcerptChars > 0); remaining tools are one line each.
 	 * OrderedToolIds empty = same set as ForEachEnabled (sorted ids). GuardrailIds are evicted last when over MaxTotalChars.
 	 */
 	void BuildCompactToolIndexAppendixTiered(
@@ -86,7 +112,20 @@ public:
 		const TSet<FString>& GuardrailToolIds,
 		int32 ExpandedCount,
 		int32 MaxTotalChars,
-		FString& OutMarkdown) const;
+		TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
+		FString& OutMarkdown,
+		int32 MaxParametersExcerptChars = 900) const;
+
+	void BuildCompactToolIndexAppendixTiered(
+		EUnrealAiAgentMode Mode,
+		const FUnrealAiModelCapabilities& Caps,
+		const FUnrealAiToolPackOptions* PackOptions,
+		const TArray<FString>& OrderedToolIds,
+		const TSet<FString>& GuardrailToolIds,
+		int32 ExpandedCount,
+		int32 MaxTotalChars,
+		FString& OutMarkdown,
+		int32 MaxParametersExcerptChars = 900) const;
 
 	/** Minified parameters object JSON for repair prompts; false if unknown tool. */
 	bool TryGetToolParametersJsonString(const FString& ToolId, FString& OutParametersJson) const;

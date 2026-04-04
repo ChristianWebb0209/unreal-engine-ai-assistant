@@ -17,6 +17,8 @@
 #include "Tools/UnrealAiToolDispatch_EditorMore.h"
 #include "Tools/UnrealAiToolDispatch_BuildPackaging.h"
 #include "Tools/UnrealAiToolDispatch_ExtraFeatures.h"
+#include "Tools/UnrealAiToolDispatch_Environment.h"
+#include "Tools/UnrealAiToolDispatch_BlueprintBuilder.h"
 #include "Tools/UnrealAiToolDispatch_GenericAssets.h"
 #include "Tools/UnrealAiToolDispatch_SettingsProperties.h"
 #include "Tools/UnrealAiToolJson.h"
@@ -88,6 +90,16 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 
 	const FString ProjectId = ResolveProjectId(SessionProjectId);
 	const FString ThreadId = ResolveThreadId(SessionThreadId);
+
+	FUnrealAiToolInvocationResult SurfaceResult;
+	if (UnrealAiTryDispatchEnvironmentBuilderTool(ToolId, A, SurfaceResult))
+	{
+		return SurfaceResult;
+	}
+	if (UnrealAiTryDispatchBlueprintBuilderSurfaceTool(ToolId, A, SurfaceResult))
+	{
+		return SurfaceResult;
+	}
 
 	// --- Implemented tools (router) ---
 	if (ToolId == TEXT("editor_get_selection"))
@@ -176,46 +188,80 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 		return UnrealAiDispatch_ActorSpawnFromClass(A);
 	}
 
-	if (ToolId == TEXT("viewport_camera_get_transform"))
+	if (ToolId == TEXT("setting_query"))
 	{
-		return UnrealAiDispatch_ViewportCameraGetTransform();
+		return UnrealAiDispatch_SettingsGet(A);
 	}
-	if (ToolId == TEXT("viewport_camera_set_transform"))
+	if (ToolId == TEXT("setting_apply"))
 	{
-		return UnrealAiDispatch_ViewportCameraSetTransform(A);
+		return UnrealAiDispatch_SettingsSet(A);
 	}
-	if (ToolId == TEXT("viewport_camera_dolly"))
+
+	if (ToolId == TEXT("viewport_camera_control"))
 	{
-		return UnrealAiDispatch_ViewportCameraDolly(A);
+		FString Op;
+		A->TryGetStringField(TEXT("operation"), Op);
+		Op = Op.ToLower();
+		if (Op == TEXT("dolly"))
+		{
+			return UnrealAiDispatch_ViewportCameraDolly(A);
+		}
+		if (Op == TEXT("orbit"))
+		{
+			return UnrealAiDispatch_ViewportCameraOrbit(A);
+		}
+		if (Op == TEXT("pan"))
+		{
+			return UnrealAiDispatch_ViewportCameraPan(A);
+		}
+		if (Op == TEXT("pilot"))
+		{
+			return UnrealAiDispatch_ViewportCameraPilot(A);
+		}
+		if (Op == TEXT("get_transform"))
+		{
+			return UnrealAiDispatch_ViewportCameraGetTransform();
+		}
+		if (Op == TEXT("set_transform"))
+		{
+			return UnrealAiDispatch_ViewportCameraSetTransform(A);
+		}
+		return UnrealAiToolJson::Error(
+			TEXT("viewport_camera_control requires operation: dolly, orbit, pan, pilot, get_transform, or set_transform."));
 	}
-	if (ToolId == TEXT("viewport_camera_pan"))
+
+	if (ToolId == TEXT("viewport_capture"))
 	{
-		return UnrealAiDispatch_ViewportCameraPan(A);
+		FString Kind;
+		A->TryGetStringField(TEXT("capture_kind"), Kind);
+		Kind = Kind.ToLower();
+		if (Kind == TEXT("immediate_png"))
+		{
+			return UnrealAiDispatch_ViewportCapturePng(A);
+		}
+		if (Kind == TEXT("after_frames"))
+		{
+			return UnrealAiDispatch_ViewportCaptureDelayed(A);
+		}
+		return UnrealAiToolJson::Error(TEXT("viewport_capture requires capture_kind: immediate_png or after_frames."));
 	}
-	if (ToolId == TEXT("viewport_camera_orbit"))
+
+	if (ToolId == TEXT("viewport_frame"))
 	{
-		return UnrealAiDispatch_ViewportCameraOrbit(A);
+		FString Target;
+		A->TryGetStringField(TEXT("target"), Target);
+		Target = Target.ToLower();
+		if (Target == TEXT("actors"))
+		{
+			return UnrealAiDispatch_ViewportFrameActors(A);
+		}
+		if (Target == TEXT("selection"))
+		{
+			return UnrealAiDispatch_ViewportFrameSelection(A);
+		}
+		return UnrealAiToolJson::Error(TEXT("viewport_frame requires target: selection or actors."));
 	}
-	if (ToolId == TEXT("viewport_camera_pilot"))
-	{
-		return UnrealAiDispatch_ViewportCameraPilot(A);
-	}
-	if (ToolId == TEXT("viewport_frame_actors"))
-	{
-		return UnrealAiDispatch_ViewportFrameActors(A);
-	}
-	if (ToolId == TEXT("viewport_frame_selection"))
-	{
-		return UnrealAiDispatch_ViewportFrameSelection(A);
-	}
-	if (ToolId == TEXT("viewport_capture_png"))
-	{
-		return UnrealAiDispatch_ViewportCapturePng(A);
-	}
-	if (ToolId == TEXT("viewport_capture_delayed"))
-	{
-		return UnrealAiDispatch_ViewportCaptureDelayed(A);
-	}
+
 	if (ToolId == TEXT("viewport_set_view_mode"))
 	{
 		return UnrealAiDispatch_ViewportSetViewMode(A);
@@ -223,14 +269,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	if (ToolId == TEXT("viewport_get_view_mode"))
 	{
 		return UnrealAiDispatch_ViewportGetViewMode(A);
-	}
-	if (ToolId == TEXT("settings_get"))
-	{
-		return UnrealAiDispatch_SettingsGet(A);
-	}
-	if (ToolId == TEXT("settings_set"))
-	{
-		return UnrealAiDispatch_SettingsSet(A);
 	}
 
 	if (ToolId == TEXT("project_file_read_text"))
@@ -433,63 +471,26 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_AssetApplyProperties(A);
 	}
-	if (ToolId == TEXT("asset_find_referencers"))
+	if (ToolId == TEXT("asset_graph_query"))
 	{
-		return UnrealAiDispatch_AssetFindReferencers(A);
-	}
-	if (ToolId == TEXT("asset_get_dependencies"))
-	{
-		return UnrealAiDispatch_AssetGetDependencies(A);
+		FString Rel;
+		A->TryGetStringField(TEXT("relation"), Rel);
+		Rel = Rel.ToLower();
+		if (Rel == TEXT("referencers"))
+		{
+			return UnrealAiDispatch_AssetFindReferencers(A);
+		}
+		if (Rel == TEXT("dependencies"))
+		{
+			return UnrealAiDispatch_AssetGetDependencies(A);
+		}
+		return UnrealAiToolJson::Error(TEXT("asset_graph_query requires relation: referencers or dependencies."));
 	}
 	if (ToolId == TEXT("level_sequence_create_asset"))
 	{
 		return UnrealAiDispatch_LevelSequenceCreateAsset(A);
 	}
 
-	if (ToolId == TEXT("blueprint_compile"))
-	{
-		return UnrealAiDispatch_BlueprintCompile(A);
-	}
-	if (ToolId == TEXT("blueprint_set_component_default"))
-	{
-		return UnrealAiDispatch_BlueprintSetComponentDefault(A);
-	}
-	if (ToolId == TEXT("blueprint_export_ir"))
-	{
-		return UnrealAiDispatch_BlueprintExportIr(A);
-	}
-	if (ToolId == TEXT("blueprint_apply_ir"))
-	{
-		return UnrealAiDispatch_BlueprintApplyIr(A);
-	}
-	if (ToolId == TEXT("blueprint_graph_patch"))
-	{
-		return UnrealAiDispatch_BlueprintGraphPatch(A);
-	}
-	if (ToolId == TEXT("blueprint_graph_list_pins"))
-	{
-		return UnrealAiDispatch_BlueprintGraphListPins(A);
-	}
-	if (ToolId == TEXT("blueprint_format_graph"))
-	{
-		return UnrealAiDispatch_BlueprintFormatGraph(A);
-	}
-	if (ToolId == TEXT("blueprint_format_selection"))
-	{
-		return UnrealAiDispatch_BlueprintFormatSelection(A);
-	}
-	if (ToolId == TEXT("blueprint_get_graph_summary"))
-	{
-		return UnrealAiDispatch_BlueprintGetGraphSummary(A);
-	}
-	if (ToolId == TEXT("blueprint_open_graph_tab"))
-	{
-		return UnrealAiDispatch_BlueprintOpenGraphTab(A);
-	}
-	if (ToolId == TEXT("blueprint_add_variable"))
-	{
-		return UnrealAiDispatch_BlueprintAddVariable(A);
-	}
 	if (ToolId == TEXT("animation_blueprint_get_graph_summary"))
 	{
 		return UnrealAiDispatch_AnimBlueprintGetGraphSummary(A);
@@ -542,10 +543,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_EditorStateSnapshotRead(Registry, ProjectId, ThreadId, A);
 	}
-	if (ToolId == TEXT("agent_emit_todo_plan"))
-	{
-		return UnrealAiDispatch_AgentEmitTodoPlan(Registry, ProjectId, ThreadId, A);
-	}
 	if (ToolId == TEXT("tool_audit_append"))
 	{
 		return UnrealAiDispatch_ToolAuditAppend(A);
@@ -587,18 +584,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	if (ToolId == TEXT("metasound_open_editor"))
 	{
 		return UnrealAiDispatch_MetasoundOpenEditor(A);
-	}
-	if (ToolId == TEXT("foliage_paint_instances"))
-	{
-		return UnrealAiDispatch_FoliagePaintInstances(A);
-	}
-	if (ToolId == TEXT("landscape_import_heightmap"))
-	{
-		return UnrealAiDispatch_LandscapeImportHeightmap(A);
-	}
-	if (ToolId == TEXT("pcg_generate"))
-	{
-		return UnrealAiDispatch_PcgGenerate(A);
 	}
 
 	if (ToolId == TEXT("scene_fuzzy_search.query"))

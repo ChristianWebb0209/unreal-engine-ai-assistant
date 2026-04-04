@@ -1,0 +1,35 @@
+{
+  "suite_id": "multi_surface_builder_curriculum_v2",
+  "default_type": "agent",
+  "coverage_notes": "v2 refresh (2026-04): Replaced turns that previously finished with zero/low friction. Same surface coverage—Actor BP + graph, Anim BP EventGraph, MI params, base material reasoning, Niagara intel, UMG/Designer gaps—but vaguer or stricter asks to stress discovery, handoff, and honest blockers. Review run.jsonl for builder handoffs and tool_finish patterns.",
+  "turns": [
+    {
+      "type": "agent",
+      "request": "Under /Game/AIHarness/MultiSurfaceBuilder/ (create the folder path in Content if the tools allow), spawn a new Actor Blueprint. The asset name must contain the substring Probe and be parented to a plain Actor—not Character. After it exists, add one integer variable with default 0 using whatever Blueprint authoring path this stack expects when graph mutation tools are not on your main roster."
+    },
+    {
+      "type": "agent",
+      "request": "Open the Probe-named actor blueprint you created. On game start I need a dead-simple proof in Output Log: one Print String (or equivalent) whose message includes the letters PROBE in order so we can grep it. Use the project’s recommended delegation path if direct graph tools are not listed for you."
+    },
+    {
+      "type": "agent",
+      "request": "Without reusing the exact same Animation Blueprint path as in any prior message in this thread: discover an AnimBlueprint under /Game/, call blueprint_get_graph_summary on main, then hand off with <unreal_ai_build_blueprint> and target_kind: anim_blueprint so the Blueprint Builder sub-turn can apply a tiny Kismet-only EventGraph change (comment box, noop branch, or small patch)—do not call blueprint_graph_patch or blueprint_apply_ir from the main agent; those are builder-only. Do not use T3D import on AnimGraph or state graphs; if EventGraph is unsuitable, say why in one paragraph."
+    },
+    {
+      "type": "agent",
+      "request": "Pick a Material Instance under /Game/ that is clearly tied to something visible (level mesh, mannequin, or prop). Adjust at least one non-color scalar if available—roughness, metallic, or specular—or explain in the tool result why only tint was possible. Name the parameter you touched."
+    },
+    {
+      "type": "agent",
+      "request": "Find a parent Material asset (not a Material Instance) under /Game/ whose graph likely has a Base Color chain. Describe a concrete node-level edit to multiply or lerp the base color darker by ~15 percent without changing UV layout. If you cannot open or inspect it with tools, state which discovery tool you tried and stop—no generic shader lecture."
+    },
+    {
+      "type": "agent",
+      "request": "Locate any Niagara System or Niagara Emitter under /Game/ that fires in short bursts or pulses. List two specific properties or user parameters you would change to make the burst snappier (spawn count, lifetime, rate, scale). If only read tools exist, return those property paths as plain text; if nothing in /Game/ qualifies, say so after one bounded search."
+    },
+    {
+      "type": "agent",
+      "request": "Find a Widget Blueprint under /Game/ that looks like HUD or in-world UI (not a material). Propose how you would wire a TextBlock to show an integer from the owning Actor or Player State; identify what still cannot be done through tools versus the UMG Designer. One short actionable paragraph plus a bullet list of gaps."
+    }
+  ]
+}

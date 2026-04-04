@@ -4,6 +4,12 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 ---
 
+## Entry 46 — Remove deprecated / catalog-removed tools (IR, T3D splits, legacy families, todo plan)
+
+- **Catalog:** Dropped deprecated split tools, IR/T3D public tools, `agent_emit_todo_plan`, and aligned `routing.legacy_targets` with canonical family ids.
+- **Resolver / dispatch:** Family tools validate against canonical schemas only; projected args carry discriminators (`operation`, `capture_kind`, `target`, `relation`, `value_kind`); router calls existing internal handlers. Removed tools return `not_implemented` (no `tool_deprecated` stubs).
+- **Note:** Older log entries below may still name removed tools (e.g. `blueprint_apply_ir`, `asset_find_referencers`); treat as historical.
+
 ## Entry 45 — Add deterministic `suggested_correct_call` for tool hotspots
 
 - **`asset_rename`:** Updated `UnrealAiDispatch_AssetRename` to accept the `object_path` alias, normalize `from_path` before `LoadObject`, and return `suggested_correct_call` to `asset_index_fuzzy_search` when the asset can’t be loaded. Also switched rename failure (`RenameAssets` returns false) from an `Ok({ok:false})` shape to a hard `Error(...)` so retries are treated as failures.

@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Context/AgentContextTypes.h"
+#include "UnrealAiBlueprintBuilderTargetKind.h"
+#include "UnrealAiEnvironmentBuilderTargetKind.h"
 
 /** Stable run identifiers for observability (parent/child workers). */
 struct FUnrealAiRunIds
@@ -123,6 +125,10 @@ struct FUnrealAiToolSurfaceTelemetry
 	FString QueryHash;
 	/** Full ordered roster passed to the tiered index (guardrails + top‑K), with per-tool scoring breakdown. */
 	TArray<FUnrealAiToolSurfaceRankedEntry> RankedTools;
+	/** e.g. default | blueprint_builder_verbose | environment_builder_verbose */
+	FString SurfaceProfile;
+	/** Blueprint Builder: max chars allowed for the tiered tool appendix before catalog trim (0 = not builder / default path). */
+	int32 AppendixCharBudgetLimit = 0;
 };
 
 /** Request into the harness from UI / tabs. */
@@ -148,4 +154,39 @@ struct FUnrealAiAgentTurnRequest
 	int32 LlmRoundBudgetFloor = 0;
 	/** Skip dispatch + tiered tool index; emit full per-tool JSON (headless tests / diagnostics). */
 	bool bForceNativeToolSurface = false;
+
+	/**
+	 * When true, this turn uses Blueprint Builder prompts and receives the full Blueprint mutation tool surface.
+	 * Set by the harness when chaining after `<unreal_ai_build_blueprint>...</unreal_ai_build_blueprint>` from the main agent.
+	 */
+	bool bBlueprintBuilderTurn = false;
+
+	/**
+	 * Parsed from handoff frontmatter (`target_kind:`) for the active builder sub-turn.
+	 * Drives conditional prompt chunks + `builder_domains` tool merging. Reset when the builder result is consumed.
+	 */
+	EUnrealAiBlueprintBuilderTargetKind BlueprintBuilderTargetKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+
+	/**
+	 * When true (default) on Agent turns that are NOT a Builder sub-turn, catalog-gated tools
+	 * (Blueprint graph mutators, Environment PCG/landscape/foliage mutators) are omitted from the tiered tool index — use the matching handoff tag instead.
+	 */
+	bool bOmitMainAgentBlueprintMutationTools = true;
+
+	/**
+	 * One-shot: after `<unreal_ai_blueprint_builder_result>`, inject `13-blueprint-builder-resume.md` into the main-agent system prompt once.
+	 * Cleared when UnrealAiTurnLlmRequestBuilder::Build consumes it.
+	 */
+	bool bInjectBlueprintBuilderResumeChunk = false;
+
+	/**
+	 * When true, this turn uses Environment / PCG Builder prompts and the environment-scoped tool surface
+	 * (`agent_surfaces` includes environment_builder). Chained after `<unreal_ai_build_environment>` from the main agent.
+	 */
+	bool bEnvironmentBuilderTurn = false;
+
+	EUnrealAiEnvironmentBuilderTargetKind EnvironmentBuilderTargetKind = EUnrealAiEnvironmentBuilderTargetKind::PcgScene;
+
+	/** One-shot resume chunk after `<unreal_ai_environment_builder_result>` (see `15-environment-builder-resume.md`). */
+	bool bInjectEnvironmentBuilderResumeChunk = false;
 };

@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
   Build the editor target for the UE project at the repository root (<ProjectName>Editor), then launch the editor
-  unless -Headless or --headless is set. The .uproject file is resolved automatically (see scripts/Resolve-RepoUProject.ps1);
+  unless -Headless is set. The .uproject file is resolved automatically (see scripts/Resolve-RepoUProject.ps1);
   set UE_REPO_UPROJECT if multiple manifests exist at the repo root or you use a custom path.
 
   PowerShell requires & to invoke .bat files with arguments — a bare quoted path is not a command.
@@ -9,12 +9,12 @@
   Usage (from repo root):
     .\build-editor.ps1
     .\build-editor.ps1 -Headless
-    .\build-editor.ps1 --headless
     .\build-editor.ps1 -Restart
     .\build-editor.ps1 -Restart -Headless
     .\build-editor.ps1 -AutomationTests
     .\build-editor.ps1 -AutomationTests -Headless
     .\build-editor.ps1 -GenerateProjectFiles
+    # Deprecated spellings (--headless, etc.) still work via $args but prefer switches above.
     Set UE_ENGINE_ROOT in repo .env (see .env.example) or: $env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\build-editor.ps1
     # Batch headed suites + full logging: tests\qualitative-tests\run-qualitative-headed.ps1 — docs\tooling\AGENT_HARNESS_HANDOFF.md
     # Full harness + iteration context for agents: docs\tooling\AGENT_HARNESS_HANDOFF.md

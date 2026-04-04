@@ -1,0 +1,55 @@
+{
+  "suite_id": "strict_blueprint_ir_roundtrip",
+  "default_type": "agent",
+  "turns": [
+    {
+      "type": "agent",
+      "request": "Ensure there is a Blueprint at /Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02 (create it if missing, parent /Script/Engine.Actor). Add at least one node in EventGraph.",
+      "assertions": [
+        {
+          "type": "asset_exists",
+          "object_path": "/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"
+        },
+        {
+          "type": "blueprint_export_ir_node_count_min",
+          "blueprint_path": "/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02",
+          "min_nodes": 1
+        }
+      ]
+    },
+    {
+      "type": "agent",
+      "request": "Produce a structured dump of /Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02’s blueprint graphs (something we could diff or archive).",
+      "assertions": [
+        {
+          "type": "tool_invoke_ok",
+          "tool": "blueprint_graph_introspect",
+          "arguments": {
+            "blueprint_path": "/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02",
+            "graph_name": "EventGraph"
+          }
+        }
+      ]
+    },
+    {
+      "type": "agent",
+      "request": "Compile /Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02.",
+      "assertions": [
+        {
+          "type": "run_jsonl_last_tool_finish",
+          "tool": "blueprint_compile",
+          "success": false,
+          "result_preview_contains": "blueprint_tool_withheld"
+        },
+        {
+          "type": "tool_invoke_ok",
+          "tool": "blueprint_compile",
+          "arguments": {
+            "blueprint_path": "/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"
+          }
+        }
+      ]
+    }
+  ]
+}
+

@@ -61,6 +61,8 @@ enum class ERecentUiSource : uint8
 	TabEvent,
 	AssetEditorEvent,
 	PollFallback,
+	/** Focus followed a tool-driven editor navigation (optional; forward-compatible). */
+	AgentToolNavigation,
 };
 
 struct FRecentUiEntry
@@ -114,6 +116,25 @@ struct FProjectTreePathPreference
 	int32 ObservedCount = 0;
 };
 
+/** Origin of a thread working-set asset touch (MRU list for context + autofill). */
+enum class EThreadAssetTouchSource : uint8
+{
+	Unknown,
+	OpenEditor,
+	ContentBrowserSelection,
+	ToolResult,
+	Attachment,
+};
+
+struct FThreadAssetWorkingEntry
+{
+	FString ObjectPath;
+	FString AssetClassPath;
+	FDateTime LastTouchedUtc = FDateTime::UtcNow();
+	EThreadAssetTouchSource TouchSource = EThreadAssetTouchSource::Unknown;
+	FString LastToolName;
+};
+
 struct FProjectTreeSummary
 {
 	/** Sampler version marker for diagnostics / migration. */
@@ -135,7 +156,7 @@ struct FProjectTreeSummary
 
 struct FAgentContextState
 {
-	static const int32 SchemaVersion = 6;
+	static const int32 SchemaVersion = 7;
 
 	int32 SchemaVersionField = SchemaVersion;
 	TArray<FContextAttachment> Attachments;
@@ -157,6 +178,11 @@ struct FAgentContextState
 	TArray<FRecentUiEntry> ThreadRecentUiOverlay;
 	/** Cached project tree inference used for path grounding in context. */
 	FProjectTreeSummary ProjectTreeSummary;
+	/**
+	 * MRU asset paths touched this thread (open editors, selection, tools, attachments).
+	 * Bounded ring; feeds ranked context + harness autofill.
+	 */
+	TArray<FThreadAssetWorkingEntry> ThreadAssetWorkingSet;
 };
 
 struct FContextRecordPolicy

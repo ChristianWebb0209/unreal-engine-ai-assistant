@@ -47,12 +47,14 @@ public class UnrealAiEditor : ModuleRules
 				"BlueprintGraph",
 				"StructUtils",
 				"RenderCore",
+				"RHI",
 				"LevelSequence",
 				"MovieScene",
 				"SQLiteCore",
 				"Kismet",
 				"KismetWidgets",
 				"GraphEditor",
+				"MaterialEditor",
 			});
 	}
 }

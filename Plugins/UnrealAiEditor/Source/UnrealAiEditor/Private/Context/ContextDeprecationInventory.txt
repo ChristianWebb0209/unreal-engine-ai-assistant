@@ -1,0 +1,15 @@
+Context pipeline refactor — inventory (post split, for safe removal only)
+
+Removed / folded
+- BuildContextWindow no longer appends UnrealAiProjectTreeSampler::BuildContextBlurb after PackCandidatesUnderBudget; tree text is a ProjectTreeSummary candidate from UnrealAiContextIngestion.
+- Monolithic CollectCandidates in UnrealAiContextCandidates.cpp replaced by UnrealAiContextIngestion::AppendAllCandidates.
+
+Dead code removed from UnrealAiContextCandidates.cpp
+- BuildEquivalenceClassIdFromName, DeriveRetrievalEntityIdFromSourceId (moved to ingestion for retrieval + working set entity ids).
+- IsDiscoveryToolName (unused after split).
+- Includes only used by old CollectCandidates: UnrealAiActiveTodoSummary, UnrealAiEditorContextQueries, Misc/EngineVersion, UnrealAiEditorModule.
+
+Still required in UnrealAiContextCandidates.cpp
+- BuildUserTokens, ComputeMentionHit, Heuristic helpers, packer-only helpers (ExtractSummaryFolderKey, tool path heuristics for budget anchors).
+
+No other context bypasses found in FUnrealAiContextService for model-facing Block after unified pack (except StaticSystemPrefix path documented in Context/README.md).

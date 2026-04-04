@@ -14,5 +14,6 @@ When a persisted plan **is** present:
 - If the **previous tool** failed, fix args or strategy before advancing.
 - If dynamic escalation triggers (too many tool calls or repeated failures), **stop with handoff** or suggest **Plan mode**—do not assume a todo tool is available.
 - **Paths in execution:** step titles and plan hints are not tool arguments—resolve real `object_path` / `actor_path` from tools/context, not from plan wording alone.
+- **Blueprint writes:** if the appendix omits graph mutators, do not improvise—finish the step with reads, non-Blueprint actions that **are** listed, and/or a handoff note per **`03`** / **`12`**.
 
 Do not paste the full step list unless the user or harness requests a repair.

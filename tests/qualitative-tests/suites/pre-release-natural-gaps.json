@@ -1,0 +1,23 @@
+{
+  "suite_id": "pre_release_natural_language_gaps_v1",
+  "default_type": "agent",
+  "coverage_notes": "**Pre-release natural-language failure focus.** Pruned to the turns that exposed argument/path failures in run-89 and nearby runs. Emphasizes mutation follow-through and required-argument discipline over easy read-only checks. Goal: force concrete path resolution + schema-correct tool arguments under natural phrasing.",
+  "turns": [
+    {
+      "type": "agent",
+      "request": "There’s a small prop in the level and a bigger piece of geometry I’m treating as the carrier. Attach/re-parent the prop so it follows the carrier later, without deleting anything. This is a mutation request: complete the change, then report what you changed."
+    },
+    {
+      "type": "agent",
+      "request": "Somewhere we probably wrote down what the controls are, or how input is wired—can you figure out where that lives in this project and summarize it in one short paragraph?"
+    },
+    {
+      "type": "agent",
+      "request": "Open the messiest gameplay-ish blueprint graph you can find under /Game and tidy the node layout for screenshot review. Behavior should stay the same. Use a concrete discovered Blueprint path and avoid guessed names."
+    },
+    {
+      "type": "agent",
+      "request": "There’s an asset under /Game with a name that looks like a scratch duplicate or typo. Rename it to something clearer and report before/after names. Use schema-correct rename args; do not retry empty argument objects."
+    }
+  ]
+}

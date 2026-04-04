@@ -5,6 +5,7 @@
 
 #include "Framework/Commands/UIAction.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "Framework/MultiBox/MultiBoxExtender.h"
 #include "Misc/Char.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
@@ -14,9 +15,11 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
-#include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Text/SMultiLineEditableText.h"
+#include "Widgets/Text/ISlateEditableTextWidget.h"
+#include "Framework/Text/SlateTextRun.h"
+#include "Framework/Text/TextLayout.h"
 
 /** Updates shared prose wrap width from allotted geometry so every frame's layout sees the current column width (narrow and wide). */
 class SChatMarkdownProseWidthShim final : public SCompoundWidget
@@ -68,108 +71,6 @@ FString UnrealAiStripInlineMarkdown(const FString& Line)
 	return O;
 }
 
-/** Read-only multiline text that supports selection/copy; plain click opens the link if the pointer did not drag (dragging still selects). */
-class SChatSelectableLinkEdit final : public SMultiLineEditableText
-{
-public:
-	SLATE_BEGIN_ARGS(SChatSelectableLinkEdit) {}
-		SLATE_ARGUMENT(FString, LinkTarget)
-		SLATE_ARGUMENT(FString, LinkLabel)
-		SLATE_ARGUMENT(FSlateFontInfo, LinkFont)
-		SLATE_ARGUMENT(TSharedPtr<float>, ProseWrapWidthPx)
-	SLATE_END_ARGS()
-
-	void Construct(const FArguments& InArgs)
-	{
-		LinkTarget = InArgs._LinkTarget;
-		const FString TargetCopy = LinkTarget;
-		const TSharedPtr<float> Wpx = InArgs._ProseWrapWidthPx;
-		check(Wpx.IsValid());
-		FTextBlockStyle LinkStyle =
-			FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>(TEXT("NormalUnderlinedText"));
-		LinkStyle.SetFont(InArgs._LinkFont);
-		LinkStyle.SetColorAndOpacity(
-			FSlateColor(FLinearColor(0.25f, 0.52f, 0.96f, 1.f)));
-		SMultiLineEditableText::Construct(SMultiLineEditableText::FArguments()
-											  .Text(FText::FromString(InArgs._LinkLabel))
-											  .TextStyle(&LinkStyle)
-											  .IsReadOnly(true)
-											  .AutoWrapText(true)
-											  .WrapTextAt(TAttribute<float>::CreateLambda([Wpx]()
-											  {
-												  return FMath::Max(8.f, *Wpx);
-											  }))
-											  .WrappingPolicy(ETextWrappingPolicy::AllowPerCharacterWrapping)
-											  .AllowContextMenu(true)
-											  .SelectAllTextWhenFocused(false)
-											  .OnContextMenuOpening(FOnContextMenuOpening::CreateLambda(
-												  [TargetCopy]()
-												  {
-													  FMenuBuilder MenuBuilder(true, nullptr);
-													  MenuBuilder.AddMenuEntry(
-														  NSLOCTEXT("UnrealAiEditor", "ChatOpenLink", "Open link"),
-														  NSLOCTEXT(
-															  "UnrealAiEditor",
-															  "ChatOpenLinkTip",
-															  "Go to this URL or project path"),
-														  FSlateIcon(),
-														  FUIAction(FExecuteAction::CreateLambda([TargetCopy]()
-														  {
-															  UnrealAiEditorNavigation::
-																  NavigateFromChatMarkdownTargetFromChatLink(
-																	  TargetCopy);
-														  })));
-													  return MenuBuilder.MakeWidget();
-												  })));
-		SetToolTipText(NSLOCTEXT("UnrealAiEditor", "ChatLinkClickTip", "Click to open this link"));
-	}
-
-	virtual FCursorReply OnCursorQuery(const FGeometry& MyGeometry, const FPointerEvent& CursorEvent) const override
-	{
-		return FCursorReply::Cursor(EMouseCursor::Hand);
-	}
-
-	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
-	{
-		if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
-		{
-			bLinkLeftDown = true;
-			LinkPressScreenPos = MouseEvent.GetScreenSpacePosition();
-		}
-		return SMultiLineEditableText::OnMouseButtonDown(MyGeometry, MouseEvent);
-	}
-
-	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
-	{
-		if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bLinkLeftDown)
-		{
-			bLinkLeftDown = false;
-			const FVector2D Delta = MouseEvent.GetScreenSpacePosition() - LinkPressScreenPos;
-			if (Delta.SizeSquared() <= 64.f)
-			{
-				UnrealAiEditorNavigation::NavigateFromChatMarkdownTargetFromChatLink(LinkTarget);
-				return FReply::Handled();
-			}
-		}
-		else if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
-		{
-			bLinkLeftDown = false;
-		}
-		return SMultiLineEditableText::OnMouseButtonUp(MyGeometry, MouseEvent);
-	}
-
-	virtual void OnMouseLeave(const FPointerEvent& MouseEvent) override
-	{
-		bLinkLeftDown = false;
-		SMultiLineEditableText::OnMouseLeave(MouseEvent);
-	}
-
-private:
-	FString LinkTarget;
-	bool bLinkLeftDown = false;
-	FVector2D LinkPressScreenPos = FVector2D::ZeroVector;
-};
-
 namespace UnrealAiChatMarkdownInline
 {
 	enum class ESegmentKind : uint8
@@ -185,6 +86,306 @@ namespace UnrealAiChatMarkdownInline
 		ESegmentKind Kind = ESegmentKind::Text;
 		FString Text;
 		FString Target;
+	};
+
+	struct FChatLinkSpan
+	{
+		int32 Begin = 0;
+		int32 End = 0;
+		FString Target;
+	};
+
+	/**
+	 * Single read-only multiline editor for chat prose: links/code/bold are Slate text runs in one layout so selection
+	 * spans lines and adjacent text (FSlateHyperlinkRun is not used — it embeds SRichTextHyperlink widgets per link).
+	 */
+	class SChatMarkdownProseText final : public SMultiLineEditableText
+	{
+	public:
+		SLATE_BEGIN_ARGS(SChatMarkdownProseText) {}
+			SLATE_ARGUMENT(TArray<FInlineSegment>, Segments)
+			SLATE_ARGUMENT(FSlateFontInfo, BodyFont)
+			SLATE_ARGUMENT(FSlateColor, BodyColor)
+			SLATE_ARGUMENT(TSharedPtr<float>, ProseWrapWidthPx)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			TArray<FInlineSegment> Segments = InArgs._Segments;
+			const FSlateFontInfo BodyFont = InArgs._BodyFont;
+			const FSlateColor BodyColor = InArgs._BodyColor;
+			ProseWrapWidthPxMember = InArgs._ProseWrapWidthPx;
+			check(ProseWrapWidthPxMember.IsValid());
+
+			FTextBlockStyle BaseStyle =
+				FCoreStyle::Get().GetWidgetStyle<FTextBlockStyle>(TEXT("NormalText"));
+			BaseStyle.SetFont(BodyFont);
+			BaseStyle.SetColorAndOpacity(BodyColor);
+
+			FTextBlockStyle LinkRunStyle =
+				FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>(TEXT("NormalUnderlinedText"));
+			LinkRunStyle.SetFont(BodyFont);
+			LinkRunStyle.SetColorAndOpacity(
+				FSlateColor(FLinearColor(0.25f, 0.52f, 0.96f, 1.f)));
+
+			FTextBlockStyle BoldStyle = BaseStyle;
+			BoldStyle.SetFont(FUnrealAiEditorStyle::FontBold(
+				FMath::Max(1, static_cast<int32>(BodyFont.Size))));
+
+			FTextBlockStyle CodeStyle = BaseStyle;
+			CodeStyle.SetFont(FUnrealAiEditorStyle::FontMono9());
+			CodeStyle.SetColorAndOpacity(FUnrealAiEditorStyle::ColorTextPrimary());
+
+			FTextBlockStyle MonoLinkRunStyle = LinkRunStyle;
+			MonoLinkRunStyle.SetFont(FUnrealAiEditorStyle::FontMono9());
+
+			SMultiLineEditableText::Construct(SMultiLineEditableText::FArguments()
+												  .Text(FText::GetEmpty())
+												  .TextStyle(&BaseStyle)
+												  .IsReadOnly(false)
+												  .AutoWrapText(true)
+												  .WrapTextAt(TAttribute<float>::CreateLambda([this]()
+												  {
+													  return FMath::Max(8.f, *ProseWrapWidthPxMember);
+												  }))
+												  .WrappingPolicy(ETextWrappingPolicy::AllowPerCharacterWrapping)
+												  .AllowContextMenu(true)
+												  .SelectAllTextWhenFocused(false)
+												  .ContextMenuExtender(
+													  FMenuExtensionDelegate::CreateSP(
+														  this,
+														  &SChatMarkdownProseText::ExtendContextMenu)));
+
+			LinkSpans.Reset();
+			PopulateFromSegments(
+				Segments,
+				BaseStyle,
+				LinkRunStyle,
+				BoldStyle,
+				CodeStyle,
+				MonoLinkRunStyle);
+			SetIsReadOnly(true);
+		}
+
+		virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+		{
+			if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+			{
+				bLinkLeftDown = true;
+				LinkPressScreenPos = MouseEvent.GetScreenSpacePosition();
+			}
+			return SMultiLineEditableText::OnMouseButtonDown(MyGeometry, MouseEvent);
+		}
+
+		virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+		{
+			const bool bLeft = MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton;
+			FReply R = SMultiLineEditableText::OnMouseButtonUp(MyGeometry, MouseEvent);
+			if (bLeft && bLinkLeftDown)
+			{
+				bLinkLeftDown = false;
+				const FVector2D Delta = MouseEvent.GetScreenSpacePosition() - LinkPressScreenPos;
+				if (Delta.SizeSquared() <= 64.f && !AnyTextSelected())
+				{
+					FString Target;
+					if (ResolveLinkTargetAtLinearIndex(TextLocationToLinear(GetCursorLocation()), Target))
+					{
+						UnrealAiEditorNavigation::NavigateFromChatMarkdownTargetFromChatLink(Target);
+						return FReply::Handled();
+					}
+				}
+			}
+			else if (bLeft)
+			{
+				bLinkLeftDown = false;
+			}
+			return R;
+		}
+
+		virtual void OnMouseLeave(const FPointerEvent& MouseEvent) override
+		{
+			bLinkLeftDown = false;
+			SMultiLineEditableText::OnMouseLeave(MouseEvent);
+		}
+
+	private:
+		void ExtendContextMenu(FMenuBuilder& MenuBuilder)
+		{
+			FString Target;
+			if (!ResolveLinkTargetForContext(Target))
+			{
+				return;
+			}
+			const FString TargetCopy = Target;
+			MenuBuilder.AddMenuEntry(
+				NSLOCTEXT("UnrealAiEditor", "ChatOpenLink", "Open link"),
+				NSLOCTEXT("UnrealAiEditor", "ChatOpenLinkTip", "Go to this URL or project path"),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([TargetCopy]()
+				{
+					UnrealAiEditorNavigation::NavigateFromChatMarkdownTargetFromChatLink(TargetCopy);
+				})));
+		}
+
+		int32 TextLocationToLinear(const FTextLocation& Loc) const
+		{
+			const int32 LineIdx = Loc.GetLineIndex();
+			if (LineIdx == INDEX_NONE)
+			{
+				return 0;
+			}
+			int32 Acc = 0;
+			for (int32 i = 0; i < LineIdx; ++i)
+			{
+				FString Line;
+				GetTextLine(i, Line);
+				Acc += Line.Len() + 1;
+			}
+			return Acc + Loc.GetOffset();
+		}
+
+		void SelectionToLinearRange(int32& OutLo, int32& OutHi) const
+		{
+			const FTextSelection Sel = GetSelection();
+			const int32 A = TextLocationToLinear(Sel.GetBeginning());
+			const int32 B = TextLocationToLinear(Sel.GetEnd());
+			OutLo = FMath::Min(A, B);
+			OutHi = FMath::Max(A, B);
+		}
+
+		bool ResolveLinkTargetAtLinearIndex(const int32 Idx, FString& OutTarget) const
+		{
+			for (const FChatLinkSpan& S : LinkSpans)
+			{
+				if (Idx >= S.Begin && Idx < S.End)
+				{
+					OutTarget = S.Target;
+					return true;
+				}
+			}
+			return false;
+		}
+
+		bool ResolveLinkTargetForContext(FString& OutTarget) const
+		{
+			int32 Lo = 0;
+			int32 Hi = 0;
+			SelectionToLinearRange(Lo, Hi);
+			const bool bCollapsed = (Lo == Hi);
+			for (const FChatLinkSpan& S : LinkSpans)
+			{
+				if (bCollapsed)
+				{
+					if (Lo >= S.Begin && Lo < S.End)
+					{
+						OutTarget = S.Target;
+						return true;
+					}
+				}
+				else if (Hi > S.Begin && Lo < S.End)
+				{
+					OutTarget = S.Target;
+					return true;
+				}
+			}
+			return false;
+		}
+
+		void PopulateFromSegments(
+			const TArray<FInlineSegment>& Segments,
+			const FTextBlockStyle& BaseStyle,
+			const FTextBlockStyle& LinkRunStyle,
+			const FTextBlockStyle& BoldStyle,
+			const FTextBlockStyle& CodeStyle,
+			const FTextBlockStyle& MonoLinkRunStyle)
+		{
+			GoTo(ETextLocation::BeginningOfDocument);
+			int32 DocOffset = 0;
+
+			auto AppendSegmentPiece = [&](const FString& Piece, const FTextBlockStyle& Style, const FString* LinkTarget)
+			{
+				if (Piece.IsEmpty())
+				{
+					return;
+				}
+				const int32 SpanBegin = DocOffset;
+				const TSharedRef<const FString> PieceText = MakeShareable(new FString(Piece));
+				InsertRunAtCursor(FSlateTextRun::Create(FRunInfo(), PieceText, Style));
+				DocOffset += Piece.Len();
+				if (LinkTarget != nullptr && !LinkTarget->IsEmpty())
+				{
+					FChatLinkSpan Span;
+					Span.Begin = SpanBegin;
+					Span.End = DocOffset;
+					Span.Target = *LinkTarget;
+					LinkSpans.Add(MoveTemp(Span));
+				}
+			};
+
+			for (const FInlineSegment& Seg : Segments)
+			{
+				FString Display;
+				switch (Seg.Kind)
+				{
+				case ESegmentKind::Link:
+					if (!Seg.Target.IsEmpty())
+					{
+						Display = UnrealAiStripInlineMarkdown(Seg.Text.IsEmpty() ? Seg.Target : Seg.Text);
+					}
+					break;
+				case ESegmentKind::Text:
+					Display = UnrealAiStripInlineMarkdown(Seg.Text);
+					break;
+				case ESegmentKind::Bold:
+					Display = UnrealAiStripInlineMarkdown(Seg.Text);
+					break;
+				case ESegmentKind::Code:
+					Display = Seg.Text;
+					break;
+				default:
+					break;
+				}
+
+				TArray<FString> Lines;
+				Display.ParseIntoArrayLines(Lines, false);
+
+				for (int32 Li = 0; Li < Lines.Num(); ++Li)
+				{
+					if (Li > 0)
+					{
+						InsertTextAtCursor(TEXT("\n"));
+						++DocOffset;
+					}
+					const FString& LineChunk = Lines[Li];
+
+					if (Seg.Kind == ESegmentKind::Link && !Seg.Target.IsEmpty())
+					{
+						AppendSegmentPiece(LineChunk, LinkRunStyle, &Seg.Target);
+					}
+					else if (Seg.Kind == ESegmentKind::Code && !Seg.Target.IsEmpty())
+					{
+						AppendSegmentPiece(LineChunk, MonoLinkRunStyle, &Seg.Target);
+					}
+					else if (Seg.Kind == ESegmentKind::Code)
+					{
+						AppendSegmentPiece(LineChunk, CodeStyle, nullptr);
+					}
+					else if (Seg.Kind == ESegmentKind::Bold)
+					{
+						AppendSegmentPiece(LineChunk, BoldStyle, nullptr);
+					}
+					else
+					{
+						AppendSegmentPiece(LineChunk, BaseStyle, nullptr);
+					}
+				}
+			}
+		}
+
+		TArray<FChatLinkSpan> LinkSpans;
+		TSharedPtr<float> ProseWrapWidthPxMember;
+		bool bLinkLeftDown = false;
+		FVector2D LinkPressScreenPos = FVector2D::ZeroVector;
 	};
 
 	static TSharedRef<SMultiLineEditableText> MakeChatSelectableReadonlyText(
@@ -662,11 +863,21 @@ namespace UnrealAiChatMarkdownInline
 		const FSlateFontInfo& LinkFont,
 		const TSharedRef<float>& ProseWrapWidthPx)
 	{
-		return SNew(SChatSelectableLinkEdit)
-			.LinkTarget(Target)
-			.LinkLabel(UnrealAiStripInlineMarkdown(Label))
-			.LinkFont(LinkFont)
-			.ProseWrapWidthPx(ProseWrapWidthPx.ToSharedPtr());
+		TArray<FInlineSegment> Segs;
+		FInlineSegment L;
+		L.Kind = ESegmentKind::Link;
+		L.Text = UnrealAiStripInlineMarkdown(Label);
+		L.Target = Target;
+		Segs.Add(MoveTemp(L));
+		return SNew(SBox)
+			.HAlign(HAlign_Fill)
+			[
+				SNew(SChatMarkdownProseText)
+					.Segments(MoveTemp(Segs))
+					.BodyFont(LinkFont)
+					.BodyColor(FUnrealAiEditorStyle::ColorMarkdownBody())
+					.ProseWrapWidthPx(ProseWrapWidthPx.ToSharedPtr())
+			];
 	}
 
 	TSharedRef<SWidget> MakeLinkAwareBodyText(
@@ -677,65 +888,15 @@ namespace UnrealAiChatMarkdownInline
 	{
 		TArray<FInlineSegment> Segs;
 		SplitInlineLinks(LineText, Segs);
-
-		TSharedRef<SWrapBox> Wrap = SNew(SWrapBox)
-			.UseAllottedSize(true);
-		for (const FInlineSegment& Seg : Segs)
-		{
-			if (Seg.Kind == ESegmentKind::Link && !Seg.Target.IsEmpty())
-			{
-				const FString Display = Seg.Text.IsEmpty() ? Seg.Target : Seg.Text;
-				Wrap->AddSlot().Padding(FMargin(0.f, 0.f, 2.f, 0.f))
-				[
-					MakeChatHyperlinkRow(Display, Seg.Target, Font, ProseWrapWidthPx)
-				];
-				continue;
-			}
-			if (Seg.Kind == ESegmentKind::Code)
-			{
-				if (!Seg.Target.IsEmpty())
-				{
-					Wrap->AddSlot().Padding(FMargin(0.f, 0.f, 2.f, 0.f))
-					[
-						MakeChatHyperlinkRow(Seg.Text, Seg.Target, FUnrealAiEditorStyle::FontMono9(), ProseWrapWidthPx)
-					];
-				}
-				else
-				{
-					Wrap->AddSlot()
-					[
-						MakeChatSelectableReadonlyText(
-							Seg.Text,
-							FUnrealAiEditorStyle::FontMono9(),
-							FUnrealAiEditorStyle::ColorTextPrimary(),
-							ProseWrapWidthPx)
-					];
-				}
-				continue;
-			}
-			if (Seg.Kind == ESegmentKind::Bold)
-			{
-				Wrap->AddSlot().Padding(FMargin(0.f, 0.f, 2.f, 0.f))
-				[
-					MakeChatSelectableReadonlyText(
-						UnrealAiStripInlineMarkdown(Seg.Text),
-						FUnrealAiEditorStyle::FontBold(11),
-						Color,
-						ProseWrapWidthPx)
-				];
-				continue;
-			}
-
-			Wrap->AddSlot()
-				[
-					MakeChatSelectableReadonlyText(
-						UnrealAiStripInlineMarkdown(Seg.Text),
-						Font,
-						Color,
-						ProseWrapWidthPx)
-				];
-		}
-		return Wrap;
+		return SNew(SBox)
+			.HAlign(HAlign_Fill)
+			[
+				SNew(SChatMarkdownProseText)
+					.Segments(MoveTemp(Segs))
+					.BodyFont(Font)
+					.BodyColor(Color)
+					.ProseWrapWidthPx(ProseWrapWidthPx.ToSharedPtr())
+			];
 	}
 } // namespace UnrealAiChatMarkdownInline
 

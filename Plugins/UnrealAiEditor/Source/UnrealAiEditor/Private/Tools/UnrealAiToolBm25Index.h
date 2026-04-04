@@ -3,6 +3,7 @@
 #include "Context/AgentContextTypes.h"
 #include "CoreMinimal.h"
 #include "Harness/UnrealAiAgentTypes.h"
+#include "Templates/Function.h"
 
 class FUnrealAiToolCatalog;
 struct FUnrealAiToolPackOptions;
@@ -16,6 +17,13 @@ public:
 		EUnrealAiAgentMode Mode,
 		const FUnrealAiModelCapabilities& Caps,
 		const FUnrealAiToolPackOptions* PackOptions);
+
+	void RebuildForEnabledTools(
+		const FUnrealAiToolCatalog& Catalog,
+		EUnrealAiAgentMode Mode,
+		const FUnrealAiModelCapabilities& Caps,
+		const FUnrealAiToolPackOptions* PackOptions,
+		TFunctionRef<bool(const FString& ToolId)> ToolIdFilter);
 
 	void ScoreQuery(const FString& QueryText, TMap<FString, float>& OutScoresByToolId) const;
 

@@ -8,6 +8,3 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AudioComponentPreview(const TShar
 FUnrealAiToolInvocationResult UnrealAiDispatch_RenderTargetReadbackEditor(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_SequencerOpen(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_MetasoundOpenEditor(const TSharedPtr<FJsonObject>& Args);
-FUnrealAiToolInvocationResult UnrealAiDispatch_FoliagePaintInstances(const TSharedPtr<FJsonObject>& Args);
-FUnrealAiToolInvocationResult UnrealAiDispatch_LandscapeImportHeightmap(const TSharedPtr<FJsonObject>& Args);
-FUnrealAiToolInvocationResult UnrealAiDispatch_PcgGenerate(const TSharedPtr<FJsonObject>& Args);

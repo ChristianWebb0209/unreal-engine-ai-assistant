@@ -165,7 +165,7 @@ Follow `resolver-architecture.md` concepts even if you simplify naming:
 2. Prefer **one authoritative code path** per logical operation (avoid copy-paste validators).
 3. For Blueprint graph operations: enforce **ordering** (e.g., export freshness, merge policy, compile prerequisites).
 
-**Deliverable:** compiles clean; run `./build-editor.ps1 --Headless` per project convention.
+**Deliverable:** compiles clean; run `./build-editor.ps1 -Headless` per project convention.
 
 ### Phase 4 — Retrieval: tags, summaries, and optional tooling
 
@@ -226,7 +226,7 @@ Build **deterministic Unreal systems that a model can invoke safely**—with **m
 * **Budget:** expect **long, multi-step** implementation; use **large** reasoning context for schema + dispatch + handlers together.
 * **Preserve working pieces:** do not rewrite search, PIE, or read-only tools without cause.
 * **Consistency:** schema, resolver messages, and handler behavior must tell the **same story**.
-* **Build:** run **`./build-editor.ps1 --Headless`** periodically; use **`./build-editor.ps1 -Restart`** if the plugin DLL is locked (**LNK1104**).
+* **Build:** run **`./build-editor.ps1 -Headless`** periodically; use **`./build-editor.ps1 -Restart`** if the plugin DLL is locked (**LNK1104**).
 * **UE version:** follow **UE 5.7** syntax and APIs per project rules.
 
 ---

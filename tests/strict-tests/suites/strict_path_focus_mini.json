@@ -1,0 +1,17 @@
+{
+  "suite_id": "strict_path_focus_mini_v1",
+  "default_type": "agent",
+  "turns": [
+    {
+      "id": "turn_01",
+      "type": "agent",
+      "request": "Build a blueprint named StrictPathProbeBP under /Game/AIHarness/PathProbe.",
+      "assertions": [
+        {
+          "type": "asset_exists",
+          "object_path": "/Game/AIHarness/PathProbe/StrictPathProbeBP.StrictPathProbeBP"
+        }
+      ]
+    }
+  ]
+}

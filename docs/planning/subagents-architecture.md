@@ -13,9 +13,9 @@ This is the authoritative description of shipped plan-mode behavior and the curr
 - **Planner pass (`EUnrealAiAgentMode::Plan`):** The model emits a single JSON object, schema `unreal_ai.plan_dag`, with a `nodes[]` array (`id`, `title`, `hint`, `dependsOn` / `depends_on`). No tools in this pass.
 - **Validation:** `UnrealAiPlanDag::ParseDagJson` and `UnrealAiPlanDag::ValidateDag` run before any node executes (duplicate ids, unknown deps, cycles, max node count). Invalid graphs do not run children; the executor may perform a **one-shot planner repair** (`FUnrealAiPlanExecutor`).
 - **Execution:** `FUnrealAiPlanExecutor` (`Plugins/UnrealAiEditor/.../Private/Planning/FUnrealAiPlanExecutor.cpp`) computes a deterministic ready **wave** (policy width `1` when plugin setting `agent.useSubagents=false`, `2` when true) and currently dispatches one child turn at a time in wave order.
-- **Thread isolation (per node):** Child runs use thread ids of the form `<parentThreadId>_plan_<nodeId>` so context/logs stay separable, while plan-scoped state mutations always target the **parent** thread via explicit context APIs.
+- **Thread isolation (per node):** Child runs use thread ids of the form `<parentThreadId>_plan_<nodeId>` so context/logs stay separable, while plan-scoped state mutations always target the **parent** thread via explicit context APIs. **Blueprint Builder** `<unreal_ai_build_blueprint>` chaining is **not** started from plan-node threads (thread id contains `_plan_`); use the parent Agent thread to delegate graph work.
 - **Harness:** `FUnrealAiAgentHarness` runs one turn at a time; plan pipeline lifetime is tracked (`IsPlanPipelineActive`, idle-abort tuning for headed runs).
-- **Prompts:** Chunk `09-plan-dag.md` (planner); chunk `11-plan-node-execution.md` for Agent turns whose thread id contains `_plan_` (anti–tool-loop / checklist discipline).
+- **Prompts:** `chunks/plan/*.md` (planner); `chunks/plan-node/*.md` for Agent turns whose thread id contains `_plan_` (anti–tool-loop / checklist discipline).
 - **Agent Chat UI:** `FUnrealAiChatRunSink` surfaces plan/run progress in transcript **RunProgress** blocks (phase text + expandable **Show details** timeline: continuation, harness progress, enforcement, plan sub-turn boundaries). Rendered in `SChatMessageList` (`EUnrealAiChatBlockKind::RunProgress`).
 - **Legacy:** `agent_emit_todo_plan` / `unreal_ai.todo_plan` persistence is **separate** from the plan DAG executor and is **deprecated** (not exposed to the model).
 
@@ -91,7 +91,7 @@ Proposed **composite** thresholds (implementation can start simple and tighten):
 
 - **Minimum tool budget** per node (e.g. expected tool rounds or a planner-provided estimate).
 - **Minimum scope** (e.g. distinct asset paths touched, or explicit “large” flag from planner).
-- **Minimum node hint** semantics: e.g. “orientation / checklist” nodes stay **serial prose-first** per `11-plan-node-execution.md`.
+- **Minimum node hint** semantics: e.g. “orientation / checklist” nodes stay **serial prose-first** per `chunks/plan-node/*.md`.
 
 Exact numbers belong in **`UnrealAiWaitTime` / policy** or a dedicated **policy struct** so tests can pin them.
 
@@ -108,7 +108,7 @@ To keep separation of concerns, **validation** should not guess intent from free
 - `primary_asset` / `scope_paths[]` — for disjointness checks.
 - `estimated_weight` — planner-estimated cost for minimum-size gating.
 
-Schema changes require **prompt updates** (`09-plan-dag.md`), **JSON parsing** in `UnrealAiPlanDag`, and **backward compatibility** (missing fields = conservative serial).
+Schema changes require **prompt updates** (`chunks/plan/*.md`), **JSON parsing** in `UnrealAiPlanDag`, and **backward compatibility** (missing fields = conservative serial).
 
 ### 3.2 Eligibility module
 
@@ -129,7 +129,7 @@ Below is a **target** layout. Names can shift; responsibilities should not.
 | **Wave scheduler (optional)** | **New:** `Private/Planning/FUnrealAiPlanWaveScheduler.h` (+ `.cpp`) | Given policy output, issue `RunTurn` calls (still **one harness**; may queue work or use async completion tokens). |
 | **Harness** | Existing: `FUnrealAiAgentHarness`, scenario runner | Ensure parallel child runs do not break `IsPlanPipelineActive`, idle abort, or cancellation. |
 | **Context / status** | Existing: `IAgentContextService` / plan node status maps | Per-node `running/success/failed` must remain consistent under concurrency. |
-| **Prompts** | `prompts/chunks/09-plan-dag.md`, new fragment if needed | Planner must output only parallel hints when safe; serial spine remains default story. |
+| **Prompts** | `prompts/chunks/plan/*.md`, new fragment if needed | Planner must output only parallel hints when safe; serial spine remains default story. |
 | **Tests** | `UnrealAiEditor` module tests or harness dry runs | Policy unit tests; headed smoke optional. |
 
 **Principle:** `FUnrealAiPlanExecutor` **orchestrates**; **policy** decides; **harness** executes; **DAG** parses.

@@ -14,6 +14,13 @@ Index of all `docs/` files: [docs/README.md](../README.md)
 | Dispatch (`UnrealAiToolDispatch*.cpp`) | Every catalog tool either runs, returns structured `not_implemented`, or validates input with clear JSON errors. |
 | Harness (chat loop + persistence) | LLM transport → tool execution → persistence all connect; artifacts land under `Saved/UnrealAiEditor/HarnessRuns/<timestamp>/`. |
 
+### Main Agent vs Blueprint Builder
+
+- **Default Agent:** `bOmitMainAgentBlueprintMutationTools` + **`agent_surfaces`** in [`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) filter which Blueprint graph tools appear in the tiered appendix (`UnrealAiBlueprintToolGate`, `UnrealAiToolSurfaceCompatibility`).
+- **Handoff:** main agent uses **`<unreal_ai_build_blueprint>`** with **`target_kind`**; harness chains a builder sub-turn (`UnrealAiBuildBlueprintTag`, `FUnrealAiAgentHarness`) with **`blueprint-builder/`** prompt chunks and **`UnrealAiBlueprintBuilderToolSurface`**.
+- **Escape hatch:** `bOmitMainAgentBlueprintMutationTools == false` disables surface gating for power users.
+- **Validators:** `scripts/Validate-UnrealAiToolCatalog.ps1`, `scripts/verify_tool_catalog_meta.py`, `scripts/audit_tool_agent_surfaces.py` (CI: `.github/workflows/validate-tool-catalog.yml`).
+
 ---
 ## Iteration order
 

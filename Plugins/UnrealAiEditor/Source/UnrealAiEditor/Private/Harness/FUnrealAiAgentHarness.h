@@ -44,6 +44,7 @@ public:
 	virtual void NotifyPlanExecutorEnded() override;
 	virtual bool IsPlanPipelineActive() const override;
 	virtual void SetHeadedScenarioStrictToolBudgets(bool bEnable) override;
+	virtual void SetHeadedScenarioSyncRun(bool bEnable) override;
 
 private:
 	IUnrealAiPersistence* Persistence = nullptr;
@@ -58,4 +59,5 @@ private:
 	TSharedPtr<UnrealAiAgentHarnessPriv::FAgentTurnRunner> ActiveRunner;
 	TWeakPtr<FUnrealAiPlanExecutor> WeakActivePlanExecutor;
 	bool bHeadedScenarioStrictToolBudgets = false;
+	bool bHeadedScenarioSyncRun = false;
 };

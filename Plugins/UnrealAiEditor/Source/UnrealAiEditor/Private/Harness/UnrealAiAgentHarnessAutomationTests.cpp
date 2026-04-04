@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Misc/UnrealAiHarnessProgressTelemetry.h"
 #include "Planning/UnrealAiPlanDag.h"
 #include "Harness/UnrealAiAgentTypes.h"
 
@@ -108,6 +109,29 @@ bool FUnrealAiPlanTransitiveDependentsTest::RunTest(const FString& Parameters)
 	Out.Reset();
 	UnrealAiPlanDag::CollectTransitiveDependents(Dag, TEXT(""), Out);
 	TestEqual(TEXT("empty failed id"), Out.Num(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiHarnessProgressTelemetryCombinedIdleTest,
+	"UnrealAiEditor.Tools.HarnessProgressTelemetryCombinedIdle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiHarnessProgressTelemetryCombinedIdleTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	UnrealAiHarnessProgressTelemetry::ResetForRun();
+	UnrealAiHarnessProgressTelemetry::NotifyThinkingDelta();
+	double RawAsst = 0.0, Http = 0.0, Llm = 0.0;
+	UnrealAiHarnessProgressTelemetry::GetStreamIdleSeconds(RawAsst, Http, Llm);
+	TestTrue(TEXT("assistant-only idle unset before assistant delta"), RawAsst < 0.0);
+	double Combined = -1.0;
+	UnrealAiHarnessProgressTelemetry::GetAssistantOrThinkingIdleSeconds(Combined);
+	TestTrue(TEXT("thinking-only updates combined stream idle"), Combined >= 0.0 && Combined < 5.0);
+
+	UnrealAiHarnessProgressTelemetry::NotifyAssistantDelta();
+	UnrealAiHarnessProgressTelemetry::GetAssistantOrThinkingIdleSeconds(Combined);
+	TestTrue(TEXT("assistant delta also yields fresh combined idle"), Combined >= 0.0 && Combined < 5.0);
 	return true;
 }
 

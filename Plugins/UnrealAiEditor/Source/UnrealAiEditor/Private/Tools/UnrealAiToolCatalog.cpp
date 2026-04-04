@@ -4,6 +4,7 @@
 #include "Dom/JsonValue.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Interfaces/IPluginManager.h"
+#include "Logging/LogMacros.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -121,6 +122,112 @@ bool FUnrealAiToolCatalog::LoadFromPlugin()
 		ToolById.Add(Tid, Obj);
 	}
 
+	const FString ResourcesDir = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Resources"));
+	const TSharedPtr<FJsonObject>* MetaObj = nullptr;
+	if (Parsed->TryGetObjectField(TEXT("meta"), MetaObj) && MetaObj && (*MetaObj).IsValid())
+	{
+		const TArray<TSharedPtr<FJsonValue>>* FragSpecs = nullptr;
+		if ((*MetaObj)->TryGetArrayField(TEXT("tool_catalog_fragments"), FragSpecs) && FragSpecs)
+		{
+			for (const TSharedPtr<FJsonValue>& SpecVal : *FragSpecs)
+			{
+				if (!SpecVal.IsValid())
+				{
+					continue;
+				}
+				FString RelPath;
+				FString FragmentRetrievalBundle;
+				if (SpecVal->Type == EJson::String)
+				{
+					RelPath = SpecVal->AsString();
+				}
+				else if (SpecVal->Type == EJson::Object)
+				{
+					const TSharedPtr<FJsonObject> SpecObj = SpecVal->AsObject();
+					if (!SpecObj.IsValid())
+					{
+						continue;
+					}
+					SpecObj->TryGetStringField(TEXT("path"), RelPath);
+					if (RelPath.IsEmpty())
+					{
+						SpecObj->TryGetStringField(TEXT("relative_path"), RelPath);
+					}
+					SpecObj->TryGetStringField(TEXT("retrieval_bundle"), FragmentRetrievalBundle);
+				}
+				RelPath.TrimStartAndEndInline();
+				FragmentRetrievalBundle.TrimStartAndEndInline();
+				if (RelPath.IsEmpty())
+				{
+					continue;
+				}
+
+				const FString FragFullPath = FPaths::Combine(ResourcesDir, RelPath);
+				FString FragJson;
+				if (!FFileHelper::LoadFileToString(FragJson, *FragFullPath))
+				{
+					UE_LOG(LogTemp, Warning, TEXT("UnrealAiToolCatalog: failed to load tool_catalog_fragments entry '%s'"), *FragFullPath);
+					continue;
+				}
+				TSharedPtr<FJsonObject> FragRoot;
+				const TSharedRef<TJsonReader<>> FragReader = TJsonReaderFactory<>::Create(FragJson);
+				if (!FJsonSerializer::Deserialize(FragReader, FragRoot) || !FragRoot.IsValid())
+				{
+					UE_LOG(LogTemp, Warning, TEXT("UnrealAiToolCatalog: invalid JSON in fragment '%s'"), *FragFullPath);
+					continue;
+				}
+				const TArray<TSharedPtr<FJsonValue>>* FragTools = nullptr;
+				if (!FragRoot->TryGetArrayField(TEXT("tools"), FragTools) || !FragTools)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("UnrealAiToolCatalog: fragment '%s' missing tools[] array"), *FragFullPath);
+					continue;
+				}
+				for (const TSharedPtr<FJsonValue>& FV : *FragTools)
+				{
+					const TSharedPtr<FJsonObject> Obj = FV.IsValid() ? FV->AsObject() : nullptr;
+					if (!Obj.IsValid())
+					{
+						continue;
+					}
+					FString Tid;
+					if (!Obj->TryGetStringField(TEXT("tool_id"), Tid) || Tid.IsEmpty())
+					{
+						continue;
+					}
+					if (ToolById.Contains(Tid))
+					{
+						UE_LOG(LogTemp, Warning, TEXT("UnrealAiToolCatalog: fragment '%s' overrides tool_id '%s'"), *RelPath, *Tid);
+					}
+					if (!FragmentRetrievalBundle.IsEmpty() && !Obj->HasField(TEXT("retrieval_bundle")))
+					{
+						Obj->SetStringField(TEXT("retrieval_bundle"), FragmentRetrievalBundle);
+					}
+					ToolById.FindOrAdd(Tid) = Obj;
+				}
+			}
+		}
+	}
+
+	// Keep Root.tools[] and meta.tool_count consistent with the merged ToolById map (harnesses may read JSON).
+	TArray<FString> SortedIds;
+	ToolById.GetKeys(SortedIds);
+	SortedIds.Sort();
+	TArray<TSharedPtr<FJsonValue>> MergedTools;
+	MergedTools.Reserve(SortedIds.Num());
+	for (const FString& Tid : SortedIds)
+	{
+		const TSharedPtr<FJsonObject>* Def = ToolById.Find(Tid);
+		if (Def && Def->IsValid())
+		{
+			MergedTools.Add(MakeShared<FJsonValueObject>(*Def));
+		}
+	}
+	Parsed->SetArrayField(TEXT("tools"), MergedTools);
+	if (MetaObj && (*MetaObj).IsValid())
+	{
+		(*MetaObj)->SetNumberField(TEXT("tool_count"), static_cast<double>(ToolById.Num()));
+	}
+
 	Root = Parsed;
 	bLoaded = true;
 	return true;
@@ -184,6 +291,21 @@ void FUnrealAiToolCatalog::ForEachEnabledToolForMode(
 	const FUnrealAiToolPackOptions* PackOptions,
 	TFunctionRef<void(const FString& ToolId, const TSharedPtr<FJsonObject>& Definition)> Fn) const
 {
+	ForEachEnabledToolForMode(
+		Mode,
+		Caps,
+		PackOptions,
+		[](const FString&) { return true; },
+		Fn);
+}
+
+void FUnrealAiToolCatalog::ForEachEnabledToolForMode(
+	EUnrealAiAgentMode Mode,
+	const FUnrealAiModelCapabilities& Caps,
+	const FUnrealAiToolPackOptions* PackOptions,
+	TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
+	TFunctionRef<void(const FString& ToolId, const TSharedPtr<FJsonObject>& Definition)> Fn) const
+{
 	if (!Caps.bSupportsNativeTools || !bLoaded)
 	{
 		return;
@@ -213,6 +335,10 @@ void FUnrealAiToolCatalog::ForEachEnabledToolForMode(
 		{
 			continue;
 		}
+		if (!ToolIdFilter(Tid))
+		{
+			continue;
+		}
 		Fn(Tid, *ObjPtr);
 	}
 }
@@ -221,6 +347,16 @@ void FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode(
 	EUnrealAiAgentMode Mode,
 	const FUnrealAiModelCapabilities& Caps,
 	const FUnrealAiToolPackOptions* PackOptions,
+	FString& OutJsonArray) const
+{
+	BuildLlmToolsJsonArrayForMode(Mode, Caps, PackOptions, [](const FString&) { return true; }, OutJsonArray);
+}
+
+void FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode(
+	EUnrealAiAgentMode Mode,
+	const FUnrealAiModelCapabilities& Caps,
+	const FUnrealAiToolPackOptions* PackOptions,
+	TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
 	FString& OutJsonArray) const
 {
 	OutJsonArray.Reset();
@@ -233,6 +369,7 @@ void FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode(
 		Mode,
 		Caps,
 		PackOptions,
+		ToolIdFilter,
 		[&](const FString& Tid, const TSharedPtr<FJsonObject>& Obj)
 	{
 		FString Summary;
@@ -326,9 +463,24 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendix(
 	const FUnrealAiToolPackOptions* PackOptions,
 	FString& OutMarkdown) const
 {
+	BuildCompactToolIndexAppendix(
+		Mode,
+		Caps,
+		PackOptions,
+		[](const FString&) { return true; },
+		OutMarkdown);
+}
+
+void FUnrealAiToolCatalog::BuildCompactToolIndexAppendix(
+	EUnrealAiAgentMode Mode,
+	const FUnrealAiModelCapabilities& Caps,
+	const FUnrealAiToolPackOptions* PackOptions,
+	TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
+	FString& OutMarkdown) const
+{
 	TArray<FString> EmptyOrder;
 	const TSet<FString> EmptyGuard;
-	BuildCompactToolIndexAppendixTiered(Mode, Caps, PackOptions, EmptyOrder, EmptyGuard, 0, 2000000000, OutMarkdown);
+	BuildCompactToolIndexAppendixTiered(Mode, Caps, PackOptions, EmptyOrder, EmptyGuard, 0, 2000000000, ToolIdFilter, OutMarkdown, 900);
 }
 
 bool FUnrealAiToolCatalog::TryGetToolParametersJsonString(const FString& ToolId, FString& OutParametersJson) const
@@ -360,7 +512,33 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
 	const TSet<FString>& GuardrailToolIds,
 	int32 ExpandedCount,
 	int32 MaxTotalChars,
-	FString& OutMarkdown) const
+	FString& OutMarkdown,
+	int32 MaxParametersExcerptChars) const
+{
+	BuildCompactToolIndexAppendixTiered(
+		Mode,
+		Caps,
+		PackOptions,
+		OrderedToolIds,
+		GuardrailToolIds,
+		ExpandedCount,
+		MaxTotalChars,
+		[](const FString&) { return true; },
+		OutMarkdown,
+		MaxParametersExcerptChars);
+}
+
+void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
+	EUnrealAiAgentMode Mode,
+	const FUnrealAiModelCapabilities& Caps,
+	const FUnrealAiToolPackOptions* PackOptions,
+	const TArray<FString>& OrderedToolIds,
+	const TSet<FString>& GuardrailToolIds,
+	int32 ExpandedCount,
+	int32 MaxTotalChars,
+	TFunctionRef<bool(const FString& ToolId)> ToolIdFilter,
+	FString& OutMarkdown,
+	int32 MaxParametersExcerptChars) const
 {
 	OutMarkdown.Reset();
 	if (!Caps.bSupportsNativeTools || !bLoaded)
@@ -375,6 +553,7 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
 			Mode,
 			Caps,
 			PackOptions,
+			ToolIdFilter,
 			[&](const FString& Tid, const TSharedPtr<FJsonObject>&)
 			{
 				Order.Add(Tid);
@@ -402,9 +581,9 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
 		Obj->TryGetStringField(TEXT("summary"), Summary);
 		FString ParamsJson;
 		TryGetToolParametersJsonString(Tid, ParamsJson);
-		if (ParamsJson.Len() > 900)
+		if (MaxParametersExcerptChars > 0 && ParamsJson.Len() > MaxParametersExcerptChars)
 		{
-			ParamsJson.LeftInline(900);
+			ParamsJson.LeftInline(MaxParametersExcerptChars);
 			ParamsJson += TEXT("...");
 		}
 		FSeg S;
@@ -422,6 +601,10 @@ void FUnrealAiToolCatalog::BuildCompactToolIndexAppendixTiered(
 	{
 		const TSharedPtr<FJsonObject> Obj = FindToolDefinition(Tid);
 		if (!Obj.IsValid())
+		{
+			continue;
+		}
+		if (!ToolIdFilter(Tid))
 		{
 			continue;
 		}

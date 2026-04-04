@@ -25,7 +25,7 @@
       "exec",
       "settings_properties"
     ],
-    "tool_count": 99,
+    "tool_count": 84,
     "retrieval_index": {
       "bm25_document_formula": "tool_id + summary + category + tags + tool_surface.domain_tags",
       "indexed_fields": [
@@ -57,27 +57,51 @@
       "viewport_prefix": "Viewport families consolidate camera, frame, and capture operations under shared prefixes.",
       "project_file_prefix": "Project-file tools continue to use project_file_* for project-scoped disk I/O.",
       "console_escape": "Console access stays behind console_command and never expands into arbitrary shell execution.",
-      "settings_envelope": "setting_query and setting_apply use a domain/key envelope and resolve to legacy settings_get/settings_set today.",
+      "settings_envelope": "setting_query and setting_apply use a domain/key envelope; the resolver projects to the internal settings backend shape before dispatch.",
       "imperative_verbs": "Use imperative verbs for one-shot actions such as compile, open, save, start, and stop."
     },
     "status_legend": {
       "implemented": "Dispatcher has a UE handler in UnrealAiToolDispatch*.cpp; calls may still fail with invalid args or engine state.",
       "future": "Staged capability in catalog; implementation may be partial — verify in source.",
-      "designed": "Contract drafted; behavior may be incomplete.",
-      "deprecated": "Prefer the replacement tool_id; see docs/tooling/tool-dispatch-inventory.md."
+      "designed": "Contract drafted; behavior may be incomplete."
     },
     "tool_surface": {
       "description": "Optional per-tool overrides under tools[].tool_surface — domain_tags, centrality, worst_case_cost, requires_strict_args (tools-expansion.md). Tiered eligibility, usage prior, JSONL logging, and repair nudges are toggled in source: Plugins/UnrealAiEditor/.../Misc/UnrealAiRuntimeDefaults.h (not environment variables).",
       "runtime_defaults_header": "Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h"
     },
+    "agent_surfaces": {
+      "description": "Optional per-tool array tools[].agent_surfaces lists which agent pipelines may surface or invoke the tool. Orthogonal to modes (ask/agent/plan) and to builder_domains / blueprint_builder_core / environment_builder_core. Parsed in UnrealAiToolSurfaceCompatibility; enforced in UnrealAiAgentToolGate when Agent mode and bOmitMainAgentBlueprintMutationTools is true.",
+      "tokens": {
+        "all": "Single entry [\"all\"] (any case) or missing/empty field: no surface restriction (same eligibility as pre-tag catalogs).",
+        "main_agent": "Main agent turn (not a Blueprint or Environment Builder sub-turn).",
+        "blueprint_builder": "Blueprint Builder sub-turn after build-blueprint handoff.",
+        "environment_builder": "Environment / PCG Builder sub-turn after build-environment handoff."
+      },
+      "escape_hatch": "When bOmitMainAgentBlueprintMutationTools is false, surface gating is bypassed for power users."
+    },
     "resolver_contract": {
-      "version": "2.1.0",
+      "version": "2.2.0",
       "architecture_doc": "docs/planning/new-tools-schema/resolver-architecture.md",
-      "notes": "No resolver inference for operation/capture_kind/target/value_kind; explicit catalog required fields only. No Levenshtein tool_id autocorrect (suggestions only). Alias table + path canonicalization only. Validates before dispatch; resolver_audit on results."
+      "notes": "Catalog tools may declare tools[].agent_surfaces for surface compatibility (main_agent / blueprint_builder / environment_builder / all); omit_from_main_agent_surface removed. No resolver inference for operation/capture_kind/target/value_kind; explicit catalog required fields only. No Levenshtein tool_id autocorrect (suggestions only). Alias table + path canonicalization only. Validates before dispatch; resolver_audit on results."
     },
     "invocation": {
       "focused_flag": "Optional JSON field \"focused\": true on supported tools. Stripped before handlers; after a successful run the editor opens or foregrounds the related Blueprint, asset, Content Browser selection, or project source file in the IDE. Tools list this property explicitly where the catalog schema is strict (additionalProperties: false)."
-    }
+    },
+    "tool_catalog_fragments": [
+      {
+        "path": "tools.blueprint.json",
+        "retrieval_bundle": "blueprint_builder"
+      },
+      {
+        "path": "tools.environment.json",
+        "retrieval_bundle": "environment_builder"
+      },
+      {
+        "path": "tools.main.json",
+        "retrieval_bundle": "main_agent"
+      }
+    ],
+    "tool_catalog_fragments_notes": "Optional array: each entry is a string (path under Resources/) or object { path, retrieval_bundle }. Fragment files must be { \"tools\": [ ... ] }. Merged tools may receive retrieval_bundle; main Agent tiered BM25 omits retrieval_bundle=blueprint_builder and =environment_builder (builder sub-turns still see the full merged catalog). Naming: tools.blueprint.json (blueprint_builder), tools.environment.json (environment_builder), tools.main.json (main_agent-only tools; may be empty)."
   },
   "tools": [
     {
@@ -813,7 +837,8 @@
       "context_selector": {
         "priority": 78,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -1034,728 +1059,6 @@
       "status": "future"
     },
     {
-      "tool_id": "blueprint_add_variable",
-      "summary": "Add member variable to Blueprint.",
-      "category": "blueprints",
-      "tags": [
-        "blueprint"
-      ],
-      "tier": "future",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 20,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "blueprint_path": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string",
-            "description": "Variable name (preferred key). Alias: variable_name."
-          },
-          "variable_name": {
-            "type": "string",
-            "description": "Legacy alias for name."
-          },
-          "type": {
-            "type": "string",
-            "description": "Variable type token (preferred key). Alias: variable_type."
-          },
-          "variable_type": {
-            "type": "string",
-            "description": "Legacy alias for type."
-          },
-          "category": {
-            "type": "string"
-          },
-          "focused": {
-            "type": "boolean",
-            "description": "After success, open this Blueprint in the editor."
-          }
-        },
-        "required": [
-          "blueprint_path",
-          "name",
-          "type"
-        ]
-      },
-      "side_effects": "asset",
-      "permission": "write",
-      "ue_entry_points": "FBlueprintEditorUtils::AddMemberVariable",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "future"
-    },
-    {
-      "tool_id": "blueprint_compile",
-      "summary": "Compile a Blueprint and return diagnostics. Use after blueprint_graph_patch, blueprint_apply_ir, or other graph edits to validate/fix compile state; not for graph discovery (use blueprint_get_graph_summary or blueprint_export_ir). Use format_graphs to run in-process graph layout on script graphs before compile when graphs should be laid out.",
-      "category": "blueprints",
-      "tags": [
-        "blueprint"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 50,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "blueprint_path": {
-            "type": "string"
-          },
-          "format_graphs": {
-            "type": "boolean",
-            "description": "When true, run bundled graph layout on all non-empty ubergraph, function, and macro graphs before compiling."
-          },
-          "focused": {
-            "type": "boolean",
-            "description": "After success, open and foreground this Blueprint in the editor."
-          }
-        },
-        "required": [
-          "blueprint_path"
-        ]
-      },
-      "side_effects": "compile",
-      "permission": "write",
-      "ue_entry_points": "FKismetEditorUtilities::CompileBlueprint",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [
-        "https://dev.epicgames.com/documentation/en-us/unreal-engine/blueprints-visual-scripting-in-unreal-engine"
-      ],
-      "status": "implemented"
-    },
-    {
-      "tool_id": "blueprint_graph_patch",
-      "summary": "Primary UE 5.7 graph mutator: ops[] on blueprint_path (/Game) and graph_name. create_node (UK2Node), create_comment (boxes + member_node_refs), connect, break_link (splice/reroute), splice_on_link (break + wire through insert_patch_id), set_pin_default, add_variable, remove_node, move_node. auto_layout defaults true with layout_scope patched_nodes (only nodes created this batch); layout_scope full_graph reformats entire script graph; layout_mode / wire_knots match blueprint_apply_ir. Insert-between flow: create_node middle → break_link or splice_on_link → connect data pins as needed, all in one ops[]. Response adds layout_applied, layout_nodes_positioned, formatter_available.",
-      "category": "blueprints",
-      "tags": [
-        "blueprint",
-        "graph",
-        "write",
-        "k2"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 74,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "blueprint_path": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Blueprint asset object path under /Game only (e.g. /Game/Folder/MyBP.MyBP)."
-          },
-          "graph_name": {
-            "type": "string",
-            "description": "Script graph to edit (default: EventGraph). Use export/summary to list function or macro graphs."
-          },
-          "compile": {
-            "type": "boolean",
-            "description": "When true (default), recompile the Blueprint after ops. For full compiler_messages[], follow with blueprint_compile."
-          },
-          "auto_layout": {
-            "type": "boolean",
-            "description": "When true (default), run bundled graph layout after ops succeed. Set false to preserve manual node positions for this patch."
-          },
-          "layout_scope": {
-            "type": "string",
-            "enum": [
-              "patched_nodes",
-              "full_graph"
-            ],
-            "description": "patched_nodes: layout only nodes created in this patch (create_node/create_comment). full_graph: LayoutEntireGraph on the script graph—use only when an explicit reformat is intended."
-          },
-          "layout_mode": {
-            "type": "string",
-            "enum": [
-              "single_row",
-              "multi_strand"
-            ],
-            "description": "Optional; omit to use project default (Plugins → Unreal AI Editor)."
-          },
-          "wire_knots": {
-            "type": "string",
-            "enum": [
-              "off",
-              "light",
-              "aggressive"
-            ],
-            "description": "Optional data-wire knot pass; omit for project default."
-          },
-          "ops": {
-            "type": "array",
-            "minItems": 1,
-            "description": "Ordered operations. NodeRef for connect/break_link/splice: patch_id from this batch, guid:uuid, or bare node_guid from blueprint_export_ir. `self` is not a graph node—use blueprint_graph_list_pins for VariableSet Target pins.",
-            "items": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "op": {
-                      "type": "string",
-                      "enum": [
-                        "create_node"
-                      ]
-                    },
-                    "patch_id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "description": "Local id for NodeRef in connect/set_pin_default within this ops list (e.g. n1)."
-                    },
-                    "k2_class": {
-                      "type": "string",
-                      "minLength": 1,
-                      "description": "UK2Node class object path, e.g. /Script/BlueprintGraph.K2Node_IfThenElse, K2Node_CallFunction, K2Node_CustomEvent (user-defined events: set event_name or custom_event.name), K2Node_Event (built-in/override: requires event_override), K2Node_VariableGet, K2Node_VariableSet, K2Node_DynamicCast."
-                    },
-                    "event_name": {
-                      "type": "string",
-                      "description": "For K2Node_CustomEvent: function name (also custom_event_name or custom_event.name or name)."
-                    },
-                    "custom_event_name": {
-                      "type": "string",
-                      "description": "Alias of event_name for K2Node_CustomEvent."
-                    },
-                    "custom_event": {
-                      "type": "object",
-                      "description": "For K2Node_CustomEvent: { \"name\": \"MyEvent\" } or event_name inside.",
-                      "properties": {
-                        "name": {
-                          "type": "string"
-                        },
-                        "event_name": {
-                          "type": "string"
-                        }
-                      }
-                    },
-                    "name": {
-                      "type": "string",
-                      "description": "Optional display/identifier; for K2Node_CustomEvent used as event name if event_name empty."
-                    },
-                    "x": {
-                      "type": "number",
-                      "description": "Editor graph X position (pixels)."
-                    },
-                    "y": {
-                      "type": "number"
-                    },
-                    "class_path": {
-                      "type": "string",
-                      "description": "For K2Node_CallFunction: owning UClass of the UFunction (e.g. /Script/Engine.KismetSystemLibrary). Use with function_name at the top level, or use call_function { class_path, function_name } instead."
-                    },
-                    "function_name": {
-                      "type": "string",
-                      "description": "For K2Node_CallFunction: UFunction short name (e.g. PrintString). Required with class_path unless call_function object is used."
-                    },
-                    "call_function": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "class_path": {
-                          "type": "string",
-                          "description": "Owning UClass of the UFunction (e.g. /Script/Engine.KismetSystemLibrary)."
-                        },
-                        "function_name": {
-                          "type": "string",
-                          "description": "UFunction short name (e.g. PrintString)."
-                        }
-                      },
-                      "required": [
-                        "class_path",
-                        "function_name"
-                      ]
-                    },
-                    "event_override": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "function_name": {
-                          "type": "string",
-                          "description": "Event or function name on outer class (e.g. ReceiveBeginPlay)."
-                        },
-                        "outer_class_path": {
-                          "type": "string",
-                          "description": "Class that declares the member (e.g. /Script/Engine.Actor)."
-                        }
-                      },
-                      "required": [
-                        "function_name",
-                        "outer_class_path"
-                      ]
-                    },
-                    "variable_name": {
-                      "type": "string",
-                      "description": "Blueprint member name for K2Node_VariableGet / K2Node_VariableSet."
-                    },
-                    "cast_target_class": {
-                      "type": "string",
-                      "description": "Target UClass path for K2Node_DynamicCast."
-                    },
-                    "dynamic_cast": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "class_path": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "class_path"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "op",
-                    "patch_id",
-                    "k2_class"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "op": {
-                      "type": "string",
-                      "enum": [
-                        "add_variable"
-                      ]
-                    },
-                    "name": {
-                      "type": "string",
-                      "description": "Member variable name."
-                    },
-                    "variable_name": {
-                      "type": "string",
-                      "description": "Alias for name."
-                    },
-                    "member_name": {
-                      "type": "string",
-                      "description": "Alias for name."
-                    },
-                    "type": {
-                      "description": "Member pin type: string token (int, float, bool, byte, int64, name, text, vector, rotator, or /Script/... /Game/... class or struct path) or object { category or pin_category, optional subcategory, class_path or subcategory_object for object/struct }.",
-                      "oneOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "object",
-                          "additionalProperties": true,
-                          "minProperties": 1
-                        }
-                      ]
-                    },
-                    "variable_type": {
-                      "description": "Alias of type (string or object).",
-                      "oneOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "object",
-                          "additionalProperties": true,
-                          "minProperties": 1
-                        }
-                      ]
-                    }
-                  },
-                  "required": [
-                    "op"
-                  ],
-                  "oneOf": [
-                    {
-                      "required": [
-                        "name",
-                        "type"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "name",
-                        "variable_type"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "variable_name",
-                        "type"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "variable_name",
-                        "variable_type"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "member_name",
-                        "type"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "member_name",
-                        "variable_type"
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "op": {
-                      "type": "string",
-                      "enum": [
-                        "connect"
-                      ]
-                    },
-                    "from": {
-                      "type": "string",
-                      "description": "Source NodeRef.Pin: patchId.pinName, export node_guid.pinName (bare UUID allowed), or guid:uuid.pinName. Pin aliases: Execute/Exec/Execution, True→Then, False→Else, inputObject→Target on many nodes, returnValue→ReturnValue."
-                    },
-                    "to": {
-                      "type": "string",
-                      "description": "Target NodeRef.Pin; same as from. Do not use `self` as a node id."
-                    }
-                  },
-                  "required": [
-                    "op",
-                    "from",
-                    "to"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "op": {
-                      "type": "string",
-                      "enum": [
-                        "set_pin_default"
-                      ]
-                    },
-                    "ref": {
-                      "type": "string",
-                      "description": "Combined NodeRef.Pin (patch id or guid:uuid)."
-                    },
-                    "node_ref": {
-                      "type": "string",
-                      "description": "Alias of ref: same NodeRef.Pin string (guid.pin or patchId.pin)."
-                    },
-                    "patch_id": {
-                      "type": "string"
-                    },
-                    "node_guid": {
-                      "type": "string",
-                      "description": "Graph node id; plain UUID or guid: prefix accepted."
-                    },
-                    "pin": {
-                      "type": "string"
-                    },
-                    "pin_name": {
-                      "type": "string",
-                      "description": "Alias of pin."
-                    },
-                    "value": {
-                      "type": "string",
-                      "description": "Default string as editor expects for this pin category."
-                    }
-                  },
-                  "required": [
-                    "op",
-                    "value"
-                  ],
-                  "oneOf": [
-                    {
-                      "required": [
-                        "ref"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "node_ref"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "patch_id",
-                        "pin"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "patch_id",
-                        "pin_name"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "node_guid",
-                        "pin"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "node_guid",
-                        "pin_name"
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "op": {
-                      "type": "string",
-                      "enum": [
-                        "remove_node"
-                      ]
-                    },
-                    "patch_id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "node_guid": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  },
-                  "required": [
-                    "op"
-                  ],
-                  "oneOf": [
-                    {
-                      "required": [
-                        "patch_id"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "node_guid"
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "op": {
-                      "type": "string",
-                      "enum": [
-                        "move_node"
-                      ]
-                    },
-                    "patch_id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "node_guid": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "x": {
-                      "type": "number"
-                    },
-                    "y": {
-                      "type": "number"
-                    }
-                  },
-                  "required": [
-                    "op"
-                  ],
-                  "oneOf": [
-                    {
-                      "required": [
-                        "patch_id"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "node_guid"
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "op": {
-                      "type": "string",
-                      "enum": [
-                        "break_link"
-                      ]
-                    },
-                    "from": {
-                      "type": "string",
-                      "description": "NodeRef.Pin of one end of an existing link."
-                    },
-                    "to": {
-                      "type": "string",
-                      "description": "NodeRef.Pin of the other end."
-                    }
-                  },
-                  "required": [
-                    "op",
-                    "from",
-                    "to"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "op": {
-                      "type": "string",
-                      "enum": [
-                        "splice_on_link"
-                      ]
-                    },
-                    "from": {
-                      "type": "string",
-                      "description": "Upstream pin (typically exec out e.g. .Then). Alias: link_from if from is omitted."
-                    },
-                    "to": {
-                      "type": "string",
-                      "description": "Downstream pin (typically exec in e.g. .Execute). Alias: link_to if to is omitted."
-                    },
-                    "link_from": {
-                      "type": "string",
-                      "description": "Alias of from for splice_on_link / break_link / connect."
-                    },
-                    "link_to": {
-                      "type": "string",
-                      "description": "Alias of to for splice_on_link / break_link / connect."
-                    },
-                    "insert_patch_id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "description": "patch_id of a node created earlier in this ops list."
-                    },
-                    "insert_input_pin": {
-                      "type": "string",
-                      "description": "Defaults to Execute."
-                    },
-                    "insert_output_pin": {
-                      "type": "string",
-                      "description": "Defaults to Then."
-                    }
-                  },
-                  "required": [
-                    "op",
-                    "from",
-                    "to",
-                    "insert_patch_id"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "op": {
-                      "type": "string",
-                      "enum": [
-                        "create_comment"
-                      ]
-                    },
-                    "patch_id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "title": {
-                      "type": "string",
-                      "description": "Comment title (alias: name)."
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "x": {
-                      "type": "number"
-                    },
-                    "y": {
-                      "type": "number"
-                    },
-                    "width": {
-                      "type": "number"
-                    },
-                    "height": {
-                      "type": "number"
-                    },
-                    "member_node_refs": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Node ids (patch_id or guid:uuid) to bound after layout—no .Pin suffix."
-                    }
-                  },
-                  "required": [
-                    "op",
-                    "patch_id"
-                  ]
-                }
-              ]
-            }
-          }
-        },
-        "required": [
-          "blueprint_path",
-          "ops"
-        ]
-      },
-      "side_effects": "compile",
-      "permission": "write",
-      "ue_entry_points": "UBlueprint; UEdGraph; UEdGraphSchema_K2; FUnrealBlueprintGraphFormatService; UnrealBlueprintCommentReflow; FKismetEditorUtilities::CompileBlueprint",
-      "threading": "game_thread",
-      "failure_modes": [
-        "Non-/Game blueprint_path rejected.",
-        "Unknown op or invalid fields per op (see parameters schema).",
-        "k2_class missing or not a UK2Node; symbol not found for call_function.",
-        "Connection rejected (pin types/direction); inspect pins with blueprint_graph_list_pins.",
-        "break_link: pins not directly linked.",
-        "splice_on_link: insert_patch_id missing, wrong exec pins, or reconnect fails after break.",
-        "Partial ops: status patch_errors, errors[], applied_partial[].",
-        "Compile errors after patch: follow with blueprint_compile for structured diagnostics."
-      ],
-      "doc_links": [
-        "https://dev.epicgames.com/documentation/en-us/unreal-engine/blueprints-visual-scripting-in-unreal-engine"
-      ],
-      "status": "implemented"
-    },
-    {
       "tool_id": "blueprint_graph_list_pins",
       "summary": "Read-only: pins[] (name, direction, category, optional default_value). Needs blueprint_path and node_ref OR guid (real graph GUID). Does not resolve patch_id strings from other tool calls.",
       "category": "blueprints",
@@ -1774,7 +1077,8 @@
       "context_selector": {
         "priority": 73,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -1792,7 +1096,7 @@
           "node_ref": {
             "type": "string",
             "minLength": 1,
-            "description": "Graph node GUID as in blueprint_export_ir node_guid, or guid:{uuid}. Must exist on the saved graph."
+            "description": "Graph node GUID as in blueprint_graph_introspect node_guid, or guid:{uuid}. Must exist on the saved graph."
           },
           "guid": {
             "type": "string",
@@ -1835,438 +1139,8 @@
       "status": "implemented"
     },
     {
-      "tool_id": "blueprint_set_component_default",
-      "summary": "Set one reflected property on a named Actor component on the Blueprint class default (CDO), then compile. Use for gameplay tuning that lives on component defaults (e.g. CharacterMovement.JumpZVelocity) instead of asset_apply_properties on the UBlueprint asset object. Requires blueprint_path under /Game, component name (e.g. CharacterMovement), property name (e.g. JumpZVelocity), and value (number/bool/string per property type). Does not replace blueprint_graph_patch / blueprint_apply_ir for EventGraph logic.",
-      "category": "blueprints",
-      "tags": [
-        "blueprint",
-        "defaults",
-        "component"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 52,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "blueprint_path": {
-            "type": "string",
-            "description": "Blueprint asset object path under /Game (e.g. /Game/Blueprints/MyCharacter.MyCharacter)."
-          },
-          "component": {
-            "type": "string",
-            "description": "Component name on the class default, e.g. CharacterMovement (matches ACharacter movement component)."
-          },
-          "property": {
-            "type": "string",
-            "description": "Property name on the component class (e.g. JumpZVelocity)."
-          },
-          "value": {
-            "description": "JSON value: number for floats/ints, bool, or string (enums, names, ExportText for exotic types)."
-          }
-        },
-        "required": [
-          "blueprint_path",
-          "component",
-          "property",
-          "value"
-        ]
-      },
-      "side_effects": "compile",
-      "permission": "write",
-      "ue_entry_points": "AActor CDO component property write, FKismetEditorUtilities::CompileBlueprint",
-      "threading": "game_thread",
-      "failure_modes": [
-        "Blueprint generated class is not an Actor (only Actor-based BPs have instanced component defaults on CDO).",
-        "component not found on class default, or property not editable on component instance."
-      ],
-      "doc_links": [],
-      "status": "implemented"
-    },
-    {
-      "tool_id": "blueprint_apply_ir",
-      "summary": "Optional compact Blueprint IR DSL: materialize/wire EventGraph nodes for supported op types (overlap, timers, variables, calls, etc.). Prefer blueprint_graph_patch for arbitrary UK2Node types or when IR ops/merge_policy are awkward; use this when the compact op set matches. blueprint_path must be an object_path from asset_index_fuzzy_search or asset_registry_query—never a guessed name when multiple assets matched. Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Minimal shape: blueprint_path + nodes[] + links[]. Optional layout_mode (single_row|multi_strand) and wire_knots override defaults when auto_layout runs. blueprint_path must be a Blueprint asset path (/Game/...Asset.Asset), not a level actor path. Not for UMG Designer layout.",
-      "category": "blueprints",
-      "tags": [
-        "blueprint",
-        "ir",
-        "graph"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 68,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "blueprint_path": {
-            "type": "string",
-            "description": "Blueprint asset path under /Game. Accepted forms: /Game/Folder/MyBP or /Game/Folder/MyBP.MyBP."
-          },
-          "graph_name": {
-            "type": "string"
-          },
-          "create_if_missing": {
-            "type": "boolean",
-            "description": "When true and blueprint_path is not on disk yet, create an Actor-based Blueprint at that path before applying IR (must be under /Game)."
-          },
-          "parent_class": {
-            "type": "string",
-            "description": "Optional native class path when using create_if_missing (default /Script/Engine.Actor)."
-          },
-          "focused": {
-            "type": "boolean",
-            "description": "After success, open this Blueprint and focus graph_name when set."
-          },
-          "merge_policy": {
-            "type": "string",
-            "enum": [
-              "create_new",
-              "append_to_existing"
-            ],
-            "description": "How to combine with existing graphs. append_to_existing: reuse the first matching ReceiveBeginPlay/ReceiveTick (etc.) in the target graph and wire new exec from the exec tail (warns on duplicate anchors). create_new: always spawn IR nodes. Default: append_to_existing on ubergraph EventGraph, create_new on function/macro graphs."
-          },
-          "layout_scope": {
-            "type": "string",
-            "enum": [
-              "ir_nodes",
-              "full_graph"
-            ],
-            "description": "When auto_layout is true: ir_nodes runs formatter on IR materialized nodes only; full_graph runs LayoutEntireGraph on the whole target graph. Default ir_nodes."
-          },
-          "auto_layout": {
-            "type": "boolean",
-            "description": "When true (default), run bundled graph layout after wiring when every IR node has x,y at 0. formatter_available is normally true in editor builds."
-          },
-          "layout_mode": {
-            "type": "string",
-            "enum": [
-              "single_row",
-              "multi_strand"
-            ],
-            "description": "Optional layout strategy when auto_layout runs. Omit to use Unreal AI Editor project default."
-          },
-          "wire_knots": {
-            "type": "string",
-            "enum": [
-              "off",
-              "light",
-              "aggressive"
-            ],
-            "description": "Optional data-wire reroute knot pass. Omit to use project default."
-          },
-          "variables": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "type": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "name",
-                "type"
-              ]
-            }
-          },
-          "nodes": {
-            "type": "array",
-            "description": "IR nodes to materialize. Minimal node object shape: {\"node_id\":\"id\",\"op\":\"event_begin_play\"}.",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "node_id": {
-                  "type": "string",
-                  "description": "Stable node reference used by links/defaults."
-                },
-                "op": {
-                  "type": "string",
-                  "enum": [
-                    "event_begin_play",
-                    "event_tick",
-                    "event_actor_begin_overlap",
-                    "custom_event",
-                    "branch",
-                    "sequence",
-                    "call_function",
-                    "delay",
-                    "get_variable",
-                    "set_variable",
-                    "dynamic_cast",
-                    "graph_comment"
-                  ]
-                },
-                "x": {
-                  "type": "integer"
-                },
-                "y": {
-                  "type": "integer"
-                },
-                "width": {
-                  "type": "integer",
-                  "description": "Optional; graph_comment box width in graph units."
-                },
-                "height": {
-                  "type": "integer",
-                  "description": "Optional; graph_comment box height in graph units."
-                },
-                "member_node_ids": {
-                  "type": "array",
-                  "description": "For graph_comment: node_id strings to geometrically refit the comment around after layout.",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "class_path": {
-                  "type": "string"
-                },
-                "function_name": {
-                  "type": "string"
-                },
-                "variable": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "node_id",
-                "op"
-              ]
-            }
-          },
-          "links": {
-            "type": "array",
-            "description": "Connections using pin refs in node_id.pin format.",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "from": {
-                  "type": "string",
-                  "description": "Source pin reference in node_id.pin form (example: beginplay.Then)."
-                },
-                "to": {
-                  "type": "string",
-                  "description": "Target pin reference in node_id.pin form (example: delay.execute)."
-                }
-              },
-              "required": [
-                "from",
-                "to"
-              ]
-            }
-          },
-          "defaults": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "node_id": {
-                  "type": "string"
-                },
-                "pin": {
-                  "type": "string"
-                },
-                "value": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "node_id",
-                "pin"
-              ]
-            }
-          }
-        },
-        "required": [
-          "blueprint_path",
-          "nodes"
-        ]
-      },
-      "side_effects": "asset",
-      "permission": "write",
-      "ue_entry_points": "UEdGraph node APIs; FBlueprintEditorUtils; FKismetEditorUtilities::CompileBlueprint",
-      "threading": "game_thread",
-      "failure_modes": [
-        "invalid_ir",
-        "asset_not_found",
-        "create_failed",
-        "graph_not_found",
-        "apply_failed",
-        "Bad blueprint_path: must be /Game/... Blueprint object path; resolve with asset_index_fuzzy_search before writes.",
-        "New asset: use create_if_missing:true or asset_create, then apply IR."
-      ],
-      "doc_links": [],
-      "status": "implemented"
-    },
-    {
-      "tool_id": "blueprint_format_graph",
-      "summary": "Run in-process layout on a Blueprint script graph: full graph or current selection, optional single-row vs multi-strand exec layout, data-wire knots, and comment reflow. Default format_scope is full_graph.",
-      "category": "blueprints",
-      "tags": [
-        "blueprint",
-        "layout",
-        "graph"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 67,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "blueprint_path": {
-            "type": "string"
-          },
-          "graph_name": {
-            "type": "string",
-            "description": "Optional; default is the first ubergraph page."
-          },
-          "focused": {
-            "type": "boolean",
-            "description": "After success, open this Blueprint and focus the graph when set."
-          },
-          "format_scope": {
-            "type": "string",
-            "enum": [
-              "full_graph",
-              "selection"
-            ],
-            "description": "full_graph: LayoutEntireGraph. selection: layout currently selected nodes in the open graph editor."
-          },
-          "layout_mode": {
-            "type": "string",
-            "enum": [
-              "single_row",
-              "multi_strand"
-            ],
-            "description": "Optional; omit for Unreal AI Editor project default."
-          },
-          "wire_knots": {
-            "type": "string",
-            "enum": [
-              "off",
-              "light",
-              "aggressive"
-            ],
-            "description": "Optional data-wire knot pass; omit for project default."
-          }
-        },
-        "required": [
-          "blueprint_path"
-        ]
-      },
-      "side_effects": "asset",
-      "permission": "write",
-      "ue_entry_points": "FUnrealBlueprintGraphFormatService::LayoutEntireGraph; LayoutSelectedNodes",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "implemented"
-    },
-    {
-      "tool_id": "blueprint_format_selection",
-      "summary": "Same layout pipeline as blueprint_format_graph but always targets the editor’s current graph selection (Blueprint graph tab must be open with nodes selected). Optional layout_mode and wire_knots override project defaults.",
-      "category": "blueprints",
-      "tags": [
-        "blueprint",
-        "layout",
-        "graph",
-        "selection"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 66,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "blueprint_path": {
-            "type": "string"
-          },
-          "graph_name": {
-            "type": "string",
-            "description": "Optional; defaults to the focused ubergraph page when omitted."
-          },
-          "focused": {
-            "type": "boolean",
-            "description": "After success, open this Blueprint and focus the graph when set."
-          },
-          "layout_mode": {
-            "type": "string",
-            "enum": [
-              "single_row",
-              "multi_strand"
-            ],
-            "description": "Optional; omit for project default."
-          },
-          "wire_knots": {
-            "type": "string",
-            "enum": [
-              "off",
-              "light",
-              "aggressive"
-            ],
-            "description": "Optional; omit for project default."
-          }
-        },
-        "required": [
-          "blueprint_path"
-        ]
-      },
-      "side_effects": "asset",
-      "permission": "write",
-      "ue_entry_points": "FUnrealBlueprintGraphFormatService::LayoutSelectedNodes",
-      "threading": "game_thread",
-      "failure_modes": [
-        "no_selection",
-        "graph_tab_not_open"
-      ],
-      "doc_links": [],
-      "status": "implemented"
-    },
-    {
       "tool_id": "blueprint_get_graph_summary",
-      "summary": "Read-only: bounded summary of Blueprint graph(s) for an existing asset. `blueprint_path` is required and must be a concrete /Game Blueprint object_path (prefer reuse from asset_index_fuzzy_search/asset_registry_query results; do not guess names). Optional graph_name narrows to one graph; omit to summarize ubergraph + functions + macros.",
+      "summary": "Read-only (main Agent + builder): bounded summary of Blueprint graph(s) for an existing asset. `blueprint_path` is required and must be a concrete /Game Blueprint object_path (prefer reuse from asset_index_fuzzy_search/asset_registry_query results; do not guess names). Optional graph_name narrows to one graph; omit to summarize ubergraph + functions + macros. Set include_layout_analysis:true to add entry/branch counts and a data-link crossing proxy per graph.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -2281,7 +1155,8 @@
       "context_selector": {
         "priority": 70,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -2298,6 +1173,10 @@
           "focused": {
             "type": "boolean",
             "description": "After success, open this Blueprint (and graph when named)."
+          },
+          "include_layout_analysis": {
+            "type": "boolean",
+            "description": "When true, each graph object includes script_node_count, entry_node_count, branch_like_node_count, data_link_crossing_proxy, etc."
           }
         },
         "required": [
@@ -2312,48 +1191,6 @@
         "Load failure: verify path with asset_index_fuzzy_search; create asset first if missing.",
         "Wrong path kind: PersistentLevel actor paths are not Blueprint assets—use /Game/... object paths."
       ],
-      "doc_links": [],
-      "status": "implemented"
-    },
-    {
-      "tool_id": "blueprint_open_graph_tab",
-      "summary": "Open Blueprint editor focused on a graph.",
-      "category": "blueprints",
-      "tags": [
-        "blueprint"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 56,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "blueprint_path": {
-            "type": "string"
-          },
-          "graph_name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "blueprint_path",
-          "graph_name"
-        ]
-      },
-      "side_effects": "ui",
-      "permission": "write",
-      "ue_entry_points": "UAssetEditorSubsystem; FKismetEditorUtilities",
-      "threading": "game_thread",
-      "failure_modes": [],
       "doc_links": [],
       "status": "implemented"
     },
@@ -2910,7 +1747,7 @@
     },
     {
       "tool_id": "setting_query",
-      "summary": "Read one allowlisted setting using the domain/key settings envelope. Prefer this over settings_get; the resolver maps the envelope to the legacy settings backend today.",
+      "summary": "Read one allowlisted setting using the domain/key settings envelope. Model-facing settings read; the resolver maps the envelope to the legacy internal settings backend.",
       "category": "settings_properties",
       "tags": [
         "settings",
@@ -3002,10 +1839,10 @@
         "strategy": "legacy_singleton",
         "legacy_targets": [
           {
-            "tool_id": "settings_get"
+            "tool_id": "setting_query"
           }
         ],
-        "resolver_notes": "Resolver maps the settings envelope to the current scope+key settings_get contract until the domain registry lands."
+        "resolver_notes": "Resolver projects domain/key to scope/key for the internal settings reader; validation uses the canonical setting_query schema."
       },
       "side_effects": "none",
       "permission": "read",
@@ -3017,7 +1854,7 @@
     },
     {
       "tool_id": "setting_apply",
-      "summary": "Write one allowlisted setting using the domain/key settings envelope. Prefer this over settings_set; the resolver maps the envelope to the legacy settings backend today.",
+      "summary": "Write one allowlisted setting using the domain/key settings envelope. Model-facing settings write; the resolver maps the envelope to the legacy internal settings backend.",
       "category": "settings_properties",
       "tags": [
         "settings",
@@ -3117,10 +1954,10 @@
         "strategy": "legacy_singleton",
         "legacy_targets": [
           {
-            "tool_id": "settings_set"
+            "tool_id": "setting_apply"
           }
         ],
-        "resolver_notes": "Resolver maps the settings envelope to the current scope+key settings_set contract until the domain registry lands."
+        "resolver_notes": "Resolver projects domain/key/value to scope/key/value for the internal settings writer; validation uses the canonical setting_apply schema."
       },
       "side_effects": "ui",
       "permission": "write",
@@ -3129,134 +1966,6 @@
       "failure_modes": [],
       "doc_links": [],
       "status": "implemented"
-    },
-    {
-      "tool_id": "settings_get",
-      "summary": "Compatibility-only legacy settings reader. Prefer setting_query for model-facing retrieval and resolver-based repair.",
-      "category": "settings_properties",
-      "tags": [
-        "settings",
-        "read",
-        "editor",
-        "viewport",
-        "project"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 61,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "tool_surface": {
-        "domain_tags": [
-          "settings",
-          "editor",
-          "viewport",
-          "project",
-          "mode",
-          "view_mode"
-        ]
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "scope": {
-            "type": "string",
-            "enum": [
-              "viewport",
-              "editor",
-              "project"
-            ]
-          },
-          "key": {
-            "type": "string",
-            "description": "Allowlisted key by scope (examples: viewport.view_mode, editor.mode, editor.editor_focus, /Script/Section:Key for project)."
-          }
-        },
-        "required": [
-          "scope",
-          "key"
-        ]
-      },
-      "side_effects": "none",
-      "permission": "read",
-      "ue_entry_points": "FEditorViewportClient / module settings / ini read",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "deprecated"
-    },
-    {
-      "tool_id": "settings_set",
-      "summary": "Compatibility-only legacy settings writer. Prefer setting_apply for model-facing retrieval and resolver-based repair.",
-      "category": "settings_properties",
-      "tags": [
-        "settings",
-        "write",
-        "editor",
-        "viewport",
-        "project"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 60,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "tool_surface": {
-        "domain_tags": [
-          "settings",
-          "editor",
-          "viewport",
-          "project",
-          "mode",
-          "view_mode"
-        ]
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "scope": {
-            "type": "string",
-            "enum": [
-              "viewport",
-              "editor",
-              "project"
-            ]
-          },
-          "key": {
-            "type": "string",
-            "description": "Allowlisted key by scope (examples: view_mode, mode, editor_focus, auto_confirm_destructive, stream_llm_chat, or /Script/Section:Key for project)."
-          },
-          "value": {
-            "description": "Typed value expected by key (bool/string/number)."
-          }
-        },
-        "required": [
-          "scope",
-          "key",
-          "value"
-        ]
-      },
-      "side_effects": "ui",
-      "permission": "write",
-      "ue_entry_points": "FEditorViewportClient / module settings / ini write",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "deprecated"
     },
     {
       "tool_id": "editor_state_snapshot_read",
@@ -3345,48 +2054,6 @@
       "status": "implemented"
     },
     {
-      "tool_id": "foliage_paint_instances",
-      "summary": "Add foliage instances in radius.",
-      "category": "landscape_foliage_pcg",
-      "tags": [
-        "foliage"
-      ],
-      "tier": "future",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 18,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "foliage_type": {
-            "type": "string"
-          },
-          "radius": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "foliage_type",
-          "radius"
-        ]
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "Foliage edit APIs",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "future"
-    },
-    {
       "tool_id": "global_tab_focus",
       "summary": "Bring a registered dock tab to front.",
       "category": "editor_ui_navigation",
@@ -3424,44 +2091,6 @@
       "failure_modes": [],
       "doc_links": [],
       "status": "implemented"
-    },
-    {
-      "tool_id": "landscape_import_heightmap",
-      "summary": "Import heightmap to landscape.",
-      "category": "landscape_foliage_pcg",
-      "tags": [
-        "landscape"
-      ],
-      "tier": "future",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 18,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "heightmap_path": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "heightmap_path"
-        ]
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "ALandscape",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "future"
     },
     {
       "tool_id": "material_get_usage_summary",
@@ -3503,6 +2132,167 @@
       ],
       "doc_links": [],
       "status": "implemented"
+    },
+    {
+      "tool_id": "material_graph_summarize",
+      "summary": "Read-only inventory of a base Material's expression graph (class + editor position + stable expression GUID per node). Prefer material_graph_export for links to material inputs and between nodes. For Material Instances, use the parent Material path or material_instance_* parameter tools.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "graph",
+        "read",
+        "expressions"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "main_agent",
+        "blueprint_builder"
+      ],
+      "context_selector": {
+        "priority": 57,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string",
+            "description": "Object path of a base Material (UMaterial), not a Material Instance."
+          },
+          "max_expressions": {
+            "type": "number",
+            "description": "Cap on rows returned (default 200, max 2000)."
+          }
+        },
+        "required": [
+          "material_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UMaterial::GetExpressionCollection",
+      "threading": "game_thread",
+      "failure_modes": [
+        "material_path is a Material Instance: load the parent Material asset or use MI parameter tools.",
+        "Very large graphs: raise max_expressions or filter in follow-up tooling."
+      ],
+      "doc_links": [],
+      "status": "implemented",
+      "builder_domains": [
+        "material_graph"
+      ]
+    },
+    {
+      "tool_id": "material_graph_export",
+      "summary": "Blueprint Builder material_graph: structured export of base Material expressions (GUID, class, editor position), per-node FExpressionInput links (to_input + from_expression_guid + from_output_index), and material_inputs[] root slot wiring (BaseColor, Normal, …). Pair with material_graph_patch and material_graph_compile.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "graph",
+        "read",
+        "export"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "main_agent",
+        "blueprint_builder"
+      ],
+      "context_selector": {
+        "priority": 58,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string",
+            "description": "Object path of a base Material (UMaterial)."
+          },
+          "max_expressions": {
+            "type": "number",
+            "description": "Cap on expressions returned (default 500, max 4000)."
+          }
+        },
+        "required": [
+          "material_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UMaterial, UMaterialExpression reflection",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Material Instance path: use parent Material or MI parameter tools."
+      ],
+      "doc_links": [],
+      "status": "implemented",
+      "builder_domains": [
+        "material_graph"
+      ]
+    },
+    {
+      "tool_id": "material_graph_validate",
+      "summary": "Blueprint Builder material_graph: list orphan expressions (not reachable from any material root input via wired inputs) and report compile_error_or_pending (IsCompilingOrHadCompileError). Read-only; does not modify the graph.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "graph",
+        "validate"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "main_agent",
+        "blueprint_builder"
+      ],
+      "context_selector": {
+        "priority": 55,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UMaterial graph traversal",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented",
+      "builder_domains": [
+        "material_graph"
+      ]
     },
     {
       "tool_id": "material_instance_get_scalar_parameter",
@@ -3549,7 +2339,7 @@
     },
     {
       "tool_id": "material_instance_set_parameter",
-      "summary": "Set a scalar or vector parameter on a Material Instance. You must pass value_kind (scalar|vector) explicitly with material_path and parameter_name; include value or linear_color per branch. No silent value_kind inference.",
+      "summary": "Set a scalar or vector parameter on a Material Instance (main Agent and builder; not a Blueprint graph mutator). Pass value_kind (scalar|vector) with material_path and parameter_name; include value or linear_color per branch. No silent value_kind inference.",
       "category": "materials_rendering",
       "tags": [
         "material",
@@ -3619,13 +2409,10 @@
         "strategy": "legacy_family",
         "legacy_targets": [
           {
-            "tool_id": "material_instance_set_scalar_parameter"
-          },
-          {
-            "tool_id": "material_instance_set_vector_parameter"
+            "tool_id": "material_instance_set_parameter"
           }
         ],
-        "resolver_notes": "Resolver branches on value_kind and projects only the fields accepted by the legacy scalar/vector handler."
+        "resolver_notes": "Resolver branches on value_kind and preserves it with material_path/parameter fields; dispatch routes by value_kind."
       },
       "side_effects": "asset",
       "permission": "write",
@@ -3635,55 +2422,10 @@
         "Base Material path: use asset_open_editor on the Material, duplicate to MI, then pass the MI path."
       ],
       "doc_links": [],
-      "status": "implemented"
-    },
-    {
-      "tool_id": "material_instance_set_scalar_parameter",
-      "summary": "Compatibility-only scalar branch for Material Instance parameter writes. Prefer material_instance_set_parameter with value_kind=scalar.",
-      "category": "materials_rendering",
-      "tags": [
-        "material"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 48,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "material_path": {
-            "type": "string"
-          },
-          "parameter_name": {
-            "type": "string"
-          },
-          "value": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "material_path",
-          "parameter_name",
-          "value"
-        ]
-      },
-      "side_effects": "asset",
-      "permission": "write",
-      "ue_entry_points": "UMaterialInstance editing APIs",
-      "threading": "game_thread",
-      "failure_modes": [
-        "Base Material path: use asset_open_editor on the Material, duplicate to MI, then pass the MI path."
-      ],
-      "doc_links": [],
-      "status": "deprecated"
+      "status": "implemented",
+      "builder_domains": [
+        "material_instance"
+      ]
     },
     {
       "tool_id": "material_instance_get_vector_parameter",
@@ -3727,55 +2469,6 @@
       "failure_modes": [],
       "doc_links": [],
       "status": "implemented"
-    },
-    {
-      "tool_id": "material_instance_set_vector_parameter",
-      "summary": "Compatibility-only vector branch for Material Instance parameter writes. Prefer material_instance_set_parameter with value_kind=vector.",
-      "category": "materials_rendering",
-      "tags": [
-        "material"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 47,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "material_path": {
-            "type": "string"
-          },
-          "parameter_name": {
-            "type": "string"
-          },
-          "linear_color": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            }
-          }
-        },
-        "required": [
-          "material_path",
-          "parameter_name",
-          "linear_color"
-        ]
-      },
-      "side_effects": "asset",
-      "permission": "write",
-      "ue_entry_points": "UMaterialInstance editing APIs",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "deprecated"
     },
     {
       "tool_id": "menu_command_invoke",
@@ -3930,44 +2623,6 @@
       "side_effects": "exec",
       "permission": "exec",
       "ue_entry_points": "UAT package",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "future"
-    },
-    {
-      "tool_id": "pcg_generate",
-      "summary": "Execute PCG graph in editor.",
-      "category": "landscape_foliage_pcg",
-      "tags": [
-        "pcg"
-      ],
-      "tier": "future",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 18,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "actor_path": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "actor_path"
-        ]
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "UPCGComponent",
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
@@ -4143,7 +2798,8 @@
       "context_selector": {
         "priority": 66,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -4629,7 +3285,8 @@
       "context_selector": {
         "priority": 64,
         "always_include_in_core_pack": true,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -4881,25 +3538,10 @@
         "strategy": "legacy_family",
         "legacy_targets": [
           {
-            "tool_id": "viewport_camera_dolly"
-          },
-          {
-            "tool_id": "viewport_camera_orbit"
-          },
-          {
-            "tool_id": "viewport_camera_pan"
-          },
-          {
-            "tool_id": "viewport_camera_pilot"
-          },
-          {
-            "tool_id": "viewport_camera_get_transform"
-          },
-          {
-            "tool_id": "viewport_camera_set_transform"
+            "tool_id": "viewport_camera_control"
           }
         ],
-        "resolver_notes": "Resolver branches on operation and projects only the fields accepted by the chosen viewport camera handler."
+        "resolver_notes": "Resolver branches on operation and projects operation plus handler-specific fields; dispatch routes by operation."
       },
       "side_effects": "scene",
       "permission": "write",
@@ -4913,300 +3555,6 @@
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
       ],
       "status": "implemented"
-    },
-    {
-      "tool_id": "viewport_camera_dolly",
-      "summary": "Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=dolly.",
-      "category": "viewport_camera",
-      "tags": [
-        "viewport",
-        "camera"
-      ],
-      "tier": "tier1_mvp",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 86,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "dolly_units": {
-            "type": "number"
-          },
-          "fov_delta": {
-            "type": "number"
-          },
-          "mode": {
-            "type": "string",
-            "enum": [
-              "dolly",
-              "fov"
-            ]
-          }
-        },
-        "required": []
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "FEditorViewportClient::ViewFOV; forward movement",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [
-        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
-      ],
-      "status": "deprecated"
-    },
-    {
-      "tool_id": "viewport_camera_get_transform",
-      "summary": "Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=get_transform.",
-      "category": "viewport_camera",
-      "tags": [
-        "viewport",
-        "camera",
-        "read"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 72,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "viewport_index": {
-            "type": "integer"
-          }
-        },
-        "required": []
-      },
-      "side_effects": "none",
-      "permission": "read",
-      "ue_entry_points": "FEditorViewportClient::GetViewLocation, GetViewRotation, ViewFOV",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "deprecated"
-    },
-    {
-      "tool_id": "viewport_camera_orbit",
-      "summary": "Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=orbit.",
-      "category": "viewport_camera",
-      "tags": [
-        "viewport",
-        "camera",
-        "mutating"
-      ],
-      "tier": "tier1_mvp",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 88,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "pivot": {
-            "type": "string",
-            "description": "World location or use_selection_center"
-          },
-          "yaw_deg": {
-            "type": "number"
-          },
-          "pitch_deg": {
-            "type": "number"
-          },
-          "radius": {
-            "type": "number"
-          },
-          "relative": {
-            "type": "boolean"
-          }
-        },
-        "required": []
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "FEditorViewportClient; FLevelEditorModule::GetFirstActiveViewport; UnrealEd, LevelEditor",
-      "threading": "game_thread",
-      "failure_modes": [
-        "no_active_viewport",
-        "pilot_conflict"
-      ],
-      "doc_links": [
-        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
-      ],
-      "status": "deprecated"
-    },
-    {
-      "tool_id": "viewport_camera_pan",
-      "summary": "Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=pan.",
-      "category": "viewport_camera",
-      "tags": [
-        "viewport",
-        "camera"
-      ],
-      "tier": "tier1_mvp",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 87,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "delta": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            },
-            "minItems": 3,
-            "maxItems": 3
-          },
-          "space": {
-            "type": "string",
-            "enum": [
-              "world",
-              "camera"
-            ]
-          }
-        },
-        "required": [
-          "delta",
-          "space"
-        ]
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "FEditorViewportClient; FViewportCameraTransform",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [
-        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
-      ],
-      "status": "deprecated"
-    },
-    {
-      "tool_id": "viewport_camera_pilot",
-      "summary": "Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=pilot.",
-      "category": "viewport_camera",
-      "tags": [
-        "viewport",
-        "camera",
-        "pilot"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 48,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "actor_path": {
-            "type": "string"
-          },
-          "unpilot": {
-            "type": "boolean"
-          }
-        },
-        "required": []
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "FEditorViewportClient pilot APIs; ACameraActor",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "deprecated"
-    },
-    {
-      "tool_id": "viewport_camera_set_transform",
-      "summary": "Compatibility-only viewport camera branch. Prefer viewport_camera_control with operation=set_transform.",
-      "category": "viewport_camera",
-      "tags": [
-        "viewport",
-        "camera"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 55,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "location": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            },
-            "minItems": 3,
-            "maxItems": 3
-          },
-          "rotation": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            },
-            "minItems": 3,
-            "maxItems": 3
-          },
-          "b_snap": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "location",
-          "rotation"
-        ]
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "FEditorViewportClient::SetViewLocation, SetViewRotation",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "deprecated"
     },
     {
       "tool_id": "viewport_capture",
@@ -5272,13 +3620,10 @@
         "strategy": "legacy_family",
         "legacy_targets": [
           {
-            "tool_id": "viewport_capture_png"
-          },
-          {
-            "tool_id": "viewport_capture_delayed"
+            "tool_id": "viewport_capture"
           }
         ],
-        "resolver_notes": "Resolver branches on capture_kind and projects only the fields accepted by the chosen viewport capture handler."
+        "resolver_notes": "Resolver branches on capture_kind and preserves it in projected args; dispatch routes by capture_kind."
       },
       "side_effects": "disk",
       "permission": "write",
@@ -5289,103 +3634,6 @@
       ],
       "doc_links": [],
       "status": "implemented"
-    },
-    {
-      "tool_id": "viewport_capture_delayed",
-      "summary": "Compatibility-only viewport capture branch. Prefer viewport_capture with capture_kind=after_frames.",
-      "category": "capture_vision",
-      "tags": [
-        "viewport",
-        "vision"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 60,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "filename_slug": {
-            "type": "string"
-          },
-          "delay_frames": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "delay_frames"
-        ]
-      },
-      "side_effects": "disk",
-      "permission": "write",
-      "ue_entry_points": "FTSTicker + FScreenshotRequest",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "deprecated"
-    },
-    {
-      "tool_id": "viewport_capture_png",
-      "summary": "Compatibility-only viewport capture branch. Prefer viewport_capture with capture_kind=immediate_png.",
-      "category": "capture_vision",
-      "tags": [
-        "viewport",
-        "vision",
-        "screenshot"
-      ],
-      "tier": "tier1_mvp",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 90,
-        "always_include_in_core_pack": true,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "filename_slug": {
-            "type": "string"
-          },
-          "resolution_scale": {
-            "type": "number"
-          },
-          "include_ui": {
-            "type": "boolean"
-          },
-          "delay_frames": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "filename_slug"
-        ]
-      },
-      "side_effects": "disk",
-      "permission": "write",
-      "ue_entry_points": "FScreenshotRequest; FViewport::ReadPixels; FEditorViewportClient",
-      "threading": "game_thread",
-      "failure_modes": [
-        "no_viewport",
-        "readback_failed",
-        "disk_full"
-      ],
-      "doc_links": [
-        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/FScreenshotRequest"
-      ],
-      "status": "deprecated"
     },
     {
       "tool_id": "viewport_frame",
@@ -5457,13 +3705,10 @@
         "strategy": "legacy_family",
         "legacy_targets": [
           {
-            "tool_id": "viewport_frame_actors"
-          },
-          {
-            "tool_id": "viewport_frame_selection"
+            "tool_id": "viewport_frame"
           }
         ],
-        "resolver_notes": "Resolver branches on target and projects only the fields accepted by the chosen viewport frame handler."
+        "resolver_notes": "Resolver branches on target and preserves it in projected args; dispatch routes by target."
       },
       "side_effects": "scene",
       "permission": "write",
@@ -5474,104 +3719,6 @@
       ],
       "doc_links": [],
       "status": "implemented"
-    },
-    {
-      "tool_id": "viewport_frame_actors",
-      "summary": "Compatibility-only viewport frame branch. Prefer viewport_frame with target=actors.",
-      "category": "selection_framing",
-      "tags": [
-        "viewport",
-        "frame"
-      ],
-      "tier": "tier1_mvp",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 85,
-        "always_include_in_core_pack": true,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "actor_paths": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Non-empty list of full world actor paths, e.g. `/Game/MyMap.MyMap:PersistentLevel.StaticMeshActor_0`. The string `PersistentLevel` by itself is not a valid entry. Obtain paths from `editor_get_selection` or `scene_fuzzy_search`."
-          },
-          "margin_scale": {
-            "type": "number"
-          },
-          "pitch_bias": {
-            "type": "number"
-          },
-          "yaw_bias": {
-            "type": "number"
-          },
-          "orthographic": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "actor_paths"
-        ]
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "AActor::GetComponentsBoundingBox; FEditorViewportClient",
-      "threading": "game_thread",
-      "failure_modes": [
-        "Missing actor_paths: discover actors first or use viewport_frame_selection if the selection is already set.",
-        "Passing only `PersistentLevel` or `WorldSettings` as a path is rejected with a suggested_correct_call to scene_fuzzy_search."
-      ],
-      "doc_links": [
-        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/AActor"
-      ],
-      "status": "deprecated"
-    },
-    {
-      "tool_id": "viewport_frame_selection",
-      "summary": "Compatibility-only viewport frame branch. Prefer viewport_frame with target=selection.",
-      "category": "selection_framing",
-      "tags": [
-        "viewport",
-        "frame"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 65,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "margin_scale": {
-            "type": "number",
-            "default": 1.15
-          }
-        },
-        "required": []
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "Editor Focus Selected / viewport framing commands",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "deprecated"
     },
     {
       "tool_id": "viewport_get_view_mode",
@@ -5669,64 +3816,8 @@
       "status": "implemented"
     },
     {
-      "tool_id": "agent_emit_todo_plan",
-      "summary": "Deprecated: not exposed to the model. Persist unreal_ai.todo_plan via tool call (legacy). Use Plan chat mode for unreal_ai.plan_dag + executor instead.",
-      "category": "exec",
-      "tags": [
-        "planning",
-        "todo"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 6,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "title": {
-            "type": "string"
-          },
-          "definitionOfDone": {
-            "type": "string",
-            "description": "Compatibility alias for title."
-          },
-          "steps": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true,
-              "properties": {
-                "title": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        },
-        "required": [
-          "title",
-          "steps"
-        ]
-      },
-      "side_effects": "memory",
-      "permission": "write",
-      "ue_entry_points": "IAgentContextService::SetActiveTodoPlan",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "deprecated"
-    },
-    {
       "tool_id": "asset_create",
-      "summary": "Create a new asset under /Game via IAssetTools (asset_class path + optional factory_class). Use for Blueprint assets/materials/sounds/etc. `{}` is invalid: `package_path`, `asset_name`, and `asset_class` are required on first attempt. Never call this tool until those fields are concrete (prefer values from context/discovery/history). Keep package_path under /Game. For Character/Pawn gameplay, create a Blueprint asset (/Script/Engine.Blueprint) then set parent_class via blueprint_apply_ir create_if_missing flow.",
+      "summary": "Create a new asset under /Game via IAssetTools (asset_class path + optional factory_class). Use for Blueprint assets/materials/sounds/etc. `{}` is invalid: `package_path`, `asset_name`, and `asset_class` are required on first attempt. Never call this tool until those fields are concrete (prefer values from context/discovery/history). Keep package_path under /Game. For Character/Pawn gameplay, create a Blueprint asset (/Script/Engine.Blueprint) then set parent_class via blueprint_graph_patch create_if_missing flow.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -5741,7 +3832,8 @@
       "context_selector": {
         "priority": 76,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -5941,13 +4033,10 @@
         "strategy": "legacy_family",
         "legacy_targets": [
           {
-            "tool_id": "asset_find_referencers"
-          },
-          {
-            "tool_id": "asset_get_dependencies"
+            "tool_id": "asset_graph_query"
           }
         ],
-        "resolver_notes": "Resolver branches on relation and projects only object_path to the chosen Asset Registry graph handler."
+        "resolver_notes": "Resolver branches on relation and preserves it with object_path; dispatch routes by relation."
       },
       "side_effects": "none",
       "permission": "read",
@@ -5956,88 +4045,6 @@
       "failure_modes": [],
       "doc_links": [],
       "status": "implemented"
-    },
-    {
-      "tool_id": "asset_find_referencers",
-      "summary": "Compatibility-only asset graph branch. Prefer asset_graph_query with relation=referencers.",
-      "category": "assets_content",
-      "tags": [
-        "asset",
-        "read",
-        "dependencies"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 74,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "object_path": {
-            "type": "string",
-            "description": "Full asset object path (e.g. /Game/Folder/MyAsset.MyAsset). Same key as asset_open_editor—not the `path` key used by content_browser_sync_asset."
-          }
-        },
-        "required": [
-          "object_path"
-        ]
-      },
-      "side_effects": "none",
-      "permission": "read",
-      "ue_entry_points": "IAssetRegistry::GetReferencers",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "deprecated"
-    },
-    {
-      "tool_id": "asset_get_dependencies",
-      "summary": "Compatibility-only asset graph branch. Prefer asset_graph_query with relation=dependencies.",
-      "category": "assets_content",
-      "tags": [
-        "asset",
-        "read",
-        "dependencies"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": false,
-        "plan": false
-      },
-      "context_selector": {
-        "priority": 73,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "object_path": {
-            "type": "string",
-            "description": "Full asset object path (e.g. /Game/Folder/MyAsset.MyAsset). Same key as asset_open_editor—not the `path` key used by content_browser_sync_asset."
-          }
-        },
-        "required": [
-          "object_path"
-        ]
-      },
-      "side_effects": "none",
-      "permission": "read",
-      "ue_entry_points": "IAssetRegistry::GetDependencies",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "deprecated"
     },
     {
       "tool_id": "level_sequence_create_asset",
@@ -6084,24 +4091,24 @@
       "status": "implemented"
     },
     {
-      "tool_id": "blueprint_export_ir",
-      "summary": "Read-only: export Blueprint graph IR for an existing Blueprint asset path. blueprint_path must come from discovery (asset_index_fuzzy_search / asset_registry_query object_path). Unknown node kinds include k2_class and node_guid for round-tripping with blueprint_graph_patch and blueprint_graph_list_pins. Use before blueprint_graph_patch or blueprint_apply_ir when planning edits.",
+      "tool_id": "blueprint_graph_introspect",
+      "summary": "Read-only: enumerate nodes with node_guid, class, title, and pins (name, direction, category, linked_to[] of {node_guid, pin_name} per wire). Use with blueprint_graph_patch connect or blueprint_graph_introspect links; empty linked_to means unwired.",
       "category": "blueprints",
       "tags": [
         "blueprint",
-        "read",
-        "graph"
+        "read"
       ],
       "tier": "standard",
       "modes": {
-        "ask": true,
+        "ask": false,
         "agent": true,
         "plan": true
       },
       "context_selector": {
-        "priority": 71,
+        "priority": 72,
         "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "embedding_hint": null,
+        "blueprint_builder_core": true
       },
       "parameters": {
         "type": "object",
@@ -6109,15 +4116,13 @@
         "properties": {
           "blueprint_path": {
             "type": "string",
-            "minLength": 1,
-            "description": "Blueprint asset path under /Game. Accepted forms: /Game/Folder/MyBP or /Game/Folder/MyBP.MyBP."
+            "minLength": 1
           },
           "graph_name": {
             "type": "string"
           },
           "focused": {
-            "type": "boolean",
-            "description": "After success, open this Blueprint editor (optional graph_name)."
+            "type": "boolean"
           }
         },
         "required": [
@@ -6126,7 +4131,57 @@
       },
       "side_effects": "none",
       "permission": "read",
-      "ue_entry_points": "UBlueprint; UEdGraph",
+      "ue_entry_points": "FEdGraphUtilities",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "blueprint_verify_graph",
+      "summary": "Post-edit verification: optional steps (default [\"links\"]): links (null/cross-graph pin links), orphan_pins (disconnected exec inputs on impure K2 nodes), duplicate_node_guids, dead_exec_outputs (CallFunction nodes with unlinked exec outputs), pin_type_mismatch (coarse category/subcategory/object equality on data links). Unknown step strings listed in unknown_steps output.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "verify"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 70,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "graph_name": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UEdGraphPin",
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],

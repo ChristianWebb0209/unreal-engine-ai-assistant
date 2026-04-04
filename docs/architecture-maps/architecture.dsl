@@ -62,6 +62,7 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
                 toolUsagePrior = component "Operational Usage Prior" "Session-only ok/fail rates per tool_id; 0.7/0.3 blend default\n(ToolUsagePriorEnabled in UnrealAiRuntimeDefaults.h).\nOperational signal only, not user satisfaction." "UnrealAiToolUsagePrior" "Core"
                 toolUsageEventLogger = component "Tool Usage Event Logger" "Append (query_hash, tool_id, operational_ok) JSONL for offline prior training\n(ToolUsageLogEnabled in UnrealAiRuntimeDefaults.h)." "UnrealAiToolUsageEventLogger" "Core"
                 executionHost = component "Tool Execution Host" "Permission checks, dispatch invocation, result envelope shaping." "FUnrealAiToolExecutionHost" "Core"
+                blueprintSurfaceGate = component "Blueprint surface gate + builder roster" "Main Agent: UnrealAiBlueprintToolGate + agent_surfaces omit graph mutators when bOmitMainAgentBlueprintMutationTools.\nBuilder: UnrealAiBlueprintBuilderToolSurface expands roster/appendix.\nHandoff: unreal_ai_build_blueprint tag + target_kind in harness." "UnrealAiBlueprintToolGate" "Core"
                 dispatchActors = component "Actors + World Dispatch" "Actor/transform/world operations." "UnrealAiToolDispatch_Actors" "Core"
                 dispatchAssets = component "Assets + Content Dispatch" "Asset CRUD, browser sync/navigation, metadata." "UnrealAiToolDispatch_*Assets*" "Core"
                 dispatchBlueprint = component "Blueprint Dispatch" "Blueprint summary/export/edit helpers and graph operations." "UnrealAiToolDispatch_BlueprintTools" "Core"
@@ -71,13 +72,14 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
                 assetResolver = component "Asset Factory Resolver" "Type-specific asset creation/resolution behavior." "UnrealAiAssetFactoryResolver" "Core"
             }
 
-            contextService = container "Context Service" "Thread-scoped context state and ranked context assembly pipeline." "C++" "ContextSection" {
-                sessionStore = component "Thread Context Session Store" "Load/create/in-memory map of thread state objects." "FUnrealAiContextService" "ContextSection"
+            contextService = container "Context Service" "Thread-scoped state; layered ingestion into\nFContextCandidateEnvelope rows; single rank/pack gate to ContextBlock.\nSee docs/planning/context-ingestion-refactor.md." "C++" "ContextSection" {
+                sessionStore = component "Thread Context Session Store" "Load/create/in-memory map of thread state objects;\nattachments, tool snippets, snapshot, plans, (target) working-set MRU." "FUnrealAiContextService" "ContextSection"
                 editorSnapshot = component "Editor Snapshot Query Adapter" "Reads selected actors/assets, open editors, folders." "UnrealAiEditorContextQueries" "ContextSection"
                 mentionParser = component "@ Mention Resolver" "Resolves @tokens to canonical asset references." "UnrealAiContextMentionParser" "ContextSection"
-                candidateCollector = component "Candidate Collector" "Collects envelope candidates by source type." "UnrealAiContextCandidates" "ContextSection"
+                contextIngestion = component "Context ingestion adapters" "Per-source builders appending envelopes only\n(attachments, tool results, editor snapshot, plans,\nmemory, retrieval, project tree, working set).\nUnrealAiContextIngestion*." "UnrealAiContextIngestion" "ContextSection"
+                candidateCollector = component "Candidate orchestration" "BuildUnifiedContext: run ingestion units,\nthen FilterHardPolicy, ScoreCandidates,\nPackCandidatesUnderBudget." "UnrealAiContextCandidates" "ContextSection"
                 candidateScorer = component "Ranking + Scoring Engine" "Applies weighted relevance/recency/mention/safety scoring." "UnrealAiContextCandidates + RankingPolicy" "ContextSection"
-                packer = component "Budgeted Context Packer" "Per-type caps and budget-aware keep/drop packing." "UnrealAiContextCandidates" "ContextSection"
+                packer = component "Budgeted Context Packer" "Per-type caps and budget-aware keep/drop;\njoined RenderedText is the rolling context body\n(no post-append in service after pack)." "UnrealAiContextCandidates" "ContextSection"
                 complexityAssessor = component "Complexity Assessor" "Deterministic complexity signal generation and plan recommendation." "FUnrealAiComplexityAssessor" "ContextSection"
                 contextFormatter = component "Context Formatter" "Builds machine-readable context blocks and summary text." "AgentContextFormat" "ContextSection"
                 contextJson = component "Context JSON Serializer" "Schema versioning, load/save, migration compatibility." "AgentContextJson" "ContextSection"
@@ -161,7 +163,9 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
         plugin.tools.toolSurfacePipeline -> plugin.tools.toolUsagePrior "Optional 0.7/0.3 blend"
         plugin.tools.toolSurfacePipeline -> plugin.tools.toolDynamicKPolicy "Margin-based K inside caps"
         plugin.tools.toolSurfacePipeline -> plugin.tools.catalogLoader "Tiered markdown + schemas"
+        plugin.tools.toolSurfacePipeline -> plugin.tools.blueprintSurfaceGate "Filter eligible Blueprint tools (agent_surfaces)"
         plugin.tools.toolSurfacePipeline -> plugin.contextService "Read thread state for bias (not docs retrieval)"
+        plugin.harness.workerOrchestration -> plugin.tools.blueprintSurfaceGate "Build-blueprint sub-turn handoff"
         plugin.harness.toolLoop -> plugin.tools.toolUsageEventLogger "Log operational_ok per invoke"
         plugin.harness.toolLoop -> plugin.tools.toolUsagePrior "Update session counts"
         plugin.harness -> plugin.contextService "Record bounded tool results"
@@ -177,6 +181,10 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
         plugin.tools -> plugin.contextService "Send tool result snippets"
         plugin.tools -> plugin.observability "Audit and diagnostics"
 
+        plugin.contextService.sessionStore -> plugin.contextService.contextIngestion "State + build options"
+        plugin.contextService.contextIngestion -> plugin.contextService.candidateCollector "Append envelopes"
+        plugin.contextService.candidateCollector -> plugin.contextService.candidateScorer "Filter then score"
+        plugin.contextService.candidateScorer -> plugin.contextService.packer "Pack under budget"
         plugin.contextService -> plugin.memoryService "Query memory snippets"
         plugin.contextService -> plugin.retrievalService "Query retrieval snippets (optional)"
         plugin.contextService -> plugin.policy "Apply mode gates and type filters"
@@ -263,6 +271,7 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
             include plugin.tools.toolUsagePrior
             include plugin.tools.toolUsageEventLogger
             include plugin.tools.catalogLoader
+            include plugin.tools.blueprintSurfaceGate
             include plugin.requestBuilder.messageBudgeter
             include plugin.contextService.editorSnapshot
             include plugin.harness.toolLoop
@@ -334,9 +343,11 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
             autoLayout tb
         }
 
-        component plugin.contextService "vector-context-unified" "Unified vector-context graph for file system + scene context.\nSingle view: index build/query, L0/L1/L2 summaries, utility/head/tail scoring,\nand deterministic scene anchors merged in one rank/pack flow." {
+        component plugin.contextService "vector-context-unified" "Unified vector-context graph for file system + scene context.\nSingle view: ingestion adapters, index build/query, L0/L1/L2 summaries,\nutility/head/tail scoring, deterministic scene anchors merged in one rank/pack flow." {
             include plugin.contextService.sessionStore
             include plugin.contextService.editorSnapshot
+            include plugin.contextService.mentionParser
+            include plugin.contextService.contextIngestion
             include plugin.contextService.candidateCollector
             include plugin.contextService.candidateScorer
             include plugin.contextService.packer
@@ -459,17 +470,17 @@ The **Backend Registry** is the composition root: it constructs **Model Profile 
 For how **context** vs **harness** split work, see [`docs/context/context-management.md`](docs/context/context-management.md) section 1.1; for plugin feature layout see [`Plugins/UnrealAiEditor/README.md`](Plugins/UnrealAiEditor/README.md).
 END_README_MAP
 BEGIN_README_MAP context-components
-**Context subsystem** decomposition: thread-scoped state, **editor snapshot** queries, **@mention** resolution, **candidate** collection from attachments/tool snippets/memory/optional retrieval, **weighted ranking**, **budgeted packing**, **complexity assessor** output, and formatted blocks that become `BuildContextWindow` / `{{CONTEXT_SERVICE_OUTPUT}}` in the prompt.
+**Context subsystem** decomposition: thread-scoped state, **editor snapshot** queries, **@mention** resolution, **ingestion adapters** (per-source `FContextCandidateEnvelope` builders), **candidate orchestration** (`BuildUnifiedContext`: collect â†’ filter â†’ score â†’ pack), **weighted ranking**, **budgeted packing**, **complexity assessor** output, and formatted blocks that become `BuildContextWindow` / `{{CONTEXT_SERVICE_OUTPUT}}` in the prompt. Target: **working-set MRU** assets and **project-tree** summary compete inside the same packer (no post-append). Plan: [`docs/planning/context-ingestion-refactor.md`](docs/planning/context-ingestion-refactor.md); narrative: [`docs/context/context-management.md`](docs/context/context-management.md) section 2.0a.
 
 Context owns **`context.json`** and planning artifacts that live beside it; it does **not** own the chat API message list (that is the **harness** + `conversation.json`). Optional local **vector retrieval** adds `retrieval_snippet` candidates into the **same** ranker when enabledâ€”see [`docs/context/context-management.md`](docs/context/context-management.md) and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 2.2.
 END_README_MAP
 BEGIN_README_MAP harness-components
-**Agent harness** decomposition: **turn loop**, **tool loop** (streaming tool calls, execution host, telemetry such as `tool_surface_metrics`, session **usage prior** updates, optional **repair** nudge after bad `unreal_ai_dispatch` unwrap), **continuation rails**, **Plan-mode DAG execution** (`Private/Planning/FUnrealAiPlanExecutor` driving serial node turns), and **run artifact** sinks (`FAgentRunFileSink`) for harness diagnostics.
+**Agent harness** decomposition: **turn loop**, **tool loop** (streaming tool calls, execution host, telemetry such as `tool_surface_metrics`, session **usage prior** updates, optional **repair** nudge after bad `unreal_ai_dispatch` unwrap), **continuation rails**, **Blueprint Builder handoff** (`unreal_ai_build_blueprint` + `target_kind` sub-turn), **Plan-mode DAG execution** (`Private/Planning/FUnrealAiPlanExecutor` driving serial node turns), and **run artifact** sinks (`FAgentRunFileSink`) for harness diagnostics.
 
 This is where **`conversation.json`** is read/written, LLM rounds are bounded, and tool rounds connect to dispatch. For iteration, artifacts, and what â€œgoodâ€ looks like in tests, see [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](docs/tooling/AGENT_HARNESS_HANDOFF.md).
 END_README_MAP
 BEGIN_README_MAP tooling-components
-**Tool catalog, execution host, and dispatch** split by concern: **catalog loader** (`UnrealAiToolCatalog.json`), **tool surface pipeline** entry (for eligibility when enabled), **execution host** (permissions + invocation), and **dispatch** modules (actors/world, assets, Blueprint, editor UI, search, PIE, etc.).
+**Tool catalog, execution host, and dispatch** split by concern: **catalog loader** (`UnrealAiToolCatalog.json`), **tool surface pipeline** entry (for eligibility when enabled), **Blueprint surface gate** (`UnrealAiBlueprintToolGate` / builder roster), **execution host** (permissions + invocation), and **dispatch** modules (actors/world, assets, Blueprint, editor UI, search, PIE, etc.).
 
 Narrowing **which tools appear** and **tiered markdown** for `unreal_ai_dispatch` is a separate pipeline from **docs vector retrieval**â€”see [`docs/tooling/tools-expansion.md`](docs/tooling/tools-expansion.md) and the companion view **Tool surface graph**. Narrative catalog: [`docs/tooling/tool-registry.md`](docs/tooling/tool-registry.md).
 END_README_MAP
@@ -521,11 +532,11 @@ BEGIN_README_MAP vector-db-query-sequence
 Described in [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 2.1 table (`vector-db-query-sequence`) and retrieval sections of [`docs/context/context-management.md`](docs/context/context-management.md).
 END_README_MAP
 BEGIN_README_MAP vector-context-unified
-**Unified vector-context graph** (single diagram): both **file-system vector context** and **scene/editor context** converge through one candidate ranking + packing pipeline.
+**Unified vector-context graph** (single diagram): both **file-system vector context** and **scene/editor context** converge through **ingestion adapters** into one **orchestrated** candidate ranking + packing pipeline (see [`docs/planning/context-ingestion-refactor.md`](docs/planning/context-ingestion-refactor.md)).
 
 - **File-system side**: retrieval index lifecycle and corpora (filesystem text, Asset Registry shards, Blueprint features, optional memory), embedding adapter, SQLite vector store + manifest.
-- **Scene side**: deterministic live anchors from editor snapshot (selection, Content Browser focus, open editors) entering the same candidate flow.
-- **Merge point**: candidate collection, scoring, and budget packing with utility/head/tail behavior and representation levels (L0/L1/L2).
+- **Scene side**: deterministic live anchors from editor snapshot (selection, Content Browser focus, open editors) entering the same ingestion + rank/pack flow.
+- **Merge point**: ingestion envelopes, scoring, and budget packing with utility/head/tail behavior and representation levels (L0/L1/L2).
 - **Output and diagnostics**: formatted context + persisted context JSON + decision logs.
 END_README_MAP
     */

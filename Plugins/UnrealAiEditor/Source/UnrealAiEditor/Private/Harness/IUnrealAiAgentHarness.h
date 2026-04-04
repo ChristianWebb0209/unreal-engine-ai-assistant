@@ -38,4 +38,7 @@ public:
 	 * No-op for default; UI/chat leaves this off.
 	 */
 	virtual void SetHeadedScenarioStrictToolBudgets(bool bEnable) { (void)bEnable; }
+
+	/** Headed `RunAgentTurnSync` only: enable stream-no-finish retry policy for normal agent threads (not UI chat). */
+	virtual void SetHeadedScenarioSyncRun(bool bEnable) { (void)bEnable; }
 };

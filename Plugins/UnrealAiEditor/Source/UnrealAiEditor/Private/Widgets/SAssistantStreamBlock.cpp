@@ -1,5 +1,6 @@
 #include "Widgets/SAssistantStreamBlock.h"
 
+#include "Tools/UnrealAiBuildBlueprintTag.h"
 #include "Widgets/UnrealAiChatMarkdown.h"
 #include "Widgets/UnrealAiChatTranscript.h"
 #include "Widgets/Layout/SBox.h"
@@ -32,6 +33,7 @@ void SAssistantStreamBlock::SyncMarkdownBody()
 {
 	FString ForDisplay = VisibleText + PendingBuffer;
 	UnrealAiStripTranscriptStyleDelimiterLines(ForDisplay);
+	UnrealAiBuildBlueprintTag::StripProtocolMarkersForUi(ForDisplay);
 	if (BodyBox.IsValid())
 	{
 		BodyBox->SetContent(UnrealAiBuildMarkdownChatBody(ForDisplay));

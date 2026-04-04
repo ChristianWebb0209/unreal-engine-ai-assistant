@@ -12,3 +12,4 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceGetScalarParamete
 FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetScalarParameter(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceGetVectorParameter(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetVectorParameter(const TSharedPtr<FJsonObject>& Args);
+FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialGraphSummarize(const TSharedPtr<FJsonObject>& Args);

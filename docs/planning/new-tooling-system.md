@@ -37,7 +37,7 @@ Following our other documentation, the main goal of this mode is to give tools a
 Taken from arch-analysis.md:
 
 - Autonomix is one of the clearest “big bang” Blueprint creation competitors:
-- - It avoids the hard problem of “LLM must invent Unreal internal GUIDs” by using a GUID placeholder system (symbolic tokens that are resolved deterministically during import).
+- - It avoids the hard problem  of “LLM must invent Unreal internal GUIDs” by using a GUID placeholder system (symbolic tokens that are resolved deterministically during import).
 - - It uses T3D (Unreal clipboard text format) as its authoring medium, which lets the model generate a whole graph in one payload instead of calling node APIs one-by-one.
 - Creation loop (as described):
 - - (For existing BPs) call get_blueprint_info first (pin audit + T3D readback).
@@ -52,3 +52,18 @@ Taken from arch-analysis.md:
 - Should we allow the main agent to emit a blueprint-builder with their choice of: interject task then continue with response in mind (this would work like stopping then starting the query again where we left off) - or - queue task on end
 - Should the main agent still expose tools to make blueprints and attatch them? Probably yes, but if so, should the blueprint builder also have these tools? Maybe we should choose one or the other to separate concerns fully. Should the main agent delegate paths to the blueprint builder, or should the responsability be on both agents to find adequate paths?
 The main agent will handle everything and we will specifically prompt it (in the description of how to emit a blueprint builder response) that it must create full valid paths with blueprints first and send a path to blueprint builder for any blueprint it wants to edit. This means the main agent will have to think about attatching blueprints to actors, etc. The blueprint builder will have a prompt chunk telling it to optionally return that the architecture is poor, and suggest (in plain language) a way to change it, then return with status, what it has done, and what remains to be done.
+
+---
+
+## Implementation status (UnrealAiEditor v1)
+
+**Shipped in this refactor:**
+
+- **Prompts:** `chunks/12-build-blueprint-delegation.md` (main agent); `chunks/blueprint-builder/*.md` (automated sub-turn); `04-tool-calling-contract.md` updated for split.
+- **Harness:** Parses `<unreal_ai_build_blueprint>...</unreal_ai_build_blueprint>` on assistant-finalize (Agent mode only; **not** when `ThreadId` contains `_plan_`), strips the block from the visible assistant message, sets `FUnrealAiAgentTurnRequest::bBlueprintBuilderTurn`, injects a structured internal `user` message, and continues the same run via `DispatchLlm()`. On `<unreal_ai_blueprint_builder_result>`, clears the builder flag, sets **`bInjectBlueprintBuilderResumeChunk`** for one system-prompt round, and injects the builder result as `user` text.
+- **Tool surface:** `UnrealAiBlueprintToolGate` removes `blueprint_graph_patch`, `blueprint_format_graph`, `blueprint_format_selection`, `blueprint_compile`, and `blueprint_add_variable` from tiered + compact tool indexes (and native tool array path) on main Agent turns when `bOmitMainAgentBlueprintMutationTools` is true (default). Builder turns and other modes see the full catalog.
+- **Assembly:** `FUnrealAiPromptAssembleParams::bBlueprintBuilderMode` selects the alternate chunk stack.
+
+**Shipped in follow-up (UnrealAiEditor v1+):** `chunks/plan/` + `chunks/plan-node/` split prompts; Blueprint Builder T3D tools (`blueprint_graph_introspect`, `blueprint_export_graph_t3d`, `blueprint_t3d_preflight_validate`, `blueprint_graph_import_t3d`, `blueprint_verify_graph`) with `__UAI_G_NNNNNN__` placeholder resolution; `context_selector.blueprint_builder_core` + score boost and prefix merge via **`UnrealAiBlueprintBuilderToolSurface`** on `bBlueprintBuilderTurn` (**full eligible tool roster**, verbose appendix: expanded summaries + large parameter excerpts; telemetry `surface_profile` **`blueprint_builder_verbose`**); prompt chunk **`13-blueprint-builder-resume.md`** after builder results; `blueprint_verify_graph` steps `links`, `orphan_pins`, `duplicate_node_guids` plus `unknown_steps` reporting; `<unreal_ai_blueprint_builder_result>` re-prompt to main agent; main-agent execution gate for withheld blueprint mutation `tool_id`s.
+
+**Formatter (2026):** Single layered layout engine; spacing density, wire knots, preserve-existing, comment mode, and reflow are **Editor Preferences → Unreal AI Editor → Blueprint Formatting** (Blueprint toolbar combo mirrors the same settings). Tools do not take per-call layout JSON; structured layout metrics on responses; T3D import runs post-import layout unless skipped; `blueprint_get_graph_summary` accepts **`include_layout_analysis`**; verify adds **`dead_exec_outputs`** and **`pin_type_mismatch`**. See `docs/planning/blueprint-formatter-requirements.md` and `docs/planning/blueprint-formatter-gaps.md`.

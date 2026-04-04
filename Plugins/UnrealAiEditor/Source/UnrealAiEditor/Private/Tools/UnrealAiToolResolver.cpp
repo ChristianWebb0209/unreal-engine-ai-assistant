@@ -1,6 +1,7 @@
 #include "Tools/UnrealAiToolResolver.h"
 
 #include "Tools/UnrealAiToolCatalog.h"
+#include "Tools/UnrealAiToolDispatch_ArgRepair.h"
 #include "Tools/UnrealAiToolJson.h"
 
 #include "Algo/LevenshteinDistance.h"
@@ -394,19 +395,14 @@ namespace UnrealAiToolResolverPriv
 		{
 			CanonicalizeAliasKeys(Args, Audit, TEXT("object_path"), {TEXT("path"), TEXT("asset_path")});
 		}
-		else if (ToolId == TEXT("blueprint_add_variable"))
-		{
-			CanonicalizeAliasKeys(Args, Audit, TEXT("name"), {TEXT("variable_name")});
-			CanonicalizeAliasKeys(Args, Audit, TEXT("type"), {TEXT("variable_type")});
-		}
-		else if (ToolId == TEXT("blueprint_open_graph_tab"))
-		{
-			CanonicalizeAliasKeys(Args, Audit, TEXT("blueprint_path"), {TEXT("object_path"), TEXT("path")});
-			CanonicalizeAliasKeys(Args, Audit, TEXT("graph_name"), {TEXT("graph")});
-		}
 		else if (ToolId == TEXT("content_browser_sync_asset"))
 		{
+			// Global CanonicalizeToolArguments maps path -> object_path first; this tool's JSON schema
+			// canonicalizes on `path` only (additionalProperties: false). Copy object_path -> path, then
+			// strip alias keys so schema validation does not fail with a stray object_path field.
 			CanonicalizeAliasKeys(Args, Audit, TEXT("path"), {TEXT("object_path"), TEXT("asset_path")});
+			Args->RemoveField(TEXT("object_path"));
+			Args->RemoveField(TEXT("asset_path"));
 		}
 		else if (ToolId == TEXT("editor_set_selection"))
 		{
@@ -851,9 +847,36 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 
 	CanonicalizeToolArguments(Result.CanonicalToolId, Result.ResolvedArguments, Result.Audit);
 
-	if (Result.CanonicalToolId == TEXT("settings_get") || Result.CanonicalToolId == TEXT("settings_set"))
+	if (Result.CanonicalToolId == TEXT("blueprint_graph_patch"))
 	{
-		CanonicalizeAliasKeys(Result.ResolvedArguments, Result.Audit, TEXT("scope"), {TEXT("domain")});
+		UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Result.ResolvedArguments, Result.Audit);
+		FString OpsJsonRel;
+		Result.ResolvedArguments->TryGetStringField(TEXT("ops_json_path"), OpsJsonRel);
+		OpsJsonRel.TrimStartAndEndInline();
+		const TArray<TSharedPtr<FJsonValue>>* OpsInline = nullptr;
+		Result.ResolvedArguments->TryGetArrayField(TEXT("ops"), OpsInline);
+		const int32 InlineCount = OpsInline ? OpsInline->Num() : 0;
+		const bool bHasPath = !OpsJsonRel.IsEmpty();
+		if (bHasPath && InlineCount > 0)
+		{
+			Result.FailureResult = BuildResolverError(
+				Result.Audit,
+				TEXT("blueprint_graph_patch: pass either ops[] or ops_json_path, not both."),
+				Result.CanonicalToolId,
+				nullptr);
+			Result.Audit->SetNumberField(TEXT("latency_ms"), (FPlatformTime::Seconds() - ResolveStartSeconds) * 1000.0);
+			return Result;
+		}
+		if (!bHasPath && InlineCount == 0)
+		{
+			Result.FailureResult = BuildResolverError(
+				Result.Audit,
+				TEXT("blueprint_graph_patch: provide non-empty ops[] or ops_json_path (UTF-8 JSON array of op objects under Saved/ or harness_step/)."),
+				Result.CanonicalToolId,
+				nullptr);
+			Result.Audit->SetNumberField(TEXT("latency_ms"), (FPlatformTime::Seconds() - ResolveStartSeconds) * 1000.0);
+			return Result;
+		}
 	}
 
 	TSharedPtr<FJsonObject> LegacyArgs = Result.ResolvedArguments;
@@ -883,7 +906,7 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 		Result.ResolvedArguments->TryGetStringField(TEXT("domain"), Domain);
 		Result.ResolvedArguments->TryGetStringField(TEXT("key"), Key);
 
-		LegacyToolId = TEXT("settings_get");
+		LegacyToolId = Result.CanonicalToolId;
 		LegacyArgs = MakeShared<FJsonObject>();
 		const FString ScopeValue = MapSettingsDomainToLegacyScope(Domain);
 		if (!ScopeValue.IsEmpty())
@@ -892,7 +915,7 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 			AddTransform(Result.Audit, FString::Printf(TEXT("mapped setting domain '%s' -> scope '%s'"), *Domain, *ScopeValue));
 		}
 		LegacyArgs->SetStringField(TEXT("key"), Key);
-		AddTransform(Result.Audit, TEXT("family dispatch: setting_query -> settings_get"));
+		AddTransform(Result.Audit, TEXT("settings envelope: projected scope+key for settings backend"));
 	}
 	else if (Result.CanonicalToolId == TEXT("setting_apply"))
 	{
@@ -901,7 +924,7 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 		Result.ResolvedArguments->TryGetStringField(TEXT("domain"), Domain);
 		Result.ResolvedArguments->TryGetStringField(TEXT("key"), Key);
 
-		LegacyToolId = TEXT("settings_set");
+		LegacyToolId = Result.CanonicalToolId;
 		LegacyArgs = MakeShared<FJsonObject>();
 		const FString ScopeValue = MapSettingsDomainToLegacyScope(Domain);
 		if (!ScopeValue.IsEmpty())
@@ -926,7 +949,7 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 		{
 			LegacyArgs->SetBoolField(TEXT("dry_run"), bDryRun);
 		}
-		AddTransform(Result.Audit, TEXT("family dispatch: setting_apply -> settings_set"));
+		AddTransform(Result.Audit, TEXT("settings envelope: projected scope+key+value for settings backend"));
 	}
 	else if (Result.CanonicalToolId == TEXT("viewport_camera_control"))
 	{
@@ -936,33 +959,57 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 
 		if (Operation == TEXT("dolly"))
 		{
-			LegacyToolId = TEXT("viewport_camera_dolly");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("dolly_units"), TEXT("fov_delta"), TEXT("mode")}, Result.Audit, TEXT("family dispatch: viewport_camera_control -> viewport_camera_dolly"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("operation"), TEXT("dolly_units"), TEXT("fov_delta"), TEXT("mode")},
+				Result.Audit,
+				TEXT("viewport_camera_control: projected dolly fields"));
 		}
 		else if (Operation == TEXT("orbit"))
 		{
-			LegacyToolId = TEXT("viewport_camera_orbit");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("pivot"), TEXT("yaw_deg"), TEXT("pitch_deg"), TEXT("radius"), TEXT("relative")}, Result.Audit, TEXT("family dispatch: viewport_camera_control -> viewport_camera_orbit"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("operation"), TEXT("pivot"), TEXT("yaw_deg"), TEXT("pitch_deg"), TEXT("radius"), TEXT("relative")},
+				Result.Audit,
+				TEXT("viewport_camera_control: projected orbit fields"));
 		}
 		else if (Operation == TEXT("pan"))
 		{
-			LegacyToolId = TEXT("viewport_camera_pan");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("delta"), TEXT("space")}, Result.Audit, TEXT("family dispatch: viewport_camera_control -> viewport_camera_pan"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("operation"), TEXT("delta"), TEXT("space")},
+				Result.Audit,
+				TEXT("viewport_camera_control: projected pan fields"));
 		}
 		else if (Operation == TEXT("pilot"))
 		{
-			LegacyToolId = TEXT("viewport_camera_pilot");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("actor_path"), TEXT("unpilot")}, Result.Audit, TEXT("family dispatch: viewport_camera_control -> viewport_camera_pilot"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("operation"), TEXT("actor_path"), TEXT("unpilot")},
+				Result.Audit,
+				TEXT("viewport_camera_control: projected pilot fields"));
 		}
 		else if (Operation == TEXT("get_transform"))
 		{
-			LegacyToolId = TEXT("viewport_camera_get_transform");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("viewport_index")}, Result.Audit, TEXT("family dispatch: viewport_camera_control -> viewport_camera_get_transform"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("operation"), TEXT("viewport_index")},
+				Result.Audit,
+				TEXT("viewport_camera_control: projected get_transform fields"));
 		}
 		else if (Operation == TEXT("set_transform"))
 		{
-			LegacyToolId = TEXT("viewport_camera_set_transform");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("location"), TEXT("rotation"), TEXT("b_snap")}, Result.Audit, TEXT("family dispatch: viewport_camera_control -> viewport_camera_set_transform"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("operation"), TEXT("location"), TEXT("rotation"), TEXT("b_snap")},
+				Result.Audit,
+				TEXT("viewport_camera_control: projected set_transform fields"));
 		}
 		else
 		{
@@ -985,13 +1032,21 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 
 		if (CaptureKind == TEXT("immediate_png"))
 		{
-			LegacyToolId = TEXT("viewport_capture_png");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("filename_slug"), TEXT("resolution_scale"), TEXT("include_ui"), TEXT("delay_frames")}, Result.Audit, TEXT("family dispatch: viewport_capture -> viewport_capture_png"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("capture_kind"), TEXT("filename_slug"), TEXT("resolution_scale"), TEXT("include_ui"), TEXT("delay_frames")},
+				Result.Audit,
+				TEXT("viewport_capture: projected immediate_png fields"));
 		}
 		else if (CaptureKind == TEXT("after_frames"))
 		{
-			LegacyToolId = TEXT("viewport_capture_delayed");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("filename_slug"), TEXT("resolution_scale"), TEXT("include_ui"), TEXT("delay_frames")}, Result.Audit, TEXT("family dispatch: viewport_capture -> viewport_capture_delayed"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("capture_kind"), TEXT("filename_slug"), TEXT("resolution_scale"), TEXT("include_ui"), TEXT("delay_frames")},
+				Result.Audit,
+				TEXT("viewport_capture: projected after_frames fields"));
 		}
 		else
 		{
@@ -1014,13 +1069,21 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 
 		if (Target == TEXT("actors"))
 		{
-			LegacyToolId = TEXT("viewport_frame_actors");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("actor_paths"), TEXT("margin_scale"), TEXT("pitch_bias"), TEXT("yaw_bias"), TEXT("orthographic")}, Result.Audit, TEXT("family dispatch: viewport_frame -> viewport_frame_actors"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("target"), TEXT("actor_paths"), TEXT("margin_scale"), TEXT("pitch_bias"), TEXT("yaw_bias"), TEXT("orthographic")},
+				Result.Audit,
+				TEXT("viewport_frame: projected actors framing fields"));
 		}
 		else if (Target == TEXT("selection"))
 		{
-			LegacyToolId = TEXT("viewport_frame_selection");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("margin_scale")}, Result.Audit, TEXT("family dispatch: viewport_frame -> viewport_frame_selection"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("target"), TEXT("margin_scale")},
+				Result.Audit,
+				TEXT("viewport_frame: projected selection framing fields"));
 		}
 		else
 		{
@@ -1042,13 +1105,21 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 		Relation = Relation.ToLower();
 		if (Relation == TEXT("referencers"))
 		{
-			LegacyToolId = TEXT("asset_find_referencers");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("object_path")}, Result.Audit, TEXT("family dispatch: asset_graph_query -> asset_find_referencers"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("relation"), TEXT("object_path")},
+				Result.Audit,
+				TEXT("asset_graph_query: projected referencers fields"));
 		}
 		else if (Relation == TEXT("dependencies"))
 		{
-			LegacyToolId = TEXT("asset_get_dependencies");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("object_path")}, Result.Audit, TEXT("family dispatch: asset_graph_query -> asset_get_dependencies"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("relation"), TEXT("object_path")},
+				Result.Audit,
+				TEXT("asset_graph_query: projected dependencies fields"));
 		}
 		else
 		{
@@ -1078,13 +1149,21 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 
 		if (ValueKind == TEXT("scalar"))
 		{
-			LegacyToolId = TEXT("material_instance_set_scalar_parameter");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("material_path"), TEXT("parameter_name"), TEXT("value")}, Result.Audit, TEXT("family dispatch: material_instance_set_parameter -> material_instance_set_scalar_parameter"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("value_kind"), TEXT("material_path"), TEXT("parameter_name"), TEXT("value")},
+				Result.Audit,
+				TEXT("material_instance_set_parameter: projected scalar fields"));
 		}
 		else if (ValueKind == TEXT("vector"))
 		{
-			LegacyToolId = TEXT("material_instance_set_vector_parameter");
-			LegacyArgs = ProjectArguments(Result.ResolvedArguments, {TEXT("material_path"), TEXT("parameter_name"), TEXT("linear_color")}, Result.Audit, TEXT("family dispatch: material_instance_set_parameter -> material_instance_set_vector_parameter"));
+			LegacyToolId = Result.CanonicalToolId;
+			LegacyArgs = ProjectArguments(
+				Result.ResolvedArguments,
+				{TEXT("value_kind"), TEXT("material_path"), TEXT("parameter_name"), TEXT("linear_color")},
+				Result.Audit,
+				TEXT("material_instance_set_parameter: projected vector fields"));
 		}
 		else
 		{
@@ -1122,24 +1201,7 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 	}
 
 	Result.LegacyToolId = LegacyToolId;
-	Result.LegacyToolDefinition = Catalog.FindToolDefinition(Result.LegacyToolId);
-	if (Result.LegacyToolDefinition.IsValid())
-	{
-		FUnrealAiToolInvocationResult Failure;
-		const FString SuggestedToolId = Result.CanonicalToolId.IsEmpty() ? Result.LegacyToolId : Result.CanonicalToolId;
-		if (!ValidateRequiredFields(Result.LegacyToolId, Result.LegacyToolDefinition, LegacyArgs, Result.Audit, SuggestedToolId, Failure))
-		{
-			Result.FailureResult = Failure;
-			Result.Audit->SetNumberField(TEXT("latency_ms"), (FPlatformTime::Seconds() - ResolveStartSeconds) * 1000.0);
-			return Result;
-		}
-		if (!ValidateSchemaShape(Result.LegacyToolId, Result.LegacyToolDefinition, LegacyArgs, Result.Audit, SuggestedToolId, Failure))
-		{
-			Result.FailureResult = Failure;
-			Result.Audit->SetNumberField(TEXT("latency_ms"), (FPlatformTime::Seconds() - ResolveStartSeconds) * 1000.0);
-			return Result;
-		}
-	}
+	Result.LegacyToolDefinition = Catalog.FindToolDefinition(Result.CanonicalToolId);
 
 	Result.ResolvedArguments = LegacyArgs.IsValid() ? LegacyArgs : MakeShared<FJsonObject>();
 	Result.bResolved = true;

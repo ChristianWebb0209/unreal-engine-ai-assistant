@@ -40,9 +40,9 @@ namespace UnrealAiRuntimeDefaults
 	// --- UnrealAiTurnLlmRequestBuilder (headed harness historically used core + extras for smaller payloads) ---
 	inline constexpr bool ToolPackRestrictToCore = true;
 	inline const TCHAR* ToolPackExtraCommaSeparated =
-		TEXT("asset_create,asset_registry_query,blueprint_compile,blueprint_set_component_default,blueprint_apply_ir,blueprint_graph_patch,blueprint_graph_list_pins,"
-			 "blueprint_export_ir,blueprint_get_graph_summary,blueprint_open_graph_tab,"
-			 "blueprint_add_variable,audio_component_preview,project_file_read_text,project_file_write_text,project_file_move,"
+		TEXT("asset_create,asset_registry_query,blueprint_compile,blueprint_verify_graph,blueprint_set_component_default,blueprint_graph_patch,blueprint_graph_list_pins,"
+			 "blueprint_graph_introspect,blueprint_get_graph_summary,blueprint_format_graph,"
+			 "audio_component_preview,project_file_read_text,project_file_write_text,project_file_move,"
 			 "cpp_project_compile,actor_spawn_from_class,console_command");
 	inline constexpr bool ToolSurfaceUseDispatch = true; // false = native full schema per tool in tools[]
 	inline constexpr bool HarnessOmitTools = false;
@@ -54,6 +54,19 @@ namespace UnrealAiRuntimeDefaults
 	inline constexpr int32 ToolKMax = 24;
 	inline constexpr int32 ToolExpandedCount = 4;
 	inline constexpr int32 ToolSurfaceBudgetChars = 80000;
+	/** Blueprint Builder automated sub-turn: tiered tool appendix (verbose roster; all tools expanded when possible). */
+	inline constexpr int32 BlueprintBuilderToolSurfaceBudgetChars = 240000;
+	/** Max fraction of estimated model context window (chars) allocated to the tiered tool appendix for Blueprint Builder. */
+	inline constexpr float BlueprintBuilderToolSurfaceMaxContextFraction = 0.35f;
+	/** If computed appendix budget is below this, TurnLlmRequestBuilder fails with a clear error (context too small). */
+	inline constexpr int32 BlueprintBuilderToolSurfaceMinBudgetChars = 16000;
+	/**
+	 * When model profile MaxContextTokens is unset (<=0), assume this many tokens only for appendix budget math
+	 * (does not change HTTP request; avoids degenerate tiny budgets).
+	 */
+	inline constexpr int32 BlueprintBuilderFallbackContextTokensWhenUnset = 128000;
+	/** Max chars of per-tool parameters JSON embedded in the builder appendix (0 = no truncation). */
+	inline constexpr int32 BlueprintBuilderToolParamsExcerptMaxChars = 0;
 
 	// --- UnrealAiToolDispatch destructive tools (headed runs: auto-confirm destructive tools) ---
 	inline constexpr bool AutoRunDestructiveDefault = true;

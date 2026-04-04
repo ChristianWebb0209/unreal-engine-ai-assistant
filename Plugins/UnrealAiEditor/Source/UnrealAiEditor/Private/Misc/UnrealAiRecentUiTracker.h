@@ -13,6 +13,8 @@ public:
 
 	static void SetActiveThreadId(const FString& InThreadId);
 	static void MarkCurrentFocusNow();
+	/** Marks thread/global recent UI as agent-driven navigation (e.g. post-tool editor open). */
+	static void RecordAgentToolNavigationToAssetPath(const FString& ObjectPath);
 
 	static void GetProjectGlobalHistory(TArray<FRecentUiEntry>& OutEntries);
 	static void GetThreadOverlay(const FString& ThreadId, TArray<FRecentUiEntry>& OutEntries);

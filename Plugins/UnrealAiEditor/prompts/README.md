@@ -4,7 +4,7 @@
 
 **Location:** `Plugins/UnrealAiEditor/prompts/` (this plugin).
 
-This folder holds **semantic fragments** the harness assembles into **system** and **developer** messages. The canonical machine-readable tool definitions live in [`Resources/UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json); narrative specs in the repo docs: [`tool-registry.md`](../../../docs/tooling/tool-registry.md), context: [`context-management.md`](../../../docs/context/context-management.md). **Plan mode (DAG)** behavior is defined in chunks (**`09-plan-dag.md`**, **`11-plan-node-execution.md`**) and C++ under `Source/UnrealAiEditor/Private/Planning/`. The `agent_emit_todo_plan` tool is **deprecated** (not exposed to the model); legacy `activeTodoPlan` may still appear in context.
+This folder holds **semantic fragments** the harness assembles into **system** and **developer** messages. The canonical machine-readable tool definitions live in [`Resources/UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json); narrative specs in the repo docs: [`tool-registry.md`](../../../docs/tooling/tool-registry.md), context: [`context-management.md`](../../../docs/context/context-management.md). **Plan mode (DAG)** behavior is defined in **`chunks/plan/*.md`** (planner pass) and **`chunks/plan-node/*.md`** (executor turns), plus C++ under `Source/UnrealAiEditor/Private/Planning/`. Legacy persisted `activeTodoPlan` JSON may still appear in context from older sessions; there is no catalog tool to emit it anymore.
 
 ## Design rules
 
@@ -17,44 +17,101 @@ This folder holds **semantic fragments** the harness assembles into **system** a
 
 | Chunk | Ask | Agent | Plan | Notes |
 |-------|-----|-------|------|--------|
-| [`chunks/00-template-tokens.md`](chunks/00-template-tokens.md) | âœ“ | âœ“ | âœ“ | Document placeholders only (no model text). |
-| [`chunks/01-identity.md`](chunks/01-identity.md) | âœ“ | âœ“ | âœ“ | Base role + scope; identity + **Examples contract**. |
+| [`chunks/00-template-tokens.md`](chunks/00-template-tokens.md) | — | — | — | **Not assembled** — documents `{{PLACEHOLDER}}` tokens for authors; see `ApplyTemplateTokens` in source. |
+| [`chunks/01-identity.md`](chunks/01-identity.md) | ✓ | ✓ | ✓ | Base role + scope; identity + **Examples contract**. |
 | [`chunks/02-operating-modes.md`](chunks/02-operating-modes.md) | inject **Ask** only | inject **Agent** only | inject **Plan** only | Shared preamble + one `## Mode:` block (`UnrealAiPromptBuilder::ExtractOperatingModeSection`). |
-| [`chunks/03-complexity-and-todo-plan.md`](chunks/03-complexity-and-todo-plan.md) | âœ“ (plan allowed; no mutating tools) | âœ“ | âœ“ | Complexity, scope, graceful handoff when blocked; Plan mode for structured DAGs. |
-| [`chunks/04-tool-calling-contract.md`](chunks/04-tool-calling-contract.md) | âœ“ (read tools only) | âœ“ | âœ“ | General tool discipline; Blueprint IR + in-process layout (`merge_policy`, `layout_scope`, `blueprint_format_graph`, `format_graphs`). |
-| [`chunks/05-context-and-editor.md`](chunks/05-context-and-editor.md) | âœ“ | âœ“ | âœ“ | Attachments, snapshot, `@` mentions. |
-| [`chunks/10-mvp-gameplay-and-tooling.md`](chunks/10-mvp-gameplay-and-tooling.md) | âœ“ | âœ“ | âœ“ | MVP gameplay flows, PIE, matrix `ok:false` semantics (`UnrealAiPromptBuilder` after `05`). |
-| [`chunks/11-plan-node-execution.md`](chunks/11-plan-node-execution.md) | â€” | when thread `*_plan_*` | â€” | Serial plan DAG node turns only (`UnrealAiTurnLlmRequestBuilder`). |
+| [`chunks/03-complexity-and-todo-plan.md`](chunks/03-complexity-and-todo-plan.md) | ✓ (plan allowed; no mutating tools) | ✓ | ✓ | Complexity, scope, graceful handoff when blocked; Plan mode for structured DAGs. |
+| [`chunks/04-tool-calling-contract.md`](chunks/04-tool-calling-contract.md) | ✓ (read tools only) | ✓ | ✓ | General tool discipline; **appendix-first** routing; Blueprint IR/patch/compile details apply when those tools are on the roster. |
+| [`chunks/12-build-blueprint-delegation.md`](chunks/12-build-blueprint-delegation.md) | ✓ | ✓ | ✓ | **Always loaded** (C++); prose targets Agent Blueprint delegation / `<unreal_ai_build_blueprint>`; Ask/Plan can ignore irrelevant lines. |
+| [`chunks/13-blueprint-builder-resume.md`](chunks/13-blueprint-builder-resume.md) | — | ✓ (one-shot after builder result) | — | `bInjectBlueprintBuilderResumeChunk`; pairs with structured builder `user` message. |
+| [`chunks/14-build-environment-delegation.md`](chunks/14-build-environment-delegation.md) | ✓ | ✓ | ✓ | **Always loaded** (C++); Environment/PCG delegation / `<unreal_ai_build_environment>`. |
+| [`chunks/15-environment-builder-resume.md`](chunks/15-environment-builder-resume.md) | — | ✓ (one-shot after builder result) | — | `bInjectEnvironmentBuilderResumeChunk`. |
+| [`chunks/blueprint-builder/`](chunks/blueprint-builder/) | — | **sub-turn only** | — | Alternate stack when `bBlueprintBuilderTurn` (deterministic loop, architecture notes, fail-safe). |
+| [`chunks/environment-builder/`](chunks/environment-builder/) | — | **sub-turn only** | — | Alternate stack when `bEnvironmentBuilderTurn` (PCG / landscape / foliage). |
+| [`chunks/05-context-and-editor.md`](chunks/05-context-and-editor.md) | ✓ | ✓ | ✓ | Attachments, snapshot, `@` mentions. |
+| [`chunks/10-mvp-gameplay-and-tooling.md`](chunks/10-mvp-gameplay-and-tooling.md) | ✓ | ✓ | ✓ | MVP gameplay flows, PIE, matrix `ok:false` semantics (`UnrealAiPromptBuilder` after `05`). |
+| [`chunks/plan-node/`](chunks/plan-node/) | — | when thread `*_plan_*` | — | Serial plan DAG node turns (`UnrealAiPromptAssemblyStrategy`). |
 | [`chunks/06-execution-subturn.md`](chunks/06-execution-subturn.md) | when `activeTodoPlan` | same | same | Legacy persisted todo plan only (`summary + pointer`). |
-| [`chunks/07-safety-banned.md`](chunks/07-safety-banned.md) | âœ“ | âœ“ | âœ“ | Permissions, destructive confirms, banned tools. |
-| [`chunks/08-output-style.md`](chunks/08-output-style.md) | âœ“ | âœ“ | âœ“ | Markdown, no fake chain-of-thought. |
-| [`chunks/09-plan-dag.md`](chunks/09-plan-dag.md) | â€” | optional | âœ“ | Plan mode: `unreal_ai.plan_dag` JSON, serial node execution (`Private/Planning/FUnrealAiPlanExecutor`). |
+| [`chunks/07-safety-banned.md`](chunks/07-safety-banned.md) | ✓ | ✓ | ✓ | Permissions, destructive confirms, banned tools. |
+| [`chunks/08-output-style.md`](chunks/08-output-style.md) | ✓ | ✓ | ✓ | Markdown, no fake chain-of-thought. |
+| [`chunks/plan/`](chunks/plan/) | — | optional | ✓ | Plan mode: `unreal_ai.plan_dag` JSON (`Private/Planning/FUnrealAiPlanExecutor`). |
 
 ## Runtime assembly (C++)
 
 The editor builds the system/developer string at LLM time:
 
-1. [`FUnrealAiContextService::BuildContextWindow`](../Source/UnrealAiEditor/Private/Context/FUnrealAiContextService.cpp) â€” formats `{{CONTEXT_SERVICE_OUTPUT}}` and `ActiveTodoSummaryText` for `{{ACTIVE_TODO_SUMMARY}}`.
-2. [`UnrealAiPromptBuilder::BuildSystemDeveloperContent`](../Source/UnrealAiEditor/Private/Prompt/UnrealAiPromptBuilder.cpp) â€” [`UnrealAiPromptAssemblyStrategy`](../Source/UnrealAiEditor/Private/Prompt/UnrealAiPromptAssemblyStrategy.cpp) loads `prompts/chunks/*.md` linearly and injects the mode slice from `02-operating-modes.md` via `ExtractOperatingModeSection`. Template tokens: `ApplyTemplateTokens`.
-3. [`UnrealAiTurnLlmRequestBuilder::Build`](../Source/UnrealAiEditor/Private/Harness/UnrealAiTurnLlmRequestBuilder.cpp) â€” merges conversation history, tools JSON, model id, streaming flag, API URL/key from the selected model profile (`FUnrealAiAgentTurnRequest::ModelProfileId` from UI session).
-4. [`FUnrealAiLlmInvocationService`](../Source/UnrealAiEditor/Private/Harness/UnrealAiLlmInvocationService.h) + [`ILlmTransport`](../Source/UnrealAiEditor/Private/Harness/ILlmTransport.h) â€” submit the request; the bundled HTTP transport is [`FOpenAiCompatibleHttpTransport`](../Source/UnrealAiEditor/Private/Transport/FOpenAiCompatibleHttpTransport.cpp) (shared chat-completions JSON shape, not one vendor only).
+1. [`FUnrealAiContextService::BuildContextWindow`](../Source/UnrealAiEditor/Private/Context/FUnrealAiContextService.cpp) — formats `{{CONTEXT_SERVICE_OUTPUT}}` and `ActiveTodoSummaryText` for `{{ACTIVE_TODO_SUMMARY}}`.
+2. [`UnrealAiPromptBuilder::BuildSystemDeveloperContent`](../Source/UnrealAiEditor/Private/Prompt/UnrealAiPromptBuilder.cpp) — [`UnrealAiPromptAssemblyStrategy`](../Source/UnrealAiEditor/Private/Prompt/UnrealAiPromptAssemblyStrategy.cpp) loads `prompts/chunks/*.md` linearly and injects the mode slice from `02-operating-modes.md` via `ExtractOperatingModeSection`. Template tokens: `ApplyTemplateTokens`.
+3. [`UnrealAiTurnLlmRequestBuilder::Build`](../Source/UnrealAiEditor/Private/Harness/UnrealAiTurnLlmRequestBuilder.cpp) — merges conversation history, tools JSON, model id, streaming flag, API URL/key from the selected model profile (`FUnrealAiAgentTurnRequest::ModelProfileId` from UI session).
+4. [`FUnrealAiLlmInvocationService`](../Source/UnrealAiEditor/Private/Harness/UnrealAiLlmInvocationService.h) + [`ILlmTransport`](../Source/UnrealAiEditor/Private/Harness/ILlmTransport.h) — submit the request; the bundled HTTP transport is [`FOpenAiCompatibleHttpTransport`](../Source/UnrealAiEditor/Private/Transport/FOpenAiCompatibleHttpTransport.cpp) (shared chat-completions JSON shape, not one vendor only).
 
-## Typical assembly
+## Canonical assembly map (must match C++)
 
-**System message (conceptual):**
+Source: [`FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent`](../Source/UnrealAiEditor/Private/Prompt/UnrealAiPromptAssemblyStrategy.cpp). If you change load order there, update this section.
 
-1. `01-identity`
-2. Mode slice from `02-operating-modes`
-3. `03` complexity / scope / handoff policy
-4. `04`, `05`, `10`
-5. If executing a stored plan: `06`
-6. `07`, `08`
-7. If Plan mode / planner pass: `09`
-8. Optional **`StaticSystemPrefix`** from context prepended when set (`SystemOrDeveloperBlock`). **`{{CONTEXT_SERVICE_OUTPUT}}`** is substituted inside chunks `03` / `05` from `BuildContextWindow`â€™s `ContextBlock`.
+### Main / Ask / Agent / Plan stack (`!bBlueprintBuilderMode && !bEnvironmentBuilderMode`)
 
-**Tools array:** Built from the catalog by mode (`BuildLlmToolsJsonArrayForMode`, chat-completions function tools); optional **narrow packs** per taskâ€”see [`tools/by-category.md`](tools/by-category.md) for human-readable grouping and [`tools/core-pack.md`](tools/core-pack.md) for default â€œalways in coreâ€ IDs.
+| Step | Chunk(s) | Condition |
+|------|-----------|-----------|
+| 1 | `01-identity.md` | always |
+| 2 | `02-operating-modes.md` | mode slice only (`ExtractOperatingModeSection`) |
+| 3 | `03-complexity-and-todo-plan.md` | always |
+| 4 | `04-tool-calling-contract.md` | always |
+| 5 | `12-build-blueprint-delegation.md` | always (**Agent** graph delegation; Ask/Plan still receive file — chunk is scoped in prose) |
+| 6 | `13-blueprint-builder-resume.md` | `bInjectBlueprintBuilderResumeChunk` |
+| 7 | `14-build-environment-delegation.md` | always |
+| 8 | `15-environment-builder-resume.md` | `bInjectEnvironmentBuilderResumeChunk` |
+| 9 | `05-context-and-editor.md` | always |
+| 10 | `10-mvp-gameplay-and-tooling.md` | always |
+| 11 | `plan-node/01` … `03` | `bIncludePlanNodeExecutionChunk` |
+| 12 | `06-execution-subturn.md` | `bIncludeExecutionSubturnChunk` |
+| 13 | `07-safety-banned.md` | always |
+| 14 | `08-output-style.md` | always |
+| 15 | `plan/01` … `04` | `bIncludePlanDagChunk` |
+| — | `ApplyTemplateTokens` | then prepend optional `SystemOrDeveloperBlock` |
+
+**On-disk chunk files not in the table above:** `blueprint-builder/**`, `environment-builder/**`, and `00-template-tokens.md` (authoring doc, not loaded in main stack).
+
+### Blueprint Builder sub-turn (`bBlueprintBuilderMode`)
+
+| Step | Chunk(s) |
+|------|-----------|
+| 1 | `01-identity.md` |
+| 2 | `02-operating-modes.md` (mode slice) |
+| 3–9 | `blueprint-builder/00-overview.md` … `07-graph-patch-canonical.md` (fixed order) |
+| 9 | `blueprint-builder/kinds/<target_kind>.md` from handoff YAML (`UnrealAiBlueprintBuilderTargetKind`) |
+| 10 | `05-context-and-editor.md` |
+| 11 | `07-safety-banned.md` |
+| 12 | `08-output-style.md` |
+| — | `ApplyTemplateTokens`; prepend optional `SystemOrDeveloperBlock` |
+
+### Environment Builder sub-turn (`bEnvironmentBuilderMode`)
+
+| Step | Chunk(s) |
+|------|-----------|
+| 1 | `01-identity.md` |
+| 2 | `02-operating-modes.md` (mode slice) |
+| 3–8 | `environment-builder/00-overview.md` … `06-verification-ladder.md` (fixed order) |
+| 9 | `environment-builder/kinds/<target_kind>.md` from handoff YAML (`EUnrealAiEnvironmentBuilderTargetKind`) |
+| 10 | `05-context-and-editor.md` |
+| 11 | `07-safety-banned.md` |
+| 12 | `08-output-style.md` |
+| — | `ApplyTemplateTokens`; prepend optional `SystemOrDeveloperBlock` |
+
+### Main Agent vs Builder surfaces (product)
+
+- **Default Agent** turns use `bOmitMainAgentBlueprintMutationTools` + per-tool `agent_surfaces` in [`UnrealAiToolCatalog.json`](../Resources/UnrealAiToolCatalog.json) (plus optional fragments e.g. [`tools.blueprint.json`](../Resources/tools.blueprint.json), [`tools.environment.json`](../Resources/tools.environment.json), [`tools.main.json`](../Resources/tools.main.json)); [`UnrealAiAgentToolGate`](../Source/UnrealAiEditor/Private/Tools/UnrealAiAgentToolGate.cpp) filters the **tiered tool appendix**.
+- **Substantive Blueprint graph mutations** on the default path: **`<unreal_ai_build_blueprint>`** with YAML **`target_kind`** → builder stack + domain-filtered tools.
+- **PCG / landscape / foliage mutators** on the default path: **`<unreal_ai_build_environment>`** with YAML **`target_kind`** → Environment Builder stack.
+- **Escape hatch:** when `bOmitMainAgentBlueprintMutationTools` is false, surface gating is bypassed (power users).
+
+## Typical assembly (summary)
+
+**System message (conceptual, main stack):** `01` → `02` slice → `03` → `04` → `12` → optional `13` → `14` → optional `15` → `05` → `10` → optional `plan-node/*` → optional `06` → `07` → `08` → optional `plan/*` → template substitution. Optional **`StaticSystemPrefix`** prepended via `SystemOrDeveloperBlock`. **`{{CONTEXT_SERVICE_OUTPUT}}`** is substituted inside chunks such as `03` / `05` from `BuildContextWindow`.
+
+**Tools array:** Built from the catalog by mode (`BuildLlmToolsJsonArrayForMode`, chat-completions function tools); optional **narrow packs** per task—see [`tools/by-category.md`](tools/by-category.md) for human-readable grouping and [`tools/core-pack.md`](tools/core-pack.md) for default "always in core" IDs.
 
 ## Maintenance
 
 - When **`UnrealAiToolCatalog.json`** changes, refresh [`tools/by-category.md`](tools/by-category.md) and [`tools/catalog-snapshot.tsv`](tools/catalog-snapshot.tsv) (TSV is optional; can be regenerated from JSON).
-- **`agent_emit_todo_plan`** is deprecated in the catalog (not in the model tool list); legacy threads may still have `activeTodoPlan` on disk.
+- **`activeTodoPlan` on disk:** older threads may still carry this blob; it is not tied to a current catalog tool.

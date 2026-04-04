@@ -5,11 +5,13 @@
 #include "Dom/JsonObject.h"
 #include "Editor.h"
 #include "Engine/Blueprint.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "HAL/IConsoleManager.h"
 #include "Styling/AppStyle.h"
 #include "ToolMenu.h"
 #include "ToolMenus.h"
 #include "ToolMenuEntry.h"
+#include "UnrealAiEditorSettings.h"
 
 #include "BlueprintFormat/UnrealAiBlueprintGraphFocusSelection.h"
 
@@ -19,11 +21,105 @@ namespace UnrealAiBlueprintFormatEditorRegistrationPriv
 {
 	static IConsoleObject* GFormatSelectionCmd = nullptr;
 
+	static TSharedRef<SWidget> BuildFormatOptionsMenu()
+	{
+		FMenuBuilder MenuBuilder(true, nullptr);
+		MenuBuilder.BeginSection(NAME_None, LOCTEXT("FmtOptsHeading", "Blueprint formatting"));
+		{
+			MenuBuilder.AddSubMenu(
+				LOCTEXT("SpacingMenu", "Spacing density"),
+				LOCTEXT("SpacingMenuTip", "Column/row spacing for the bundled formatter (Editor Preferences)"),
+				FNewMenuDelegate::CreateLambda([](FMenuBuilder& Sub)
+				{
+					auto Set = [](EUnrealAiBlueprintFormatSpacingDensity D)
+					{
+						UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
+						St->BlueprintFormatSpacingDensity = D;
+						St->SaveConfig();
+					};
+					Sub.AddMenuEntry(
+						LOCTEXT("Sparse", "Sparse"),
+						LOCTEXT("SparseTip", "Wider grid"),
+						FSlateIcon(),
+						FUIAction(FExecuteAction::CreateLambda([Set]() { Set(EUnrealAiBlueprintFormatSpacingDensity::Sparse); })));
+					Sub.AddMenuEntry(
+						LOCTEXT("Medium", "Medium"),
+						LOCTEXT("MediumTip", "Default grid"),
+						FSlateIcon(),
+						FUIAction(FExecuteAction::CreateLambda([Set]() { Set(EUnrealAiBlueprintFormatSpacingDensity::Medium); })));
+					Sub.AddMenuEntry(
+						LOCTEXT("Dense", "Dense"),
+						LOCTEXT("DenseTip", "Tighter grid"),
+						FSlateIcon(),
+						FUIAction(FExecuteAction::CreateLambda([Set]() { Set(EUnrealAiBlueprintFormatSpacingDensity::Dense); })));
+				}));
+			MenuBuilder.AddSubMenu(
+				LOCTEXT("CommentsMenu", "Comment synthesis"),
+				LOCTEXT("CommentsMenuTip", "Auto region comments when the formatter adds boxes"),
+				FNewMenuDelegate::CreateLambda([](FMenuBuilder& Sub)
+				{
+					auto Set = [](EUnrealAiBlueprintCommentsMode M)
+					{
+						UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
+						St->BlueprintCommentsMode = M;
+						St->SaveConfig();
+					};
+					Sub.AddMenuEntry(
+						LOCTEXT("CommOff", "Off"),
+						FText::GetEmpty(),
+						FSlateIcon(),
+						FUIAction(FExecuteAction::CreateLambda([Set]() { Set(EUnrealAiBlueprintCommentsMode::Off); })));
+					Sub.AddMenuEntry(
+						LOCTEXT("CommMin", "Minimal"),
+						FText::GetEmpty(),
+						FSlateIcon(),
+						FUIAction(FExecuteAction::CreateLambda([Set]() { Set(EUnrealAiBlueprintCommentsMode::Minimal); })));
+					Sub.AddMenuEntry(
+						LOCTEXT("CommVerb", "Verbose"),
+						FText::GetEmpty(),
+						FSlateIcon(),
+						FUIAction(FExecuteAction::CreateLambda([Set]() { Set(EUnrealAiBlueprintCommentsMode::Verbose); })));
+				}));
+			MenuBuilder.AddMenuEntry(
+				LOCTEXT("ToggleKnots", "Toggle wire knots"),
+				LOCTEXT("ToggleKnotsTip", "Reroute knots on long data wires (best-effort)"),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([]()
+				{
+					UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
+					St->bBlueprintFormatUseWireKnots = !St->bBlueprintFormatUseWireKnots;
+					St->SaveConfig();
+				})));
+			MenuBuilder.AddMenuEntry(
+				LOCTEXT("TogglePreserve", "Toggle preserve existing positions"),
+				LOCTEXT("TogglePreserveTip", "Skip repositioning nodes that already have non-zero coordinates"),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([]()
+				{
+					UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
+					St->bBlueprintFormatPreserveExistingPositions = !St->bBlueprintFormatPreserveExistingPositions;
+					St->SaveConfig();
+				})));
+			MenuBuilder.AddMenuEntry(
+				LOCTEXT("ToggleReflow", "Toggle reflow comment boxes"),
+				LOCTEXT("ToggleReflowTip", "Resize comment nodes to fit members after layout"),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([]()
+				{
+					UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
+					St->bBlueprintFormatReflowCommentsByGeometry = !St->bBlueprintFormatReflowCommentsByGeometry;
+					St->SaveConfig();
+				})));
+		}
+		MenuBuilder.EndSection();
+		return MenuBuilder.MakeWidget();
+	}
+
 	static void RunFormatSelectionFromConsole(const TArray<FString>& Args)
 	{
 		if (!GEditor || Args.Num() < 1)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("UnrealAi.BlueprintFormatSelection <blueprint_path> [graph_name] [layout_mode] [wire_knots] — Blueprint editor must be open."));
+			UE_LOG(LogTemp, Warning, TEXT("UnrealAi.BlueprintFormatSelection <blueprint_path> [graph_name] — uses Editor Preferences; Blueprint editor must be open."));
 			return;
 		}
 		TSharedPtr<FJsonObject> J = MakeShared<FJsonObject>();
@@ -31,14 +127,6 @@ namespace UnrealAiBlueprintFormatEditorRegistrationPriv
 		if (Args.Num() > 1)
 		{
 			J->SetStringField(TEXT("graph_name"), Args[1]);
-		}
-		if (Args.Num() > 2)
-		{
-			J->SetStringField(TEXT("layout_mode"), Args[2]);
-		}
-		if (Args.Num() > 3)
-		{
-			J->SetStringField(TEXT("wire_knots"), Args[3]);
 		}
 		const FUnrealAiToolInvocationResult R = UnrealAiDispatch_BlueprintFormatSelection(J);
 		UE_LOG(LogTemp, Display, TEXT("UnrealAi.BlueprintFormatSelection: ok=%d %s"),
@@ -60,12 +148,11 @@ void UnrealAiBlueprintFormatEditorExtendBlueprintToolbar()
 		{
 			continue;
 		}
-		// Same strip as the primary Compile controls (avoids overflow "⋯" island for extra sections).
 		FToolMenuSection& Section = Toolbar->FindOrAddSection(TEXT("Compile"));
 		{
-			FToolMenuEntry FormatGraphEntry = FToolMenuEntry::InitToolBarButton(
+			FToolMenuEntry FormatGraphComboEntry = FToolMenuEntry::InitComboButton(
 				TEXT("UnrealAiFormatBlueprintUbergraph"),
-				FUIAction(
+				FToolUIActionChoice(FUIAction(
 					FExecuteAction::CreateLambda([]()
 					{
 						UBlueprint* BP = nullptr;
@@ -90,12 +177,20 @@ void UnrealAiBlueprintFormatEditorExtendBlueprintToolbar()
 						UEdGraph* Graph = nullptr;
 						int32 Count = 0;
 						return UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count);
-					})),
+					}))),
+				FNewToolMenuChoice(FOnGetContent::CreateLambda([]()
+				{
+					return UnrealAiBlueprintFormatEditorRegistrationPriv::BuildFormatOptionsMenu();
+				})),
 				LOCTEXT("FmtBlueprintBtn", "AI: Format graph"),
-				LOCTEXT("FmtBlueprintTip", "Run bundled layout on the Blueprint Ubergraph (Event Graph). Requires Event Graph to be focused."),
-				FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("ClassIcon.Blueprint")));
-			FormatGraphEntry.InsertPosition = FToolMenuInsert(TEXT("CompileBlueprint"), EToolMenuInsertType::After);
-			Section.AddEntry(FormatGraphEntry);
+				LOCTEXT(
+					"FmtBlueprintTip",
+					"Run bundled layout on the Blueprint Ubergraph (Event Graph). Click the arrow for formatter options (same as Editor Preferences → Unreal AI Editor → Blueprint Formatting)."),
+				FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("ClassIcon.Blueprint")),
+				false,
+				NAME_None);
+			FormatGraphComboEntry.InsertPosition = FToolMenuInsert(TEXT("CompileBlueprint"), EToolMenuInsertType::After);
+			Section.AddEntry(FormatGraphComboEntry);
 		}
 		{
 			FToolMenuEntry FormatSelEntry = FToolMenuEntry::InitToolBarButton(
@@ -127,7 +222,7 @@ void UnrealAiBlueprintFormatEditorExtendBlueprintToolbar()
 						return UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count) && Count > 0;
 					})),
 				LOCTEXT("FmtSelBtn", "AI: Format selection"),
-				LOCTEXT("FmtSelTip", "Run bundled layout on the Blueprint Ubergraph selection. Requires Event Graph to be focused and at least one node selected."),
+				LOCTEXT("FmtSelTip", "Run bundled layout on the Blueprint Ubergraph selection. Uses Unreal AI Editor → Blueprint Formatting preferences."),
 				FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("GraphEditor.StateMachine_24x")));
 			FormatSelEntry.InsertPosition = FToolMenuInsert(TEXT("UnrealAiFormatBlueprintUbergraph"), EToolMenuInsertType::After);
 			Section.AddEntry(FormatSelEntry);
@@ -143,7 +238,7 @@ void UnrealAiBlueprintFormatEditorRegistrationStartup()
 	{
 		GFormatSelectionCmd = IConsoleManager::Get().RegisterConsoleCommand(
 			TEXT("UnrealAi.BlueprintFormatSelection"),
-			TEXT("Layout selected nodes. Args: blueprint_path [graph_name] [layout_mode] [wire_knots]. Requires Blueprint editor open."),
+			TEXT("Layout selected nodes. Args: blueprint_path [graph_name]. Uses Editor Preferences → Unreal AI Editor → Blueprint Formatting. Requires Blueprint editor open."),
 			FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 			{
 				UnrealAiBlueprintFormatEditorRegistrationPriv::RunFormatSelectionFromConsole(Args);

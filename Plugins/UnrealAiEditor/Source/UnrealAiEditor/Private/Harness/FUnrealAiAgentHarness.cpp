@@ -1,10 +1,15 @@
 #include "Harness/FUnrealAiAgentHarness.h"
 
 #include "Async/Async.h"
+#include "Containers/Ticker.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Templates/SharedPointer.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Harness/FUnrealAiConversationStore.h"
+#include "Tools/UnrealAiBuildBlueprintTag.h"
+#include "Tools/UnrealAiBuildEnvironmentTag.h"
+#include "Tools/UnrealAiBlueprintBuilderToolSurface.h"
+#include "Tools/UnrealAiEnvironmentBuilderToolSurface.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Harness/IAgentRunSink.h"
 #include "Planning/FUnrealAiPlanExecutor.h"
@@ -14,9 +19,12 @@
 #include "Harness/IToolExecutionHost.h"
 #include "Context/IAgentContextService.h"
 #include "Context/AgentContextTypes.h"
+#include "Context/UnrealAiContextWorkingSet.h"
 #include "Misc/SecureHash.h"
 #include "Tools/UnrealAiToolUsageEventLogger.h"
 #include "Tools/UnrealAiToolUsagePrior.h"
+#include "Tools/UnrealAiAgentToolGate.h"
+#include "GraphBuilder/UnrealAiGraphEditDomain.h"
 #include "Backend/FUnrealAiUsageTracker.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Memory/FUnrealAiMemoryCompactor.h"
@@ -45,7 +53,7 @@ namespace UnrealAiAgentHarnessPriv
 	/** Stop after this many consecutive identical tool failures (same invoke + args). */
 	static constexpr int32 GHarnessRepeatedFailureStopCount = 4;
 	/** How many retries we allow when streamed tool JSON is truncated and never becomes valid. */
-	static constexpr int32 GHarnessStreamToolCallIncompleteMaxRetriesPerRound = 1;
+	static constexpr int32 GHarnessStreamToolCallIncompleteMaxRetriesPerRound = 4;
 	/** Default token budget per agent turn when profile sets maxAgentTurnTokens to 0 (unset in JSON). */
 	static constexpr int32 GHarnessDefaultMaxTurnTokens = 1000000;
 	/** Hard backstop on LLM↔tool iterations if token/repeat limits do not apply first. */
@@ -96,6 +104,37 @@ namespace UnrealAiAgentHarnessPriv
 	}
 
 	/** asset_apply_properties failures often differ only in property keys; normalize so repeat-failure stop triggers. */
+	/** Summarize blueprint_graph_patch failure error_codes[] for harness nudges (best-effort JSON parse). */
+	static FString TryExtractBlueprintPatchErrorCodesSummary(const FString& ModelToolContent)
+	{
+		TSharedPtr<FJsonObject> Root;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ModelToolContent);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			return FString();
+		}
+		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+		if (!Root->TryGetArrayField(TEXT("error_codes"), Arr) || !Arr)
+		{
+			return FString();
+		}
+		FString Out;
+		const int32 N = FMath::Min(6, Arr->Num());
+		for (int32 i = 0; i < N; ++i)
+		{
+			FString S;
+			if ((*Arr)[i].IsValid() && (*Arr)[i]->TryGetString(S))
+			{
+				if (!Out.IsEmpty())
+				{
+					Out += TEXT(", ");
+				}
+				Out += S;
+			}
+		}
+		return Out.IsEmpty() ? FString() : FString::Printf(TEXT(" Repeated patch error_codes: [%s]."), *Out);
+	}
+
 	static FString NormalizeToolFailureSignatureForRepeatCount(const FString& InvokeName, const FString& InvokeArgs)
 	{
 		if (InvokeName.Equals(TEXT("asset_apply_properties"), ESearchCase::IgnoreCase))
@@ -150,6 +189,14 @@ namespace UnrealAiAgentHarnessPriv
 		TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 		Root->SetStringField(TEXT("query_shape"), Tel.QueryShape);
 		Root->SetStringField(TEXT("query_hash"), Tel.QueryHash);
+		if (!Tel.SurfaceProfile.IsEmpty())
+		{
+			Root->SetStringField(TEXT("surface_profile"), Tel.SurfaceProfile);
+		}
+		if (Tel.AppendixCharBudgetLimit > 0)
+		{
+			Root->SetNumberField(TEXT("appendix_char_budget_limit"), static_cast<double>(Tel.AppendixCharBudgetLimit));
+		}
 		Root->SetNumberField(TEXT("k_effective"), static_cast<double>(Tel.KEffective));
 		Root->SetNumberField(TEXT("eligible_count"), static_cast<double>(Tel.EligibleCount));
 		TArray<TSharedPtr<FJsonValue>> ToolsArr;
@@ -345,7 +392,7 @@ namespace UnrealAiAgentHarnessPriv
 			|| T.Contains(TEXT("_list_"))
 			|| T.Contains(TEXT("snapshot"))
 			|| T.Contains(TEXT("_status"))
-			|| T == TEXT("blueprint_export_ir");
+			|| T == TEXT("blueprint_graph_introspect");
 	}
 
 	static bool IsLikelyRequiredArgsTool(const FString& ToolName)
@@ -353,8 +400,7 @@ namespace UnrealAiAgentHarnessPriv
 		return ToolName == TEXT("asset_create")
 			|| ToolName == TEXT("asset_rename")
 			|| ToolName == TEXT("blueprint_get_graph_summary")
-			|| ToolName == TEXT("blueprint_export_ir")
-			|| ToolName == TEXT("blueprint_apply_ir")
+			|| ToolName == TEXT("blueprint_graph_introspect")
 			|| ToolName == TEXT("project_file_read_text")
 			|| ToolName == TEXT("project_file_write_text")
 			|| ToolName == TEXT("project_file_move");
@@ -604,7 +650,7 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
-		if (InvokeName != TEXT("blueprint_get_graph_summary") && InvokeName != TEXT("blueprint_export_ir")
+		if (InvokeName != TEXT("blueprint_get_graph_summary") && InvokeName != TEXT("blueprint_graph_introspect")
 			&& InvokeName != TEXT("project_file_read_text")
 			&& InvokeName != TEXT("asset_create"))
 		{
@@ -625,7 +671,7 @@ namespace UnrealAiAgentHarnessPriv
 				ArgsObj->SetStringField(TEXT("relative_path"), DefaultProjectReadRelativePath());
 			}
 		}
-		if (InvokeName == TEXT("blueprint_get_graph_summary") || InvokeName == TEXT("blueprint_export_ir"))
+		if (InvokeName == TEXT("blueprint_get_graph_summary") || InvokeName == TEXT("blueprint_graph_introspect"))
 		{
 			FString BpPath;
 			const bool bHasBpPath = ArgsObj->TryGetStringField(TEXT("blueprint_path"), BpPath) && !BpPath.TrimStartAndEnd().IsEmpty();
@@ -651,7 +697,11 @@ namespace UnrealAiAgentHarnessPriv
 				else
 				{
 					const FAgentContextState* State = ContextService->GetState(ProjectId, ThreadId);
-					const FString Resolved = FindRecentBlueprintPathFromContextState(State);
+					FString Resolved = State ? UnrealAiContextWorkingSet::FindBlueprintPathForAutofill(*State) : FString();
+					if (Resolved.IsEmpty())
+					{
+						Resolved = FindRecentBlueprintPathFromContextState(State);
+					}
 					if (!Resolved.IsEmpty())
 					{
 						ArgsObj->SetStringField(TEXT("blueprint_path"), Resolved);
@@ -945,6 +995,8 @@ namespace UnrealAiAgentHarnessPriv
 		FString LastToolFailureSignature;
 		/** Latest `suggested_correct_call` JSON from a failed tool (for repeated-validation nudge). */
 		FString LastSuggestedCorrectCallSerialized;
+		/** When the last failing tool was blueprint_graph_patch, trimmed JSON for error_codes extraction. */
+		FString LastFailedBlueprintGraphPatchContent;
 		int32 RepeatedToolFailureCount = 0;
 		TMap<FString, int32> ToolInvokeCountByName;
 		TMap<FString, int32> ToolInvokeCountBySignature;
@@ -963,6 +1015,7 @@ namespace UnrealAiAgentHarnessPriv
 		/** Headed scenario runner only: editor_state_snapshot_read budget; CompleteToolPath fails if exceeded. */
 		bool bPendingFailHarnessSnapshotReadSpam = false;
 		bool bHeadedScenarioStrictToolBudgets = false;
+		bool bHeadedScenarioSyncRun = false;
 		int32 EditorSnapshotReadInvokeCount = 0;
 		int32 ReplanCount = 0;
 		int32 QueueStepsPending = 0;
@@ -978,6 +1031,8 @@ namespace UnrealAiAgentHarnessPriv
 		bool bActionBlockerOutcomeCounted = false;
 		bool bMutationIntentCounted = false;
 		bool bToolExecutionInProgress = false;
+		/** When true, a ticker is draining streamed tools before CompleteToolPath may call DispatchLlm. */
+		bool bCompleteToolPathReschedulePending = false;
 		bool bAssistantToolCallMessageRecorded = false;
 		bool bFinishReceived = false;
 		FString FinishReason;
@@ -1065,6 +1120,7 @@ namespace UnrealAiAgentHarnessPriv
 			Display,
 			TEXT("UnrealAi harness: runner_terminal_set result=failed msg=%s"),
 			Msg.IsEmpty() ? TEXT("<none>") : *Msg);
+		bCompleteToolPathReschedulePending = false;
 		FUnrealAiEditorModalMonitor::NotifyAgentTurnEndedForSink(Sink);
 		if (Sink.IsValid())
 		{
@@ -1081,6 +1137,7 @@ namespace UnrealAiAgentHarnessPriv
 			return;
 		}
 		UE_LOG(LogTemp, Display, TEXT("UnrealAi harness: runner_terminal_set result=success"));
+		bCompleteToolPathReschedulePending = false;
 		if (Conv.IsValid())
 		{
 			Conv->SaveNow();
@@ -1411,11 +1468,12 @@ namespace UnrealAiAgentHarnessPriv
 			Sink->OnEnforcementEvent(
 				TEXT("tool_surface_metrics"),
 				FString::Printf(
-					TEXT("mode=%s eligible=%d roster_chars=%d budget_left=%d latency_ms=%d k=%d qshape=%s qhash=%s expanded=%s"),
+					TEXT("mode=%s eligible=%d roster_chars=%d budget_left=%d appendix_budget=%d latency_ms=%d k=%d qshape=%s qhash=%s expanded=%s"),
 					*ToolSurfaceTel.ToolSurfaceMode,
 					ToolSurfaceTel.EligibleCount,
 					ToolSurfaceTel.RosterChars,
 					ToolSurfaceTel.BudgetRemaining,
+					ToolSurfaceTel.AppendixCharBudgetLimit,
 					ToolSurfaceTel.RetrievalLatencyMs,
 					ToolSurfaceTel.KEffective,
 					*ToolSurfaceTel.QueryShape,
@@ -1604,6 +1662,17 @@ namespace UnrealAiAgentHarnessPriv
 			{
 				continue;
 			}
+			if (bForceOnFinish && ToolArgumentsJsonOversizedForDeserialize(Tc.ArgumentsJson))
+			{
+				Fail(FString::Printf(
+					TEXT("Tool call arguments exceed harness max size (%d characters; index=%d id=%s name=%s). "
+						 "Split the tool payload, use blueprint_graph_patch `ops_json_path` for large op lists, or reduce inline JSON."),
+					UnrealAiWaitTime::MaxToolArgumentsJsonDeserializeChars,
+					I,
+					*Tc.Id,
+					*Tc.Name));
+				return true;
+			}
 			EmitEnforcementEvent(
 				TEXT("stream_tool_call_incomplete_timeout"),
 				FString::Printf(TEXT("index=%d id=%s name=%s age_events=%d age_ms=%d"), I, *Tc.Id, *Tc.Name, AgeEvents, AgeMs));
@@ -1673,7 +1742,15 @@ namespace UnrealAiAgentHarnessPriv
 
 	int32 FAgentTurnRunner::GetMaxStreamNoFinishRetriesPerRound() const
 	{
-		return IsPlanNodeAgentThread() ? FMath::Max(0, UnrealAiWaitTime::PlanNodeStreamNoFinishMaxRetries) : 0;
+		if (IsPlanNodeAgentThread())
+		{
+			return FMath::Max(0, UnrealAiWaitTime::PlanNodeStreamNoFinishMaxRetries);
+		}
+		if (bHeadedScenarioSyncRun)
+		{
+			return FMath::Clamp(UnrealAiWaitTime::HeadedAgentStreamNoFinishMaxRetries, 0, 1);
+		}
+		return 0;
 	}
 
 	uint32 FAgentTurnRunner::GetEffectiveStreamNoFinishGraceMs() const
@@ -1681,6 +1758,10 @@ namespace UnrealAiAgentHarnessPriv
 		if (IsPlanNodeAgentThread() && UnrealAiWaitTime::PlanNodeStreamNoFinishGraceMs > 0)
 		{
 			return UnrealAiWaitTime::PlanNodeStreamNoFinishGraceMs;
+		}
+		if (bHeadedScenarioSyncRun && UnrealAiWaitTime::HeadedAgentStreamNoFinishGraceMs > 0)
+		{
+			return UnrealAiWaitTime::HeadedAgentStreamNoFinishGraceMs;
 		}
 		return UnrealAiWaitTime::HarnessStreamNoFinishGraceMs;
 	}
@@ -1700,17 +1781,20 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
-		double AsstIdle = -1.0;
+		double StreamIdle = -1.0;
 		double HttpIdle = -1.0;
 		double LlmSubmitIdle = -1.0;
-		UnrealAiHarnessProgressTelemetry::GetStreamIdleSeconds(AsstIdle, HttpIdle, LlmSubmitIdle);
+		double UnusedRawAssistantIdle = -1.0;
+		UnrealAiHarnessProgressTelemetry::GetAssistantOrThinkingIdleSeconds(StreamIdle);
+		UnrealAiHarnessProgressTelemetry::GetStreamIdleSeconds(UnusedRawAssistantIdle, HttpIdle, LlmSubmitIdle);
+		(void)UnusedRawAssistantIdle;
 		(void)LlmSubmitIdle;
 		const double ThreshSec = static_cast<double>(GraceMs) / 1000.0;
-		if (AsstIdle < 0.0 || HttpIdle < 0.0)
+		if (StreamIdle < 0.0 || HttpIdle < 0.0)
 		{
 			return;
 		}
-		if (AsstIdle < ThreshSec || HttpIdle < ThreshSec)
+		if (StreamIdle < ThreshSec || HttpIdle < ThreshSec)
 		{
 			return;
 		}
@@ -1825,8 +1909,9 @@ namespace UnrealAiAgentHarnessPriv
 			{
 				PendingToolCalls.Reset();
 			}
-			EnqueueNewlyCompleteCalls();
-			StartOrContinueStreamedToolExecution();
+			// Tool execution + CompleteToolPath deferral live in CompleteToolPath / CompleteAssistantOnly — do not
+			// call StartOrContinueStreamedToolExecution here first, or we can run tools then enter CompleteToolPath
+			// while bToolExecutionInProgress is still true (ticker yield) and abort the stream via DispatchLlm.
 			if (CheckIncompleteToolCallTimeout(true))
 			{
 				return;
@@ -1875,6 +1960,27 @@ namespace UnrealAiAgentHarnessPriv
 			if (bTerminal.load(std::memory_order_relaxed))
 			{
 				break;
+			}
+			// Headed editor runs: yield between tools so Slate/engine can tick. Without this,
+			// chained streamed tool calls (Blueprint Builder graph ops) monopolize one game-thread
+			// slice and the whole editor looks frozen. Scenario sync runs keep the old tight loop.
+			if (!bHeadedScenarioSyncRun && CompletedToolCallQueue.Num() > 0)
+			{
+				const TWeakPtr<FAgentTurnRunner> WeakSelf = AsShared();
+				FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+					[WeakSelf](float /*DeltaTime*/) -> bool
+					{
+						const TSharedPtr<FAgentTurnRunner> Self = WeakSelf.Pin();
+						if (!Self.IsValid())
+						{
+							return false;
+						}
+						// Release the guard before re-entering; it stayed true while we yielded.
+						Self->bToolExecutionInProgress = false;
+						Self->StartOrContinueStreamedToolExecution();
+						return false;
+					}));
+				return;
 			}
 		}
 		bToolExecutionInProgress = false;
@@ -2072,6 +2178,74 @@ namespace UnrealAiAgentHarnessPriv
 		const bool bRepeatSignature = Request.Mode == EUnrealAiAgentMode::Agent && InvokeName != TEXT("agent_emit_todo_plan")
 			&& (SigCount >= GHarnessRepeatedFailureStopCount || NameCount >= 6);
 		EmitEnforcementEvent(TEXT("stream_tool_exec_start"), FString::Printf(TEXT("id=%s name=%s"), *Tc.Id, *InvokeName));
+		if (Request.Mode == EUnrealAiAgentMode::Agent
+			&& !UnrealAiAgentToolGate::PassesToolSurfaceFilter(Request, InvokeName, Catalog))
+		{
+			const FString BlockMsg = FString::Printf(
+				TEXT("[Harness][reason=agent_surface_tool_withheld] Blocked: tool \"%s\" is reserved for a Builder sub-turn (Blueprint or Environment/PCG). ")
+				TEXT("Delegate via <unreal_ai_build_blueprint> or <unreal_ai_build_environment> per the system prompt, or use read-only tools on the main agent."),
+				*InvokeName);
+			if (Sink.IsValid())
+			{
+				Sink->OnToolCallFinished(InvokeName, Tc.Id, false, UnrealAiTruncateForUi(BlockMsg), nullptr);
+			}
+			if (Conv.IsValid())
+			{
+				FUnrealAiConversationMessage Tm;
+				Tm.Role = TEXT("tool");
+				Tm.ToolCallId = Tc.Id;
+				Tm.Content = BlockMsg;
+				Conv->GetMessagesMutable().Add(Tm);
+			}
+			++CurrentRoundToolFailCount;
+			CurrentRoundExecutedToolNames.Add(InvokeName);
+			if (!Tc.Id.IsEmpty())
+			{
+				ExecutedToolCallIds.Add(Tc.Id);
+			}
+			EmitEnforcementEvent(
+				TEXT("agent_surface_tool_gate_block"),
+				FString::Printf(TEXT("tool=%s builder_surface_only=1"), *InvokeName));
+			UnrealAiToolUsagePrior::NoteSessionOutcome(InvokeName, false);
+			LastConsecutiveIdenticalOkSignature.Reset();
+			ConsecutiveIdenticalOkCount = 0;
+			return;
+		}
+		if (Request.bBlueprintBuilderTurn)
+		{
+			FUnrealAiToolInvocationResult GraphDomainBlock;
+			if (UnrealAiGraphEditDomainPreflight_ShouldBlockInvocation(Request, InvokeName, InvokeArgs, GraphDomainBlock))
+			{
+				const FString BlockMsg = GraphDomainBlock.ErrorMessage.IsEmpty()
+					? FString(TEXT("[Harness][reason=graph_domain_preflight] Blocked: asset does not match builder handoff."))
+					: GraphDomainBlock.ErrorMessage;
+				if (Sink.IsValid())
+				{
+					Sink->OnToolCallFinished(InvokeName, Tc.Id, false, UnrealAiTruncateForUi(BlockMsg), nullptr);
+				}
+				if (Conv.IsValid())
+				{
+					FUnrealAiConversationMessage Tm;
+					Tm.Role = TEXT("tool");
+					Tm.ToolCallId = Tc.Id;
+					Tm.Content = BlockMsg;
+					Conv->GetMessagesMutable().Add(Tm);
+				}
+				++CurrentRoundToolFailCount;
+				CurrentRoundExecutedToolNames.Add(InvokeName);
+				if (!Tc.Id.IsEmpty())
+				{
+					ExecutedToolCallIds.Add(Tc.Id);
+				}
+				EmitEnforcementEvent(
+					TEXT("graph_domain_preflight_block"),
+					FString::Printf(TEXT("tool=%s"), *InvokeName));
+				UnrealAiToolUsagePrior::NoteSessionOutcome(InvokeName, false);
+				LastConsecutiveIdenticalOkSignature.Reset();
+				ConsecutiveIdenticalOkCount = 0;
+				return;
+			}
+		}
 		const FUnrealAiToolInvocationResult Inv = Tools->InvokeTool(InvokeName, InvokeArgs, Tc.Id);
 		CurrentRoundExecutedToolNames.Add(InvokeName);
 		const FString DialogFootnote = FUnrealAiEditorModalMonitor::ConsumePendingToolDialogFootnote();
@@ -2164,6 +2338,7 @@ namespace UnrealAiAgentHarnessPriv
 			LastToolFailureSignature.Reset();
 			RepeatedToolFailureCount = 0;
 			LastSuggestedCorrectCallSerialized.Reset();
+			LastFailedBlueprintGraphPatchContent.Reset();
 		}
 		else
 		{
@@ -2185,6 +2360,10 @@ namespace UnrealAiAgentHarnessPriv
 			{
 				LastToolFailureSignature = FailureSig;
 				RepeatedToolFailureCount = 1;
+			}
+			if (InvokeName == TEXT("blueprint_graph_patch"))
+			{
+				LastFailedBlueprintGraphPatchContent = ModelToolContent.Left(12000);
 			}
 		}
 		if (Sink.IsValid())
@@ -2253,6 +2432,42 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
+		// StartOrContinueStreamedToolExecution yields between tools via FTSTicker when not in headed sync runs.
+		// If we proceed to DispatchLlm while tools are still queued or a ticker continuation is pending,
+		// DispatchLlm cancels the transport and resets runner state — killing the in-flight LLM stream and
+		// stranding the tool ticker (symptom: UI stuck on "Run started" with no assistant output).
+		if (bToolExecutionInProgress || CompletedToolCallQueue.Num() > 0)
+		{
+			if (!bCompleteToolPathReschedulePending)
+			{
+				bCompleteToolPathReschedulePending = true;
+				UE_LOG(
+					LogTemp,
+					Display,
+					TEXT("UnrealAi harness: CompleteToolPath deferred until streamed tool queue idle (in_progress=%s queue=%d)."),
+					bToolExecutionInProgress ? TEXT("true") : TEXT("false"),
+					CompletedToolCallQueue.Num());
+				const TWeakPtr<FAgentTurnRunner> WeakSelf = AsShared();
+				FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+					[WeakSelf](float /*DeltaTime*/) -> bool
+					{
+						const TSharedPtr<FAgentTurnRunner> Self = WeakSelf.Pin();
+						if (!Self.IsValid() || Self->bTerminal.load(std::memory_order_relaxed))
+						{
+							return false;
+						}
+						if (Self->bToolExecutionInProgress || Self->CompletedToolCallQueue.Num() > 0)
+						{
+							return true;
+						}
+						Self->bCompleteToolPathReschedulePending = false;
+						Self->CompleteToolPath();
+						return false;
+					}));
+			}
+			return;
+		}
+		bCompleteToolPathReschedulePending = false;
 
 		FString TodoPlanEffectiveName;
 		if (PendingToolCalls.Num() == 1)
@@ -2397,7 +2612,8 @@ namespace UnrealAiAgentHarnessPriv
 				LastToolFailureSignature.IsEmpty() ? TEXT("unknown signature") : *LastToolFailureSignature));
 			return;
 		}
-		const bool bRepeatedValidationLoop = RepeatedToolFailureCount >= 3;
+		const bool bRepeatedValidationLoop = RepeatedToolFailureCount >= 3
+			|| (RepeatedToolFailureCount >= 2 && LastToolFailureSignature.StartsWith(TEXT("blueprint_graph_patch|")));
 		if (bRepeatedValidationLoop && Request.Mode != EUnrealAiAgentMode::Ask)
 		{
 			FUnrealAiConversationMessage RepairNudge;
@@ -2405,6 +2621,12 @@ namespace UnrealAiAgentHarnessPriv
 			RepairNudge.Content = TEXT(
 				"[Harness][reason=repeated_validation_failure] The same tool validation failure repeated multiple times. Repair-or-stop now: either call one corrected tool invocation with fixed arguments, or provide a concise blocked summary with the exact failing tool and required fields. Last failing pattern: ");
 			RepairNudge.Content += LastToolFailureSignature;
+			if (LastToolFailureSignature.StartsWith(TEXT("blueprint_graph_patch|")))
+			{
+				RepairNudge.Content += TEXT(
+					" After repeated blueprint_graph_patch failures you must change strategy: call blueprint_graph_introspect (and blueprint_graph_list_pins for one node), use validate_only:true on a smaller ops batch, or split the patch — do not resend the same failing patch JSON.");
+				RepairNudge.Content += UnrealAiAgentHarnessPriv::TryExtractBlueprintPatchErrorCodesSummary(LastFailedBlueprintGraphPatchContent);
+			}
 			if (!LastSuggestedCorrectCallSerialized.IsEmpty())
 			{
 				RepairNudge.Content += TEXT(" If the last tool message included `suggested_correct_call`, use that exact inner tool_id + arguments on the next `unreal_ai_dispatch` retry. suggested_correct_call: ");
@@ -2420,6 +2642,16 @@ namespace UnrealAiAgentHarnessPriv
 			LoopNudge.Content = TEXT(
 				"[Harness][reason=repeated_tool_loop] Repeated tool loop detected. Stop or change strategy: provide a concise blocked summary with the exact blocker, or summarize what is done vs remaining; use Plan chat mode for dependency-style multi-step work.");
 			Conv->GetMessagesMutable().Add(LoopNudge);
+		}
+		if (ToolFailCount >= 4 && Request.Mode == EUnrealAiAgentMode::Agent && !bTodoPlanOnly && Request.bOmitMainAgentBlueprintMutationTools
+			&& !Request.bBlueprintBuilderTurn && !Request.bEnvironmentBuilderTurn)
+		{
+			FUnrealAiConversationMessage BpNudge;
+			BpNudge.Role = TEXT("user");
+			BpNudge.Content = TEXT(
+				"[Harness][reason=multi_tool_failure_round] Multiple tool failures this round. For Blueprint graph mutations from the main agent, use the <unreal_ai_build_blueprint> handoff (see 12-build-blueprint-delegation). Use only tool_id values from the current tool appendix—never invent names. If still blocked, summarize the exact error text and stop.");
+			Conv->GetMessagesMutable().Add(BpNudge);
+			EmitEnforcementEvent(TEXT("blueprint_mutation_handoff_nudge"), FString::Printf(TEXT("tool_fail_count=%d"), ToolFailCount));
 		}
 		// The next round still runs (DispatchLlm below), but models often reply with text-only and end
 		// the run. A synthetic user line nudges execution when the only tool was the todo plan.
@@ -2528,9 +2760,66 @@ namespace UnrealAiAgentHarnessPriv
 			return;
 		}
 		AccumulateRoundUsage();
+		const FString OrigAssist = AssistantBuffer;
+		FString BbResultInner;
+		FString BbResultVisible;
+		const bool bBbResultParsed =
+			Request.bBlueprintBuilderTurn && UnrealAiBlueprintBuilderResultTag::TryConsume(OrigAssist, BbResultInner, BbResultVisible);
+
+		FString EnvResultInner;
+		FString EnvResultVisible;
+		const bool bEnvResultParsed =
+			Request.bEnvironmentBuilderTurn && UnrealAiEnvironmentBuilderResultTag::TryConsume(OrigAssist, EnvResultInner, EnvResultVisible);
+
+		FString BpInner;
+		FString BpVisible;
+		const bool bBpParsed = !Request.bBlueprintBuilderTurn && !Request.bEnvironmentBuilderTurn
+			&& UnrealAiBuildBlueprintTag::TryConsume(OrigAssist, BpInner, BpVisible);
+
+		FString EnvInner;
+		FString EnvVisibleFromTag;
+		const bool bEnvParsed = !Request.bBlueprintBuilderTurn && !Request.bEnvironmentBuilderTurn
+			&& UnrealAiBuildEnvironmentTag::TryConsume(OrigAssist, EnvInner, EnvVisibleFromTag);
+
+		const bool bBpHandoff = bBpParsed && (Request.Mode == EUnrealAiAgentMode::Agent) && !Request.bBlueprintBuilderTurn
+			&& !Request.bEnvironmentBuilderTurn && !Request.ThreadId.Contains(TEXT("_plan_")) && !BpInner.TrimStartAndEnd().IsEmpty();
+
+		const bool bEnvHandoff = bEnvParsed && (Request.Mode == EUnrealAiAgentMode::Agent) && !Request.bBlueprintBuilderTurn
+			&& !Request.bEnvironmentBuilderTurn && !Request.ThreadId.Contains(TEXT("_plan_")) && !EnvInner.TrimStartAndEnd().IsEmpty();
+
 		FUnrealAiConversationMessage Am;
 		Am.Role = TEXT("assistant");
-		Am.Content = AssistantBuffer;
+		if (bBpHandoff)
+		{
+			Am.Content = BpVisible;
+		}
+		else if (bEnvHandoff)
+		{
+			Am.Content = EnvVisibleFromTag;
+		}
+		else if (bBbResultParsed)
+		{
+			Am.Content = BbResultVisible;
+			if (Am.Content.TrimStartAndEnd().IsEmpty())
+			{
+				Am.Content = TEXT("Blueprint Builder finished (structured result follows for the main agent).");
+			}
+		}
+		else if (bEnvResultParsed)
+		{
+			Am.Content = EnvResultVisible;
+			if (Am.Content.TrimStartAndEnd().IsEmpty())
+			{
+				Am.Content = TEXT("Environment Builder finished (structured result follows for the main agent).");
+			}
+		}
+		else
+		{
+			Am.Content = OrigAssist;
+		}
+		// Models sometimes emit malformed tag junctions (e.g. closing handoff + opening result) that TryConsume skips.
+		UnrealAiBuildBlueprintTag::StripProtocolMarkersForUi(Am.Content);
+		UnrealAiBuildEnvironmentTag::StripProtocolMarkersForUi(Am.Content);
 		Conv->GetMessagesMutable().Add(Am);
 
 		// Second+ LLM rounds often end with finish_reason=stop and no tool_calls. Models sometimes return an
@@ -2540,7 +2829,7 @@ namespace UnrealAiAgentHarnessPriv
 		const bool bPlanPlannerPass = UnrealAiPlanPlannerHarness::IsPlanPlannerPass(Request.Mode);
 		const FString LastRealUser = GetLastRealUserMessage(Conv->GetMessages());
 		const bool bActionIntent = UserLikelyRequestsActionTool(LastRealUser);
-		const bool bHasExplicitBlocker = AssistantContainsExplicitBlocker(AssistantBuffer);
+		const bool bHasExplicitBlocker = AssistantContainsExplicitBlocker(OrigAssist);
 		if (bAgentModeWantsToolExecution && bActionIntent)
 		{
 			if (!bActionIntentCounted)
@@ -2561,7 +2850,8 @@ namespace UnrealAiAgentHarnessPriv
 		// Interactive Agent mode retries empty assistant deltas with a harness nudge. Plan DAG node threads
 		// (`*_plan_*`) run in series; burning multiple LLM rounds here blocks the plan executor and looks
 		// like a hang. Finish the node so the parent plan can advance.
-		if (bAgentModeWantsToolExecution && AssistantBuffer.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
+		if (!bBpHandoff && !bEnvHandoff && !bBbResultParsed && !bEnvResultParsed && bAgentModeWantsToolExecution
+			&& Am.Content.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
 		{
 			if (!Request.ThreadId.Contains(TEXT("_plan_")))
 			{
@@ -2581,7 +2871,7 @@ namespace UnrealAiAgentHarnessPriv
 			Fail(TEXT("Plan node finished with empty assistant output (no text and no tools)."));
 			return;
 		}
-		if (bPlanPlannerPass && AssistantBuffer.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
+		if (bPlanPlannerPass && Am.Content.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
 		{
 			FUnrealAiConversationMessage Nudge;
 			Nudge.Role = TEXT("user");
@@ -2595,7 +2885,7 @@ namespace UnrealAiAgentHarnessPriv
 		if (Request.Mode == EUnrealAiAgentMode::Ask && !bPlanPlannerPass && !Request.ThreadId.Contains(TEXT("_plan_"))
 			&& LlmRound < EffectiveMaxLlmRounds)
 		{
-			const FString TrimAsk = AssistantBuffer.TrimStartAndEnd();
+			const FString TrimAsk = Am.Content.TrimStartAndEnd();
 			if (UnrealAiAgentHarnessPriv::LooksLikeIncompleteAskAnswer(TrimAsk) && AskAnswerRepairNudgeCount < 1)
 			{
 				++AskAnswerRepairNudgeCount;
@@ -2625,6 +2915,74 @@ namespace UnrealAiAgentHarnessPriv
 			EmitEnforcementEvent(
 				TEXT("action_text_only_completion"),
 				TEXT("agent round ended with assistant text only (no tool_calls); harness allows success for qualitative review"));
+		}
+
+		if (bBpHandoff)
+		{
+			EUnrealAiBlueprintBuilderTargetKind ParsedKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+			UnrealAiBuildBlueprintTag::ParseAndStripHandoffMetadata(BpInner, ParsedKind);
+			Request.BlueprintBuilderTargetKind = ParsedKind;
+			Request.bBlueprintBuilderTurn = true;
+			Request.bEnvironmentBuilderTurn = false;
+			EmitEnforcementEvent(TEXT("blueprint_builder_chain"), TEXT("chained_subturn_from_build_blueprint_tag"));
+			FUnrealAiConversationMessage Sub;
+			Sub.Role = TEXT("user");
+			Sub.Content = UnrealAiBlueprintBuilderToolSurface::BuildAutomatedSubturnHarnessPreamble(ParsedKind) + BpInner;
+			Conv->GetMessagesMutable().Add(Sub);
+			AssistantBuffer.Reset();
+			DispatchLlm();
+			return;
+		}
+
+		if (bEnvHandoff)
+		{
+			EUnrealAiEnvironmentBuilderTargetKind ParsedEnvKind = EUnrealAiEnvironmentBuilderTargetKind::PcgScene;
+			UnrealAiBuildEnvironmentTag::ParseAndStripHandoffMetadata(EnvInner, ParsedEnvKind);
+			Request.EnvironmentBuilderTargetKind = ParsedEnvKind;
+			Request.bEnvironmentBuilderTurn = true;
+			Request.bBlueprintBuilderTurn = false;
+			EmitEnforcementEvent(TEXT("environment_builder_chain"), TEXT("chained_subturn_from_build_environment_tag"));
+			FUnrealAiConversationMessage SubEnv;
+			SubEnv.Role = TEXT("user");
+			SubEnv.Content = UnrealAiEnvironmentBuilderToolSurface::BuildAutomatedSubturnHarnessPreamble(ParsedEnvKind) + EnvInner;
+			Conv->GetMessagesMutable().Add(SubEnv);
+			AssistantBuffer.Reset();
+			DispatchLlm();
+			return;
+		}
+
+		if (bBbResultParsed)
+		{
+			Request.bBlueprintBuilderTurn = false;
+			Request.BlueprintBuilderTargetKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+			Request.bInjectBlueprintBuilderResumeChunk = true;
+			EmitEnforcementEvent(TEXT("blueprint_builder_result"), TEXT("return_to_main_agent"));
+			FUnrealAiConversationMessage Ret;
+			Ret.Role = TEXT("user");
+			Ret.Content = FString::Printf(
+				TEXT("[Blueprint Builder — result for main agent]\n%s"),
+				*BbResultInner);
+			Conv->GetMessagesMutable().Add(Ret);
+			AssistantBuffer.Reset();
+			DispatchLlm();
+			return;
+		}
+
+		if (bEnvResultParsed)
+		{
+			Request.bEnvironmentBuilderTurn = false;
+			Request.EnvironmentBuilderTargetKind = EUnrealAiEnvironmentBuilderTargetKind::PcgScene;
+			Request.bInjectEnvironmentBuilderResumeChunk = true;
+			EmitEnforcementEvent(TEXT("environment_builder_result"), TEXT("return_to_main_agent"));
+			FUnrealAiConversationMessage RetEnv;
+			RetEnv.Role = TEXT("user");
+			RetEnv.Content = FString::Printf(
+				TEXT("[Environment Builder — result for main agent]\n%s"),
+				*EnvResultInner);
+			Conv->GetMessagesMutable().Add(RetEnv);
+			AssistantBuffer.Reset();
+			DispatchLlm();
+			return;
 		}
 
 		Succeed();
@@ -2728,6 +3086,11 @@ void FUnrealAiAgentHarness::SetHeadedScenarioStrictToolBudgets(bool bEnable)
 	bHeadedScenarioStrictToolBudgets = bEnable;
 }
 
+void FUnrealAiAgentHarness::SetHeadedScenarioSyncRun(bool bEnable)
+{
+	bHeadedScenarioSyncRun = bEnable;
+}
+
 void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TSharedPtr<IAgentRunSink> Sink)
 {
 	CancelTurn();
@@ -2755,6 +3118,7 @@ void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TS
 	Runner->UsageTracker = UsageTracker;
 	Runner->MemoryService = MemoryService;
 	Runner->bHeadedScenarioStrictToolBudgets = bHeadedScenarioStrictToolBudgets;
+	Runner->bHeadedScenarioSyncRun = bHeadedScenarioSyncRun;
 	Runner->AccumulatedUsage = FUnrealAiTokenUsage();
 	Runner->Conv = MakeUnique<FUnrealAiConversationStore>(Persistence);
 	Runner->Conv->LoadOrCreate(Request.ProjectId, Request.ThreadId);

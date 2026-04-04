@@ -67,6 +67,27 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		}
 	};
 
+	/** RAII: headed RunAgentTurnSync — enable headed-only harness policies (stream-no-finish retry for agent turns). */
+	struct FScopedHeadedScenarioSyncRun
+	{
+		IUnrealAiAgentHarness* Harness;
+		explicit FScopedHeadedScenarioSyncRun(IUnrealAiAgentHarness* InHarness)
+			: Harness(InHarness)
+		{
+			if (Harness)
+			{
+				Harness->SetHeadedScenarioSyncRun(true);
+			}
+		}
+		~FScopedHeadedScenarioSyncRun()
+		{
+			if (Harness)
+			{
+				Harness->SetHeadedScenarioSyncRun(false);
+			}
+		}
+	};
+
 	static uint32 GetEffectiveHarnessSyncIdleAbortMs(IUnrealAiAgentHarness* Harness, const bool bScenarioSyncWait)
 	{
 		uint32 IdleMs = UnrealAiWaitTime::HarnessSyncIdleAbortMs;
@@ -115,20 +136,28 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		// uses normal idle thresholds. UI path still uses active_llm_transport skip above.
 		if (bScenarioSyncWait && Harness->HasActiveLlmTransportRequest())
 		{
-			double AsstPre = -1.0;
+			double StreamPre = -1.0;
 			double HttpPre = -1.0;
 			double LlmPre = -1.0;
-			UnrealAiHarnessProgressTelemetry::GetStreamIdleSeconds(AsstPre, HttpPre, LlmPre);
-			if (AsstPre < 0.0)
+			double RawAsstPre = -1.0;
+			UnrealAiHarnessProgressTelemetry::GetAssistantOrThinkingIdleSeconds(StreamPre);
+			UnrealAiHarnessProgressTelemetry::GetStreamIdleSeconds(RawAsstPre, HttpPre, LlmPre);
+			(void)RawAsstPre;
+			if (StreamPre < 0.0)
 			{
-				UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("awaiting_first_assistant_delta"));
+				UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("awaiting_first_assistant_or_thinking_delta"));
 				return false;
 			}
 		}
-		double AsstIdle = -1.0;
+		double StreamIdle = -1.0;
 		double HttpIdle = -1.0;
 		double LlmIdle = -1.0;
-		UnrealAiHarnessProgressTelemetry::GetStreamIdleSeconds(AsstIdle, HttpIdle, LlmIdle);
+		double UnusedRawAssistantIdle = -1.0;
+		UnrealAiHarnessProgressTelemetry::GetAssistantOrThinkingIdleSeconds(StreamIdle);
+		UnrealAiHarnessProgressTelemetry::GetStreamIdleSeconds(UnusedRawAssistantIdle, HttpIdle, LlmIdle);
+		(void)UnusedRawAssistantIdle;
+		double ToolFinishIdle = -1.0;
+		UnrealAiHarnessProgressTelemetry::GetToolFinishIdleSeconds(ToolFinishIdle);
 		const double ThreshSec = static_cast<double>(IdleMs) / 1000.0;
 		const bool bHttpTelemetryValid = (HttpIdle >= 0.0);
 		if (bHttpTelemetryValid)
@@ -143,10 +172,23 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		{
 			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("http_idle_unset_assistant_only"));
 		}
-		const bool bAssistantStale = (AsstIdle >= ThreshSec) || (AsstIdle < 0.0);
-		if (!bAssistantStale)
+		if (ToolFinishIdle >= 0.0 && ToolFinishIdle < ThreshSec)
 		{
-			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("assistant_not_idle_enough"));
+			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("recent_tool_finish"));
+			return false;
+		}
+		bool bStreamStale = false;
+		if (bScenarioSyncWait && StreamIdle < 0.0)
+		{
+			bStreamStale = false;
+		}
+		else
+		{
+			bStreamStale = (StreamIdle >= ThreshSec) || (StreamIdle < 0.0);
+		}
+		if (!bStreamStale)
+		{
+			UnrealAiHarnessProgressTelemetry::SetIdleAbortSkipReason(TEXT("stream_not_idle_enough"));
 			return false;
 		}
 		if (LlmIdle >= 0.0 && LlmIdle < ThreshSec)
@@ -338,6 +380,7 @@ namespace UnrealAiHarnessScenarioRunnerPriv
 		}
 
 		const FScopedHeadedScenarioStrictToolBudgets ScopedStrictToolBudgets(Harness);
+		const FScopedHeadedScenarioSyncRun ScopedHeadedSyncRun(Harness);
 
 		const FString ProjectId = UnrealAiProjectId::GetCurrentProjectId();
 		FString RunDir = OutputRootDir;

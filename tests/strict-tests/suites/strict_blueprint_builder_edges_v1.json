@@ -1,0 +1,78 @@
+{
+  "suite_id": "strict_blueprint_builder_edges_v1",
+  "default_type": "agent",
+  "coverage_notes": "Blueprint Builder policy edges: main-agent compile is withheld (run.jsonl), then direct tool_invoke_ok proves the asset compiles; T3D export + verify_graph steps (links/orphan_pins/duplicate_node_guids). Requires sample project content; first turn creates /Game/AIHarness/BlueprintBuilderEdges/EdgeHarnessBP.",
+  "turns": [
+    {
+      "id": "turn_01",
+      "type": "agent",
+      "request": "Create a new Actor Blueprint asset at /Game/AIHarness/BlueprintBuilderEdges/EdgeHarnessBP.EdgeHarnessBP (parent /Script/Engine.Actor). Put at least one real node in EventGraph so the graph is not empty.",
+      "assertions": [
+        {
+          "type": "asset_exists",
+          "object_path": "/Game/AIHarness/BlueprintBuilderEdges/EdgeHarnessBP.EdgeHarnessBP"
+        },
+        {
+          "type": "blueprint_export_ir_node_count_min",
+          "blueprint_path": "/Game/AIHarness/BlueprintBuilderEdges/EdgeHarnessBP.EdgeHarnessBP",
+          "min_nodes": 1
+        }
+      ]
+    },
+    {
+      "id": "turn_02",
+      "type": "agent",
+      "request": "Compile the Blueprint at /Game/AIHarness/BlueprintBuilderEdges/EdgeHarnessBP.EdgeHarnessBP.",
+      "assertions": [
+        {
+          "type": "run_jsonl_last_tool_finish",
+          "tool": "blueprint_compile",
+          "success": false,
+          "result_preview_contains": "blueprint_tool_withheld"
+        },
+        {
+          "type": "tool_invoke_ok",
+          "tool": "blueprint_compile",
+          "arguments": {
+            "blueprint_path": "/Game/AIHarness/BlueprintBuilderEdges/EdgeHarnessBP.EdgeHarnessBP"
+          }
+        }
+      ]
+    },
+    {
+      "id": "turn_03",
+      "type": "agent",
+      "request": "Export EventGraph of /Game/AIHarness/BlueprintBuilderEdges/EdgeHarnessBP.EdgeHarnessBP as T3D for inspection.",
+      "assertions": [
+        {
+          "type": "tool_invoke_ok",
+          "tool": "blueprint_export_graph_t3d",
+          "arguments": {
+            "blueprint_path": "/Game/AIHarness/BlueprintBuilderEdges/EdgeHarnessBP.EdgeHarnessBP",
+            "graph_name": "EventGraph"
+          }
+        }
+      ]
+    },
+    {
+      "id": "turn_04",
+      "type": "agent",
+      "request": "Run verification on /Game/AIHarness/BlueprintBuilderEdges/EdgeHarnessBP.EdgeHarnessBP EventGraph.",
+      "assertions": [
+        {
+          "type": "tool_invoke_ok",
+          "tool": "blueprint_verify_graph",
+          "arguments": {
+            "blueprint_path": "/Game/AIHarness/BlueprintBuilderEdges/EdgeHarnessBP.EdgeHarnessBP",
+            "graph_name": "EventGraph",
+            "steps": [
+              "links",
+              "orphan_pins",
+              "duplicate_node_guids"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

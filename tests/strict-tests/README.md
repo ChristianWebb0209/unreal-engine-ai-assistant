@@ -12,6 +12,15 @@ Examples:
 - Assert that a certain attribute was modified on a component
 - Assert that a certain asset was renamed
 
+## Strict vs agent tool path
+
+- **Agent turns** (`UnrealAi.RunAgentTurn`) execute tools through the harness. For main-agent Blueprint work, some tools (for example `blueprint_compile`) are **withheld** and recorded in `run.jsonl` as `tool_finish` with `success: false` and a `blueprint_tool_withheld` message.
+- **`tool_invoke_ok`** in `UnrealAi.RunStrictAssertions` calls `IToolExecutionHost::InvokeTool` **directly**. It does **not** replay the agent stream and does **not** apply the same withhold rules. It answers: “does this tool succeed against current editor state?”
+- To assert **agent** behavior, use **`run_jsonl_last_tool_finish`**, **`run_jsonl_enforcement_event`**, or **`run_jsonl_substring`** against the turn’s `run.jsonl` (same folder as `strict_assertions_result.json`).
+- Typical pattern for gated tools: assert the **last** matching `tool_finish` in `run.jsonl` shows the expected failure, then assert **`tool_invoke_ok`** for the same tool to prove the underlying asset/editor state is still valid.
+
+Implementation: [`Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/UnrealAiEditorModule.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/UnrealAiEditorModule.cpp) (`UnrealAi.RunStrictAssertions`).
+
 ## How this harness works
 
 - `run-strict-headed.ps1` wraps `tests/qualitative-tests/run-qualitative-headed.ps1`.
@@ -47,18 +56,33 @@ Examples:
 
 ## Supported assertion types
 
-- `asset_exists`
-  - Fields: `object_path` (string) (for example `/Game/Blueprints/MyBP.MyBP`)
-- `tool_invoke_ok`
-  - Fields: `tool` (string, tool id), `arguments` (JSON object passed to the tool)
-- `blueprint_export_ir_node_count_min`
-  - Fields: `blueprint_path` (string), `min_nodes` (int), optional `graph_name` (string)
-  - Uses `blueprint_export_ir` editor tool and verifies the exported IR contains at least `min_nodes` nodes.
+All handlers live in `UnrealAi.RunStrictAssertions` unless noted.
+
+| Type | Purpose |
+|------|---------|
+| `asset_exists` | `object_path` — asset loads in editor |
+| `asset_not_exists` | `object_path` — asset does not load |
+| `project_file_exists` | `relative_path` — file under project dir |
+| `project_dir_exists` | `relative_path` — directory under project dir |
+| `tool_invoke_ok` | `tool`, `arguments` — direct tool invocation succeeds (`Inv.bOk`) |
+| `tool_invoke_fail` | `tool`, `arguments` — direct invocation fails as expected |
+| `tool_result_path_exists` | `tool`, `arguments`, `path` — JSON path exists in tool result |
+| `tool_result_path_equals_string` | `tool`, `arguments`, `path`, `expected` |
+| `tool_result_path_contains` | `tool`, `arguments`, `path`, `substring` |
+| `tool_result_array_min_length` | `tool`, `arguments`, `path`, `min_length` |
+| `tool_result_number_gte` / `tool_result_number_lte` | numeric comparisons at `path` |
+| `tool_result_bool_equals` | bool at `path` |
+| `tool_result_string_nonempty` | string at `path` non-empty |
+| `blueprint_export_ir_node_count_min` | `blueprint_path`, `min_nodes`, optional `graph_name` — implemented with **`blueprint_graph_introspect`** (`nodes[]` count); assertion id kept for suite JSON compatibility |
+| `run_jsonl_last_tool_finish` | `tool`, `success` (bool), optional `result_preview_contains`, optional `run_jsonl_relative_path` (default `run.jsonl`) — last matching `tool_finish` line in the turn’s JSONL |
+| `run_jsonl_enforcement_event` | `event_type`, optional `detail_contains`, optional `run_jsonl_relative_path` — first matching `enforcement_event` |
+| `run_jsonl_substring` | `substring`, optional `run_jsonl_relative_path` — file body contains substring |
 
 ## Usage
 
 ```powershell
 .\tests\strict-tests\run-strict-headed.ps1 -Suite strict_blueprint_creation_v2
+.\tests\strict-tests\run-strict-headed.ps1 -Suite strict_blueprint_builder_edges_v1
 ```
 
 Options:
@@ -66,9 +90,8 @@ Options:
 - `-Suite` (required, with or without `.json`)
 - `-MaxSuites` (default `0` = all)
 - `-DryRun`
-- `-KeepTempSuites`
 
 ## Notes
 
 - This harness is designed to expose regressions quickly even if long-running qualitative runs appear green, because strict assertions check editor-side outcomes directly.
-
+- Agent turns that **never** call a tool referenced by `run_jsonl_last_tool_finish` will fail that assertion (no matching `tool_finish` line).

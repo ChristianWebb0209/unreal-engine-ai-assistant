@@ -46,7 +46,9 @@ if (-not $doc.tools -or $doc.tools -isnot [System.Collections.IEnumerable]) {
 
 $tools = @($doc.tools)
 $count = $tools.Count
-if ($doc.meta.tool_count -ne $count) {
+$fragArr = @($doc.meta.tool_catalog_fragments)
+$hasFragments = $fragArr.Count -gt 0
+if (-not $hasFragments -and $doc.meta.tool_count -ne $count) {
     Write-Error "meta.tool_count ($($doc.meta.tool_count)) does not match tools array length ($count)."
     exit 1
 }
@@ -70,4 +72,27 @@ foreach ($t in $tools) {
 }
 
 Write-Host "Validate-UnrealAiToolCatalog: OK ($count tools, resolver_contract $v)." -ForegroundColor Green
+
+$py = Get-Command python -ErrorAction SilentlyContinue
+if (-not $py) {
+    $py = Get-Command py -ErrorAction SilentlyContinue
+}
+if ($py) {
+    $pythonExe = $py.Source
+    Write-Host "Running verify_tool_catalog_meta.py..." -ForegroundColor Cyan
+    & $pythonExe (Join-Path $PSScriptRoot 'verify_tool_catalog_meta.py')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Host "Running audit_tool_agent_surfaces.py..." -ForegroundColor Cyan
+    & $pythonExe (Join-Path $PSScriptRoot 'audit_tool_agent_surfaces.py')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Host "Running audit_tool_environment_surfaces.py..." -ForegroundColor Cyan
+    & $pythonExe (Join-Path $PSScriptRoot 'audit_tool_environment_surfaces.py')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Host "Running audit_subagent_exclusive_fragments.py..." -ForegroundColor Cyan
+    & $pythonExe (Join-Path $PSScriptRoot 'audit_subagent_exclusive_fragments.py')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+} else {
+    Write-Warning 'Python not found on PATH; skipped verify_tool_catalog_meta.py and audit_tool_agent_surfaces.py (CI still runs them explicitly).'
+}
+
 exit 0

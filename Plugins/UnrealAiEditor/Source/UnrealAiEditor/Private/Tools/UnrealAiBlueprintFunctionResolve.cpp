@@ -75,5 +75,13 @@ bool UnrealAiBlueprintFunctionResolve::TryDefaultOuterClassPathForK2Event(
 		OutOuterClassPath = TEXT("/Script/Engine.Pawn");
 		return true;
 	}
+	static const FName NJump(TEXT("Jump"));
+	static const FName NLanded(TEXT("Landed"));
+	static const FName NReceiveJump(TEXT("ReceiveJump"));
+	if (F == NJump || F == NLanded || F == NReceiveJump)
+	{
+		OutOuterClassPath = TEXT("/Script/Engine.Character");
+		return true;
+	}
 	return false;
 }

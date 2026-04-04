@@ -10,6 +10,7 @@
 #include "FileHelpers.h"
 #include "IAssetTools.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialExpression.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
@@ -630,5 +631,74 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetVectorParamete
 	MI->PostEditChange();
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
+	return UnrealAiToolJson::Ok(O);
+}
+
+FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialGraphSummarize(const TSharedPtr<FJsonObject>& Args)
+{
+	FString MaterialPath;
+	if (!Args->TryGetStringField(TEXT("material_path"), MaterialPath) || MaterialPath.IsEmpty())
+	{
+		Args->TryGetStringField(TEXT("object_path"), MaterialPath);
+		if (MaterialPath.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("path"), MaterialPath);
+		}
+	}
+	double MaxExprD = 200.0;
+	Args->TryGetNumberField(TEXT("max_expressions"), MaxExprD);
+	int32 MaxExpressions = FMath::Clamp(static_cast<int32>(MaxExprD), 1, 2000);
+
+	if (MaterialPath.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("material_path is required (aliases: object_path, path)."));
+	}
+	UnrealAiToolDispatchArgRepair::NormalizeAssetLikeObjectPath(MaterialPath);
+
+	UMaterial* Mat = LoadObject<UMaterial>(nullptr, *MaterialPath);
+	if (!Mat)
+	{
+		return UnrealAiToolJson::Error(
+			TEXT("Could not load UMaterial at material_path. Pass a base Material asset (/Game/.../M_Name.M_Name), not a Material Instance."));
+	}
+
+	const FMaterialExpressionCollection& Coll = Mat->GetExpressionCollection();
+	const int32 TotalExpressions = Coll.Expressions.Num();
+	TArray<TSharedPtr<FJsonValue>> ExprArr;
+	ExprArr.Reserve(FMath::Min(MaxExpressions, TotalExpressions));
+
+	int32 Added = 0;
+	for (const TObjectPtr<UMaterialExpression>& Ptr : Coll.Expressions)
+	{
+		if (Added >= MaxExpressions)
+		{
+			break;
+		}
+		UMaterialExpression* E = Ptr.Get();
+		if (!E)
+		{
+			continue;
+		}
+		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+		Row->SetStringField(TEXT("class"), E->GetClass()->GetPathName());
+		Row->SetStringField(TEXT("expression_guid"), E->MaterialExpressionGuid.ToString());
+#if WITH_EDITOR
+		Row->SetNumberField(TEXT("editor_x"), static_cast<double>(E->MaterialExpressionEditorX));
+		Row->SetNumberField(TEXT("editor_y"), static_cast<double>(E->MaterialExpressionEditorY));
+#endif
+		ExprArr.Add(MakeShared<FJsonValueObject>(Row));
+		++Added;
+	}
+
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetBoolField(TEXT("ok"), true);
+	O->SetStringField(TEXT("material_path"), MaterialPath);
+	O->SetNumberField(TEXT("expression_count_total"), static_cast<double>(TotalExpressions));
+	O->SetNumberField(TEXT("expression_count_returned"), static_cast<double>(ExprArr.Num()));
+	O->SetBoolField(TEXT("truncated"), TotalExpressions > ExprArr.Num());
+	O->SetArrayField(TEXT("expressions"), ExprArr);
+	O->SetStringField(
+		TEXT("note"),
+		TEXT("Read-only graph inventory. For links and root inputs use material_graph_export; mutations use material_graph_patch in a Blueprint Builder material_graph sub-turn."));
 	return UnrealAiToolJson::Ok(O);
 }

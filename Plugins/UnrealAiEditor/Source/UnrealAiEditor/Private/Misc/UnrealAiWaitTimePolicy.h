@@ -18,9 +18,9 @@ namespace UnrealAiWaitTime
 	/**
 	 * Headed harness: if the turn is still non-terminal but HTTP is complete and stream telemetry is idle
 	 * for this long (no active tool work), cancel early instead of waiting the full HarnessSyncWaitMs.
-	 * 0 = disabled. Run-29 step_03: post-tool assistant replies need more than 3s on slow models; 12s reduces false idle-abort before run_finished.
+	 * 0 = disabled. Run-29 step_03: post-tool assistant replies need more than 3s on slow models; qualitative headed runs need extra headroom after tool failures before the assistant streams again.
 	 */
-	inline constexpr uint32 HarnessSyncIdleAbortMs = 12000;
+	inline constexpr uint32 HarnessSyncIdleAbortMs = 22000;
 
 	/**
 	 * Headed scenario sync: when a plan pipeline is active (planner + serial node turns), post-tool / post-token
@@ -109,22 +109,39 @@ namespace UnrealAiWaitTime
 	inline constexpr int32 PlanNodeTransientHttpMaxRetries = 1;
 
 	/**
+	 * Headed `RunAgentTurnSync` agent turns (non-plan-node): max `DispatchLlm(true)` retries per LLM round when HTTP
+	 * completes without a stream Finish (truncated SSE). Capped at 1 in harness. 0 = legacy (idle-abort / long sync wait only).
+	 */
+	inline constexpr int32 HeadedAgentStreamNoFinishMaxRetries = 1;
+
+	/**
+	 * When > 0, headed sync agent turns use this instead of HarnessStreamNoFinishGraceMs for the no-finish idle gate.
+	 * 0 = use HarnessStreamNoFinishGraceMs (5s default).
+	 */
+	inline constexpr uint32 HeadedAgentStreamNoFinishGraceMs = 0;
+
+	/**
 	 * Plan-node agent threads: fail fast when the same validation-style tool failure signature repeats this many times.
 	 * Keeps nodes from burning rounds on identical "missing required args" loops.
 	 */
 	inline constexpr int32 PlanNodeRepeatedValidationFailFastThreshold = 2;
 
 	// --- Streamed tool-call incomplete guard (SSE can split tool JSON across chunks) ---
-	/** Run-20 step_01: `stream_tool_call_incomplete_timeout` at age_events=64 (age_ms=4) — provider fragmented many tiny SSE chunks before tool JSON closed. */
-	inline constexpr int32 StreamToolIncompleteMaxEvents = 128;
+	/**
+	 * Max stream events while a tool call is still receiving `arguments` deltas before we treat it as stalled.
+	 * Token-granular providers can emit hundreds of tiny SSE chunks per second; keep this very large so we rely
+	 * primarily on StreamToolIncompleteMaxMs instead of a low event budget.
+	 */
+	inline constexpr int32 StreamToolIncompleteMaxEvents = 100000;
 	inline constexpr int32 StreamToolIncompleteMaxMs = 120000; // 2 min
 
 	/**
 	 * `FAgentTurnRunner::TryParseArgumentsJsonComplete`: refuse to call `FJsonSerializer::Deserialize` when the
-	 * streamed `arguments` string is larger than this. Oversize / malformed tool JSON has triggered UE JsonReader
-	 * BufferReader asserts instead of a clean parse failure; treat as "not yet complete" for readiness.
+	 * streamed `arguments` string is larger than this (avoids JsonReader edge cases on huge buffers). On Finish,
+	 * the harness fails with an explicit message instead of spinning until the event timeout. For larger payloads,
+	 * use tool-specific indirection (e.g. blueprint_graph_patch `ops_json_path`).
 	 */
-	inline constexpr int32 MaxToolArgumentsJsonDeserializeChars = 2 * 1024 * 1024;
+	inline constexpr int32 MaxToolArgumentsJsonDeserializeChars = 32 * 1024 * 1024;
 
 	// --- Optional pacing between LLM submits (0 = off) ---
 	inline constexpr int32 HarnessRoundMinDelayMs = 0;

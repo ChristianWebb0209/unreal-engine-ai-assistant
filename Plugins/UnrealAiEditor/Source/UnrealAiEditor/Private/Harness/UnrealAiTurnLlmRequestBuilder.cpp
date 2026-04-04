@@ -9,6 +9,9 @@
 #include "Misc/UnrealAiRuntimeDefaults.h"
 #include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Prompt/UnrealAiPromptBuilder.h"
+#include "Tools/UnrealAiAgentToolGate.h"
+#include "Tools/UnrealAiBlueprintBuilderToolSurface.h"
+#include "Tools/UnrealAiEnvironmentBuilderToolSurface.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Tools/UnrealAiToolSurfacePipeline.h"
 #include "UnrealAiEditorSettings.h"
@@ -83,7 +86,7 @@ namespace UnrealAiTurnLlmRequestBuilderPriv
 }
 
 bool UnrealAiTurnLlmRequestBuilder::Build(
-	const FUnrealAiAgentTurnRequest& Request,
+	FUnrealAiAgentTurnRequest& Request,
 	int32 LlmRound,
 	int32 MaxLlmRounds,
 	const FString& RetrievalTurnKey,
@@ -143,6 +146,20 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 		P.bIncludePlanNodeExecutionChunk = true;
 	}
 	P.bIncludePlanDagChunk = (Request.Mode == EUnrealAiAgentMode::Plan);
+	P.bBlueprintBuilderMode = Request.bBlueprintBuilderTurn;
+	P.BlueprintBuilderTargetKind = Request.BlueprintBuilderTargetKind;
+	P.bEnvironmentBuilderMode = Request.bEnvironmentBuilderTurn;
+	P.EnvironmentBuilderTargetKind = Request.EnvironmentBuilderTargetKind;
+
+	const bool bResumeChunk = Request.bInjectBlueprintBuilderResumeChunk;
+	Request.bInjectBlueprintBuilderResumeChunk = false;
+	P.bInjectBlueprintBuilderResumeChunk =
+		bResumeChunk && !Request.bBlueprintBuilderTurn && Request.Mode == EUnrealAiAgentMode::Agent;
+
+	const bool bEnvResumeChunk = Request.bInjectEnvironmentBuilderResumeChunk;
+	Request.bInjectEnvironmentBuilderResumeChunk = false;
+	P.bInjectEnvironmentBuilderResumeChunk =
+		bEnvResumeChunk && !Request.bEnvironmentBuilderTurn && Request.Mode == EUnrealAiAgentMode::Agent;
 
 	const FString SystemContent = UnrealAiPromptBuilder::BuildSystemDeveloperContent(P);
 	FString SystemAugmented = SystemContent;
@@ -185,11 +202,44 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	}
 	const FUnrealAiToolPackOptions* PackPtr = PackOpt.bRestrictToCorePack ? &PackOpt : nullptr;
 
+	const auto ToolSurfaceFilter = [&](const FString& Tid) -> bool
+	{
+		return UnrealAiAgentToolGate::PassesToolSurfaceFilter(Request, Tid, Catalog);
+	};
+
 	FString ToolsJson;
 	const bool bWantDispatchSurface = UnrealAiRuntimeDefaults::ToolSurfaceUseDispatch && !Request.bForceNativeToolSurface;
 	bool bUsingDispatchSurface = false;
 	if (Request.Mode != EUnrealAiAgentMode::Plan && Caps.bSupportsNativeTools && bWantDispatchSurface)
 	{
+		int32 BlueprintBuilderAppendixBudgetChars = 0;
+		if (Request.bBlueprintBuilderTurn && Request.Mode == EUnrealAiAgentMode::Agent)
+		{
+			FString BpBudgetErr;
+			if (!UnrealAiBlueprintBuilderToolSurface::TryComputeAppendixBudgetFromModelContext(
+					Caps.MaxContextTokens,
+					CharPerTokenApprox,
+					BlueprintBuilderAppendixBudgetChars,
+					&BpBudgetErr))
+			{
+				OutError = BpBudgetErr;
+				return false;
+			}
+		}
+		int32 EnvironmentBuilderAppendixBudgetChars = 0;
+		if (Request.bEnvironmentBuilderTurn && Request.Mode == EUnrealAiAgentMode::Agent)
+		{
+			FString EnvBudgetErr;
+			if (!UnrealAiEnvironmentBuilderToolSurface::TryComputeAppendixBudgetFromModelContext(
+					Caps.MaxContextTokens,
+					CharPerTokenApprox,
+					EnvironmentBuilderAppendixBudgetChars,
+					&EnvBudgetErr))
+			{
+				OutError = EnvBudgetErr;
+				return false;
+			}
+		}
 		FString ToolIndexMd;
 		FUnrealAiToolSurfaceTelemetry Tel;
 		const bool bTiered = UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
@@ -201,10 +251,12 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 			PackPtr,
 			true,
 			ToolIndexMd,
-			Tel);
+			Tel,
+			BlueprintBuilderAppendixBudgetChars,
+			EnvironmentBuilderAppendixBudgetChars);
 		if (!bTiered)
 		{
-			Catalog->BuildCompactToolIndexAppendix(Request.Mode, Caps, PackPtr, ToolIndexMd);
+			Catalog->BuildCompactToolIndexAppendix(Request.Mode, Caps, PackPtr, ToolSurfaceFilter, ToolIndexMd);
 		}
 		if (OutToolSurfaceTelemetry)
 		{
@@ -224,7 +276,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	}
 	if (!bUsingDispatchSurface)
 	{
-		Catalog->BuildLlmToolsJsonArrayForMode(Request.Mode, Caps, PackPtr, ToolsJson);
+		Catalog->BuildLlmToolsJsonArrayForMode(Request.Mode, Caps, PackPtr, ToolSurfaceFilter, ToolsJson);
 	}
 
 	TArray<FUnrealAiConversationMessage> ApiMsgs;

@@ -12,6 +12,8 @@ This document is for an **autonomous maintainer agent** (or human) that improves
 
 **Broader harness context:** [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md)
 
+**Architecture note:** headed curricula exercise the **full** tool path. On the **default main Agent**, Blueprint **graph mutators** are often **not** on the roster (`agent_surfaces` + `bOmitMainAgentBlueprintMutationTools`); the model is expected to **hand off** via **`<unreal_ai_build_blueprint>`** for patch/IR/compile loops. Failures that look like “model tried `blueprint_graph_patch` but tool was missing” often mean prompt/catalog drift—align with [`prompts/chunks/04-tool-calling-contract.md`](../../Plugins/UnrealAiEditor/prompts/chunks/04-tool-calling-contract.md) and [`12-build-blueprint-delegation.md`](../../Plugins/UnrealAiEditor/prompts/chunks/12-build-blueprint-delegation.md).
+
 ---
 
 ## Goal
