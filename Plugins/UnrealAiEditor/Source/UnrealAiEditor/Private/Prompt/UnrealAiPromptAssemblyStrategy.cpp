@@ -1,6 +1,7 @@
 #include "Prompt/UnrealAiPromptAssemblyStrategy.h"
 
 #include "Prompt/UnrealAiPromptChunkUtils.h"
+#include "UnrealAiBlueprintBuilderTargetKind.h"
 
 #include <initializer_list>
 
@@ -76,6 +77,19 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/03-fail-safe-handoff.md"));
 		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/04-t3d-placeholders-and-import.md"));
 		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/05-verification-ladder.md"));
+		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/06-cross-tool-identity.md"));
+		{
+			const FString KindRel = UnrealAiBlueprintBuilderTargetKind::KindChunkFileName(Params.BlueprintBuilderTargetKind);
+			FString KindChunk;
+			if (UnrealAiPromptChunkUtils::LoadChunk(TEXT("chunks"), *KindRel, KindChunk) && !KindChunk.IsEmpty())
+			{
+				if (!Acc.IsEmpty())
+				{
+					Acc += TEXT("\n\n---\n\n");
+				}
+				Acc += KindChunk;
+			}
+		}
 		AppendChunk(TEXT("05-context-and-editor.md"));
 		AppendChunk(TEXT("07-safety-banned.md"));
 		AppendChunk(TEXT("08-output-style.md"));

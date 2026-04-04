@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Context/AgentContextTypes.h"
+#include "UnrealAiBlueprintBuilderTargetKind.h"
 
 /** Parameters for assembling static prompt chunks + transcript tokens (see `prompts/README.md`). */
 struct FUnrealAiPromptAssembleParams
@@ -18,6 +19,9 @@ struct FUnrealAiPromptAssembleParams
 
 	/** Blueprint Builder sub-turn: alternate prompt stack under `prompts/chunks/blueprint-builder/`. */
 	bool bBlueprintBuilderMode = false;
+
+	/** Sub-turn domain from `<unreal_ai_build_blueprint>` frontmatter; selects `blueprint-builder/kinds/*.md`. */
+	EUnrealAiBlueprintBuilderTargetKind BlueprintBuilderTargetKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
 
 	/** Main agent: one-shot resume guidance after builder result (see `13-blueprint-builder-resume.md`). */
 	bool bInjectBlueprintBuilderResumeChunk = false;

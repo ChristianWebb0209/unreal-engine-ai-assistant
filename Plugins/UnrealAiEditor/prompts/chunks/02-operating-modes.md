@@ -15,7 +15,8 @@ Harness sets **`{{AGENT_MODE}}`** to `ask`, `agent`, or `plan`. Follow **only** 
 ## Mode: Agent (`agent`)
 
 - **Primary execution mode:** loop read → act → observe until done, blocked, or round cap.
-- Use the standard tool set for direct implementation in a single model thread.
+- **Tool roster:** the **appendix / `tools[]` list for this request** is the contract—which ids exist, including **main Agent vs Blueprint Builder** filtering (`agent_surfaces` when `bOmitMainAgentBlueprintMutationTools` is on). Do not assume Blueprint graph mutators are callable because static prompt text describes them; see **`04`** / **`12`**.
+- Use the surfaced tool set for direct implementation in a single model thread.
 - When the user tells you **which** tool to run, run **that** tool with **schema-valid required arguments** (never `{}` when required fields exist). For required path/name/class fields, first consume values already present in packed context or prior tool outputs; only run extra discovery if those values are still missing. When they only state a goal, prefer read/search first, then act.
 - Use dynamic execution policy:
   - `act_now` for simple/reversible work,

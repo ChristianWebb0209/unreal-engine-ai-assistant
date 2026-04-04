@@ -37,15 +37,23 @@ _No catalog entries._ Placeholder tools for generic network access, raw exec str
 
 | tool_id | Summary | permission | status | modes |
 |---------|---------|------------|--------|-------|
-| `blueprint_add_variable` | Add member variable to Blueprint. | write | future | ask=False agent=True |
-| `blueprint_apply_ir` | Compact Blueprint IR DSL; merge_policy, event_tick, auto_layout, layout_scope; use when ops fit—else blueprint_graph_patch. | write | implemented | ask=False agent=True |
-| `blueprint_compile` | Compile a Blueprint and return diagnostics; optional format_graphs runs Unreal Blueprint Formatter on script graphs before compile. | write | implemented | ask=False agent=True |
-| `blueprint_export_ir` | Export graph to IR JSON; unknown nodes include k2_class/node_guid for blueprint_graph_patch round-trip. | read | implemented | ask=True agent=True |
-| `blueprint_graph_list_pins` | List visible pins on one node (GUID from export or patch); read-only introspection before connect/set_pin_default. | read | implemented | ask=True agent=True |
-| `blueprint_graph_patch` | Graph mutator: create_node, create_comment, connect, break_link, splice_on_link, set_pin_default, add_variable, remove/move_node; auto_layout + layout_scope (patched_nodes default); /Game. | write | implemented | ask=False agent=True |
-| `blueprint_format_graph` | LayoutEntireGraph readability pass on a script graph (bundled layout). | write | implemented | ask=False agent=True |
-| `blueprint_get_graph_summary` | Export bounded summary of a Blueprint graph. | read | implemented | ask=True agent=True |
+| `blueprint_add_variable` | Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Add member variable to ... | write | future | ask=False agent=True |
+| `blueprint_apply_ir` | Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; omitted from default mai... | write | implemented | ask=False agent=True |
+| `blueprint_compile` | Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agen... | write | implemented | ask=False agent=True |
+| `blueprint_composite_lifecycle_print` | Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Composite (Tier-1): wir... | write | implemented | ask=False agent=True |
+| `blueprint_export_graph_t3d` | Read-only: export graph nodes as Unreal T3D clipboard text. Exact tool_id is blueprint_expor... | read | implemented | ask=False agent=True |
+| `blueprint_export_ir` | Read-only (available on main Agent and builder): export Blueprint graph IR for an existing B... | read | implemented | ask=True agent=True |
+| `blueprint_format_graph` | Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Run in-process layout o... | write | implemented | ask=False agent=True |
+| `blueprint_format_selection` | Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Same layout pipeline as... | write | implemented | ask=False agent=True |
+| `blueprint_get_graph_summary` | Read-only (main Agent + builder): bounded summary of Blueprint graph(s) for an existing asse... | read | implemented | ask=True agent=True |
+| `blueprint_graph_import_t3d` | Atomic graph mutation: resolve __UAI_G_NNNNNN__ placeholders then ImportNodesFromText on the... | write | implemented | ask=False agent=True |
+| `blueprint_graph_introspect` | Read-only: enumerate nodes in a Blueprint graph with node_guid, class, title, and pins (name... | read | implemented | ask=False agent=True |
+| `blueprint_graph_list_pins` | Read-only: pins[] (name, direction, category, optional default_value). Needs blueprint_path ... | read | implemented | ask=True agent=True |
+| `blueprint_graph_patch` | Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agen... | write | implemented | ask=False agent=True |
 | `blueprint_open_graph_tab` | Open Blueprint editor focused on a graph. | write | implemented | ask=False agent=True |
+| `blueprint_set_component_default` | Blueprint Builder sub-turn only (not default main Agent). Set one reflected property on a na... | write | implemented | ask=False agent=True |
+| `blueprint_t3d_preflight_validate` | Resolve __UAI_G_NNNNNN__ placeholders in t3d_text and run CanImportNodesFromText without mut... | read | implemented | ask=False agent=True |
+| `blueprint_verify_graph` | Post-edit verification: optional steps (default ["links"]): links (null/cross-graph pin link... | read | implemented | ask=False agent=True |
 
 ## `build_packaging`
 
@@ -101,8 +109,9 @@ _No catalog entries._ Placeholder tools for generic network access, raw exec str
 | tool_id | Summary | permission | status | modes |
 |---------|---------|------------|--------|-------|
 | `material_get_usage_summary` | List referencers for a material. | read | implemented | ask=True agent=True |
-| `material_instance_set_scalar_parameter` | Set scalar on material instance. | write | implemented | ask=False agent=True |
-| `material_instance_set_vector_parameter` | Set vector parameter on material instance. | write | implemented | ask=False agent=True |
+| `material_instance_set_parameter` | Set scalar or vector on MI; main Agent + builder (implicit all surfaces). value_kind required. | write | implemented | ask=False agent=True |
+| `material_instance_set_scalar_parameter` | Legacy branch; prefer material_instance_set_parameter. | write | deprecated | ask=False agent=False |
+| `material_instance_set_vector_parameter` | Legacy branch; prefer material_instance_set_parameter. | write | deprecated | ask=False agent=False |
 
 ## `exec`
 
