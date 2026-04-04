@@ -1,6 +1,29 @@
-#include "Tools/UnrealAiToolDispatch_PcgEnvironment.h"
+#include "Tools/UnrealAiToolDispatch_Environment.h"
 
 #include "Tools/UnrealAiToolJson.h"
+
+bool UnrealAiTryDispatchEnvironmentBuilderTool(
+	const FString& ToolId,
+	const TSharedPtr<FJsonObject>& Args,
+	FUnrealAiToolInvocationResult& OutResult)
+{
+	if (ToolId == TEXT("foliage_paint_instances"))
+	{
+		OutResult = UnrealAiDispatch_FoliagePaintInstances(Args);
+		return true;
+	}
+	if (ToolId == TEXT("landscape_import_heightmap"))
+	{
+		OutResult = UnrealAiDispatch_LandscapeImportHeightmap(Args);
+		return true;
+	}
+	if (ToolId == TEXT("pcg_generate"))
+	{
+		OutResult = UnrealAiDispatch_PcgGenerate(Args);
+		return true;
+	}
+	return false;
+}
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_FoliagePaintInstances(const TSharedPtr<FJsonObject>& Args)
 {

@@ -2,7 +2,6 @@
 
 #include "Tools/UnrealAiToolDispatch_Actors.h"
 #include "Tools/UnrealAiToolDispatch_AssetsMaterials.h"
-#include "Tools/UnrealAiToolDispatch_MaterialGraph.h"
 #include "Tools/UnrealAiToolDispatch_Console.h"
 #include "Tools/UnrealAiToolDispatch_ContentBrowserEx.h"
 #include "Tools/UnrealAiToolDispatch_Context.h"
@@ -18,7 +17,8 @@
 #include "Tools/UnrealAiToolDispatch_EditorMore.h"
 #include "Tools/UnrealAiToolDispatch_BuildPackaging.h"
 #include "Tools/UnrealAiToolDispatch_ExtraFeatures.h"
-#include "Tools/UnrealAiToolDispatch_PcgEnvironment.h"
+#include "Tools/UnrealAiToolDispatch_Environment.h"
+#include "Tools/UnrealAiToolDispatch_BlueprintBuilder.h"
 #include "Tools/UnrealAiToolDispatch_GenericAssets.h"
 #include "Tools/UnrealAiToolDispatch_SettingsProperties.h"
 #include "Tools/UnrealAiToolJson.h"
@@ -58,39 +58,6 @@ namespace UnrealAiToolDispatchInternal
 		return R;
 	}
 
-	/** Removed from UnrealAiToolCatalog.json; still callable for stale clients — deterministic migration hint. */
-	static FUnrealAiToolInvocationResult BlueprintToolDeprecatedCatalogRemoved(const FString& ToolId)
-	{
-		static const TCHAR* Msg =
-			TEXT("Removed from the agent tool catalog. Mutate Kismet graphs with blueprint_graph_patch (add_variable op for new members; validate_only for dry-runs). "
-				 "Read node GUIDs and pins with blueprint_graph_introspect or blueprint_graph_list_pins. Layout: blueprint_format_graph (format_scope full_graph or selection).");
-		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
-		O->SetBoolField(TEXT("ok"), false);
-		O->SetStringField(TEXT("status"), TEXT("tool_deprecated"));
-		O->SetStringField(TEXT("tool_id"), ToolId);
-		O->SetStringField(TEXT("message"), Msg);
-		TSharedPtr<FJsonObject> Sug = MakeShared<FJsonObject>();
-		Sug->SetStringField(TEXT("tool_id"), TEXT("blueprint_graph_patch"));
-		TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
-		A->SetStringField(TEXT("blueprint_path"), TEXT("/Game/YourPath/YourBP"));
-		A->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
-		A->SetBoolField(TEXT("validate_only"), true);
-		TArray<TSharedPtr<FJsonValue>> Ops;
-		TSharedPtr<FJsonObject> Op1 = MakeShared<FJsonObject>();
-		Op1->SetStringField(TEXT("op"), TEXT("add_variable"));
-		Op1->SetStringField(TEXT("name"), TEXT("MyVar"));
-		Op1->SetStringField(TEXT("type"), TEXT("int"));
-		Ops.Add(MakeShareable(new FJsonValueObject(Op1.ToSharedRef())));
-		A->SetArrayField(TEXT("ops"), Ops);
-		Sug->SetObjectField(TEXT("arguments"), A);
-		O->SetObjectField(TEXT("suggested_correct_call"), Sug);
-		FUnrealAiToolInvocationResult R;
-		R.bOk = false;
-		R.ErrorMessage = FString::Printf(TEXT("%s: tool deprecated (removed from catalog)"), *ToolId);
-		R.ContentForModel = UnrealAiToolJson::SerializeObject(O);
-		return R;
-	}
-
 	static FString ResolveProjectId(const FString& Session)
 	{
 		return Session.IsEmpty() ? UnrealAiProjectId::GetCurrentProjectId() : Session;
@@ -123,6 +90,16 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 
 	const FString ProjectId = ResolveProjectId(SessionProjectId);
 	const FString ThreadId = ResolveThreadId(SessionThreadId);
+
+	FUnrealAiToolInvocationResult SurfaceResult;
+	if (UnrealAiTryDispatchEnvironmentBuilderTool(ToolId, A, SurfaceResult))
+	{
+		return SurfaceResult;
+	}
+	if (UnrealAiTryDispatchBlueprintBuilderSurfaceTool(ToolId, A, SurfaceResult))
+	{
+		return SurfaceResult;
+	}
 
 	// --- Implemented tools (router) ---
 	if (ToolId == TEXT("editor_get_selection"))
@@ -211,46 +188,80 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 		return UnrealAiDispatch_ActorSpawnFromClass(A);
 	}
 
-	if (ToolId == TEXT("viewport_camera_get_transform"))
+	if (ToolId == TEXT("setting_query"))
 	{
-		return UnrealAiDispatch_ViewportCameraGetTransform();
+		return UnrealAiDispatch_SettingsGet(A);
 	}
-	if (ToolId == TEXT("viewport_camera_set_transform"))
+	if (ToolId == TEXT("setting_apply"))
 	{
-		return UnrealAiDispatch_ViewportCameraSetTransform(A);
+		return UnrealAiDispatch_SettingsSet(A);
 	}
-	if (ToolId == TEXT("viewport_camera_dolly"))
+
+	if (ToolId == TEXT("viewport_camera_control"))
 	{
-		return UnrealAiDispatch_ViewportCameraDolly(A);
+		FString Op;
+		A->TryGetStringField(TEXT("operation"), Op);
+		Op = Op.ToLower();
+		if (Op == TEXT("dolly"))
+		{
+			return UnrealAiDispatch_ViewportCameraDolly(A);
+		}
+		if (Op == TEXT("orbit"))
+		{
+			return UnrealAiDispatch_ViewportCameraOrbit(A);
+		}
+		if (Op == TEXT("pan"))
+		{
+			return UnrealAiDispatch_ViewportCameraPan(A);
+		}
+		if (Op == TEXT("pilot"))
+		{
+			return UnrealAiDispatch_ViewportCameraPilot(A);
+		}
+		if (Op == TEXT("get_transform"))
+		{
+			return UnrealAiDispatch_ViewportCameraGetTransform();
+		}
+		if (Op == TEXT("set_transform"))
+		{
+			return UnrealAiDispatch_ViewportCameraSetTransform(A);
+		}
+		return UnrealAiToolJson::Error(
+			TEXT("viewport_camera_control requires operation: dolly, orbit, pan, pilot, get_transform, or set_transform."));
 	}
-	if (ToolId == TEXT("viewport_camera_pan"))
+
+	if (ToolId == TEXT("viewport_capture"))
 	{
-		return UnrealAiDispatch_ViewportCameraPan(A);
+		FString Kind;
+		A->TryGetStringField(TEXT("capture_kind"), Kind);
+		Kind = Kind.ToLower();
+		if (Kind == TEXT("immediate_png"))
+		{
+			return UnrealAiDispatch_ViewportCapturePng(A);
+		}
+		if (Kind == TEXT("after_frames"))
+		{
+			return UnrealAiDispatch_ViewportCaptureDelayed(A);
+		}
+		return UnrealAiToolJson::Error(TEXT("viewport_capture requires capture_kind: immediate_png or after_frames."));
 	}
-	if (ToolId == TEXT("viewport_camera_orbit"))
+
+	if (ToolId == TEXT("viewport_frame"))
 	{
-		return UnrealAiDispatch_ViewportCameraOrbit(A);
+		FString Target;
+		A->TryGetStringField(TEXT("target"), Target);
+		Target = Target.ToLower();
+		if (Target == TEXT("actors"))
+		{
+			return UnrealAiDispatch_ViewportFrameActors(A);
+		}
+		if (Target == TEXT("selection"))
+		{
+			return UnrealAiDispatch_ViewportFrameSelection(A);
+		}
+		return UnrealAiToolJson::Error(TEXT("viewport_frame requires target: selection or actors."));
 	}
-	if (ToolId == TEXT("viewport_camera_pilot"))
-	{
-		return UnrealAiDispatch_ViewportCameraPilot(A);
-	}
-	if (ToolId == TEXT("viewport_frame_actors"))
-	{
-		return UnrealAiDispatch_ViewportFrameActors(A);
-	}
-	if (ToolId == TEXT("viewport_frame_selection"))
-	{
-		return UnrealAiDispatch_ViewportFrameSelection(A);
-	}
-	if (ToolId == TEXT("viewport_capture_png"))
-	{
-		return UnrealAiDispatch_ViewportCapturePng(A);
-	}
-	if (ToolId == TEXT("viewport_capture_delayed"))
-	{
-		return UnrealAiDispatch_ViewportCaptureDelayed(A);
-	}
+
 	if (ToolId == TEXT("viewport_set_view_mode"))
 	{
 		return UnrealAiDispatch_ViewportSetViewMode(A);
@@ -258,14 +269,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	if (ToolId == TEXT("viewport_get_view_mode"))
 	{
 		return UnrealAiDispatch_ViewportGetViewMode(A);
-	}
-	if (ToolId == TEXT("settings_get"))
-	{
-		return UnrealAiDispatch_SettingsGet(A);
-	}
-	if (ToolId == TEXT("settings_set"))
-	{
-		return UnrealAiDispatch_SettingsSet(A);
 	}
 
 	if (ToolId == TEXT("project_file_read_text"))
@@ -336,26 +339,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	if (ToolId == TEXT("material_get_usage_summary"))
 	{
 		return UnrealAiDispatch_MaterialGetUsageSummary(A);
-	}
-	if (ToolId == TEXT("material_graph_summarize"))
-	{
-		return UnrealAiDispatch_MaterialGraphSummarize(A);
-	}
-	if (ToolId == TEXT("material_graph_export"))
-	{
-		return UnrealAiDispatch_MaterialGraphExport(A);
-	}
-	if (ToolId == TEXT("material_graph_patch"))
-	{
-		return UnrealAiDispatch_MaterialGraphPatch(A);
-	}
-	if (ToolId == TEXT("material_graph_compile"))
-	{
-		return UnrealAiDispatch_MaterialGraphCompile(A);
-	}
-	if (ToolId == TEXT("material_graph_validate"))
-	{
-		return UnrealAiDispatch_MaterialGraphValidate(A);
 	}
 	if (ToolId == TEXT("material_instance_set_scalar_parameter"))
 	{
@@ -488,87 +471,26 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_AssetApplyProperties(A);
 	}
-	if (ToolId == TEXT("asset_find_referencers"))
+	if (ToolId == TEXT("asset_graph_query"))
 	{
-		return UnrealAiDispatch_AssetFindReferencers(A);
-	}
-	if (ToolId == TEXT("asset_get_dependencies"))
-	{
-		return UnrealAiDispatch_AssetGetDependencies(A);
+		FString Rel;
+		A->TryGetStringField(TEXT("relation"), Rel);
+		Rel = Rel.ToLower();
+		if (Rel == TEXT("referencers"))
+		{
+			return UnrealAiDispatch_AssetFindReferencers(A);
+		}
+		if (Rel == TEXT("dependencies"))
+		{
+			return UnrealAiDispatch_AssetGetDependencies(A);
+		}
+		return UnrealAiToolJson::Error(TEXT("asset_graph_query requires relation: referencers or dependencies."));
 	}
 	if (ToolId == TEXT("level_sequence_create_asset"))
 	{
 		return UnrealAiDispatch_LevelSequenceCreateAsset(A);
 	}
 
-	if (ToolId == TEXT("blueprint_compile"))
-	{
-		return UnrealAiDispatch_BlueprintCompile(A);
-	}
-	if (ToolId == TEXT("blueprint_set_component_default"))
-	{
-		return UnrealAiDispatch_BlueprintSetComponentDefault(A);
-	}
-	if (ToolId == TEXT("blueprint_export_ir"))
-	{
-		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
-	}
-	if (ToolId == TEXT("blueprint_apply_ir"))
-	{
-		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
-	}
-	if (ToolId == TEXT("blueprint_composite_lifecycle_print"))
-	{
-		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
-	}
-	if (ToolId == TEXT("blueprint_graph_patch"))
-	{
-		return UnrealAiDispatch_BlueprintGraphPatch(A);
-	}
-	if (ToolId == TEXT("blueprint_graph_list_pins"))
-	{
-		return UnrealAiDispatch_BlueprintGraphListPins(A);
-	}
-	if (ToolId == TEXT("blueprint_format_graph"))
-	{
-		return UnrealAiDispatch_BlueprintFormatGraph(A);
-	}
-	if (ToolId == TEXT("blueprint_format_selection"))
-	{
-		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
-	}
-	if (ToolId == TEXT("blueprint_get_graph_summary"))
-	{
-		return UnrealAiDispatch_BlueprintGetGraphSummary(A);
-	}
-	if (ToolId == TEXT("blueprint_open_graph_tab"))
-	{
-		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
-	}
-	if (ToolId == TEXT("blueprint_add_variable"))
-	{
-		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
-	}
-	if (ToolId == TEXT("blueprint_graph_introspect"))
-	{
-		return UnrealAiDispatch_BlueprintGraphIntrospect(A);
-	}
-	if (ToolId == TEXT("blueprint_export_graph_t3d"))
-	{
-		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
-	}
-	if (ToolId == TEXT("blueprint_t3d_preflight_validate"))
-	{
-		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
-	}
-	if (ToolId == TEXT("blueprint_graph_import_t3d"))
-	{
-		return BlueprintToolDeprecatedCatalogRemoved(ToolId);
-	}
-	if (ToolId == TEXT("blueprint_verify_graph"))
-	{
-		return UnrealAiDispatch_BlueprintVerifyGraph(A);
-	}
 	if (ToolId == TEXT("animation_blueprint_get_graph_summary"))
 	{
 		return UnrealAiDispatch_AnimBlueprintGetGraphSummary(A);
@@ -621,10 +543,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_EditorStateSnapshotRead(Registry, ProjectId, ThreadId, A);
 	}
-	if (ToolId == TEXT("agent_emit_todo_plan"))
-	{
-		return UnrealAiDispatch_AgentEmitTodoPlan(Registry, ProjectId, ThreadId, A);
-	}
 	if (ToolId == TEXT("tool_audit_append"))
 	{
 		return UnrealAiDispatch_ToolAuditAppend(A);
@@ -666,18 +584,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	if (ToolId == TEXT("metasound_open_editor"))
 	{
 		return UnrealAiDispatch_MetasoundOpenEditor(A);
-	}
-	if (ToolId == TEXT("foliage_paint_instances"))
-	{
-		return UnrealAiDispatch_FoliagePaintInstances(A);
-	}
-	if (ToolId == TEXT("landscape_import_heightmap"))
-	{
-		return UnrealAiDispatch_LandscapeImportHeightmap(A);
-	}
-	if (ToolId == TEXT("pcg_generate"))
-	{
-		return UnrealAiDispatch_PcgGenerate(A);
 	}
 
 	if (ToolId == TEXT("scene_fuzzy_search.query"))
