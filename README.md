@@ -64,7 +64,7 @@ For how **context** vs **harness** split work, see [`docs/context/context-manage
 <details>
 <summary><strong>Context components</strong></summary>
 
-**Context subsystem** decomposition: thread-scoped state, **editor snapshot** queries, **@mention** resolution, **candidate** collection from attachments/tool snippets/memory/optional retrieval, **weighted ranking**, **budgeted packing**, **complexity assessor** output, and formatted blocks that become `BuildContextWindow` / `{{CONTEXT_SERVICE_OUTPUT}}` in the prompt.
+**Context subsystem** decomposition: thread-scoped state, **editor snapshot** queries, **@mention** resolution, **ingestion adapters** (per-source `FContextCandidateEnvelope` builders), **candidate orchestration** (`BuildUnifiedContext`: collect â†’ filter â†’ score â†’ pack), **weighted ranking**, **budgeted packing**, **complexity assessor** output, and formatted blocks that become `BuildContextWindow` / `{{CONTEXT_SERVICE_OUTPUT}}` in the prompt. Target: **working-set MRU** assets and **project-tree** summary compete inside the same packer (no post-append). Plan: [`docs/planning/context-ingestion-refactor.md`](docs/planning/context-ingestion-refactor.md); narrative: [`docs/context/context-management.md`](docs/context/context-management.md) section 2.0a.
 
 Context owns **`context.json`** and planning artifacts that live beside it; it does **not** own the chat API message list (that is the **harness** + `conversation.json`). Optional local **vector retrieval** adds `retrieval_snippet` candidates into the **same** ranker when enabledâ€”see [`docs/context/context-management.md`](docs/context/context-management.md) and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) section 2.2.
 
@@ -79,7 +79,7 @@ Context owns **`context.json`** and planning artifacts that live beside it; it d
 <details>
 <summary><strong>Harness components</strong></summary>
 
-**Agent harness** decomposition: **turn loop**, **tool loop** (streaming tool calls, execution host, telemetry such as `tool_surface_metrics`, session **usage prior** updates, optional **repair** nudge after bad `unreal_ai_dispatch` unwrap), **continuation rails**, **Plan-mode DAG execution** (`Private/Planning/FUnrealAiPlanExecutor` driving serial node turns), and **run artifact** sinks (`FAgentRunFileSink`) for harness diagnostics.
+**Agent harness** decomposition: **turn loop**, **tool loop** (streaming tool calls, execution host, telemetry such as `tool_surface_metrics`, session **usage prior** updates, optional **repair** nudge after bad `unreal_ai_dispatch` unwrap), **continuation rails**, **Blueprint Builder handoff** (`unreal_ai_build_blueprint` + `target_kind` sub-turn), **Plan-mode DAG execution** (`Private/Planning/FUnrealAiPlanExecutor` driving serial node turns), and **run artifact** sinks (`FAgentRunFileSink`) for harness diagnostics.
 
 This is where **`conversation.json`** is read/written, LLM rounds are bounded, and tool rounds connect to dispatch. For iteration, artifacts, and what â€œgoodâ€ looks like in tests, see [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](docs/tooling/AGENT_HARNESS_HANDOFF.md).
 
@@ -94,7 +94,7 @@ This is where **`conversation.json`** is read/written, LLM rounds are bounded, a
 <details>
 <summary><strong>Tooling components</strong></summary>
 
-**Tool catalog, execution host, and dispatch** split by concern: **catalog loader** (`UnrealAiToolCatalog.json`), **tool surface pipeline** entry (for eligibility when enabled), **execution host** (permissions + invocation), and **dispatch** modules (actors/world, assets, Blueprint, editor UI, search, PIE, etc.).
+**Tool catalog, execution host, and dispatch** split by concern: **catalog loader** (`UnrealAiToolCatalog.json`), **tool surface pipeline** entry (for eligibility when enabled), **Blueprint surface gate** (`UnrealAiBlueprintToolGate` / builder roster), **execution host** (permissions + invocation), and **dispatch** modules (actors/world, assets, Blueprint, editor UI, search, PIE, etc.).
 
 Narrowing **which tools appear** and **tiered markdown** for `unreal_ai_dispatch` is a separate pipeline from **docs vector retrieval**â€”see [`docs/tooling/tools-expansion.md`](docs/tooling/tools-expansion.md) and the companion view **Tool surface graph**. Narrative catalog: [`docs/tooling/tool-registry.md`](docs/tooling/tool-registry.md).
 
@@ -231,11 +231,11 @@ See the long view caption in `architecture.dsl` and [`docs/context/vector-db-imp
 <details>
 <summary><strong>Vector context unified</strong></summary>
 
-**Unified vector-context graph** (single diagram): both **file-system vector context** and **scene/editor context** converge through one candidate ranking + packing pipeline.
+**Unified vector-context graph** (single diagram): both **file-system vector context** and **scene/editor context** converge through **ingestion adapters** into one **orchestrated** candidate ranking + packing pipeline (see [`docs/planning/context-ingestion-refactor.md`](docs/planning/context-ingestion-refactor.md)).
 
 - **File-system side**: retrieval index lifecycle and corpora (filesystem text, Asset Registry shards, Blueprint features, optional memory), embedding adapter, SQLite vector store + manifest.
-- **Scene side**: deterministic live anchors from editor snapshot (selection, Content Browser focus, open editors) entering the same candidate flow.
-- **Merge point**: candidate collection, scoring, and budget packing with utility/head/tail behavior and representation levels (L0/L1/L2).
+- **Scene side**: deterministic live anchors from editor snapshot (selection, Content Browser focus, open editors) entering the same ingestion + rank/pack flow.
+- **Merge point**: ingestion envelopes, scoring, and budget packing with utility/head/tail behavior and representation levels (L0/L1/L2).
 - **Output and diagnostics**: formatted context + persisted context JSON + decision logs.
 
 [Open full-size SVG](docs/architecture-maps/vector-context-unified.svg)
