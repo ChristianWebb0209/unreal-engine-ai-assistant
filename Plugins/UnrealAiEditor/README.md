@@ -97,7 +97,7 @@ Hosted product backend, mandatory cloud accounts, separate **required** OS servi
 
 ## Context service
 
-Per-chat **context assembly** (`IAgentContextService` / `FUnrealAiContextService`): attachments, tool-result memory, editor snapshot, `BuildContextWindow` â†’ persisted as `chats/<project_id>/threads/<thread_id>/context.json`. See repo [`docs/context/context-management.md`](../../docs/context/context-management.md).
+Per-chat **context assembly** (`IAgentContextService` / `FUnrealAiContextService`): attachments, tool-result memory, editor snapshot, `BuildContextWindow` â†’ persisted as `chats/<project_id>/threads/<thread_id>/context.json`. See repo [`docs/context/context-management.md`](../../docs/context/context-management.md) and the **target** layered-ingestion plan [`docs/planning/context-ingestion-refactor.md`](../../docs/planning/context-ingestion-refactor.md).
 
 ## Engine module layout
 

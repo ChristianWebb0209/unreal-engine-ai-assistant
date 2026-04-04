@@ -4,6 +4,8 @@ This document is the **single source of truth** for how the Unreal AI Editor plu
 
 **Related (not duplicated here):** harness iteration and scripts in [`AGENT_HARNESS_HANDOFF.md`](../tooling/AGENT_HARNESS_HANDOFF.md). For current testing/review workflow, see [`HEADLESS_TESTING_PLAYBOOK.md`](HEADLESS_TESTING_PLAYBOOK.md). Plan-mode DAG: C++ under `Plugins/UnrealAiEditor/.../Private/Planning/`; overview [`planning/subagents-architecture.md`](../planning/subagents-architecture.md); prompts **`chunks/plan/*.md`** / **`chunks/plan-node/*.md`**. Plan **subagent wave policy** is **`agent.useSubagents`** in **`plugin_settings.json`** (AI Settings tab), not context ranking. Legacy todo persistence may still appear in state.
 
+**Context ingestion refactor (layered adapters, working set, single packer gate):** engineering plan and task checklist in [`docs/planning/context-ingestion-refactor.md`](../planning/context-ingestion-refactor.md). The diagram in **§2.0a** below is the **target** architecture; update this doc in the plan’s **final doc-sync step** when implementation lands.
+
 ---
 
 ## 1. System at a glance
@@ -99,6 +101,46 @@ flowchart TB
   Builder --> LLM
   LLM --> Tools
   Tools -->|"RecordToolResult"| State
+```
+
+### 2.0a Layered ingestion pipeline (target architecture)
+
+Editor context for the model is assembled as **ranked candidates** with a fixed internal pipeline. **Separation of concerns:**
+
+| Layer | Responsibility | Typical code |
+|-------|----------------|--------------|
+| **Capture** | Load/save thread state, refresh editor snapshot, record tool results, attachments | `FUnrealAiContextService`, `UnrealAiEditorContextQueries`, `AgentContextJson` |
+| **Ingestion** | Append `FContextCandidateEnvelope` rows (payload, `RenderedText`, token estimate, pre-filled `FFeatures` only) | `UnrealAiContextIngestion*` units called from `CollectCandidates` |
+| **Policy** | Mode gates, type caps, weighted scoring, char budget pack | `UnrealAiContextRankingPolicy`, `FilterHardPolicy`, `ScoreCandidates`, `PackCandidatesUnderBudget` |
+| **Orchestration** | `BuildUnifiedContext`: collect → filter → score → pack → `ContextBlock` | `UnrealAiContextCandidates` |
+
+**Rules (target):**
+
+- **Single gate:** The rolling `ContextBlock` is built from **packed** candidate `RenderedText` only (plus joins inside `BuildUnifiedContext`). **No** extra prose appended afterward in `BuildContextWindow` (today an exception is the project-tree blurb; that moves **into** ingestion so it competes under the same budget).
+- **Working set:** A bounded, per-thread **MRU list of touched assets** (from tools, snapshot, attachments) is persisted on `FAgentContextState`, emitted as **scored candidates**, and reused for **harness autofill** (e.g. default `blueprint_path`) in the same priority order as the ranker’s head.
+- **Autofill** must not invent a second relevance model; it reads the same persisted signals.
+
+```mermaid
+flowchart LR
+  subgraph capture [Capture]
+    Svc[FUnrealAiContextService]
+    Snap[Editor snapshot queries]
+    Json[AgentContextJson]
+  end
+  subgraph ingest [Ingestion adapters]
+    A1[Attachments tools plans memory retrieval]
+    A2[Project tree working set]
+  end
+  subgraph pipe [Single pipeline]
+    F[FilterHardPolicy]
+    Sc[ScoreCandidates]
+    Pk[PackCandidatesUnderBudget]
+  end
+  capture --> ingest
+  ingest --> F
+  F --> Sc
+  Sc --> Pk
+  Pk --> CB[ContextBlock]
 ```
 
 ### 2.0 Node descriptions (what + why)

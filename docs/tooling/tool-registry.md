@@ -7,7 +7,7 @@
 
 **This Markdown file** remains the **human-readable** narrative, Epic links, and engineering notes.
 
-**Related:** [`context-management.md`](../context/context-management.md), [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md), [`tools-expansion.md`](tools-expansion.md) (tool surface pipeline, compiled defaults in `UnrealAiRuntimeDefaults.h`, architecture map), [`tool-catalog-audit-guide.md`](tool-catalog-audit-guide.md) (iterative catalog review using harness results), repo [`README.md`](../README.md).
+**Related:** [`context-management.md`](../context/context-management.md), [`context-ingestion-refactor.md`](../planning/context-ingestion-refactor.md) (layered candidate pipeline plan), [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md), [`tools-expansion.md`](tools-expansion.md) (tool surface pipeline, compiled defaults in `UnrealAiRuntimeDefaults.h`, architecture map), [`tool-catalog-audit-guide.md`](tool-catalog-audit-guide.md) (iterative catalog review using harness results), repo [`README.md`](../README.md).
 
 ---
 
@@ -707,12 +707,12 @@ These are the first implementation wave. Each row is expanded in its domain sect
 |-------|--------|
 | **summary** | Structured **`ops[]`** on a **`/Game`** script graph: **`create_node`**, **`create_comment`** (`member_node_refs` + reflow like IR), **`connect`**, **`break_link`**, **`splice_on_link`** (insert on one exec edge), **`set_pin_default`**, **`add_variable`**, **`remove_node`**, **`move_node`**. Optional **`auto_layout`** (default **true**), **`layout_scope`** `patched_nodes` \| **`full_graph`**. Formatter options match **`blueprint_apply_ir`** (Editor Preferences → Unreal AI Editor → Blueprint Formatting). **`compile`** default true. |
 | **parameters** | Full JSON Schema **`oneOf`** per op in [`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json). **`patch_id`** is batch-local; disk nodes use **`guid:`** from export or **`applied[].node_guid`**. |
-| **returns** | Success: `ok`, `applied[]`, `blueprint_status`, `compiled`, **`auto_layout`**, **`layout_scope`**, **`layout_applied`**, **`layout_nodes_positioned`**, **`formatter_available`**. Partial failure: `patch_errors`, `errors[]`, `applied_partial[]`. |
+| **returns** | Success: `ok`, `applied[]`, `blueprint_status`, `compiled`, **`auto_layout`**, **`layout_scope`**, **`layout_applied`**, **`layout_nodes_positioned`**, **`formatter_available`**. Failure: `status` **`patch_errors`**, `errors[]`, **`error_codes[]`**, **`applied_partial`** always **`[]`** (transaction cancelled), **`note`**, **`suggested_correct_call`**. |
 | **side_effects** | asset; layout; compile (optional) |
 | **permission** | `write` |
 | **ue_entry_points** | `UBlueprint`, `UEdGraph`, `UEdGraphSchema_K2`, `FUnrealBlueprintGraphFormatService`, `UnrealBlueprintCommentReflow`, `FBlueprintEditorUtils`, `FKismetEditorUtilities::CompileBlueprint` |
 | **threading** | game thread |
-| **failure_modes** | `/Game` policy; invalid `k2_class`; connect/break/splice pin errors; partial application. |
+| **failure_modes** | `/Game` policy; invalid `k2_class`; connect/break/splice pin errors; failures roll back the whole batch (no partial persistence). |
 | **status** | `implemented` |
 
 ### `blueprint_graph_list_pins`
