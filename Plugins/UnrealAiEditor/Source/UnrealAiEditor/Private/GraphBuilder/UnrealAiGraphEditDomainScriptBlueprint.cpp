@@ -5,7 +5,7 @@
 
 namespace UnrealAiGraphEditDomainEntry
 {
-	namespace
+	namespace Private_ScriptBlueprint
 	{
 		bool IsWidgetBlueprintAsset(UBlueprint* B)
 		{
@@ -64,6 +64,6 @@ namespace UnrealAiGraphEditDomainEntry
 
 	IUnrealAiGraphEditDomain* ScriptBlueprint()
 	{
-		return &GDomain;
+		return &Private_ScriptBlueprint::GDomain;
 	}
 }

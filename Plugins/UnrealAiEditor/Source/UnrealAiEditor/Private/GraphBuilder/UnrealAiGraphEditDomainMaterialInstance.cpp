@@ -5,7 +5,7 @@
 
 namespace UnrealAiGraphEditDomainEntry
 {
-	namespace
+	namespace Private_MaterialInstance
 	{
 		class FDomain final : public IUnrealAiGraphEditDomain
 		{
@@ -50,6 +50,6 @@ namespace UnrealAiGraphEditDomainEntry
 
 	IUnrealAiGraphEditDomain* MaterialInstance()
 	{
-		return &GDomain;
+		return &Private_MaterialInstance::GDomain;
 	}
 }

@@ -4,7 +4,7 @@
 
 namespace UnrealAiGraphEditDomainEntry
 {
-	namespace
+	namespace Private_WidgetBlueprint
 	{
 		class FDomain final : public IUnrealAiGraphEditDomain
 		{
@@ -50,6 +50,6 @@ namespace UnrealAiGraphEditDomainEntry
 
 	IUnrealAiGraphEditDomain* WidgetBlueprint()
 	{
-		return &GDomain;
+		return &Private_WidgetBlueprint::GDomain;
 	}
 }

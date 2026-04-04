@@ -4,7 +4,7 @@
 
 namespace UnrealAiGraphEditDomainEntry
 {
-	namespace
+	namespace Private_AnimBlueprint
 	{
 		class FDomain final : public IUnrealAiGraphEditDomain
 		{
@@ -45,6 +45,6 @@ namespace UnrealAiGraphEditDomainEntry
 
 	IUnrealAiGraphEditDomain* AnimBlueprint()
 	{
-		return &GDomain;
+		return &Private_AnimBlueprint::GDomain;
 	}
 }

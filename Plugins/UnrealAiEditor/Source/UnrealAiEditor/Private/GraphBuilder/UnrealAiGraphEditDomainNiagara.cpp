@@ -4,7 +4,7 @@
 
 namespace UnrealAiGraphEditDomainEntry
 {
-	namespace
+	namespace Private_Niagara
 	{
 		static bool IsLikelyNiagaraAsset(UObject* Obj)
 		{
@@ -58,6 +58,6 @@ namespace UnrealAiGraphEditDomainEntry
 
 	IUnrealAiGraphEditDomain* Niagara()
 	{
-		return &GDomain;
+		return &Private_Niagara::GDomain;
 	}
 }

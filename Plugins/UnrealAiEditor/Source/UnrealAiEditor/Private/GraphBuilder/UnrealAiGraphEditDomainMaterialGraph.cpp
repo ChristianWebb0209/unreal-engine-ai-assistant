@@ -3,7 +3,7 @@
 #include "Materials/Material.h"
 namespace UnrealAiGraphEditDomainEntry
 {
-	namespace
+	namespace Private_MaterialGraph
 	{
 		class FDomain final : public IUnrealAiGraphEditDomain
 		{
@@ -40,6 +40,6 @@ namespace UnrealAiGraphEditDomainEntry
 
 	IUnrealAiGraphEditDomain* MaterialGraph()
 	{
-		return &GDomain;
+		return &Private_MaterialGraph::GDomain;
 	}
 }
