@@ -78,6 +78,7 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/04-t3d-placeholders-and-import.md"));
 		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/05-verification-ladder.md"));
 		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/06-cross-tool-identity.md"));
+		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/07-graph-patch-canonical.md"));
 		{
 			const FString KindRel = UnrealAiBlueprintBuilderTargetKind::KindChunkFileName(Params.BlueprintBuilderTargetKind);
 			FString KindChunk;

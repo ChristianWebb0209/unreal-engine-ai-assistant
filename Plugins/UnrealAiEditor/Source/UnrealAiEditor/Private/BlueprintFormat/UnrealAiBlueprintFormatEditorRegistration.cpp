@@ -12,8 +12,6 @@
 #include "ToolMenus.h"
 #include "ToolMenuEntry.h"
 #include "UnrealAiEditorSettings.h"
-#include "Widgets/Input/SComboButton.h"
-#include "Widgets/Text/STextBlock.h"
 
 #include "BlueprintFormat/UnrealAiBlueprintGraphFocusSelection.h"
 
@@ -22,23 +20,6 @@
 namespace UnrealAiBlueprintFormatEditorRegistrationPriv
 {
 	static IConsoleObject* GFormatSelectionCmd = nullptr;
-
-	static FText SpacingDensityLabel(const UUnrealAiEditorSettings* S)
-	{
-		if (!S)
-		{
-			return LOCTEXT("FmtOptsCombo", "AI: Format options");
-		}
-		switch (S->BlueprintFormatSpacingDensity)
-		{
-		case EUnrealAiBlueprintFormatSpacingDensity::Sparse:
-			return LOCTEXT("FmtOptsSparse", "AI: Sparse");
-		case EUnrealAiBlueprintFormatSpacingDensity::Dense:
-			return LOCTEXT("FmtOptsDense", "AI: Dense");
-		default:
-			return LOCTEXT("FmtOptsMedium", "AI: Medium");
-		}
-	}
 
 	static TSharedRef<SWidget> BuildFormatOptionsMenu()
 	{
@@ -169,9 +150,9 @@ void UnrealAiBlueprintFormatEditorExtendBlueprintToolbar()
 		}
 		FToolMenuSection& Section = Toolbar->FindOrAddSection(TEXT("Compile"));
 		{
-			FToolMenuEntry FormatGraphEntry = FToolMenuEntry::InitToolBarButton(
+			FToolMenuEntry FormatGraphComboEntry = FToolMenuEntry::InitComboButton(
 				TEXT("UnrealAiFormatBlueprintUbergraph"),
-				FUIAction(
+				FToolUIActionChoice(FUIAction(
 					FExecuteAction::CreateLambda([]()
 					{
 						UBlueprint* BP = nullptr;
@@ -196,12 +177,20 @@ void UnrealAiBlueprintFormatEditorExtendBlueprintToolbar()
 						UEdGraph* Graph = nullptr;
 						int32 Count = 0;
 						return UnrealAiTryGetFocusedBlueprintUbergraphSelection(BP, Graph, Count);
-					})),
+					}))),
+				FNewToolMenuChoice(FOnGetContent::CreateLambda([]()
+				{
+					return UnrealAiBlueprintFormatEditorRegistrationPriv::BuildFormatOptionsMenu();
+				})),
 				LOCTEXT("FmtBlueprintBtn", "AI: Format graph"),
-				LOCTEXT("FmtBlueprintTip", "Run bundled layout on the Blueprint Ubergraph (Event Graph). Uses Unreal AI Editor → Blueprint Formatting preferences."),
-				FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("ClassIcon.Blueprint")));
-			FormatGraphEntry.InsertPosition = FToolMenuInsert(TEXT("CompileBlueprint"), EToolMenuInsertType::After);
-			Section.AddEntry(FormatGraphEntry);
+				LOCTEXT(
+					"FmtBlueprintTip",
+					"Run bundled layout on the Blueprint Ubergraph (Event Graph). Click the arrow for formatter options (same as Editor Preferences → Unreal AI Editor → Blueprint Formatting)."),
+				FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("ClassIcon.Blueprint")),
+				false,
+				NAME_None);
+			FormatGraphComboEntry.InsertPosition = FToolMenuInsert(TEXT("CompileBlueprint"), EToolMenuInsertType::After);
+			Section.AddEntry(FormatGraphComboEntry);
 		}
 		{
 			FToolMenuEntry FormatSelEntry = FToolMenuEntry::InitToolBarButton(
@@ -237,33 +226,6 @@ void UnrealAiBlueprintFormatEditorExtendBlueprintToolbar()
 				FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("GraphEditor.StateMachine_24x")));
 			FormatSelEntry.InsertPosition = FToolMenuInsert(TEXT("UnrealAiFormatBlueprintUbergraph"), EToolMenuInsertType::After);
 			Section.AddEntry(FormatSelEntry);
-		}
-		{
-			const TSharedRef<SWidget> ComboWidget = SNew(SComboButton)
-				.OnGetMenuContent_Lambda([]()
-				{
-					return UnrealAiBlueprintFormatEditorRegistrationPriv::BuildFormatOptionsMenu();
-				})
-				.ToolTipText(LOCTEXT("FmtOptsComboTip", "Change Blueprint formatter options (same as Editor Preferences → Plugins → Unreal AI Editor)."))
-				.ButtonContent()
-				[
-					SNew(STextBlock)
-					.Text_Lambda([]()
-					{
-						return UnrealAiBlueprintFormatEditorRegistrationPriv::SpacingDensityLabel(
-							GetDefault<UUnrealAiEditorSettings>());
-					})
-				];
-			FToolMenuEntry FmtOptsEntry = FToolMenuEntry::InitWidget(
-				TEXT("UnrealAiBlueprintFormatOptionsCombo"),
-				ComboWidget,
-				LOCTEXT("FmtOptsLabel", "AI format"),
-				false,
-				true,
-				false,
-				LOCTEXT("FmtOptsComboTip", "Change Blueprint formatter options (same as Editor Preferences → Plugins → Unreal AI Editor)."));
-			FmtOptsEntry.InsertPosition = FToolMenuInsert(TEXT("UnrealAiFormatBlueprintSelection"), EToolMenuInsertType::After);
-			Section.AddEntry(FmtOptsEntry);
 		}
 		break;
 	}

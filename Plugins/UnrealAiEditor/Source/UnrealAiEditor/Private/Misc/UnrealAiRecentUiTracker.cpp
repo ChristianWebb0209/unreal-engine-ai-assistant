@@ -62,6 +62,44 @@ void FUnrealAiRecentUiTracker::MarkCurrentFocusNow()
 	TrackFocusedWidget(ERecentUiSource::SlateFocus);
 }
 
+void FUnrealAiRecentUiTracker::RecordAgentToolNavigationToAssetPath(const FString& ObjectPath)
+{
+	if (ObjectPath.IsEmpty())
+	{
+		return;
+	}
+	FString Label = ObjectPath;
+	int32 Dot = INDEX_NONE;
+	if (ObjectPath.FindChar(TEXT('.'), Dot))
+	{
+		Label = ObjectPath.Left(Dot);
+	}
+	FRecentUiEntry Candidate;
+	Candidate.UiKind = ERecentUiKind::AssetEditor;
+	Candidate.Source = ERecentUiSource::AgentToolNavigation;
+	Candidate.DisplayName = TrimmedLabel(Label);
+	Candidate.LastSeenUtc = FDateTime::UtcNow();
+	Candidate.bCurrentlyActive = true;
+	Candidate.bThreadLocalPreferred = !ActiveThreadId.IsEmpty();
+	Candidate.StableId = BuildStableId(ERecentUiKind::AssetEditor, FString::Printf(TEXT("agent_nav|%s"), *ObjectPath));
+
+	for (FRecentUiEntry& E : ProjectGlobalHistory)
+	{
+		E.bCurrentlyActive = false;
+	}
+	Upsert(ProjectGlobalHistory, Candidate, UnrealAiRecentUiTrackerPriv::MaxGlobalEntries);
+
+	if (!ActiveThreadId.IsEmpty())
+	{
+		TArray<FRecentUiEntry>& Overlay = ThreadOverlayByThreadId.FindOrAdd(ActiveThreadId);
+		for (FRecentUiEntry& E : Overlay)
+		{
+			E.bCurrentlyActive = false;
+		}
+		Upsert(Overlay, Candidate, UnrealAiRecentUiTrackerPriv::MaxPerThreadEntries);
+	}
+}
+
 void FUnrealAiRecentUiTracker::GetProjectGlobalHistory(TArray<FRecentUiEntry>& OutEntries)
 {
 	OutEntries = ProjectGlobalHistory;
