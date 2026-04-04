@@ -18,7 +18,7 @@
 #include "Engine/StaticMesh.h"
 #include "UObject/UObjectGlobals.h"
 #include "Tools/UnrealAiToolDispatch_BlueprintTools.h"
-#include "Tools/UnrealAiBlueprintToolGate.h"
+#include "Tools/UnrealAiAgentToolGate.h"
 #include "Tools/UnrealAiToolSurfaceCompatibility.h"
 #include "EdGraphSchema_K2.h"
 #include "GraphBuilder/UnrealAiGraphEditDomain.h"
@@ -415,6 +415,21 @@ bool FUnrealAiBlueprintGraphPatchArgRepairTest::RunTest(const FString& Parameter
 	TestTrue(TEXT("math k2"), (*FixMath)->TryGetStringField(TEXT("k2_class"), K2Math));
 	TestEqual(TEXT("K2Node_IntLess -> CallFunction"), K2Math, FString(TEXT("/Script/BlueprintGraph.K2Node_CallFunction")));
 
+	TSharedPtr<FJsonObject> AuditInt = MakeShared<FJsonObject>();
+	TSharedPtr<FJsonObject> OpInt = MakeShared<FJsonObject>();
+	OpInt->SetStringField(TEXT("op"), TEXT("add_variable"));
+	OpInt->SetStringField(TEXT("name"), TEXT("UaiRepairAuditProbe"));
+	OpInt->SetStringField(TEXT("type"), TEXT("integer"));
+	TArray<TSharedPtr<FJsonValue>> OpsInt;
+	OpsInt.Add(MakeShared<FJsonValueObject>(OpInt.ToSharedRef()));
+	TSharedPtr<FJsonObject> ArgsInt = MakeShared<FJsonObject>();
+	ArgsInt->SetArrayField(TEXT("ops"), OpsInt);
+	UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(ArgsInt, AuditInt);
+	const TArray<TSharedPtr<FJsonValue>>* Repairs = nullptr;
+	TestTrue(
+		TEXT("graph_patch_repairs records add_variable type alias"),
+		AuditInt->TryGetArrayField(TEXT("graph_patch_repairs"), Repairs) && Repairs && Repairs->Num() > 0);
+
 	return true;
 }
 
@@ -525,36 +540,6 @@ bool FUnrealAiBlueprintGraphPatchContractTest::RunTest(const FString& Parameters
 			FString(),
 			FString());
 		TestFalse(TEXT("blueprint_graph_introspect empty args: bOk"), R.bOk);
-	}
-	{
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_export_graph_t3d"),
-			MakeShared<FJsonObject>(),
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-		TestFalse(TEXT("blueprint_export_graph_t3d empty args: bOk"), R.bOk);
-	}
-	{
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_t3d_preflight_validate"),
-			MakeShared<FJsonObject>(),
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-		TestFalse(TEXT("blueprint_t3d_preflight_validate empty args: bOk"), R.bOk);
-	}
-	{
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_graph_import_t3d"),
-			MakeShared<FJsonObject>(),
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-		TestFalse(TEXT("blueprint_graph_import_t3d empty args: bOk"), R.bOk);
 	}
 	{
 		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
@@ -702,6 +687,161 @@ bool FUnrealAiBlueprintGraphPatchContractTest::RunTest(const FString& Parameters
 		}
 	}
 
+	// create_node with semantic_kind (no k2_class) + validate_only dry-run (Strict_BP02).
+	{
+		UBlueprint* BpSem = LoadObject<UBlueprint>(nullptr, TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+		if (BpSem)
+		{
+			TSharedPtr<FJsonObject> OpSem = MakeShared<FJsonObject>();
+			OpSem->SetStringField(TEXT("op"), TEXT("create_node"));
+			OpSem->SetStringField(TEXT("patch_id"), TEXT("uai_sem_kind_branch"));
+			OpSem->SetStringField(TEXT("semantic_kind"), TEXT("branch"));
+			OpSem->SetNumberField(TEXT("x"), -28000);
+			OpSem->SetNumberField(TEXT("y"), -28000);
+			TArray<TSharedPtr<FJsonValue>> OpsSem;
+			OpsSem.Add(MakeShared<FJsonValueObject>(OpSem.ToSharedRef()));
+			TSharedPtr<FJsonObject> ArgsSem = MakeShared<FJsonObject>();
+			ArgsSem->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+			ArgsSem->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+			ArgsSem->SetArrayField(TEXT("ops"), OpsSem);
+			ArgsSem->SetBoolField(TEXT("compile"), false);
+			ArgsSem->SetBoolField(TEXT("auto_layout"), false);
+			const FUnrealAiToolInvocationResult RSem = UnrealAiDispatchTool(
+				TEXT("blueprint_graph_patch"),
+				ArgsSem,
+				nullptr,
+				nullptr,
+				FString(),
+				FString());
+			TestTrue(TEXT("graph_patch semantic_kind branch: bOk"), RSem.bOk);
+			TSharedPtr<FJsonObject> OSem;
+			TSharedRef<TJsonReader<>> ReaderSem = TJsonReaderFactory<>::Create(RSem.ContentForModel);
+			TestTrue(TEXT("graph_patch semantic_kind: JSON"), FJsonSerializer::Deserialize(ReaderSem, OSem) && OSem.IsValid());
+			const TArray<TSharedPtr<FJsonValue>>* AppliedSem = nullptr;
+			TestTrue(TEXT("graph_patch semantic_kind: applied"), OSem->TryGetArrayField(TEXT("applied"), AppliedSem) && AppliedSem && AppliedSem->Num() > 0);
+			FString GuidCleanup;
+			const TSharedPtr<FJsonObject>* FirstRec = nullptr;
+			TestTrue(TEXT("graph_patch semantic_kind: first applied"), (*AppliedSem)[0]->TryGetObject(FirstRec) && FirstRec && (*FirstRec).IsValid());
+			TestTrue(TEXT("graph_patch semantic_kind: node_guid"), (*FirstRec)->TryGetStringField(TEXT("node_guid"), GuidCleanup) && !GuidCleanup.IsEmpty());
+			TSharedPtr<FJsonObject> OpRm = MakeShared<FJsonObject>();
+			OpRm->SetStringField(TEXT("op"), TEXT("remove_node"));
+			OpRm->SetStringField(TEXT("node_guid"), GuidCleanup);
+			TArray<TSharedPtr<FJsonValue>> OpsRm;
+			OpsRm.Add(MakeShared<FJsonValueObject>(OpRm.ToSharedRef()));
+			TSharedPtr<FJsonObject> ArgsRm = MakeShared<FJsonObject>();
+			ArgsRm->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+			ArgsRm->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+			ArgsRm->SetArrayField(TEXT("ops"), OpsRm);
+			ArgsRm->SetBoolField(TEXT("compile"), false);
+			ArgsRm->SetBoolField(TEXT("auto_layout"), false);
+			const FUnrealAiToolInvocationResult RRm = UnrealAiDispatchTool(
+				TEXT("blueprint_graph_patch"),
+				ArgsRm,
+				nullptr,
+				nullptr,
+				FString(),
+				FString());
+			TestTrue(TEXT("graph_patch semantic_kind cleanup remove_node: bOk"), RRm.bOk);
+
+			TSharedPtr<FJsonObject> ArgsVal = MakeShared<FJsonObject>();
+			ArgsVal->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+			ArgsVal->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+			ArgsVal->SetBoolField(TEXT("validate_only"), true);
+			TArray<TSharedPtr<FJsonValue>> OpsVal;
+			TSharedPtr<FJsonObject> OpV1 = MakeShared<FJsonObject>();
+			OpV1->SetStringField(TEXT("op"), TEXT("create_node"));
+			OpV1->SetStringField(TEXT("patch_id"), TEXT("v_n1"));
+			OpV1->SetStringField(TEXT("semantic_kind"), TEXT("branch"));
+			OpsVal.Add(MakeShared<FJsonValueObject>(OpV1.ToSharedRef()));
+			ArgsVal->SetArrayField(TEXT("ops"), OpsVal);
+			const FUnrealAiToolInvocationResult RVok = UnrealAiDispatchTool(
+				TEXT("blueprint_graph_patch"),
+				ArgsVal,
+				nullptr,
+				nullptr,
+				FString(),
+				FString());
+			TestTrue(TEXT("validate_only happy: bOk"), RVok.bOk);
+			TSharedPtr<FJsonObject> OVok;
+			TSharedRef<TJsonReader<>> RVr = TJsonReaderFactory<>::Create(RVok.ContentForModel);
+			TestTrue(TEXT("validate_only happy: parse"), FJsonSerializer::Deserialize(RVr, OVok) && OVok.IsValid());
+			TestEqual(TEXT("validate_only status"), OVok->GetStringField(TEXT("status")), FString(TEXT("patch_validated")));
+
+			TSharedPtr<FJsonObject> ArgsValBad = MakeShared<FJsonObject>();
+			ArgsValBad->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+			ArgsValBad->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+			ArgsValBad->SetBoolField(TEXT("validate_only"), true);
+			TArray<TSharedPtr<FJsonValue>> OpsValBad;
+			TSharedPtr<FJsonObject> OpVB0 = MakeShared<FJsonObject>();
+			OpVB0->SetStringField(TEXT("op"), TEXT("create_node"));
+			OpVB0->SetStringField(TEXT("patch_id"), TEXT("v_ok"));
+			OpVB0->SetStringField(TEXT("semantic_kind"), TEXT("branch"));
+			OpsValBad.Add(MakeShared<FJsonValueObject>(OpVB0.ToSharedRef()));
+			TSharedPtr<FJsonObject> OpVB1 = MakeShared<FJsonObject>();
+			OpVB1->SetStringField(TEXT("op"), TEXT("connect"));
+			OpVB1->SetStringField(TEXT("from"), TEXT("not_declared.Then"));
+			OpVB1->SetStringField(TEXT("to"), TEXT("v_ok.Execute"));
+			OpsValBad.Add(MakeShared<FJsonValueObject>(OpVB1.ToSharedRef()));
+			ArgsValBad->SetArrayField(TEXT("ops"), OpsValBad);
+			const FUnrealAiToolInvocationResult RVbad = UnrealAiDispatchTool(
+				TEXT("blueprint_graph_patch"),
+				ArgsValBad,
+				nullptr,
+				nullptr,
+				FString(),
+				FString());
+			TestFalse(TEXT("validate_only bad: bOk"), RVbad.bOk);
+			TSharedPtr<FJsonObject> OVb;
+			TSharedRef<TJsonReader<>> RVbr = TJsonReaderFactory<>::Create(RVbad.ContentForModel);
+			TestTrue(TEXT("validate_only bad: parse"), FJsonSerializer::Deserialize(RVbr, OVb) && OVb.IsValid());
+			TestEqual(TEXT("validate_only failed_op_index"), static_cast<int32>(OVb->GetNumberField(TEXT("failed_op_index"))), 1);
+
+			TSharedPtr<FJsonObject> ArgsEvShape = MakeShared<FJsonObject>();
+			ArgsEvShape->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+			ArgsEvShape->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+			ArgsEvShape->SetBoolField(TEXT("validate_only"), true);
+			TSharedPtr<FJsonObject> OpEvShape = MakeShared<FJsonObject>();
+			OpEvShape->SetStringField(TEXT("op"), TEXT("create_node"));
+			OpEvShape->SetStringField(TEXT("patch_id"), TEXT("uai_evt_missing_override"));
+			OpEvShape->SetStringField(TEXT("k2_class"), TEXT("/Script/BlueprintGraph.K2Node_Event"));
+			OpEvShape->SetNumberField(TEXT("x"), 0);
+			OpEvShape->SetNumberField(TEXT("y"), 0);
+			TArray<TSharedPtr<FJsonValue>> OpsEvShape;
+			OpsEvShape.Add(MakeShared<FJsonValueObject>(OpEvShape.ToSharedRef()));
+			ArgsEvShape->SetArrayField(TEXT("ops"), OpsEvShape);
+			const FUnrealAiToolInvocationResult REvShape = UnrealAiDispatchTool(
+				TEXT("blueprint_graph_patch"),
+				ArgsEvShape,
+				nullptr,
+				nullptr,
+				FString(),
+				FString());
+			TestFalse(TEXT("validate_only K2Node_Event missing event_override: bOk"), REvShape.bOk);
+			TSharedPtr<FJsonObject> OEvShape;
+			TSharedRef<TJsonReader<>> REvR = TJsonReaderFactory<>::Create(REvShape.ContentForModel);
+			TestTrue(TEXT("validate_only event shape: parse"), FJsonSerializer::Deserialize(REvR, OEvShape) && OEvShape.IsValid());
+			TestEqual(TEXT("validate_only event shape: failed_op_index"), static_cast<int32>(OEvShape->GetNumberField(TEXT("failed_op_index"))), 0);
+			const TArray<TSharedPtr<FJsonValue>>* EvCodes = nullptr;
+			TestTrue(TEXT("validate_only event shape: error_codes"), OEvShape->TryGetArrayField(TEXT("error_codes"), EvCodes) && EvCodes && EvCodes->Num() > 0);
+			FString EvCode0;
+			TestTrue(TEXT("validate_only event shape: first code"), (*EvCodes)[0]->TryGetString(EvCode0));
+			TestEqual(TEXT("validate_only event shape: event_override_shape code"), EvCode0, FString(TEXT("event_override_shape")));
+			const TSharedPtr<FJsonObject>* SugEv = nullptr;
+			TestTrue(TEXT("validate_only event shape: suggested_correct_call"), OEvShape->TryGetObjectField(TEXT("suggested_correct_call"), SugEv) && SugEv && (*SugEv).IsValid());
+			TestEqual(TEXT("validate_only event shape: suggestion tool"), (*SugEv)->GetStringField(TEXT("tool_id")), FString(TEXT("blueprint_graph_patch")));
+			const TSharedPtr<FJsonObject>* SugEvArgs = nullptr;
+			TestTrue(TEXT("validate_only event shape: suggestion arguments"), (*SugEv)->TryGetObjectField(TEXT("arguments"), SugEvArgs) && SugEvArgs && (*SugEvArgs).IsValid());
+			const TArray<TSharedPtr<FJsonValue>>* SugEvOps = nullptr;
+			TestTrue(TEXT("validate_only event shape: suggestion ops"), (*SugEvArgs)->TryGetArrayField(TEXT("ops"), SugEvOps) && SugEvOps && SugEvOps->Num() > 0);
+			const TSharedPtr<FJsonObject>* SugFirstOp = nullptr;
+			TestTrue(TEXT("validate_only event shape: first suggested op"), (*SugEvOps)[0]->TryGetObject(SugFirstOp) && SugFirstOp && (*SugFirstOp).IsValid());
+			const TSharedPtr<FJsonObject>* EvOv = nullptr;
+			TestTrue(TEXT("validate_only event shape: event_override in suggestion"), (*SugFirstOp)->TryGetObjectField(TEXT("event_override"), EvOv) && EvOv && (*EvOv).IsValid());
+			TestEqual(TEXT("validate_only event shape: Landed outer"), (*EvOv)->GetStringField(TEXT("outer_class_path")), FString(TEXT("/Script/Engine.Character")));
+			TestEqual(TEXT("validate_only event shape: Landed fn"), (*EvOv)->GetStringField(TEXT("function_name")), FString(TEXT("Landed")));
+		}
+	}
+
 	// Atomic rollback + minimal successful create_node (StrictTests harness only).
 	{
 		UBlueprint* BpAtomic = LoadObject<UBlueprint>(nullptr, TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
@@ -734,6 +874,23 @@ bool FUnrealAiBlueprintGraphPatchContractTest::RunTest(const FString& Parameters
 				FString());
 			TestFalse(TEXT("graph_patch atomic rollback: bOk"), RRb.bOk);
 			TestEqual(TEXT("graph_patch atomic: variable count restored"), BpAtomic->NewVariables.Num(), VarCountBefore);
+			{
+				TSharedPtr<FJsonObject> ORb;
+				TSharedRef<TJsonReader<>> ReaderRb = TJsonReaderFactory<>::Create(RRb.ContentForModel);
+				TestTrue(TEXT("graph_patch atomic rollback: JSON parse"), FJsonSerializer::Deserialize(ReaderRb, ORb) && ORb.IsValid());
+				TestEqual(TEXT("graph_patch atomic: failed_op_index"), static_cast<int32>(ORb->GetNumberField(TEXT("failed_op_index"))), 1);
+				const TSharedPtr<FJsonObject>* FailedOp = nullptr;
+				TestTrue(TEXT("graph_patch atomic: failed_op object"), ORb->TryGetObjectField(TEXT("failed_op"), FailedOp) && FailedOp && (*FailedOp).IsValid());
+				FString FailedOpName;
+				TestTrue(TEXT("graph_patch atomic: failed_op.op"), (*FailedOp)->TryGetStringField(TEXT("op"), FailedOpName));
+				TestEqual(TEXT("graph_patch atomic: failed op is connect"), FailedOpName, FString(TEXT("connect")));
+				const TSharedPtr<FJsonObject>* Sug = nullptr;
+				TestTrue(TEXT("graph_patch atomic: suggested_correct_call"), ORb->TryGetObjectField(TEXT("suggested_correct_call"), Sug) && Sug && (*Sug).IsValid());
+				TestEqual(
+					TEXT("graph_patch atomic: suggestion is list_pins"),
+					(*Sug)->GetStringField(TEXT("tool_id")),
+					FString(TEXT("blueprint_graph_list_pins")));
+			}
 
 			TSharedPtr<FJsonObject> OpOk = MakeShared<FJsonObject>();
 			OpOk->SetStringField(TEXT("op"), TEXT("create_node"));
@@ -876,322 +1033,43 @@ bool FUnrealAiBlueprintApplyIrContractTest::RunTest(const FString& Parameters)
 	(void)Parameters;
 	TestTrue(TEXT("Runs on game thread (tool dispatch requirement)"), IsInGameThread());
 
-	// Missing required fields should return structured invalid_ir.
+	auto ExpectCatalogDeprecated = [this](const TCHAR* ToolId, const TCHAR* Desc)
 	{
 		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_apply_ir"),
+			ToolId,
 			MakeShared<FJsonObject>(),
 			nullptr,
 			nullptr,
 			FString(),
 			FString());
-		TestFalse(TEXT("blueprint_apply_ir missing required: bOk"), R.bOk);
-
+		TestFalse(FString::Printf(TEXT("%s: bOk"), Desc), R.bOk);
 		TSharedPtr<FJsonObject> O;
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("blueprint_apply_ir missing required: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-		TestFalse(TEXT("blueprint_apply_ir missing required: ok field"), O->GetBoolField(TEXT("ok")));
-
+		TestTrue(FString::Printf(TEXT("%s: JSON parse"), Desc), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+		TestFalse(FString::Printf(TEXT("%s: ok field"), Desc), O->GetBoolField(TEXT("ok")));
 		FString Status;
-		TestTrue(TEXT("blueprint_apply_ir missing required: status"), O->TryGetStringField(TEXT("status"), Status));
-		TestEqual(TEXT("blueprint_apply_ir missing required: status value"), Status, FString(TEXT("invalid_ir")));
-		TestTrue(TEXT("blueprint_apply_ir missing required: errors present"), O->HasTypedField<EJson::Array>(TEXT("errors")));
-	}
-
-	// Missing/empty `nodes` should include a suggested recovery path via blueprint_export_ir.
-	{
-		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
-		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/__does_not_exist__/BP_ApplyIrMissingNodes.BP_ApplyIrMissingNodes"));
-
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_apply_ir"),
-			Args,
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-
-		TestFalse(TEXT("blueprint_apply_ir missing nodes: bOk"), R.bOk);
-
-		TSharedPtr<FJsonObject> O;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("blueprint_apply_ir missing nodes: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-
-		TestTrue(TEXT("blueprint_apply_ir missing nodes: has suggested_correct_call"), O->HasField(TEXT("suggested_correct_call")));
-
-		const TSharedPtr<FJsonObject>* SuggestedObj = nullptr;
+		TestTrue(FString::Printf(TEXT("%s: status"), Desc), O->TryGetStringField(TEXT("status"), Status));
+		TestEqual(FString::Printf(TEXT("%s: status value"), Desc), Status, FString(TEXT("tool_deprecated")));
+		TestTrue(FString::Printf(TEXT("%s: suggested_correct_call"), Desc), O->HasField(TEXT("suggested_correct_call")));
+		const TSharedPtr<FJsonObject>* Sug = nullptr;
 		TestTrue(
-			TEXT("suggested_correct_call parseable"),
-			O->TryGetObjectField(TEXT("suggested_correct_call"), SuggestedObj) && SuggestedObj && SuggestedObj->IsValid());
-
+			FString::Printf(TEXT("%s: suggested parse"), Desc),
+			O->TryGetObjectField(TEXT("suggested_correct_call"), Sug) && Sug && (*Sug).IsValid());
 		TestEqual(
-			TEXT("suggested_correct_call.tool_id"),
-			SuggestedObj->Get()->GetStringField(TEXT("tool_id")),
-			FString(TEXT("blueprint_export_ir")));
-	}
+			FString::Printf(TEXT("%s: suggested.tool_id"), Desc),
+			(*Sug)->GetStringField(TEXT("tool_id")),
+			FString(TEXT("blueprint_graph_patch")));
+	};
 
-	// Deprecated op normalization: add_movement_input -> call_function (+ class_path/function_name)
-	{
-		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
-		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/__does_not_exist__/BP_ResolverTest.BP_ResolverTest"));
-
-		TArray<TSharedPtr<FJsonValue>> Nodes;
-		{
-			TSharedPtr<FJsonObject> N = MakeShared<FJsonObject>();
-			N->SetStringField(TEXT("node_id"), TEXT("n1"));
-			N->SetStringField(TEXT("op"), TEXT("add_movement_input"));
-			Nodes.Add(MakeShareable(new FJsonValueObject(N.ToSharedRef())));
-		}
-		Args->SetArrayField(TEXT("nodes"), Nodes);
-
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_apply_ir"),
-			Args,
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-		TestFalse(TEXT("deprecated op normalization should not succeed"), R.bOk);
-
-		TSharedPtr<FJsonObject> O;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("blueprint_apply_ir deprecated op: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-
-		TestTrue(TEXT("blueprint_apply_ir deprecated op: normalization_applied present"), O->HasField(TEXT("normalization_applied")));
-		TestTrue(TEXT("blueprint_apply_ir deprecated op: normalization_applied true"), O->GetBoolField(TEXT("normalization_applied")));
-		TestTrue(TEXT("blueprint_apply_ir deprecated op: has deprecated_fields_seen"), O->HasField(TEXT("deprecated_fields_seen")));
-
-		const TArray<TSharedPtr<FJsonValue>>* DepArr = nullptr;
-		TestTrue(TEXT("deprecated_fields_seen parseable"), O->TryGetArrayField(TEXT("deprecated_fields_seen"), DepArr) && DepArr);
-
-		bool bFoundDeprecated = false;
-		if (DepArr)
-		{
-			for (const TSharedPtr<FJsonValue>& V : *DepArr)
-			{
-				if (V.IsValid() && V->AsString().Contains(TEXT("op:add_movement_input")))
-				{
-					bFoundDeprecated = true;
-					break;
-				}
-			}
-		}
-		TestTrue(TEXT("deprecated_fields_seen contains op:add_movement_input"), bFoundDeprecated);
-	}
-
-	// custom_event name normalization: implicit name from node_id (required by UK2Node_CustomEvent)
-	{
-		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
-		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/__does_not_exist__/BP_CustomEventName.BP_CustomEventName"));
-
-		TArray<TSharedPtr<FJsonValue>> Nodes;
-		{
-			// event nodes are fine without extra metadata; they only exist to make the apply shape realistic.
-			TSharedPtr<FJsonObject> N = MakeShared<FJsonObject>();
-			N->SetStringField(TEXT("node_id"), TEXT("begin_play"));
-			N->SetStringField(TEXT("op"), TEXT("event_begin_play"));
-			Nodes.Add(MakeShareable(new FJsonValueObject(N.ToSharedRef())));
-		}
-		{
-			// LLMs commonly omit `name` and emit only `node_id` + `op:custom_event`.
-			TSharedPtr<FJsonObject> N = MakeShared<FJsonObject>();
-			N->SetStringField(TEXT("node_id"), TEXT("coin_hover"));
-			N->SetStringField(TEXT("op"), TEXT("custom_event"));
-			Nodes.Add(MakeShareable(new FJsonValueObject(N.ToSharedRef())));
-		}
-		Args->SetArrayField(TEXT("nodes"), Nodes);
-
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_apply_ir"),
-			Args,
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-		TestFalse(TEXT("custom_event name normalization should still fail due to missing blueprint"), R.bOk);
-
-		TSharedPtr<FJsonObject> O;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("blueprint_apply_ir custom_event name normalization: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-
-		TestTrue(TEXT("custom_event name normalization: has normalization_applied"), O->HasField(TEXT("normalization_applied")));
-		TestTrue(TEXT("custom_event name normalization: normalization_applied true"), O->GetBoolField(TEXT("normalization_applied")));
-
-		TestTrue(TEXT("custom_event name normalization: has deprecated_fields_seen"), O->HasField(TEXT("deprecated_fields_seen")));
-		const TArray<TSharedPtr<FJsonValue>>* DepArr = nullptr;
-		TestTrue(TEXT("custom_event name normalization: deprecated_fields_seen parseable"), O->TryGetArrayField(TEXT("deprecated_fields_seen"), DepArr) && DepArr);
-
-		bool bFoundMapping = false;
-		if (DepArr)
-		{
-			for (const TSharedPtr<FJsonValue>& V : *DepArr)
-			{
-				if (V.IsValid() && V->AsString().Contains(TEXT("node_id_for_custom_event_name")))
-				{
-					bFoundMapping = true;
-					break;
-				}
-			}
-		}
-		TestTrue(TEXT("deprecated_fields_seen contains mapping node_id_for_custom_event_name"), bFoundMapping);
-	}
-
-	// Alias repair + suggested_correct_call: nodeId repaired -> invalid_ir still returned (missing op)
-	{
-		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
-		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/__does_not_exist__/BP_ResolverTest2.BP_ResolverTest2"));
-
-		TArray<TSharedPtr<FJsonValue>> Nodes;
-		{
-			TSharedPtr<FJsonObject> N = MakeShared<FJsonObject>();
-			N->SetStringField(TEXT("nodeId"), TEXT("n1"));
-			// op intentionally omitted to trigger invalid_ir after normalization
-			Nodes.Add(MakeShareable(new FJsonValueObject(N.ToSharedRef())));
-		}
-		Args->SetArrayField(TEXT("nodes"), Nodes);
-
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_apply_ir"),
-			Args,
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-
-		TestFalse(TEXT("alias repair but still invalid_ir"), R.bOk);
-		TSharedPtr<FJsonObject> O;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("blueprint_apply_ir alias repair: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-
-		TestEqual(TEXT("blueprint_apply_ir alias repair: status"), O->GetStringField(TEXT("status")), FString(TEXT("invalid_ir")));
-		TestTrue(TEXT("blueprint_apply_ir alias repair: has suggested_correct_call"), O->HasField(TEXT("suggested_correct_call")));
-
-		const TSharedPtr<FJsonObject>* SuggestedObj = nullptr;
-		TestTrue(
-			TEXT("suggested_correct_call parseable"),
-			O->TryGetObjectField(TEXT("suggested_correct_call"), SuggestedObj) && SuggestedObj && SuggestedObj->IsValid());
-		TestEqual(TEXT("suggested_correct_call.tool_id"), SuggestedObj->Get()->GetStringField(TEXT("tool_id")), FString(TEXT("blueprint_apply_ir")));
-	}
-
-	// Link pin defaulting: from/to without pin are normalized (notes emitted) before asset loading fails.
-	{
-		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
-		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/__does_not_exist__/BP_ResolverTest3.BP_ResolverTest3"));
-
-		TArray<TSharedPtr<FJsonValue>> Nodes;
-		{
-			TSharedPtr<FJsonObject> N = MakeShared<FJsonObject>();
-			N->SetStringField(TEXT("node_id"), TEXT("n1"));
-			N->SetStringField(TEXT("op"), TEXT("event_begin_play"));
-			Nodes.Add(MakeShareable(new FJsonValueObject(N.ToSharedRef())));
-		}
-		Args->SetArrayField(TEXT("nodes"), Nodes);
-
-		TArray<TSharedPtr<FJsonValue>> Links;
-		{
-			TSharedPtr<FJsonObject> L = MakeShared<FJsonObject>();
-			L->SetStringField(TEXT("from"), TEXT("n1"));
-			L->SetStringField(TEXT("to"), TEXT("n1"));
-			Links.Add(MakeShareable(new FJsonValueObject(L.ToSharedRef())));
-		}
-		Args->SetArrayField(TEXT("links"), Links);
-
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_apply_ir"),
-			Args,
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-
-		TestFalse(TEXT("link defaulting should still fail due to missing blueprint"), R.bOk);
-
-		TSharedPtr<FJsonObject> O;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("blueprint_apply_ir link defaulting: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-
-		TestTrue(TEXT("blueprint_apply_ir link defaulting: has normalization_notes"), O->HasField(TEXT("normalization_notes")));
-		const TArray<TSharedPtr<FJsonValue>>* NotesArr = nullptr;
-		TestTrue(TEXT("normalization_notes parseable"), O->TryGetArrayField(TEXT("normalization_notes"), NotesArr) && NotesArr);
-
-		bool bFoundFromNote = false;
-		bool bFoundToNote = false;
-		if (NotesArr)
-		{
-			for (const TSharedPtr<FJsonValue>& V : *NotesArr)
-			{
-				if (V.IsValid() && V->AsString().Contains(TEXT("Normalized link.from without pin to .Then")))
-				{
-					bFoundFromNote = true;
-				}
-				if (V.IsValid() && V->AsString().Contains(TEXT("Normalized link.to without pin to .Execute")))
-				{
-					bFoundToNote = true;
-				}
-			}
-		}
-		TestTrue(TEXT("normalization_notes includes from-pin default"), bFoundFromNote);
-		TestTrue(TEXT("normalization_notes includes to-pin default"), bFoundToNote);
-	}
-
-	// Unsupported op should fail deterministically with apply_failed.
-	{
-		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
-		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/__does_not_exist__.__does_not_exist__"));
-		TArray<TSharedPtr<FJsonValue>> Nodes;
-		{
-			TSharedPtr<FJsonObject> N = MakeShared<FJsonObject>();
-			N->SetStringField(TEXT("node_id"), TEXT("n1"));
-			N->SetStringField(TEXT("op"), TEXT("totally_unknown_op"));
-			Nodes.Add(MakeShareable(new FJsonValueObject(N.ToSharedRef())));
-		}
-		Args->SetArrayField(TEXT("nodes"), Nodes);
-
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_apply_ir"),
-			Args,
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-		TestFalse(TEXT("blueprint_apply_ir unsupported op: bOk"), R.bOk);
-
-		TSharedPtr<FJsonObject> O;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("blueprint_apply_ir unsupported op: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-		TestFalse(TEXT("blueprint_apply_ir unsupported op: ok field"), O->GetBoolField(TEXT("ok")));
-		TestTrue(TEXT("blueprint_apply_ir unsupported op: has status"), O->HasTypedField<EJson::String>(TEXT("status")));
-	}
-
-	// Invalid merge_policy should fail parse (invalid_ir) before asset load.
-	{
-		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
-		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/__unreal_ai_missing_bp__.__unreal_ai_missing_bp__"));
-		Args->SetStringField(TEXT("merge_policy"), TEXT("not_a_real_policy"));
-		TArray<TSharedPtr<FJsonValue>> Nodes;
-		{
-			TSharedPtr<FJsonObject> N = MakeShared<FJsonObject>();
-			N->SetStringField(TEXT("node_id"), TEXT("n1"));
-			N->SetStringField(TEXT("op"), TEXT("event_begin_play"));
-			Nodes.Add(MakeShareable(new FJsonValueObject(N.ToSharedRef())));
-		}
-		Args->SetArrayField(TEXT("nodes"), Nodes);
-
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_apply_ir"),
-			Args,
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-		TestFalse(TEXT("blueprint_apply_ir invalid merge_policy: bOk"), R.bOk);
-		TSharedPtr<FJsonObject> O;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("blueprint_apply_ir invalid merge_policy: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-		FString Status;
-		TestTrue(TEXT("blueprint_apply_ir invalid merge_policy: status"), O->TryGetStringField(TEXT("status"), Status));
-		TestEqual(TEXT("blueprint_apply_ir invalid merge_policy: status value"), Status, FString(TEXT("invalid_ir")));
-	}
+	ExpectCatalogDeprecated(TEXT("blueprint_apply_ir"), TEXT("blueprint_apply_ir"));
+	ExpectCatalogDeprecated(TEXT("blueprint_export_ir"), TEXT("blueprint_export_ir"));
+	ExpectCatalogDeprecated(TEXT("blueprint_add_variable"), TEXT("blueprint_add_variable"));
+	ExpectCatalogDeprecated(TEXT("blueprint_format_selection"), TEXT("blueprint_format_selection"));
+	ExpectCatalogDeprecated(TEXT("blueprint_open_graph_tab"), TEXT("blueprint_open_graph_tab"));
+	ExpectCatalogDeprecated(TEXT("blueprint_composite_lifecycle_print"), TEXT("blueprint_composite_lifecycle_print"));
+	ExpectCatalogDeprecated(TEXT("blueprint_export_graph_t3d"), TEXT("blueprint_export_graph_t3d"));
+	ExpectCatalogDeprecated(TEXT("blueprint_t3d_preflight_validate"), TEXT("blueprint_t3d_preflight_validate"));
+	ExpectCatalogDeprecated(TEXT("blueprint_graph_import_t3d"), TEXT("blueprint_graph_import_t3d"));
 
 	return true;
 }
@@ -1619,17 +1497,6 @@ bool FUnrealAiGenericAssetToolsContractTest::RunTest(const FString& Parameters)
 
 	{
 		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_export_ir"),
-			MakeShared<FJsonObject>(),
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-		TestFalse(TEXT("blueprint_export_ir missing blueprint_path: bOk"), R.bOk);
-	}
-
-	{
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
 			TEXT("blueprint_format_graph"),
 			MakeShared<FJsonObject>(),
 			nullptr,
@@ -1637,17 +1504,6 @@ bool FUnrealAiGenericAssetToolsContractTest::RunTest(const FString& Parameters)
 			FString(),
 			FString());
 		TestFalse(TEXT("blueprint_format_graph missing blueprint_path: bOk"), R.bOk);
-	}
-
-	{
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_format_selection"),
-			MakeShared<FJsonObject>(),
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-		TestFalse(TEXT("blueprint_format_selection missing blueprint_path: bOk"), R.bOk);
 	}
 
 	return true;
@@ -2025,70 +1881,6 @@ bool FUnrealAiBlueprintGraphIntrospectLinkedToTest::RunTest(const FString& Param
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FUnrealAiBlueprintCompositeLifecyclePrintContractTest,
-	"UnrealAiEditor.Tools.BlueprintCompositeLifecyclePrintContract",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-bool FUnrealAiBlueprintCompositeLifecyclePrintContractTest::RunTest(const FString& Parameters)
-{
-	(void)Parameters;
-	TestTrue(TEXT("Runs on game thread (tool dispatch requirement)"), IsInGameThread());
-
-	{
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_composite_lifecycle_print"),
-			MakeShared<FJsonObject>(),
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-		TestFalse(TEXT("composite_lifecycle_print empty args: bOk"), R.bOk);
-		TSharedPtr<FJsonObject> O;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("composite_lifecycle_print empty args: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-		TestEqual(TEXT("composite_lifecycle_print empty args: error"), O->GetStringField(TEXT("error")), FString(TEXT("blueprint_path is required")));
-	}
-
-	{
-		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
-		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
-		Args->SetStringField(TEXT("lifecycle"), TEXT("not_a_real_lifecycle"));
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_composite_lifecycle_print"),
-			Args,
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-		TestFalse(TEXT("composite_lifecycle_print bad lifecycle: bOk"), R.bOk);
-		TSharedPtr<FJsonObject> O;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("composite_lifecycle_print bad lifecycle: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-		TestEqual(TEXT("composite_lifecycle_print bad lifecycle: error"), O->GetStringField(TEXT("error")), FString(TEXT("lifecycle must be begin_play or tick")));
-	}
-
-	{
-		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
-		Args->SetStringField(TEXT("blueprint_path"), TEXT("/Game/__does_not_exist__/UaiCompositeMissing.UaiCompositeMissing"));
-		Args->SetStringField(TEXT("lifecycle"), TEXT("begin_play"));
-		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
-			TEXT("blueprint_composite_lifecycle_print"),
-			Args,
-			nullptr,
-			nullptr,
-			FString(),
-			FString());
-		TestFalse(TEXT("composite_lifecycle_print missing asset: bOk"), R.bOk);
-		TSharedPtr<FJsonObject> O;
-		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("composite_lifecycle_print missing asset: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-		TestEqual(TEXT("composite_lifecycle_print missing asset: status"), O->GetStringField(TEXT("status")), FString(TEXT("asset_not_found")));
-	}
-
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FUnrealAiBlueprintIrTier1GoldenRoundTripTest,
 	"UnrealAiEditor.Tools.BlueprintIrTier1GoldenRoundTrip",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -2098,7 +1890,7 @@ bool FUnrealAiBlueprintIrTier1GoldenRoundTripTest::RunTest(const FString& Parame
 	(void)Parameters;
 	TestTrue(TEXT("Runs on game thread (tool dispatch requirement)"), IsInGameThread());
 
-	// Golden Tier-1 IR (event_begin_play + PrintString + link + default) must parse; failure must be asset load, not invalid_ir.
+	// Former Tier-1 IR shape: dispatch is catalog-deprecated (tool_deprecated), not asset_not_found.
 	{
 		TSharedPtr<FJsonObject> Ir = MakeShared<FJsonObject>();
 		Ir->SetStringField(TEXT("blueprint_path"), TEXT("/Game/__Tier1Golden__/BP_Tier1Golden.BP_Tier1Golden"));
@@ -2148,46 +1940,46 @@ bool FUnrealAiBlueprintIrTier1GoldenRoundTripTest::RunTest(const FString& Parame
 			nullptr,
 			FString(),
 			FString());
-		TestFalse(TEXT("Tier-1 golden IR missing asset: bOk"), R.bOk);
+		TestFalse(TEXT("Tier-1 golden IR via dispatch: bOk"), R.bOk);
 		TSharedPtr<FJsonObject> O;
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
-		TestTrue(TEXT("Tier-1 golden IR missing asset: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
-		TestEqual(TEXT("Tier-1 golden IR missing asset: status"), O->GetStringField(TEXT("status")), FString(TEXT("asset_not_found")));
+		TestTrue(TEXT("Tier-1 golden IR via dispatch: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+		TestEqual(TEXT("Tier-1 golden IR via dispatch: status"), O->GetStringField(TEXT("status")), FString(TEXT("tool_deprecated")));
 	}
 
-	// Export stability: two consecutive blueprint_export_ir calls return the same node count (StrictTests harness only).
+	// Introspect stability: two consecutive blueprint_graph_introspect calls return the same node count (StrictTests harness only).
 	{
 		UBlueprint* Bp = LoadObject<UBlueprint>(nullptr, TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
 		if (!Bp)
 		{
-			UE_LOG(LogTemp, Display, TEXT("UnrealAiEditor.Tools.BlueprintIrTier1GoldenRoundTrip: skip export stability — Strict_BP02 not in project"));
+			UE_LOG(LogTemp, Display, TEXT("UnrealAiEditor.Tools.BlueprintIrTier1GoldenRoundTrip: skip introspect stability — Strict_BP02 not in project"));
 			return true;
 		}
 		(void)Bp;
 
-		TSharedPtr<FJsonObject> ExportArgs = MakeShared<FJsonObject>();
-		ExportArgs->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
-		ExportArgs->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+		TSharedPtr<FJsonObject> IntroArgs = MakeShared<FJsonObject>();
+		IntroArgs->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+		IntroArgs->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
 
 		const FUnrealAiToolInvocationResult R1 = UnrealAiDispatchTool(
-			TEXT("blueprint_export_ir"),
-			ExportArgs,
+			TEXT("blueprint_graph_introspect"),
+			IntroArgs,
 			nullptr,
 			nullptr,
 			FString(),
 			FString());
 		const FUnrealAiToolInvocationResult R2 = UnrealAiDispatchTool(
-			TEXT("blueprint_export_ir"),
-			ExportArgs,
+			TEXT("blueprint_graph_introspect"),
+			IntroArgs,
 			nullptr,
 			nullptr,
 			FString(),
 			FString());
 
-		TestTrue(TEXT("export stability R1: bOk"), R1.bOk);
-		TestTrue(TEXT("export stability R2: bOk"), R2.bOk);
+		TestTrue(TEXT("introspect stability R1: bOk"), R1.bOk);
+		TestTrue(TEXT("introspect stability R2: bOk"), R2.bOk);
 
-		auto ParseIrNodeCount = [](const FString& Json, int32& OutCount) -> bool
+		auto ParseIntrospectNodeCount = [](const FString& Json, int32& OutCount) -> bool
 		{
 			OutCount = 0;
 			TSharedPtr<FJsonObject> Root;
@@ -2196,26 +1988,21 @@ bool FUnrealAiBlueprintIrTier1GoldenRoundTripTest::RunTest(const FString& Parame
 			{
 				return false;
 			}
-			const TSharedPtr<FJsonObject>* IrObj = nullptr;
-			if (!Root->TryGetObjectField(TEXT("ir"), IrObj) || !IrObj || !(*IrObj).IsValid())
+			const TArray<TSharedPtr<FJsonValue>>* Ns = nullptr;
+			if (!Root->TryGetArrayField(TEXT("nodes"), Ns) || !Ns)
 			{
 				return false;
 			}
-			const TArray<TSharedPtr<FJsonValue>>* Nodes = nullptr;
-			if (!(*IrObj)->TryGetArrayField(TEXT("nodes"), Nodes) || !Nodes)
-			{
-				return false;
-			}
-			OutCount = Nodes->Num();
+			OutCount = Ns->Num();
 			return true;
 		};
 
 		int32 C1 = 0;
 		int32 C2 = 0;
-		TestTrue(TEXT("export stability: parse R1"), ParseIrNodeCount(R1.ContentForModel, C1));
-		TestTrue(TEXT("export stability: parse R2"), ParseIrNodeCount(R2.ContentForModel, C2));
-		TestEqual(TEXT("export stability: node count"), C1, C2);
-		TestTrue(TEXT("export stability: non-empty graph"), C1 > 0);
+		TestTrue(TEXT("introspect stability: parse R1"), ParseIntrospectNodeCount(R1.ContentForModel, C1));
+		TestTrue(TEXT("introspect stability: parse R2"), ParseIntrospectNodeCount(R2.ContentForModel, C2));
+		TestEqual(TEXT("introspect stability: node count"), C1, C2);
+		TestTrue(TEXT("introspect stability: non-empty graph"), C1 > 0);
 	}
 
 	return true;
@@ -2245,7 +2032,7 @@ bool FUnrealAiGraphEditDomainRegistryTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("kind roundtrip"), D->GetKind(), K);
 	}
 	TestTrue(
-		TEXT("script surface exposes Kismet IR capability"),
+		TEXT("script surface exposes Kismet graph tooling capability"),
 		FUnrealAiGraphEditDomainRegistry::Get(EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint)->GetCapabilities().bSupportsKismetIR);
 	TestTrue(
 		TEXT("material instance surface exposes parameter capability"),
@@ -2324,15 +2111,26 @@ bool FUnrealAiToolSurfaceCompatibilityTest::RunTest(const FString& Parameters)
 			UnrealAiToolSurfaceCompatibility::ToolAllowedOnSurface(BuilderOnly, false, EUnrealAiToolSurfaceKind::BlueprintBuilder));
 	}
 
+	{
+		TSet<FString> EnvOnly;
+		EnvOnly.Add(UnrealAiToolSurfaceCompatibility::GAgentSurfaceToken_EnvironmentBuilder);
+		TestFalse(
+			TEXT("environment_builder-only on main agent"),
+			UnrealAiToolSurfaceCompatibility::ToolAllowedOnSurface(EnvOnly, false, EUnrealAiToolSurfaceKind::MainAgent));
+		TestTrue(
+			TEXT("environment_builder-only on environment builder"),
+			UnrealAiToolSurfaceCompatibility::ToolAllowedOnSurface(EnvOnly, false, EUnrealAiToolSurfaceKind::EnvironmentBuilder));
+	}
+
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FUnrealAiBlueprintToolGateSurfaceTest,
-	"UnrealAiEditor.Tools.BlueprintToolGateSurface",
+	FUnrealAiAgentToolGateSurfaceTest,
+	"UnrealAiEditor.Tools.AgentToolGateSurface",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FUnrealAiBlueprintToolGateSurfaceTest::RunTest(const FString& Parameters)
+bool FUnrealAiAgentToolGateSurfaceTest::RunTest(const FString& Parameters)
 {
 	(void)Parameters;
 
@@ -2345,42 +2143,53 @@ bool FUnrealAiBlueprintToolGateSurfaceTest::RunTest(const FString& Parameters)
 	Req.Mode = EUnrealAiAgentMode::Ask;
 	TestTrue(
 		TEXT("ask mode passes surface gate"),
-		UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Req, TEXT("blueprint_graph_patch"), &Catalog));
+		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("blueprint_graph_patch"), &Catalog));
 
 	Req.Mode = EUnrealAiAgentMode::Agent;
 	Req.bOmitMainAgentBlueprintMutationTools = false;
 	TestTrue(
 		TEXT("omit flag off bypasses gate"),
-		UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Req, TEXT("blueprint_graph_patch"), &Catalog));
+		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("blueprint_graph_patch"), &Catalog));
 
 	Req.bOmitMainAgentBlueprintMutationTools = true;
 	Req.bBlueprintBuilderTurn = false;
 	TestFalse(
 		TEXT("builder-only tool blocked on main agent"),
-		UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Req, TEXT("blueprint_graph_patch"), &Catalog));
+		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("blueprint_graph_patch"), &Catalog));
 
 	Req.bBlueprintBuilderTurn = true;
 	TestTrue(
 		TEXT("builder-only tool allowed on builder turn"),
-		UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Req, TEXT("blueprint_graph_patch"), &Catalog));
+		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("blueprint_graph_patch"), &Catalog));
 
 	Req.bBlueprintBuilderTurn = false;
 	TestTrue(
 		TEXT("default surfaces (no field) passes on main"),
-		UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Req, TEXT("editor_get_selection"), &Catalog));
+		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("editor_get_selection"), &Catalog));
 
 	Req.bOmitMainAgentBlueprintMutationTools = true;
 	Req.bBlueprintBuilderTurn = false;
+	Req.bEnvironmentBuilderTurn = false;
 	TestFalse(
 		TEXT("material_graph_patch blocked on main agent"),
-		UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Req, TEXT("material_graph_patch"), &Catalog));
+		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("material_graph_patch"), &Catalog));
 	TestTrue(
 		TEXT("material_graph_export allowed on main agent"),
-		UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Req, TEXT("material_graph_export"), &Catalog));
+		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("material_graph_export"), &Catalog));
 	Req.bBlueprintBuilderTurn = true;
 	TestTrue(
 		TEXT("material_graph_patch allowed on builder turn"),
-		UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Req, TEXT("material_graph_patch"), &Catalog));
+		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("material_graph_patch"), &Catalog));
+
+	Req.bBlueprintBuilderTurn = false;
+	Req.bOmitMainAgentBlueprintMutationTools = true;
+	TestFalse(
+		TEXT("pcg_generate blocked on main agent"),
+		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("pcg_generate"), &Catalog));
+	Req.bEnvironmentBuilderTurn = true;
+	TestTrue(
+		TEXT("pcg_generate allowed on environment builder turn"),
+		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("pcg_generate"), &Catalog));
 
 	return true;
 }
