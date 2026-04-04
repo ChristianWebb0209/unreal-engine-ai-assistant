@@ -218,6 +218,14 @@ namespace UnrealAiBlueprintGraphPatchPriv
 	{
 		FString NodePart = NodePartIn;
 		NodePart.TrimStartAndEndInline();
+		if (NodePart.Contains(TEXT("__UAI_G_")))
+		{
+			Err = FString::Printf(
+				TEXT("T3D placeholder in node ref \"%s\". __UAI_G_NNNNNN__ is only for blueprint_graph_import_t3d. "
+					 "Use guid:<uuid> from blueprint_export_ir / blueprint_graph_introspect, or patch_id from this ops[] batch."),
+				*NodePartIn);
+			return nullptr;
+		}
 		if (NodePart.StartsWith(TEXT("guid:"), ESearchCase::IgnoreCase))
 		{
 			const FString GuidBody = NodePart.Mid(5).TrimStartAndEnd();
@@ -343,7 +351,19 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		UClass* NodeClass = LoadObject<UClass>(nullptr, *K2ClassPath);
 		if (!NodeClass || !NodeClass->IsChildOf(UK2Node::StaticClass()))
 		{
-			OutErrors.Add(FString::Printf(TEXT("k2_class not a UK2Node: %s"), *K2ClassPath));
+			FString Hint;
+			const FString Low = K2ClassPath.ToLower();
+			if (Low.Contains(TEXT("intless")) || Low.Contains(TEXT("intadd")) || Low.Contains(TEXT("less_int"))
+				|| Low.Contains(TEXT("add_int")) || Low.Contains(TEXT("k2node_math")))
+			{
+				Hint = TEXT(
+					" Integer math/compare nodes are usually K2Node_CallFunction: class_path /Script/Engine.KismetMathLibrary, function_name Less_IntInt | Add_IntInt | Greater_IntInt | EqualEqual_IntInt.");
+			}
+			else if (Low.Contains(TEXT("literal")))
+			{
+				Hint = TEXT(" Literal ints: K2Node_CallFunction with KismetMathLibrary.MakeLiteralInt, or set_pin_default on an int input.");
+			}
+			OutErrors.Add(FString::Printf(TEXT("k2_class not a UK2Node: %s.%s"), *K2ClassPath, *Hint));
 			return nullptr;
 		}
 
@@ -598,6 +618,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 {
 	using namespace UnrealAiBlueprintGraphPatchPriv;
 	UnrealAiToolDispatchArgRepair::RepairBlueprintAssetPathArgs(Args);
+	UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Args);
 	FString Path;
 	if (!Args->TryGetStringField(TEXT("blueprint_path"), Path) || Path.IsEmpty())
 	{
@@ -657,10 +678,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 		LayoutScopeStr = TEXT("patched_nodes");
 	}
 	const bool bLayoutFullGraph = LayoutScopeStr.Equals(TEXT("full_graph"), ESearchCase::IgnoreCase);
-	FString LayoutModeStr;
-	FString WireKnotsStr;
-	Args->TryGetStringField(TEXT("layout_mode"), LayoutModeStr);
-	Args->TryGetStringField(TEXT("wire_knots"), WireKnotsStr);
 
 	const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
 
@@ -1173,10 +1190,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 	}
 
 	UnrealAiBlueprintFormatterBridge::EnsureFormatterModuleLoaded(nullptr);
-	const FUnrealBlueprintGraphFormatOptions FmtOpts = UnrealAiBlueprintTools_MakeFormatOptions(
-		LayoutModeStr,
-		WireKnotsStr,
-		GetDefault<UUnrealAiEditorSettings>());
+	const FUnrealBlueprintGraphFormatOptions FmtOpts =
+		UnrealAiBlueprintTools_MakeFormatOptionsFromSettings(GetDefault<UUnrealAiEditorSettings>());
 	FUnrealBlueprintGraphFormatResult LayoutResult;
 	if (bAutoLayout)
 	{
@@ -1235,8 +1250,15 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 	O->SetBoolField(TEXT("compiled"), bCompile);
 	O->SetBoolField(TEXT("auto_layout"), bAutoLayout);
 	O->SetStringField(TEXT("layout_scope"), LayoutScopeStr);
-	O->SetBoolField(TEXT("layout_applied"), LayoutResult.NodesPositioned > 0);
+	O->SetBoolField(TEXT("layout_applied"), LayoutResult.NodesPositioned > 0 || LayoutResult.NodesMoved > 0);
 	O->SetNumberField(TEXT("layout_nodes_positioned"), static_cast<double>(LayoutResult.NodesPositioned));
+	O->SetNumberField(TEXT("layout_nodes_moved"), static_cast<double>(LayoutResult.NodesMoved));
+	O->SetNumberField(TEXT("layout_nodes_skipped_preserve"), static_cast<double>(LayoutResult.NodesSkippedPreserve));
+	O->SetNumberField(TEXT("layout_entry_subgraphs"), static_cast<double>(LayoutResult.EntrySubgraphs));
+	O->SetNumberField(TEXT("layout_disconnected_nodes"), static_cast<double>(LayoutResult.DisconnectedNodes));
+	O->SetNumberField(TEXT("layout_data_only_nodes_placed"), static_cast<double>(LayoutResult.DataOnlyNodesPlaced));
+	O->SetNumberField(TEXT("layout_knots_inserted"), static_cast<double>(LayoutResult.KnotsInserted));
+	O->SetNumberField(TEXT("layout_comments_adjusted"), static_cast<double>(LayoutResult.CommentsAdjusted));
 	O->SetBoolField(TEXT("formatter_available"), UnrealAiBlueprintFormatterBridge::IsFormatterModuleReady());
 	const FString Md = FString::Printf(TEXT("### blueprint_graph_patch\n- Ops applied: %d\n"), Applied.Num());
 	return UnrealAiToolJson::OkWithEditorPresentation(

@@ -25,11 +25,9 @@ bool UnrealAiBlueprintTools_TryParsePinTypeFromString(const FString& TypeStr, FE
 /** Legacy: unknown tokens map to Boolean (preserves older callers); prefer TryParse for strict validation. */
 FEdGraphPinType UnrealAiBlueprintTools_ParsePinTypeFromString(const FString& TypeStr);
 
-/** Build format options from optional layout_mode / wire_knots strings (same tokens as blueprint_apply_ir). */
-FUnrealBlueprintGraphFormatOptions UnrealAiBlueprintTools_MakeFormatOptions(
-	const FString& LayoutMode,
-	const FString& WireKnots,
-	const UUnrealAiEditorSettings* Settings);
+/** Single source for formatter knobs: Editor Preferences → Plugins → Unreal AI Editor (Blueprint Formatting). */
+FUnrealBlueprintGraphFormatOptions UnrealAiBlueprintTools_MakeFormatOptionsFromSettings(
+	const UUnrealAiEditorSettings* Settings = nullptr);
 
 /** Open the Blueprint editor; optionally focus a graph by name (EventGraph, etc.). */
 void UnrealAiFocusBlueprintEditor(const FString& BlueprintObjectPath, const FString& GraphName);

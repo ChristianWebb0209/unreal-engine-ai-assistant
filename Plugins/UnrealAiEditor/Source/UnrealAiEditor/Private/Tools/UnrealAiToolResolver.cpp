@@ -1,6 +1,7 @@
 #include "Tools/UnrealAiToolResolver.h"
 
 #include "Tools/UnrealAiToolCatalog.h"
+#include "Tools/UnrealAiToolDispatch_ArgRepair.h"
 #include "Tools/UnrealAiToolJson.h"
 
 #include "Algo/LevenshteinDistance.h"
@@ -855,6 +856,11 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 	}
 
 	CanonicalizeToolArguments(Result.CanonicalToolId, Result.ResolvedArguments, Result.Audit);
+
+	if (Result.CanonicalToolId == TEXT("blueprint_graph_patch"))
+	{
+		UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Result.ResolvedArguments);
+	}
 
 	if (Result.CanonicalToolId == TEXT("settings_get") || Result.CanonicalToolId == TEXT("settings_set"))
 	{

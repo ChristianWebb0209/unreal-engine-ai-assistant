@@ -14,14 +14,17 @@
 #include "Engine/Blueprint.h"
 #include "Internationalization/Regex.h"
 #include "K2Node.h"
+#include "K2Node_CallFunction.h"
 #include "K2Node_CustomEvent.h"
 #include "K2Node_Event.h"
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_Knot.h"
 #include "K2Node_Timeline.h"
+#include "BlueprintFormat/UnrealAiBlueprintFormatterBridge.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "ScopedTransaction.h"
 #include "UObject/Class.h"
+#include "UnrealAiEditorSettings.h"
 
 namespace UnrealAiBlueprintT3d
 {
@@ -397,11 +400,26 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphImportT3d(const TSh
 	TSet<UEdGraphNode*> Imported;
 	FEdGraphUtilities::ImportNodesFromText(Graph, Resolved, Imported);
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+
+	bool bSkipPostImportFormat = false;
+	Args->TryGetBoolField(TEXT("skip_post_import_format"), bSkipPostImportFormat);
+	FUnrealBlueprintGraphFormatResult PostImportFormat;
+	if (!bSkipPostImportFormat && Imported.Num() > 0)
+	{
+		UnrealAiBlueprintFormatterBridge::EnsureFormatterModuleLoaded(nullptr);
+		const FUnrealBlueprintGraphFormatOptions FmtOpts =
+			UnrealAiBlueprintTools_MakeFormatOptionsFromSettings(GetDefault<UUnrealAiEditorSettings>());
+		PostImportFormat = UnrealAiBlueprintFormatterBridge::TryLayoutEntireGraph(Graph, true, FmtOpts);
+	}
+
 	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("blueprint_path"), Path);
 	O->SetStringField(TEXT("graph_name"), Graph->GetName());
 	O->SetNumberField(TEXT("imported_node_count"), static_cast<double>(Imported.Num()));
+	O->SetBoolField(TEXT("post_import_format_ran"), !bSkipPostImportFormat && Imported.Num() > 0);
+	O->SetNumberField(TEXT("post_import_layout_nodes_moved"), static_cast<double>(PostImportFormat.NodesMoved));
+	O->SetNumberField(TEXT("post_import_knots_inserted"), static_cast<double>(PostImportFormat.KnotsInserted));
 	const FString Md = FString::Printf(
 		TEXT("### blueprint_graph_import_t3d\n- Imported nodes: **%d**\n"),
 		Imported.Num());
@@ -576,6 +594,87 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintVerifyGraph(const TShare
 				else
 				{
 					ByGuid.Add(N->NodeGuid, N);
+				}
+			}
+		}
+		else if (Step == TEXT("dead_exec_outputs"))
+		{
+			for (UEdGraphNode* N : Graph->Nodes)
+			{
+				UK2Node_CallFunction* Call = Cast<UK2Node_CallFunction>(N);
+				if (!Call)
+				{
+					continue;
+				}
+				for (UEdGraphPin* Pin : Call->Pins)
+				{
+					if (!Pin || Pin->Direction != EGPD_Output)
+					{
+						continue;
+					}
+					if (Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+					{
+						continue;
+					}
+					if (Pin->LinkedTo.Num() == 0)
+					{
+						AddIssue(
+							TEXT("dead_exec_output"),
+							FString::Printf(
+								TEXT("CallFunction '%s' exec output '%s' has no outgoing link."),
+								*Call->GetName(),
+								*Pin->PinName.ToString()));
+					}
+				}
+			}
+		}
+		else if (Step == TEXT("pin_type_mismatch"))
+		{
+			for (UEdGraphNode* N : Graph->Nodes)
+			{
+				if (!N)
+				{
+					continue;
+				}
+				for (UEdGraphPin* Pin : N->Pins)
+				{
+					if (!Pin || Pin->LinkedTo.Num() == 0)
+					{
+						continue;
+					}
+					if (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec)
+					{
+						continue;
+					}
+					for (UEdGraphPin* Other : Pin->LinkedTo)
+					{
+						if (!Other)
+						{
+							continue;
+						}
+						if (Other->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec)
+						{
+							continue;
+						}
+						if (Pin->Direction == EGPD_Output && Other->Direction == EGPD_Input)
+						{
+							const bool bCat = Pin->PinType.PinCategory == Other->PinType.PinCategory;
+							const bool bSub = Pin->PinType.PinSubCategory == Other->PinType.PinSubCategory;
+							const bool bObj =
+								Pin->PinType.PinSubCategoryObject == Other->PinType.PinSubCategoryObject;
+							if (!bCat || !bSub || !bObj)
+							{
+								AddIssue(
+									TEXT("pin_type_mismatch"),
+									FString::Printf(
+										TEXT("Data link %s.%s -> %s.%s has mismatched pin types (category/subcategory/object)."),
+										*N->GetName(),
+										*Pin->PinName.ToString(),
+										Other->GetOwningNode() ? *Other->GetOwningNode()->GetName() : TEXT("?"),
+										*Other->PinName.ToString()));
+							}
+						}
+					}
 				}
 			}
 		}
