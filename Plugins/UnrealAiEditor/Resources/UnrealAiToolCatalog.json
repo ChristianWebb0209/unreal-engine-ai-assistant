@@ -1228,7 +1228,7 @@
     },
     {
       "tool_id": "blueprint_graph_patch",
-      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Anti-pattern: T3D placeholders __UAI_G_NNNNNN__ are invalid here — use real guid:UUID from blueprint_graph_introspect or patch_id from this batch. Primary UE 5.7 graph mutator: ops[] on blueprint_path (/Game) and graph_name. create_node (UK2Node), create_comment (boxes + member_node_refs), connect, break_link (splice/reroute), splice_on_link (break + wire through insert_patch_id), set_pin_default, add_variable, remove_node, move_node. auto_layout defaults true with layout_scope patched_nodes (only nodes created this batch); layout_scope full_graph reformats entire script graph; layout_mode / wire_knots match blueprint_apply_ir. Insert-between flow: create_node middle → break_link or splice_on_link → connect data pins as needed, all in one ops[]. Response adds layout_applied, layout_nodes_positioned, formatter_available.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Anti-pattern: T3D placeholders __UAI_G_NNNNNN__ are invalid here — use real guid:UUID from blueprint_graph_introspect or patch_id from this batch. Primary UE 5.7 graph mutator: ops[] on blueprint_path (/Game) and graph_name. create_node (UK2Node), create_comment (boxes + member_node_refs), connect, break_link (splice/reroute), splice_on_link (break + wire through insert_patch_id), set_pin_default, add_variable, remove_node, move_node. auto_layout defaults true with layout_scope patched_nodes (only nodes created this batch); layout_scope full_graph reformats entire script graph. Formatter spacing, knots, preserve-existing, comments, and reflow follow Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting. Insert-between flow: create_node middle → break_link or splice_on_link → connect data pins as needed, all in one ops[]. Response adds layout_applied, layout_nodes_positioned, formatter_available.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -1280,23 +1280,6 @@
             ],
             "description": "patched_nodes: layout only nodes created in this patch (create_node/create_comment). full_graph: LayoutEntireGraph on the script graph—use only when an explicit reformat is intended."
           },
-          "layout_mode": {
-            "type": "string",
-            "enum": [
-              "single_row",
-              "multi_strand"
-            ],
-            "description": "Optional; omit to use project default (Plugins → Unreal AI Editor)."
-          },
-          "wire_knots": {
-            "type": "string",
-            "enum": [
-              "off",
-              "light",
-              "aggressive"
-            ],
-            "description": "Optional data-wire knot pass; omit for project default."
-          },
           "ops": {
             "type": "array",
             "minItems": 1,
@@ -1321,7 +1304,7 @@
                     "k2_class": {
                       "type": "string",
                       "minLength": 1,
-                      "description": "UK2Node class object path, e.g. /Script/BlueprintGraph.K2Node_IfThenElse, K2Node_CallFunction, K2Node_CustomEvent (user-defined events: set event_name or custom_event.name), K2Node_Event (built-in/override: requires event_override), K2Node_VariableGet, K2Node_VariableSet, K2Node_DynamicCast."
+                      "description": "UK2Node class object path, e.g. /Script/BlueprintGraph.K2Node_IfThenElse. Use K2Node_ prefix in /Script paths (not UK2Node_). Bare K2Node_* is accepted and expanded to /Script/BlueprintGraph.* (K2Node_Enhanced* → /Script/InputBlueprintNodes.*). Integer math/compare has no K2Node_IntLess/IntAdd — use K2Node_CallFunction + /Script/Engine.KismetMathLibrary + Less_IntInt / Add_IntInt / etc. Do not put node_guid on create_node (schema rejects it). Do not use __UAI_G_* in connect refs (T3D-only)."
                     },
                     "event_name": {
                       "type": "string",
@@ -1985,7 +1968,7 @@
     },
     {
       "tool_id": "blueprint_apply_ir",
-      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; omitted from default main Agent). Never call with empty {}. Tier-1 IR: event_begin_play, event_tick, call_function, branch, sequence, variables, links with node_id.PinName endpoints. Optional compact Blueprint IR DSL: materialize/wire EventGraph nodes for supported op types (overlap, timers, variables, calls, etc.). Prefer blueprint_graph_patch for arbitrary UK2Node types or when IR ops/merge_policy are awkward; use this when the compact op set matches. blueprint_path must be an object_path from asset_index_fuzzy_search or asset_registry_query—never a guessed name when multiple assets matched. Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Minimal shape: blueprint_path + nodes[] + links[]. Optional layout_mode (single_row|multi_strand) and wire_knots override defaults when auto_layout runs. blueprint_path must be a Blueprint asset path (/Game/...Asset.Asset), not a level actor path. Not for UMG Designer layout.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; omitted from default main Agent). Never call with empty {}. Tier-1 IR: event_begin_play, event_tick, call_function, branch, sequence, variables, links with node_id.PinName endpoints. Optional compact Blueprint IR DSL: materialize/wire EventGraph nodes for supported op types (overlap, timers, variables, calls, etc.). Prefer blueprint_graph_patch for arbitrary UK2Node types or when IR ops/merge_policy are awkward; use this when the compact op set matches. blueprint_path must be an object_path from asset_index_fuzzy_search or asset_registry_query—never a guessed name when multiple assets matched. Use create_if_missing + parent_class for new BPs under /Game; pair with blueprint_compile. Minimal shape: blueprint_path + nodes[] + links[]. Layout knobs (spacing, knots, preserve, comments, reflow) come from Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting, not tool JSON. layout_scope ir_nodes vs full_graph still controls scope; very large materialized batches may auto-promote to full_graph layout. Returns extended layout_* metrics. blueprint_path must be a Blueprint asset path (/Game/...Asset.Asset), not a level actor path. Not for UMG Designer layout.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -2049,23 +2032,6 @@
           "auto_layout": {
             "type": "boolean",
             "description": "When true (default), run bundled graph layout after wiring when every IR node has x,y at 0. formatter_available is normally true in editor builds."
-          },
-          "layout_mode": {
-            "type": "string",
-            "enum": [
-              "single_row",
-              "multi_strand"
-            ],
-            "description": "Optional layout strategy when auto_layout runs. Omit to use Unreal AI Editor project default."
-          },
-          "wire_knots": {
-            "type": "string",
-            "enum": [
-              "off",
-              "light",
-              "aggressive"
-            ],
-            "description": "Optional data-wire reroute knot pass. Omit to use project default."
           },
           "variables": {
             "type": "array",
@@ -2219,7 +2185,7 @@
     },
     {
       "tool_id": "blueprint_format_graph",
-      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Run in-process layout on a Blueprint script graph: full graph or current selection, optional single-row vs multi-strand exec layout, data-wire knots, and comment reflow. Default format_scope is full_graph.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Run in-process layered layout on a Blueprint script graph (full graph or current selection). Spacing, wire knots, preserve-existing, comment synthesis, and comment reflow follow Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting (or the Blueprint editor toolbar AI format options). Returns structured layout_* metrics. Default format_scope is full_graph.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -2263,23 +2229,6 @@
               "selection"
             ],
             "description": "full_graph: LayoutEntireGraph. selection: layout currently selected nodes in the open graph editor."
-          },
-          "layout_mode": {
-            "type": "string",
-            "enum": [
-              "single_row",
-              "multi_strand"
-            ],
-            "description": "Optional; omit for Unreal AI Editor project default."
-          },
-          "wire_knots": {
-            "type": "string",
-            "enum": [
-              "off",
-              "light",
-              "aggressive"
-            ],
-            "description": "Optional data-wire knot pass; omit for project default."
           }
         },
         "required": [
@@ -2296,7 +2245,7 @@
     },
     {
       "tool_id": "blueprint_format_selection",
-      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Same layout pipeline as blueprint_format_graph but always targets the editor’s current graph selection (Blueprint graph tab must be open with nodes selected). Optional layout_mode and wire_knots override project defaults.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Same layout pipeline as blueprint_format_graph but always targets the editor’s current graph selection (Blueprint graph tab must be open with nodes selected). Formatter options follow Editor Preferences → Unreal AI Editor → Blueprint Formatting.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -2333,23 +2282,6 @@
           "focused": {
             "type": "boolean",
             "description": "After success, open this Blueprint and focus the graph when set."
-          },
-          "layout_mode": {
-            "type": "string",
-            "enum": [
-              "single_row",
-              "multi_strand"
-            ],
-            "description": "Optional; omit for project default."
-          },
-          "wire_knots": {
-            "type": "string",
-            "enum": [
-              "off",
-              "light",
-              "aggressive"
-            ],
-            "description": "Optional; omit for project default."
           }
         },
         "required": [
@@ -2369,7 +2301,7 @@
     },
     {
       "tool_id": "blueprint_get_graph_summary",
-      "summary": "Read-only (main Agent + builder): bounded summary of Blueprint graph(s) for an existing asset. `blueprint_path` is required and must be a concrete /Game Blueprint object_path (prefer reuse from asset_index_fuzzy_search/asset_registry_query results; do not guess names). Optional graph_name narrows to one graph; omit to summarize ubergraph + functions + macros.",
+      "summary": "Read-only (main Agent + builder): bounded summary of Blueprint graph(s) for an existing asset. `blueprint_path` is required and must be a concrete /Game Blueprint object_path (prefer reuse from asset_index_fuzzy_search/asset_registry_query results; do not guess names). Optional graph_name narrows to one graph; omit to summarize ubergraph + functions + macros. Set include_layout_analysis:true to add entry/branch counts and a data-link crossing proxy per graph.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -2402,6 +2334,10 @@
           "focused": {
             "type": "boolean",
             "description": "After success, open this Blueprint (and graph when named)."
+          },
+          "include_layout_analysis": {
+            "type": "boolean",
+            "description": "When true, each graph object includes script_node_count, entry_node_count, branch_like_node_count, data_link_crossing_proxy, etc."
           }
         },
         "required": [
@@ -6666,7 +6602,7 @@
     },
     {
       "tool_id": "blueprint_graph_import_t3d",
-      "summary": "Atomic graph mutation: resolve __UAI_G_NNNNNN__ placeholders then ImportNodesFromText on the target Kismet graph. Wiring is only restored if t3d_text includes the same pin/connection CustomProperties as a native export; otherwise nodes spawn disconnected—use blueprint_apply_ir connect ops or start from blueprint_export_graph_t3d. Writable /Game path only. Not for AnimGraph/state-machine graphs—use blueprint_graph_patch on EventGraph when preflight says CanImportNodesFromText is false.",
+      "summary": "Atomic graph mutation: resolve __UAI_G_NNNNNN__ placeholders then ImportNodesFromText on the target Kismet graph. After import, runs a full-graph layout pass by default using Editor Preferences → Unreal AI Editor → Blueprint Formatting; set skip_post_import_format:true to skip. Wiring is only restored if t3d_text includes the same pin/connection CustomProperties as a native export; otherwise nodes spawn disconnected—use blueprint_apply_ir connect ops or start from blueprint_export_graph_t3d. Writable /Game path only. Not for AnimGraph/state-machine graphs—use blueprint_graph_patch on EventGraph when preflight says CanImportNodesFromText is false.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -6702,6 +6638,10 @@
           "t3d_text": {
             "type": "string",
             "minLength": 1
+          },
+          "skip_post_import_format": {
+            "type": "boolean",
+            "description": "When true, skip automatic LayoutEntireGraph after import."
           }
         },
         "required": [
@@ -6719,7 +6659,7 @@
     },
     {
       "tool_id": "blueprint_verify_graph",
-      "summary": "Post-edit verification: optional steps (default [\"links\"]): links (null/cross-graph pin links), orphan_pins (disconnected exec inputs on impure K2 nodes), duplicate_node_guids. Unknown step strings listed in unknown_steps output.",
+      "summary": "Post-edit verification: optional steps (default [\"links\"]): links (null/cross-graph pin links), orphan_pins (disconnected exec inputs on impure K2 nodes), duplicate_node_guids, dead_exec_outputs (CallFunction nodes with unlinked exec outputs), pin_type_mismatch (coarse category/subcategory/object equality on data links). Unknown step strings listed in unknown_steps output.",
       "category": "blueprints",
       "tags": [
         "blueprint",
