@@ -13,21 +13,13 @@ enum class EUnrealAiBlueprintCommentsMode : uint8
 	Verbose UMETA(DisplayName = "Verbose")
 };
 
-/** Default graph layout when tools omit layout_mode (bundled formatter). */
+/** Column/row spacing for the bundled Blueprint graph formatter. */
 UENUM()
-enum class EUnrealAiBlueprintDefaultLayoutStrategy : uint8
+enum class EUnrealAiBlueprintFormatSpacingDensity : uint8
 {
-	SingleRow UMETA(DisplayName = "Single row"),
-	MultiStrand UMETA(DisplayName = "Multi-strand (stacked lanes)")
-};
-
-/** Default data-wire reroute (knot) insertion when tools omit wire_knots. */
-UENUM()
-enum class EUnrealAiBlueprintDefaultWireKnotMode : uint8
-{
-	Off UMETA(DisplayName = "Off"),
-	Light UMETA(DisplayName = "Light"),
-	Aggressive UMETA(DisplayName = "Aggressive")
+	Sparse UMETA(DisplayName = "Sparse"),
+	Medium UMETA(DisplayName = "Medium"),
+	Dense UMETA(DisplayName = "Dense")
 };
 
 UCLASS(Config = Editor, defaultconfig, meta = (DisplayName = "Unreal AI Editor"))
@@ -82,20 +74,25 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Plan: auto-replan on failure or wall stall"))
 	bool bPlanAutoReplan = true;
 
-	/**
-	 * Blueprint graph commentary policy for agent turns (injected into the static prompt).
-	 * Off: logic-only; Minimal: short labels where helpful; Verbose: richer sectioning guidance.
-	 */
-	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Blueprint comments"))
+	/** Off: no auto region comments; Minimal / Verbose: formatter may add section boxes (see Blueprint formatter). */
+	UPROPERTY(EditAnywhere, Config, Category = "Blueprint Formatting", meta = (DisplayName = "Comment synthesis"))
 	EUnrealAiBlueprintCommentsMode BlueprintCommentsMode = EUnrealAiBlueprintCommentsMode::Minimal;
 
-	/** Used when blueprint_apply_ir / blueprint_format_graph omit layout_mode. */
-	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Blueprint layout: default strategy"))
-	EUnrealAiBlueprintDefaultLayoutStrategy BlueprintDefaultLayoutStrategy = EUnrealAiBlueprintDefaultLayoutStrategy::MultiStrand;
+	/** Horizontal/vertical spacing between laid-out nodes. */
+	UPROPERTY(EditAnywhere, Config, Category = "Blueprint Formatting", meta = (DisplayName = "Spacing density"))
+	EUnrealAiBlueprintFormatSpacingDensity BlueprintFormatSpacingDensity = EUnrealAiBlueprintFormatSpacingDensity::Medium;
 
-	/** Used when blueprint_apply_ir / blueprint_format_graph omit wire_knots. */
-	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Blueprint layout: data wire knots"))
-	EUnrealAiBlueprintDefaultWireKnotMode BlueprintDefaultWireKnotMode = EUnrealAiBlueprintDefaultWireKnotMode::Off;
+	/** Insert reroute knots on long or crowded data wires (best-effort). */
+	UPROPERTY(EditAnywhere, Config, Category = "Blueprint Formatting", meta = (DisplayName = "Use wire knots"))
+	bool bBlueprintFormatUseWireKnots = false;
+
+	/** Skip repositioning nodes that already have non-zero graph coordinates. */
+	UPROPERTY(EditAnywhere, Config, Category = "Blueprint Formatting", meta = (DisplayName = "Preserve existing node positions"))
+	bool bBlueprintFormatPreserveExistingPositions = false;
+
+	/** After layout, resize comment boxes to fit member nodes geometrically. */
+	UPROPERTY(EditAnywhere, Config, Category = "Blueprint Formatting", meta = (DisplayName = "Reflow comment boxes to fit nodes"))
+	bool bBlueprintFormatReflowCommentsByGeometry = true;
 
 	/** Maximum supplemental planner (replan) HTTP turns per plan executor run; 0 disables replanning. */
 	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (ClampMin = "0", ClampMax = "8"))
