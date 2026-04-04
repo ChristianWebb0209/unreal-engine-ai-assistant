@@ -27,6 +27,12 @@
 #include "BlueprintFormat/UnrealAiBlueprintFormatterBridge.h"
 #include "UnrealAiEditorSettings.h"
 #include "Tools/UnrealAiBlueprintFunctionResolve.h"
+#include "Tools/UnrealAiToolProjectPathAllowlist.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Dom/JsonValue.h"
 
 namespace UnrealAiBlueprintGraphPatchPriv
 {
@@ -61,17 +67,79 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		return false;
 	}
 
-	static bool TryCreateLink(UEdGraphPin* PA, UEdGraphPin* PB, const UEdGraphSchema_K2* Schema)
+	static FString PinDebugSummary(const UEdGraphPin* P)
 	{
-		if (!PA || !PB || !Schema)
+		if (!P)
+		{
+			return TEXT("null");
+		}
+		const TCHAR* Dir = (P->Direction == EGPD_Input) ? TEXT("in") : TEXT("out");
+		return FString::Printf(TEXT("%s dir=%s cat=%s"), *P->PinName.ToString(), Dir, *P->PinType.PinCategory.ToString());
+	}
+
+	/** K2: output pin -> input pin only (no silent reversal). */
+	static bool TryCreateDirectedLink(UEdGraphPin* FromOutput, UEdGraphPin* ToInput, const UEdGraphSchema_K2* Schema, FString* OutErr)
+	{
+		if (!FromOutput || !ToInput || !Schema)
 		{
 			return false;
 		}
-		if (Schema->TryCreateConnection(PA, PB))
+		if (FromOutput->Direction != EGPD_Output || ToInput->Direction != EGPD_Input)
 		{
-			return true;
+			if (OutErr)
+			{
+				*OutErr = FString::Printf(
+					TEXT("connect requires from=output and to=input; got %s -> %s (swap from/to or fix pin names)"),
+					*PinDebugSummary(FromOutput),
+					*PinDebugSummary(ToInput));
+			}
+			return false;
 		}
-		return Schema->TryCreateConnection(PB, PA);
+		if (!Schema->TryCreateConnection(FromOutput, ToInput))
+		{
+			if (OutErr)
+			{
+				*OutErr = FString::Printf(
+					TEXT("TryCreateConnection failed: %s -> %s"),
+					*PinDebugSummary(FromOutput),
+					*PinDebugSummary(ToInput));
+			}
+			return false;
+		}
+		return true;
+	}
+
+	static void SeedInsertedNodeBetweenNeighbors(UEdGraphNode* Mid, const UEdGraphNode* Up, const UEdGraphNode* Down)
+	{
+		if (!Mid || !Up || !Down)
+		{
+			return;
+		}
+		auto Bounds = [](const UEdGraphNode* N)
+		{
+			struct FR
+			{
+				int32 MinX = 0;
+				int32 MinY = 0;
+				int32 MaxX = 0;
+				int32 MaxY = 0;
+			} R;
+			const int32 W = FMath::Max(64, N->NodeWidth > 0 ? N->NodeWidth : 240);
+			const int32 H = FMath::Max(32, N->NodeHeight > 0 ? N->NodeHeight : 120);
+			R.MinX = N->NodePosX;
+			R.MinY = N->NodePosY;
+			R.MaxX = R.MinX + W;
+			R.MaxY = R.MinY + H;
+			return R;
+		};
+		const auto A = Bounds(Up);
+		const auto B = Bounds(Down);
+		const int32 MidW = FMath::Max(64, Mid->NodeWidth > 0 ? Mid->NodeWidth : 240);
+		const int32 MidH = FMath::Max(32, Mid->NodeHeight > 0 ? Mid->NodeHeight : 120);
+		const int32 Cx = ((A.MinX + A.MaxX + B.MinX + B.MaxX) / 4) - MidW / 2;
+		const int32 Cy = ((A.MinY + A.MaxY + B.MinY + B.MaxY) / 4) - MidH / 2;
+		Mid->NodePosX = Cx;
+		Mid->NodePosY = Cy;
 	}
 
 	static FString NormalizePinToken(const FString& PinName)
@@ -271,26 +339,75 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		return nullptr;
 	}
 
-	static UEdGraphPin* FindPin(UEdGraphNode* Node, const FString& PinName)
+	static UEdGraphPin* FindPin(UEdGraphNode* Node, const FString& PinName, FString* OutError = nullptr)
 	{
 		if (!Node || PinName.IsEmpty())
 		{
 			return nullptr;
 		}
+		if (OutError)
+		{
+			OutError->Reset();
+		}
 		const FString Nrm = NormalizePinToken(PinName);
+
+		int32 PinNameMatches = 0;
+		UEdGraphPin* PinNameHit = nullptr;
 		for (UEdGraphPin* P : Node->Pins)
 		{
-			if (!P)
+			if (!P || P->bHidden)
 			{
 				continue;
 			}
 			if (P->PinName.ToString().Equals(Nrm, ESearchCase::IgnoreCase)
-				|| P->PinName.ToString().Equals(PinName, ESearchCase::IgnoreCase)
-				|| P->GetDisplayName().ToString().Equals(PinName, ESearchCase::IgnoreCase))
+				|| P->PinName.ToString().Equals(PinName, ESearchCase::IgnoreCase))
 			{
-				return P;
+				++PinNameMatches;
+				if (!PinNameHit)
+				{
+					PinNameHit = P;
+				}
 			}
 		}
+		if (PinNameMatches > 1)
+		{
+			if (OutError)
+			{
+				*OutError = FString::Printf(TEXT("ambiguous pin name \"%s\" (%d visible matches)"), *PinName, PinNameMatches);
+			}
+			return nullptr;
+		}
+		if (PinNameMatches == 1)
+		{
+			return PinNameHit;
+		}
+
+		TArray<UEdGraphPin*> DispMatches;
+		for (UEdGraphPin* P : Node->Pins)
+		{
+			if (!P || P->bHidden)
+			{
+				continue;
+			}
+			const FString Dn = P->GetDisplayName().ToString();
+			if (Dn.Equals(PinName, ESearchCase::IgnoreCase) || Dn.Equals(Nrm, ESearchCase::IgnoreCase))
+			{
+				DispMatches.Add(P);
+			}
+		}
+		if (DispMatches.Num() > 1)
+		{
+			if (OutError)
+			{
+				*OutError = FString::Printf(TEXT("ambiguous pin display \"%s\" (%d matches)"), *PinName, DispMatches.Num());
+			}
+			return nullptr;
+		}
+		if (DispMatches.Num() == 1)
+		{
+			return DispMatches[0];
+		}
+
 		auto TryAliasPinName = [&](const TCHAR* Alias) -> UEdGraphPin*
 		{
 			for (UEdGraphPin* P : Node->Pins)
@@ -323,6 +440,76 @@ namespace UnrealAiBlueprintGraphPatchPriv
 			if (UEdGraphPin* P = TryAliasPinName(TEXT("ReturnValue")))
 			{
 				return P;
+			}
+		}
+		auto IsExecCategory = [](const UEdGraphPin* P) -> bool
+		{
+			return P && P->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec;
+		};
+		if (UK2Node_VariableSet* VS = Cast<UK2Node_VariableSet>(Node))
+		{
+			if (PinName.Equals(TEXT("Set"), ESearchCase::IgnoreCase)
+				|| PinName.Equals(TEXT("Value"), ESearchCase::IgnoreCase)
+				|| PinName.Equals(TEXT("Input"), ESearchCase::IgnoreCase))
+			{
+				const FName VarFName = VS->VariableReference.GetMemberName();
+				if (VarFName != NAME_None)
+				{
+					for (UEdGraphPin* P : Node->Pins)
+					{
+						if (!P || P->bHidden || P->Direction != EGPD_Input || IsExecCategory(P))
+						{
+							continue;
+						}
+						if (P->PinName == VarFName)
+						{
+							return P;
+						}
+					}
+				}
+				for (UEdGraphPin* P : Node->Pins)
+				{
+					if (!P || P->bHidden || P->Direction != EGPD_Input || IsExecCategory(P))
+					{
+						continue;
+					}
+					if (P->PinName == UEdGraphSchema_K2::PN_Self)
+					{
+						continue;
+					}
+					return P;
+				}
+			}
+		}
+		if (UK2Node_VariableGet* VG = Cast<UK2Node_VariableGet>(Node))
+		{
+			if (PinName.Equals(TEXT("Get"), ESearchCase::IgnoreCase)
+				|| PinName.Equals(TEXT("Value"), ESearchCase::IgnoreCase)
+				|| PinName.Equals(TEXT("Output"), ESearchCase::IgnoreCase))
+			{
+				const FName VarFName = VG->VariableReference.GetMemberName();
+				if (VarFName != NAME_None)
+				{
+					for (UEdGraphPin* P : Node->Pins)
+					{
+						if (!P || P->bHidden || P->Direction != EGPD_Output || IsExecCategory(P))
+						{
+							continue;
+						}
+						if (P->PinName == VarFName)
+						{
+							return P;
+						}
+					}
+				}
+				for (UEdGraphPin* P : Node->Pins)
+				{
+					if (!P || P->bHidden || P->Direction != EGPD_Output || IsExecCategory(P))
+					{
+						continue;
+					}
+					return P;
+				}
 			}
 		}
 		return nullptr;
@@ -612,6 +799,227 @@ namespace UnrealAiBlueprintGraphPatchPriv
 			OutArr.Add(MakeShareable(new FJsonValueObject(Po.ToSharedRef())));
 		}
 	}
+
+	static FString InferBlueprintGraphPatchErrorCode(const FString& Msg)
+	{
+		if (Msg.Contains(TEXT("create_node requires k2_class")))
+		{
+			return TEXT("missing_k2_class");
+		}
+		if (Msg.Contains(TEXT("create_node requires patch_id")))
+		{
+			return TEXT("missing_patch_id");
+		}
+		if (Msg.Contains(TEXT("k2_class not a UK2Node")))
+		{
+			return TEXT("invalid_k2_class");
+		}
+		if (Msg.Contains(TEXT("T3D placeholder")))
+		{
+			return TEXT("t3d_placeholder_in_patch");
+		}
+		if (Msg.Contains(TEXT("Unknown node ref")))
+		{
+			return TEXT("unknown_node_ref");
+		}
+		if (Msg.Contains(TEXT("connect pin not found")))
+		{
+			return TEXT("pin_not_found");
+		}
+		if (Msg.Contains(TEXT("Could not connect")))
+		{
+			return TEXT("link_failed");
+		}
+		if (Msg.Contains(TEXT("connect requires from and to")))
+		{
+			return TEXT("connect_shape_invalid");
+		}
+		if (Msg.Contains(TEXT("add_variable requires name and type")))
+		{
+			return TEXT("add_variable_invalid");
+		}
+		if (Msg.Contains(TEXT("add_variable: unknown or unsupported type")))
+		{
+			return TEXT("add_variable_type");
+		}
+		if (Msg.Contains(TEXT("Invalid guid ref")))
+		{
+			return TEXT("invalid_guid_ref");
+		}
+		if (Msg.Contains(TEXT("Node guid not found")))
+		{
+			return TEXT("node_guid_not_found");
+		}
+		if (Msg.Contains(TEXT("Unknown op:")))
+		{
+			return TEXT("unknown_op");
+		}
+		if (Msg.Contains(TEXT("Each ops[] entry must be an object")))
+		{
+			return TEXT("op_not_object");
+		}
+		if (Msg.Contains(TEXT("ops[].op is required")))
+		{
+			return TEXT("missing_op_field");
+		}
+		return TEXT("patch_error");
+	}
+
+	static void AppendBlueprintGraphPatchSuggestedCorrectCall(
+		const FString& BlueprintPath,
+		const FString& GraphName,
+		const FString& FirstError,
+		const TSharedPtr<FJsonObject>& Payload)
+	{
+		if (!Payload.IsValid() || FirstError.IsEmpty())
+		{
+			return;
+		}
+		TSharedPtr<FJsonObject> Suggested = MakeShared<FJsonObject>();
+		if (FirstError.Contains(TEXT("connect pin not found")) || FirstError.Contains(TEXT("Could not connect"))
+			|| FirstError.Contains(TEXT("set_pin_default: pin")))
+		{
+			Suggested->SetStringField(TEXT("tool_id"), TEXT("blueprint_graph_list_pins"));
+			TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+			A->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+			A->SetStringField(TEXT("graph_name"), GraphName);
+			A->SetStringField(
+				TEXT("node_ref"),
+				TEXT("Replace with node_guid from blueprint_export_ir or blueprint_graph_introspect (bare UUID or guid:UUID)."));
+			Suggested->SetObjectField(TEXT("arguments"), A);
+		}
+		else
+		{
+			Suggested->SetStringField(TEXT("tool_id"), TEXT("blueprint_graph_patch"));
+			TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+			A->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+			A->SetStringField(TEXT("graph_name"), GraphName);
+			TArray<TSharedPtr<FJsonValue>> Ops;
+			if (FirstError.Contains(TEXT("create_node requires k2_class")) || FirstError.Contains(TEXT("k2_class not a UK2Node")))
+			{
+				TSharedPtr<FJsonObject> Op = MakeShared<FJsonObject>();
+				Op->SetStringField(TEXT("op"), TEXT("create_node"));
+				Op->SetStringField(TEXT("patch_id"), TEXT("n_branch"));
+				Op->SetStringField(TEXT("k2_class"), TEXT("/Script/BlueprintGraph.K2Node_IfThenElse"));
+				Op->SetNumberField(TEXT("x"), 0);
+				Op->SetNumberField(TEXT("y"), 0);
+				Ops.Add(MakeShareable(new FJsonValueObject(Op.ToSharedRef())));
+			}
+			else if (FirstError.Contains(TEXT("Unknown node ref")) || FirstError.Contains(TEXT("T3D placeholder")))
+			{
+				TSharedPtr<FJsonObject> Op = MakeShared<FJsonObject>();
+				Op->SetStringField(TEXT("op"), TEXT("connect"));
+				Op->SetStringField(TEXT("from"), TEXT("n_branch.Then"));
+				Op->SetStringField(
+					TEXT("to"),
+					TEXT("guid:PASTE-NODE-GUID-FROM-blueprint_graph_introspect.Execute"));
+				Ops.Add(MakeShareable(new FJsonValueObject(Op.ToSharedRef())));
+			}
+			else if (FirstError.Contains(TEXT("add_variable requires name and type")))
+			{
+				TSharedPtr<FJsonObject> Op = MakeShared<FJsonObject>();
+				Op->SetStringField(TEXT("op"), TEXT("add_variable"));
+				Op->SetStringField(TEXT("name"), TEXT("MyInt"));
+				Op->SetStringField(TEXT("type"), TEXT("int"));
+				Ops.Add(MakeShareable(new FJsonValueObject(Op.ToSharedRef())));
+			}
+			else
+			{
+				TSharedPtr<FJsonObject> Op = MakeShared<FJsonObject>();
+				Op->SetStringField(TEXT("op"), TEXT("create_node"));
+				Op->SetStringField(TEXT("patch_id"), TEXT("n_branch"));
+				Op->SetStringField(TEXT("k2_class"), TEXT("/Script/BlueprintGraph.K2Node_IfThenElse"));
+				Op->SetNumberField(TEXT("x"), 0);
+				Op->SetNumberField(TEXT("y"), 0);
+				Ops.Add(MakeShareable(new FJsonValueObject(Op.ToSharedRef())));
+			}
+			A->SetArrayField(TEXT("ops"), Ops);
+			Suggested->SetObjectField(TEXT("arguments"), A);
+		}
+		Payload->SetObjectField(TEXT("suggested_correct_call"), Suggested);
+	}
+
+	static constexpr int64 GMaxOpsJsonFileBytes = 96LL * 1024 * 1024;
+
+	static bool OpsJsonRelativePathHasAllowedPrefix(FString Rel)
+	{
+		Rel.TrimStartAndEndInline();
+		Rel.ReplaceInline(TEXT("\\"), TEXT("/"));
+		while (Rel.StartsWith(TEXT("/")))
+		{
+			Rel = Rel.Mid(1);
+		}
+		const FString L = Rel.ToLower();
+		return L.StartsWith(TEXT("saved/")) || L.StartsWith(TEXT("harness_step/"));
+	}
+
+	static bool TryLoadOpsArrayFromProjectFile(const FString& RelPathIn, TArray<TSharedPtr<FJsonValue>>& OutOps, FString& OutErr)
+	{
+		FString Rel = RelPathIn;
+		Rel.TrimStartAndEndInline();
+		Rel.ReplaceInline(TEXT("\\"), TEXT("/"));
+		while (Rel.StartsWith(TEXT("/")))
+		{
+			Rel = Rel.Mid(1);
+		}
+		if (Rel.IsEmpty())
+		{
+			OutErr = TEXT("ops_json_path is empty");
+			return false;
+		}
+		if (!OpsJsonRelativePathHasAllowedPrefix(Rel))
+		{
+			OutErr = TEXT("ops_json_path must be project-relative under Saved/ or harness_step/");
+			return false;
+		}
+		FString Abs;
+		FString PathErr;
+		if (!UnrealAiResolveProjectFilePath(Rel, Abs, PathErr))
+		{
+			OutErr = PathErr;
+			return false;
+		}
+		const int64 Sz = IFileManager::Get().FileSize(*Abs);
+		if (Sz < 0)
+		{
+			OutErr = TEXT("ops_json_path: could not read file size");
+			return false;
+		}
+		if (Sz > GMaxOpsJsonFileBytes)
+		{
+			OutErr = FString::Printf(
+				TEXT("ops JSON file too large (%lld bytes; max %lld) — split the patch or raise limits in source"),
+				Sz,
+				GMaxOpsJsonFileBytes);
+			return false;
+		}
+		FString JsonStr;
+		if (!FFileHelper::LoadFileToString(JsonStr, *Abs))
+		{
+			OutErr = TEXT("Failed to read ops JSON file");
+			return false;
+		}
+		TSharedPtr<FJsonValue> Root;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonStr);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			OutErr = TEXT("Invalid JSON in ops file");
+			return false;
+		}
+		if (Root->Type != EJson::Array)
+		{
+			OutErr = TEXT("ops JSON file must be a JSON array at the root");
+			return false;
+		}
+		const TArray<TSharedPtr<FJsonValue>>& Arr = Root->AsArray();
+		if (Arr.Num() == 0)
+		{
+			OutErr = TEXT("ops JSON array must be non-empty");
+			return false;
+		}
+		OutOps = Arr;
+		return true;
+	}
 } // namespace UnrealAiBlueprintGraphPatchPriv
 
 FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TSharedPtr<FJsonObject>& Args)
@@ -634,10 +1042,37 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 	{
 		GraphName = TEXT("EventGraph");
 	}
+
+	FString OpsJsonPath;
+	Args->TryGetStringField(TEXT("ops_json_path"), OpsJsonPath);
+	OpsJsonPath.TrimStartAndEndInline();
+
 	const TArray<TSharedPtr<FJsonValue>>* OpsArr = nullptr;
-	if (!Args->TryGetArrayField(TEXT("ops"), OpsArr) || !OpsArr || OpsArr->Num() == 0)
+	Args->TryGetArrayField(TEXT("ops"), OpsArr);
+	const int32 InlineOpsNum = OpsArr ? OpsArr->Num() : 0;
+
+	if (!OpsJsonPath.IsEmpty())
 	{
-		return UnrealAiToolJson::Error(TEXT("ops array is required with at least one operation"));
+		if (InlineOpsNum > 0)
+		{
+			return UnrealAiToolJson::Error(TEXT("Pass either ops[] or ops_json_path, not both"));
+		}
+		TArray<TSharedPtr<FJsonValue>> Loaded;
+		FString LoadErr;
+		if (!TryLoadOpsArrayFromProjectFile(OpsJsonPath, Loaded, LoadErr))
+		{
+			return UnrealAiToolJson::Error(LoadErr);
+		}
+		Args->SetArrayField(TEXT("ops"), Loaded);
+		UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Args);
+		OpsArr = nullptr;
+		Args->TryGetArrayField(TEXT("ops"), OpsArr);
+	}
+
+	if (!OpsArr || OpsArr->Num() == 0)
+	{
+		return UnrealAiToolJson::Error(
+			TEXT("Provide non-empty ops[] or ops_json_path (UTF-8 JSON array of op objects under Saved/ or harness_step/)"));
 	}
 
 	UBlueprint* BP = UnrealAiBlueprintTools_LoadBlueprintGame(Path);
@@ -654,7 +1089,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 	bool bCompile = true;
 	Args->TryGetBoolField(TEXT("compile"), bCompile);
 
-	const FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnBpGraphPatch", "Unreal AI: blueprint_graph_patch"));
+	FScopedTransaction Txn(NSLOCTEXT("UnrealAiEditor", "TxnBpGraphPatch", "Unreal AI: blueprint_graph_patch"));
 	BP->Modify();
 	Graph->Modify();
 
@@ -687,7 +1122,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 		if (!OpVal->TryGetObject(OpObj) || !OpObj || !(*OpObj).IsValid())
 		{
 			Errors.Add(TEXT("Each ops[] entry must be an object"));
-			continue;
+			break;
 		}
 		const TSharedPtr<FJsonObject>& Op = *OpObj;
 		FString OpName;
@@ -696,7 +1131,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 		if (OpName.IsEmpty())
 		{
 			Errors.Add(TEXT("ops[].op is required"));
-			continue;
+			break;
 		}
 		if (OpName.Equals(TEXT("create_node"), ESearchCase::IgnoreCase))
 		{
@@ -741,7 +1176,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			{
 				Errors.Add(TEXT(
 					"add_variable requires name and type — type may be a string (e.g. \"int\") or object { \"category\":\"int\", \"subcategory\":\"int32\" }"));
-				continue;
+				break;
 			}
 			FEdGraphPinType Pt;
 			if (!UnrealAiBlueprintTools_TryParsePinTypeFromString(Tstr, Pt))
@@ -749,7 +1184,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 				Errors.Add(FString::Printf(
 					TEXT("add_variable: unknown or unsupported type \"%s\" (try int, float, bool, name, text, or /Script/... class path)"),
 					*Tstr));
-				continue;
+				break;
 			}
 			FBlueprintEditorUtils::AddMemberVariable(BP, FName(*Vn), Pt);
 			TSharedPtr<FJsonObject> Rec = MakeShared<FJsonObject>();
@@ -774,31 +1209,42 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (!SplitNodePinRef(FromS, NFrom, PFrom) || !SplitNodePinRef(ToS, NTo, PTo))
 			{
 				Errors.Add(TEXT("connect requires from and to as NodeRef.Pin (e.g. n1.Then -> n2.execute)"));
-				continue;
+				break;
 			}
 			UEdGraphNode* NA = ResolveNodePart(NFrom, PatchMap, Graph, Err);
 			if (!NA)
 			{
 				Errors.Add(FString::Printf(TEXT("connect from: %s"), *Err));
-				continue;
+				break;
 			}
 			UEdGraphNode* NB = ResolveNodePart(NTo, PatchMap, Graph, Err);
 			if (!NB)
 			{
 				Errors.Add(FString::Printf(TEXT("connect to: %s"), *Err));
-				continue;
+				break;
 			}
-			UEdGraphPin* PA = FindPin(NA, PFrom);
-			UEdGraphPin* PB = FindPin(NB, PTo);
-			if (!PA || !PB)
+			FString PErrA, PErrB;
+			UEdGraphPin* PA = FindPin(NA, PFrom, &PErrA);
+			UEdGraphPin* PB = FindPin(NB, PTo, &PErrB);
+			if (!PA)
 			{
-				Errors.Add(FString::Printf(TEXT("connect pin not found (%s or %s)"), *FromS, *ToS));
-				continue;
+				Errors.Add(!PErrA.IsEmpty()
+					? FString::Printf(TEXT("connect from pin %s: %s"), *FromS, *PErrA)
+					: FString::Printf(TEXT("connect pin not found (%s)"), *FromS));
+				break;
 			}
-			if (!TryCreateLink(PA, PB, Schema))
+			if (!PB)
 			{
-				Errors.Add(FString::Printf(TEXT("Could not connect %s -> %s (type/direction)"), *FromS, *ToS));
-				continue;
+				Errors.Add(!PErrB.IsEmpty()
+					? FString::Printf(TEXT("connect to pin %s: %s"), *ToS, *PErrB)
+					: FString::Printf(TEXT("connect pin not found (%s)"), *ToS));
+				break;
+			}
+			FString LinkErr;
+			if (!TryCreateDirectedLink(PA, PB, Schema, &LinkErr))
+			{
+				Errors.Add(FString::Printf(TEXT("connect %s -> %s: %s"), *FromS, *ToS, *LinkErr));
+				break;
 			}
 			TSharedPtr<FJsonObject> Rec = MakeShared<FJsonObject>();
 			Rec->SetStringField(TEXT("op"), TEXT("connect"));
@@ -855,24 +1301,27 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (NPart.IsEmpty() || PName.IsEmpty())
 			{
 				Errors.Add(TEXT("set_pin_default requires ref or node_ref as \"patchId.pin\" or \"guid:....pin\" OR patch_id+pin / node_guid+pin plus value"));
-				continue;
+				break;
 			}
 			if (Val.IsEmpty())
 			{
 				Errors.Add(TEXT("set_pin_default requires value"));
-				continue;
+				break;
 			}
 			UEdGraphNode* N = ResolveNodePart(NPart, PatchMap, Graph, Err);
 			if (!N)
 			{
 				Errors.Add(Err);
-				continue;
+				break;
 			}
-			UEdGraphPin* P = FindPin(N, PName);
+			FString SpErr;
+			UEdGraphPin* P = FindPin(N, PName, &SpErr);
 			if (!P)
 			{
-				Errors.Add(FString::Printf(TEXT("set_pin_default: pin %s not on node"), *PName));
-				continue;
+				Errors.Add(!SpErr.IsEmpty()
+					? FString::Printf(TEXT("set_pin_default: %s"), *SpErr)
+					: FString::Printf(TEXT("set_pin_default: pin %s not on node"), *PName));
+				break;
 			}
 			P->DefaultValue = Val;
 			TSharedPtr<FJsonObject> Rec = MakeShared<FJsonObject>();
@@ -898,31 +1347,43 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (!SplitNodePinRef(FromS, NFrom, PFrom) || !SplitNodePinRef(ToS, NTo, PTo))
 			{
 				Errors.Add(TEXT("break_link requires from and to as NodeRef.Pin"));
-				continue;
+				break;
 			}
 			UEdGraphNode* NA = ResolveNodePart(NFrom, PatchMap, Graph, Err);
 			if (!NA)
 			{
 				Errors.Add(FString::Printf(TEXT("break_link from: %s"), *Err));
-				continue;
+				break;
 			}
 			UEdGraphNode* NB = ResolveNodePart(NTo, PatchMap, Graph, Err);
 			if (!NB)
 			{
 				Errors.Add(FString::Printf(TEXT("break_link to: %s"), *Err));
-				continue;
+				break;
 			}
-			UEdGraphPin* PA = FindPin(NA, PFrom);
-			UEdGraphPin* PB = FindPin(NB, PTo);
+			FString BrA, BrB;
+			UEdGraphPin* PA = FindPin(NA, PFrom, &BrA);
+			UEdGraphPin* PB = FindPin(NB, PTo, &BrB);
 			if (!PA || !PB)
 			{
-				Errors.Add(TEXT("break_link: pin not found"));
-				continue;
+				if (!PA && !BrA.IsEmpty())
+				{
+					Errors.Add(FString::Printf(TEXT("break_link from pin: %s"), *BrA));
+				}
+				else if (!PB && !BrB.IsEmpty())
+				{
+					Errors.Add(FString::Printf(TEXT("break_link to pin: %s"), *BrB));
+				}
+				else
+				{
+					Errors.Add(TEXT("break_link: pin not found"));
+				}
+				break;
 			}
 			if (!TryBreakPinLink(PA, PB, Schema))
 			{
 				Errors.Add(TEXT("break_link: no link between those pins"));
-				continue;
+				break;
 			}
 			TSharedPtr<FJsonObject> Rec = MakeShared<FJsonObject>();
 			Rec->SetStringField(TEXT("op"), TEXT("break_link"));
@@ -958,44 +1419,80 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (!SplitNodePinRef(FromS, NFrom, PFrom) || !SplitNodePinRef(ToS, NTo, PTo) || InsPid.IsEmpty())
 			{
 				Errors.Add(TEXT("splice_on_link requires from, to (NodeRef.Pin), and insert_patch_id"));
-				continue;
+				break;
 			}
 			UEdGraphNode* UpNode = ResolveNodePart(NFrom, PatchMap, Graph, Err);
 			if (!UpNode)
 			{
 				Errors.Add(FString::Printf(TEXT("splice_on_link from: %s"), *Err));
-				continue;
+				break;
 			}
 			UEdGraphNode* DownNode = ResolveNodePart(NTo, PatchMap, Graph, Err);
 			if (!DownNode)
 			{
 				Errors.Add(FString::Printf(TEXT("splice_on_link to: %s"), *Err));
-				continue;
+				break;
 			}
 			UEdGraphNode* const* MidPtr = PatchMap.Find(InsPid);
 			if (!MidPtr || !*MidPtr)
 			{
 				Errors.Add(TEXT("splice_on_link: insert_patch_id not found in this patch batch"));
-				continue;
+				break;
 			}
-			UEdGraphPin* UpPin = FindPin(UpNode, PFrom);
-			UEdGraphPin* DownPin = FindPin(DownNode, PTo);
-			UEdGraphPin* MidIn = FindPin(*MidPtr, InPinStr);
-			UEdGraphPin* MidOut = FindPin(*MidPtr, OutPinStr);
+			FString SErrU, SErrD, SErrMi, SErrMo;
+			UEdGraphPin* UpPin = FindPin(UpNode, PFrom, &SErrU);
+			UEdGraphPin* DownPin = FindPin(DownNode, PTo, &SErrD);
+			UEdGraphPin* MidIn = FindPin(*MidPtr, InPinStr, &SErrMi);
+			UEdGraphPin* MidOut = FindPin(*MidPtr, OutPinStr, &SErrMo);
 			if (!UpPin || !DownPin || !MidIn || !MidOut)
 			{
-				Errors.Add(TEXT("splice_on_link: pin resolution failed (check insert_input_pin / insert_output_pin)"));
-				continue;
+				if (!UpPin && !SErrU.IsEmpty())
+				{
+					Errors.Add(FString::Printf(TEXT("splice_on_link from pin: %s"), *SErrU));
+				}
+				else if (!DownPin && !SErrD.IsEmpty())
+				{
+					Errors.Add(FString::Printf(TEXT("splice_on_link to pin: %s"), *SErrD));
+				}
+				else if (!MidIn && !SErrMi.IsEmpty())
+				{
+					Errors.Add(FString::Printf(TEXT("splice_on_link insert_input_pin: %s"), *SErrMi));
+				}
+				else if (!MidOut && !SErrMo.IsEmpty())
+				{
+					Errors.Add(FString::Printf(TEXT("splice_on_link insert_output_pin: %s"), *SErrMo));
+				}
+				else
+				{
+					Errors.Add(TEXT("splice_on_link: pin resolution failed (check insert_input_pin / insert_output_pin)"));
+				}
+				break;
 			}
 			if (!TryBreakPinLink(UpPin, DownPin, Schema))
 			{
 				Errors.Add(TEXT("splice_on_link: no direct link between from and to pins"));
-				continue;
+				break;
 			}
-			if (!TryCreateLink(UpPin, MidIn, Schema) || !TryCreateLink(MidOut, DownPin, Schema))
+			SeedInsertedNodeBetweenNeighbors(*MidPtr, UpNode, DownNode);
+			for (int32 Li = 0; Li < LayoutNodes.Num() && Li < LayoutHints.Num(); ++Li)
 			{
-				Errors.Add(TEXT("splice_on_link: reconnect failed after break (try manual connect ops)"));
-				continue;
+				if (LayoutNodes[Li] == *MidPtr)
+				{
+					LayoutHints[Li].X = (*MidPtr)->NodePosX;
+					LayoutHints[Li].Y = (*MidPtr)->NodePosY;
+					break;
+				}
+			}
+			FString ReErr;
+			if (!TryCreateDirectedLink(UpPin, MidIn, Schema, &ReErr))
+			{
+				Errors.Add(FString::Printf(TEXT("splice_on_link reconnect: %s"), *ReErr));
+				break;
+			}
+			if (!TryCreateDirectedLink(MidOut, DownPin, Schema, &ReErr))
+			{
+				Errors.Add(FString::Printf(TEXT("splice_on_link reconnect: %s"), *ReErr));
+				break;
 			}
 			TSharedPtr<FJsonObject> Rec = MakeShared<FJsonObject>();
 			Rec->SetStringField(TEXT("op"), TEXT("splice_on_link"));
@@ -1009,7 +1506,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (Pid.IsEmpty())
 			{
 				Errors.Add(TEXT("create_comment requires patch_id"));
-				continue;
+				break;
 			}
 			double CXD = 0, CYD = 0;
 			Op->TryGetNumberField(TEXT("x"), CXD);
@@ -1099,7 +1596,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (!N)
 			{
 				Errors.Add(FString::Printf(TEXT("remove_node: %s"), *Err));
-				continue;
+				break;
 			}
 			FBlueprintEditorUtils::RemoveNode(BP, N, true);
 			if (!Pid.IsEmpty())
@@ -1152,7 +1649,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			if (!N)
 			{
 				Errors.Add(FString::Printf(TEXT("move_node: %s"), *Err));
-				continue;
+				break;
 			}
 			double XD = 0, YD = 0;
 			Op->TryGetNumberField(TEXT("x"), XD);
@@ -1168,20 +1665,31 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 		{
 			Errors.Add(FString::Printf(TEXT("Unknown op: %s"), *OpName));
 		}
+		if (Errors.Num() > 0)
+		{
+			break;
+		}
 	}
 
 	if (Errors.Num() > 0)
 	{
+		Txn.Cancel();
 		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 		O->SetBoolField(TEXT("ok"), false);
 		O->SetStringField(TEXT("status"), TEXT("patch_errors"));
+		O->SetStringField(TEXT("note"), TEXT("Patch was not applied (transaction cancelled). applied_partial is always empty on failure."));
 		TArray<TSharedPtr<FJsonValue>> EArr;
+		TArray<TSharedPtr<FJsonValue>> CodeArr;
 		for (const FString& E : Errors)
 		{
 			EArr.Add(MakeShareable(new FJsonValueString(E)));
+			CodeArr.Add(MakeShareable(
+				new FJsonValueString(InferBlueprintGraphPatchErrorCode(E))));
 		}
 		O->SetArrayField(TEXT("errors"), EArr);
-		O->SetArrayField(TEXT("applied_partial"), Applied);
+		O->SetArrayField(TEXT("error_codes"), CodeArr);
+		O->SetArrayField(TEXT("applied_partial"), TArray<TSharedPtr<FJsonValue>>());
+		AppendBlueprintGraphPatchSuggestedCorrectCall(Path, GraphName, Errors[0], O);
 		FUnrealAiToolInvocationResult R;
 		R.bOk = false;
 		R.ErrorMessage = UnrealAiToolJson::SerializeObject(O);
