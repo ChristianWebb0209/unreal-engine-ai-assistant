@@ -29,6 +29,13 @@ namespace UnrealAiToolDispatchArgRepair
 	 */
 	void RepairBlueprintAssetPathArgs(const TSharedPtr<FJsonObject>& Args);
 
+	/**
+	 * Pre-schema fixes for blueprint_graph_patch: normalize k2_class strings (UK2Node_*, bare K2Node_*),
+	 * strip LLM-only keys that break additionalProperties (e.g. node_guid on create_node),
+	 * copy class_name -> k2_class when k2_class is empty.
+	 */
+	void RepairBlueprintGraphPatchToolArgs(const TSharedPtr<FJsonObject>& Args);
+
 	static bool TryGetStringFieldCanonical(
 		const TSharedPtr<FJsonObject>& Args,
 		const TCHAR* CanonicalKey,

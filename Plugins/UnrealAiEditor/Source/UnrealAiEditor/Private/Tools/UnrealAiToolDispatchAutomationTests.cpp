@@ -4,6 +4,7 @@
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Tools/UnrealAiToolDispatch.h"
+#include "Tools/UnrealAiToolDispatch_ArgRepair.h"
 #include "Tools/UnrealAiToolProjectPathAllowlist.h"
 #include "Tools/UnrealAiAssetFactoryResolver.h"
 #include "Tools/UnrealAiToolCatalog.h"
@@ -250,6 +251,54 @@ bool FUnrealAiBlueprintPinTypeParseTest::RunTest(const FString& Parameters)
 
 	FEdGraphPinType Legacy = UnrealAiBlueprintTools_ParsePinTypeFromString(TEXT("not_a_real_type_xyz_q"));
 	TestTrue(TEXT("legacy boolean fallback"), Legacy.PinCategory == UEdGraphSchema_K2::PC_Boolean);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiBlueprintGraphPatchArgRepairTest,
+	"UnrealAiEditor.Tools.BlueprintGraphPatchArgRepair",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiBlueprintGraphPatchArgRepairTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	TSharedPtr<FJsonObject> Op = MakeShared<FJsonObject>();
+	Op->SetStringField(TEXT("op"), TEXT("create_node"));
+	Op->SetStringField(TEXT("patch_id"), TEXT("n1"));
+	Op->SetStringField(TEXT("k2_class"), TEXT("UK2Node_IfThenElse"));
+	Op->SetStringField(TEXT("node_guid"), TEXT("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+	TArray<TSharedPtr<FJsonValue>> Ops;
+	Ops.Add(MakeShared<FJsonValueObject>(Op.ToSharedRef()));
+	TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+	Args->SetArrayField(TEXT("ops"), Ops);
+	UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Args);
+	const TArray<TSharedPtr<FJsonValue>>* OutOps = nullptr;
+	TestTrue(TEXT("ops array"), Args->TryGetArrayField(TEXT("ops"), OutOps) && OutOps && OutOps->Num() == 1);
+	const TSharedPtr<FJsonObject>* Fixed = nullptr;
+	TestTrue(TEXT("first op object"), (*OutOps)[0]->TryGetObject(Fixed) && Fixed && (*Fixed).IsValid());
+	FString K2;
+	TestTrue(TEXT("k2 normalized"), (*Fixed)->TryGetStringField(TEXT("k2_class"), K2));
+	TestEqual(TEXT("k2_class path"), K2, FString(TEXT("/Script/BlueprintGraph.K2Node_IfThenElse")));
+	TestFalse(TEXT("node_guid stripped"), (*Fixed)->HasField(TEXT("node_guid")));
+
+	TSharedPtr<FJsonObject> Op2 = MakeShared<FJsonObject>();
+	Op2->SetStringField(TEXT("op"), TEXT("create_node"));
+	Op2->SetStringField(TEXT("patch_id"), TEXT("e1"));
+	Op2->SetStringField(TEXT("class_name"), TEXT("K2Node_CallFunction"));
+	TArray<TSharedPtr<FJsonValue>> Ops2;
+	Ops2.Add(MakeShared<FJsonValueObject>(Op2.ToSharedRef()));
+	TSharedPtr<FJsonObject> Args2 = MakeShared<FJsonObject>();
+	Args2->SetArrayField(TEXT("ops"), Ops2);
+	UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Args2);
+	const TArray<TSharedPtr<FJsonValue>>* OutOps2 = nullptr;
+	TestTrue(TEXT("ops2"), Args2->TryGetArrayField(TEXT("ops"), OutOps2) && OutOps2 && OutOps2->Num() == 1);
+	const TSharedPtr<FJsonObject>* Fixed2 = nullptr;
+	TestTrue(TEXT("op2 object"), (*OutOps2)[0]->TryGetObject(Fixed2) && Fixed2 && (*Fixed2).IsValid());
+	FString K2b;
+	TestTrue(TEXT("class_name -> k2"), (*Fixed2)->TryGetStringField(TEXT("k2_class"), K2b));
+	TestEqual(TEXT("bare K2Node expanded"), K2b, FString(TEXT("/Script/BlueprintGraph.K2Node_CallFunction")));
+	TestFalse(TEXT("class_name removed"), (*Fixed2)->HasField(TEXT("class_name")));
 
 	return true;
 }
