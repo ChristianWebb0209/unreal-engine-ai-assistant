@@ -1,6 +1,7 @@
 #include "Harness/FUnrealAiAgentHarness.h"
 
 #include "Async/Async.h"
+#include "Containers/Ticker.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Templates/SharedPointer.h"
 #include "Tools/UnrealAiToolCatalog.h"
@@ -20,6 +21,7 @@
 #include "Tools/UnrealAiToolUsageEventLogger.h"
 #include "Tools/UnrealAiToolUsagePrior.h"
 #include "Tools/UnrealAiBlueprintToolGate.h"
+#include "GraphBuilder/UnrealAiGraphEditDomain.h"
 #include "Backend/FUnrealAiUsageTracker.h"
 #include "Backend/IUnrealAiPersistence.h"
 #include "Memory/FUnrealAiMemoryCompactor.h"
@@ -974,6 +976,7 @@ namespace UnrealAiAgentHarnessPriv
 		/** Headed scenario runner only: editor_state_snapshot_read budget; CompleteToolPath fails if exceeded. */
 		bool bPendingFailHarnessSnapshotReadSpam = false;
 		bool bHeadedScenarioStrictToolBudgets = false;
+		bool bHeadedScenarioSyncRun = false;
 		int32 EditorSnapshotReadInvokeCount = 0;
 		int32 ReplanCount = 0;
 		int32 QueueStepsPending = 0;
@@ -989,6 +992,8 @@ namespace UnrealAiAgentHarnessPriv
 		bool bActionBlockerOutcomeCounted = false;
 		bool bMutationIntentCounted = false;
 		bool bToolExecutionInProgress = false;
+		/** When true, a ticker is draining streamed tools before CompleteToolPath may call DispatchLlm. */
+		bool bCompleteToolPathReschedulePending = false;
 		bool bAssistantToolCallMessageRecorded = false;
 		bool bFinishReceived = false;
 		FString FinishReason;
@@ -1076,6 +1081,7 @@ namespace UnrealAiAgentHarnessPriv
 			Display,
 			TEXT("UnrealAi harness: runner_terminal_set result=failed msg=%s"),
 			Msg.IsEmpty() ? TEXT("<none>") : *Msg);
+		bCompleteToolPathReschedulePending = false;
 		FUnrealAiEditorModalMonitor::NotifyAgentTurnEndedForSink(Sink);
 		if (Sink.IsValid())
 		{
@@ -1092,6 +1098,7 @@ namespace UnrealAiAgentHarnessPriv
 			return;
 		}
 		UE_LOG(LogTemp, Display, TEXT("UnrealAi harness: runner_terminal_set result=success"));
+		bCompleteToolPathReschedulePending = false;
 		if (Conv.IsValid())
 		{
 			Conv->SaveNow();
@@ -1685,7 +1692,15 @@ namespace UnrealAiAgentHarnessPriv
 
 	int32 FAgentTurnRunner::GetMaxStreamNoFinishRetriesPerRound() const
 	{
-		return IsPlanNodeAgentThread() ? FMath::Max(0, UnrealAiWaitTime::PlanNodeStreamNoFinishMaxRetries) : 0;
+		if (IsPlanNodeAgentThread())
+		{
+			return FMath::Max(0, UnrealAiWaitTime::PlanNodeStreamNoFinishMaxRetries);
+		}
+		if (bHeadedScenarioSyncRun)
+		{
+			return FMath::Clamp(UnrealAiWaitTime::HeadedAgentStreamNoFinishMaxRetries, 0, 1);
+		}
+		return 0;
 	}
 
 	uint32 FAgentTurnRunner::GetEffectiveStreamNoFinishGraceMs() const
@@ -1693,6 +1708,10 @@ namespace UnrealAiAgentHarnessPriv
 		if (IsPlanNodeAgentThread() && UnrealAiWaitTime::PlanNodeStreamNoFinishGraceMs > 0)
 		{
 			return UnrealAiWaitTime::PlanNodeStreamNoFinishGraceMs;
+		}
+		if (bHeadedScenarioSyncRun && UnrealAiWaitTime::HeadedAgentStreamNoFinishGraceMs > 0)
+		{
+			return UnrealAiWaitTime::HeadedAgentStreamNoFinishGraceMs;
 		}
 		return UnrealAiWaitTime::HarnessStreamNoFinishGraceMs;
 	}
@@ -1712,17 +1731,20 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
-		double AsstIdle = -1.0;
+		double StreamIdle = -1.0;
 		double HttpIdle = -1.0;
 		double LlmSubmitIdle = -1.0;
-		UnrealAiHarnessProgressTelemetry::GetStreamIdleSeconds(AsstIdle, HttpIdle, LlmSubmitIdle);
+		double UnusedRawAssistantIdle = -1.0;
+		UnrealAiHarnessProgressTelemetry::GetAssistantOrThinkingIdleSeconds(StreamIdle);
+		UnrealAiHarnessProgressTelemetry::GetStreamIdleSeconds(UnusedRawAssistantIdle, HttpIdle, LlmSubmitIdle);
+		(void)UnusedRawAssistantIdle;
 		(void)LlmSubmitIdle;
 		const double ThreshSec = static_cast<double>(GraceMs) / 1000.0;
-		if (AsstIdle < 0.0 || HttpIdle < 0.0)
+		if (StreamIdle < 0.0 || HttpIdle < 0.0)
 		{
 			return;
 		}
-		if (AsstIdle < ThreshSec || HttpIdle < ThreshSec)
+		if (StreamIdle < ThreshSec || HttpIdle < ThreshSec)
 		{
 			return;
 		}
@@ -1837,8 +1859,9 @@ namespace UnrealAiAgentHarnessPriv
 			{
 				PendingToolCalls.Reset();
 			}
-			EnqueueNewlyCompleteCalls();
-			StartOrContinueStreamedToolExecution();
+			// Tool execution + CompleteToolPath deferral live in CompleteToolPath / CompleteAssistantOnly — do not
+			// call StartOrContinueStreamedToolExecution here first, or we can run tools then enter CompleteToolPath
+			// while bToolExecutionInProgress is still true (ticker yield) and abort the stream via DispatchLlm.
 			if (CheckIncompleteToolCallTimeout(true))
 			{
 				return;
@@ -1887,6 +1910,27 @@ namespace UnrealAiAgentHarnessPriv
 			if (bTerminal.load(std::memory_order_relaxed))
 			{
 				break;
+			}
+			// Headed editor runs: yield between tools so Slate/engine can tick. Without this,
+			// chained streamed tool calls (Blueprint Builder graph ops) monopolize one game-thread
+			// slice and the whole editor looks frozen. Scenario sync runs keep the old tight loop.
+			if (!bHeadedScenarioSyncRun && CompletedToolCallQueue.Num() > 0)
+			{
+				const TWeakPtr<FAgentTurnRunner> WeakSelf = AsShared();
+				FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+					[WeakSelf](float /*DeltaTime*/) -> bool
+					{
+						const TSharedPtr<FAgentTurnRunner> Self = WeakSelf.Pin();
+						if (!Self.IsValid())
+						{
+							return false;
+						}
+						// Release the guard before re-entering; it stayed true while we yielded.
+						Self->bToolExecutionInProgress = false;
+						Self->StartOrContinueStreamedToolExecution();
+						return false;
+					}));
+				return;
 			}
 		}
 		bToolExecutionInProgress = false;
@@ -2084,7 +2128,8 @@ namespace UnrealAiAgentHarnessPriv
 		const bool bRepeatSignature = Request.Mode == EUnrealAiAgentMode::Agent && InvokeName != TEXT("agent_emit_todo_plan")
 			&& (SigCount >= GHarnessRepeatedFailureStopCount || NameCount >= 6);
 		EmitEnforcementEvent(TEXT("stream_tool_exec_start"), FString::Printf(TEXT("id=%s name=%s"), *Tc.Id, *InvokeName));
-		if (Request.Mode == EUnrealAiAgentMode::Agent && !UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Request, InvokeName))
+		if (Request.Mode == EUnrealAiAgentMode::Agent
+			&& !UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Request, InvokeName, Catalog))
 		{
 			const FString BlockMsg = FString::Printf(
 				TEXT("[Harness][reason=blueprint_tool_withheld] Blocked: tool \"%s\" is reserved for automated Blueprint Builder sub-turns. ")
@@ -2115,6 +2160,41 @@ namespace UnrealAiAgentHarnessPriv
 			LastConsecutiveIdenticalOkSignature.Reset();
 			ConsecutiveIdenticalOkCount = 0;
 			return;
+		}
+		if (Request.bBlueprintBuilderTurn)
+		{
+			FUnrealAiToolInvocationResult GraphDomainBlock;
+			if (UnrealAiGraphEditDomainPreflight_ShouldBlockInvocation(Request, InvokeName, InvokeArgs, GraphDomainBlock))
+			{
+				const FString BlockMsg = GraphDomainBlock.ErrorMessage.IsEmpty()
+					? FString(TEXT("[Harness][reason=graph_domain_preflight] Blocked: asset does not match builder handoff."))
+					: GraphDomainBlock.ErrorMessage;
+				if (Sink.IsValid())
+				{
+					Sink->OnToolCallFinished(InvokeName, Tc.Id, false, UnrealAiTruncateForUi(BlockMsg), nullptr);
+				}
+				if (Conv.IsValid())
+				{
+					FUnrealAiConversationMessage Tm;
+					Tm.Role = TEXT("tool");
+					Tm.ToolCallId = Tc.Id;
+					Tm.Content = BlockMsg;
+					Conv->GetMessagesMutable().Add(Tm);
+				}
+				++CurrentRoundToolFailCount;
+				CurrentRoundExecutedToolNames.Add(InvokeName);
+				if (!Tc.Id.IsEmpty())
+				{
+					ExecutedToolCallIds.Add(Tc.Id);
+				}
+				EmitEnforcementEvent(
+					TEXT("graph_domain_preflight_block"),
+					FString::Printf(TEXT("tool=%s"), *InvokeName));
+				UnrealAiToolUsagePrior::NoteSessionOutcome(InvokeName, false);
+				LastConsecutiveIdenticalOkSignature.Reset();
+				ConsecutiveIdenticalOkCount = 0;
+				return;
+			}
 		}
 		const FUnrealAiToolInvocationResult Inv = Tools->InvokeTool(InvokeName, InvokeArgs, Tc.Id);
 		CurrentRoundExecutedToolNames.Add(InvokeName);
@@ -2297,6 +2377,42 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
+		// StartOrContinueStreamedToolExecution yields between tools via FTSTicker when not in headed sync runs.
+		// If we proceed to DispatchLlm while tools are still queued or a ticker continuation is pending,
+		// DispatchLlm cancels the transport and resets runner state — killing the in-flight LLM stream and
+		// stranding the tool ticker (symptom: UI stuck on "Run started" with no assistant output).
+		if (bToolExecutionInProgress || CompletedToolCallQueue.Num() > 0)
+		{
+			if (!bCompleteToolPathReschedulePending)
+			{
+				bCompleteToolPathReschedulePending = true;
+				UE_LOG(
+					LogTemp,
+					Display,
+					TEXT("UnrealAi harness: CompleteToolPath deferred until streamed tool queue idle (in_progress=%s queue=%d)."),
+					bToolExecutionInProgress ? TEXT("true") : TEXT("false"),
+					CompletedToolCallQueue.Num());
+				const TWeakPtr<FAgentTurnRunner> WeakSelf = AsShared();
+				FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+					[WeakSelf](float /*DeltaTime*/) -> bool
+					{
+						const TSharedPtr<FAgentTurnRunner> Self = WeakSelf.Pin();
+						if (!Self.IsValid() || Self->bTerminal.load(std::memory_order_relaxed))
+						{
+							return false;
+						}
+						if (Self->bToolExecutionInProgress || Self->CompletedToolCallQueue.Num() > 0)
+						{
+							return true;
+						}
+						Self->bCompleteToolPathReschedulePending = false;
+						Self->CompleteToolPath();
+						return false;
+					}));
+			}
+			return;
+		}
+		bCompleteToolPathReschedulePending = false;
 
 		FString TodoPlanEffectiveName;
 		if (PendingToolCalls.Num() == 1)
@@ -2465,6 +2581,16 @@ namespace UnrealAiAgentHarnessPriv
 				"[Harness][reason=repeated_tool_loop] Repeated tool loop detected. Stop or change strategy: provide a concise blocked summary with the exact blocker, or summarize what is done vs remaining; use Plan chat mode for dependency-style multi-step work.");
 			Conv->GetMessagesMutable().Add(LoopNudge);
 		}
+		if (ToolFailCount >= 4 && Request.Mode == EUnrealAiAgentMode::Agent && !bTodoPlanOnly && Request.bOmitMainAgentBlueprintMutationTools
+			&& !Request.bBlueprintBuilderTurn)
+		{
+			FUnrealAiConversationMessage BpNudge;
+			BpNudge.Role = TEXT("user");
+			BpNudge.Content = TEXT(
+				"[Harness][reason=multi_tool_failure_round] Multiple tool failures this round. For Blueprint graph mutations from the main agent, use the <unreal_ai_build_blueprint> handoff (see 12-build-blueprint-delegation). Use only tool_id values from the current tool appendix—never invent names. If still blocked, summarize the exact error text and stop.");
+			Conv->GetMessagesMutable().Add(BpNudge);
+			EmitEnforcementEvent(TEXT("blueprint_mutation_handoff_nudge"), FString::Printf(TEXT("tool_fail_count=%d"), ToolFailCount));
+		}
 		// The next round still runs (DispatchLlm below), but models often reply with text-only and end
 		// the run. A synthetic user line nudges execution when the only tool was the todo plan.
 		if (bTodoPlanOnly && Request.Mode != EUnrealAiAgentMode::Ask)
@@ -2603,6 +2729,8 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			Am.Content = OrigAssist;
 		}
+		// Models sometimes emit malformed tag junctions (e.g. closing handoff + opening result) that TryConsume skips.
+		UnrealAiBuildBlueprintTag::StripProtocolMarkersForUi(Am.Content);
 		Conv->GetMessagesMutable().Add(Am);
 
 		// Second+ LLM rounds often end with finish_reason=stop and no tool_calls. Models sometimes return an
@@ -2702,11 +2830,14 @@ namespace UnrealAiAgentHarnessPriv
 
 		if (bBpHandoff)
 		{
+			EUnrealAiBlueprintBuilderTargetKind ParsedKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+			UnrealAiBuildBlueprintTag::ParseAndStripHandoffMetadata(BpInner, ParsedKind);
+			Request.BlueprintBuilderTargetKind = ParsedKind;
 			Request.bBlueprintBuilderTurn = true;
 			EmitEnforcementEvent(TEXT("blueprint_builder_chain"), TEXT("chained_subturn_from_build_blueprint_tag"));
 			FUnrealAiConversationMessage Sub;
 			Sub.Role = TEXT("user");
-			Sub.Content = UnrealAiBlueprintBuilderToolSurface::BuildAutomatedSubturnHarnessPreamble() + BpInner;
+			Sub.Content = UnrealAiBlueprintBuilderToolSurface::BuildAutomatedSubturnHarnessPreamble(ParsedKind) + BpInner;
 			Conv->GetMessagesMutable().Add(Sub);
 			AssistantBuffer.Reset();
 			DispatchLlm();
@@ -2716,6 +2847,7 @@ namespace UnrealAiAgentHarnessPriv
 		if (bBbResultParsed)
 		{
 			Request.bBlueprintBuilderTurn = false;
+			Request.BlueprintBuilderTargetKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
 			Request.bInjectBlueprintBuilderResumeChunk = true;
 			EmitEnforcementEvent(TEXT("blueprint_builder_result"), TEXT("return_to_main_agent"));
 			FUnrealAiConversationMessage Ret;
@@ -2830,6 +2962,11 @@ void FUnrealAiAgentHarness::SetHeadedScenarioStrictToolBudgets(bool bEnable)
 	bHeadedScenarioStrictToolBudgets = bEnable;
 }
 
+void FUnrealAiAgentHarness::SetHeadedScenarioSyncRun(bool bEnable)
+{
+	bHeadedScenarioSyncRun = bEnable;
+}
+
 void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TSharedPtr<IAgentRunSink> Sink)
 {
 	CancelTurn();
@@ -2857,6 +2994,7 @@ void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TS
 	Runner->UsageTracker = UsageTracker;
 	Runner->MemoryService = MemoryService;
 	Runner->bHeadedScenarioStrictToolBudgets = bHeadedScenarioStrictToolBudgets;
+	Runner->bHeadedScenarioSyncRun = bHeadedScenarioSyncRun;
 	Runner->AccumulatedUsage = FUnrealAiTokenUsage();
 	Runner->Conv = MakeUnique<FUnrealAiConversationStore>(Persistence);
 	Runner->Conv->LoadOrCreate(Request.ProjectId, Request.ThreadId);
