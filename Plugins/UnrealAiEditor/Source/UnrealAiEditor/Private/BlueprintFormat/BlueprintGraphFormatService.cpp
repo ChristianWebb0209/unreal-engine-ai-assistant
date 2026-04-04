@@ -3,9 +3,10 @@
 
 #include "BlueprintFormat/BlueprintGraphFormatService.h"
 
+#include "BlueprintFormat/BlueprintGraphAutoComments.h"
 #include "BlueprintFormat/BlueprintGraphCommentReflow.h"
 #include "BlueprintFormat/BlueprintGraphKnotService.h"
-#include "BlueprintFormat/BlueprintGraphStrandLayout.h"
+#include "BlueprintFormat/BlueprintGraphLayeredDagLayout.h"
 
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
@@ -27,9 +28,13 @@ namespace UnrealBlueprintFormatServicePriv
 		{
 			return;
 		}
-		if (Options.WireKnotAggression != EUnrealBlueprintWireKnotAggression::Off)
+		if (Options.CommentsMode != EUnrealAiBlueprintCommentsMode::Off)
 		{
-			const int32 K = UnrealBlueprintKnotService::InsertDataWireKnots(Graph, Options.WireKnotAggression);
+			R.CommentsAdjusted += UnrealBlueprintAutoComments::MaybeAddRegionCommentsForLargeGraphs(Graph, Options);
+		}
+		{
+			const int32 K = UnrealBlueprintKnotService::ApplyWireKnots(Graph, Options);
+			R.KnotsInserted += K;
 			if (K > 0)
 			{
 				R.Warnings.Add(FString::Printf(TEXT("inserted_data_knots:%d"), K));
@@ -37,7 +42,7 @@ namespace UnrealBlueprintFormatServicePriv
 		}
 		if (Options.bReflowCommentsByGeometry)
 		{
-			UnrealBlueprintCommentReflow::RefitAllCommentsToGeometricMembers(Graph);
+			R.CommentsAdjusted += UnrealBlueprintCommentReflow::RefitAllCommentsToGeometricMembers(Graph);
 		}
 	}
 
@@ -117,7 +122,9 @@ namespace UnrealBlueprintFormatServicePriv
 	}
 
 	/** Rule 1: script nodes we position must not overlap (AABB + pairwise minimum gap). */
-	static void ResolveAxisAlignedOverlapsAmong(TArray<UEdGraphNode*>& Nodes)
+	static void ResolveAxisAlignedOverlapsAmong(
+		TArray<UEdGraphNode*>& Nodes,
+		const TSet<UEdGraphNode*>* LockedNodes = nullptr)
 	{
 		if (Nodes.Num() < 2)
 		{
@@ -143,13 +150,17 @@ namespace UnrealBlueprintFormatServicePriv
 					{
 						continue;
 					}
+					UEdGraphNode* const Mover = B;
+					if (LockedNodes && LockedNodes->Contains(Mover))
+					{
+						continue;
+					}
 					const int32 G = PairwiseSeparationGap(A, B);
 					const FNodeRect Rb = GetNodeRect(B);
 					if (!NodeRectsOverlapWithGap(Ra, Rb, G))
 					{
 						continue;
 					}
-					UEdGraphNode* const Mover = B;
 					const FNodeRect Ra2 = GetNodeRect(A);
 					const FNodeRect Rm = GetNodeRect(Mover);
 					int32 Dx = (Ra2.MaxX + G) - Rm.MinX;
@@ -438,26 +449,15 @@ namespace UnrealBlueprintFormatServicePriv
 		}
 	}
 
-	static void LayoutNodesHorizontal(TArray<UEdGraphNode*>& Nodes, FUnrealBlueprintGraphFormatResult& OutResult)
+	static void BuildPreserveLockedSet(const TArray<UEdGraphNode*>& ScriptNodes, TSet<UEdGraphNode*>& OutLocked)
 	{
-		Nodes.Sort([](const UEdGraphNode& A, const UEdGraphNode& B) { return A.NodeGuid < B.NodeGuid; });
-		int32 X = 0;
-		UEdGraphNode* Prev = nullptr;
-		for (UEdGraphNode* N : Nodes)
+		OutLocked.Reset();
+		for (UEdGraphNode* N : ScriptNodes)
 		{
-			if (!N)
+			if (N && (N->NodePosX != 0 || N->NodePosY != 0))
 			{
-				continue;
+				OutLocked.Add(N);
 			}
-			if (Prev)
-			{
-				const int32 WPrev = FMath::Max(64, Prev->NodeWidth > 0 ? Prev->NodeWidth : 240);
-				X += WPrev + HorizontalGapBetweenConsecutive(Prev, N);
-			}
-			N->NodePosX = X;
-			N->NodePosY = 0;
-			Prev = N;
-			++OutResult.NodesPositioned;
 		}
 	}
 
@@ -467,17 +467,45 @@ namespace UnrealBlueprintFormatServicePriv
 		const FUnrealBlueprintGraphFormatOptions& Options,
 		FUnrealBlueprintGraphFormatResult& R)
 	{
-		if (Options.LayoutStrategy == EUnrealBlueprintGraphLayoutStrategy::MultiStrand)
+		TSet<UEdGraphNode*> LockedNodes;
+		const TSet<UEdGraphNode*>* LockedPtr = nullptr;
+		if (Options.bPreserveExistingPositions)
 		{
-			int32 N = 0;
-			UnrealBlueprintStrandLayout::LayoutNodesMultiStrand(Graph, ScriptNodes, N);
-			R.NodesPositioned += N;
+			BuildPreserveLockedSet(ScriptNodes, LockedNodes);
+			R.NodesSkippedPreserve = LockedNodes.Num();
+			LockedPtr = &LockedNodes;
 		}
-		else
+
 		{
-			LayoutNodesHorizontal(ScriptNodes, R);
+			UnrealBlueprintLayeredDagLayout::FLayeredLayoutStats St;
+			UnrealBlueprintLayeredDagLayout::LayoutScriptNodes(Graph, ScriptNodes, Options, St);
+			R.EntrySubgraphs = St.EntryPoints;
+			R.DisconnectedNodes += St.DisconnectedNodes;
+			R.DataOnlyNodesPlaced += St.DataOnlyNodes;
+			R.NodesPositioned += St.LayoutNodes;
 		}
-		ResolveAxisAlignedOverlapsAmong(ScriptNodes);
+		ResolveAxisAlignedOverlapsAmong(ScriptNodes, LockedPtr);
+	}
+
+	static void AccumulateMoveStats(
+		const TMap<const UEdGraphNode*, FIntPoint>& Before,
+		const TArray<UEdGraphNode*>& Nodes,
+		FUnrealBlueprintGraphFormatResult& R)
+	{
+		for (UEdGraphNode* N : Nodes)
+		{
+			if (!N)
+			{
+				continue;
+			}
+			if (const FIntPoint* P = Before.Find(N))
+			{
+				if (P->X != N->NodePosX || P->Y != N->NodePosY)
+				{
+					++R.NodesMoved;
+				}
+			}
+		}
 	}
 
 	/** After strip layout, move the cluster so its top-left origin matches the pre-layout cluster (avoids piling on Y=0 over unrelated nodes). */
@@ -572,6 +600,7 @@ FUnrealBlueprintGraphFormatResult FUnrealBlueprintGraphFormatService::LayoutAfte
 		}
 		UnrealBlueprintFormatServicePriv::EnforceCommentContainmentAfterMove(Graph, MaterializedNodes, BeforePositions);
 		UnrealBlueprintFormatServicePriv::RunPostLayoutPasses(Graph, Options, R);
+		UnrealBlueprintFormatServicePriv::AccumulateMoveStats(BeforePositions, MaterializedNodes, R);
 		return R;
 	}
 
@@ -617,6 +646,7 @@ FUnrealBlueprintGraphFormatResult FUnrealBlueprintGraphFormatService::LayoutEnti
 	UnrealBlueprintFormatServicePriv::RunScriptStripLayout(Graph, ScriptNodes, Options, R);
 	UnrealBlueprintFormatServicePriv::EnforceCommentContainmentAfterMove(Graph, ScriptNodes, BeforePositions);
 	UnrealBlueprintFormatServicePriv::RunPostLayoutPasses(Graph, Options, R);
+	UnrealBlueprintFormatServicePriv::AccumulateMoveStats(BeforePositions, ScriptNodes, R);
 	return R;
 }
 
@@ -653,5 +683,6 @@ FUnrealBlueprintGraphFormatResult FUnrealBlueprintGraphFormatService::LayoutSele
 	UnrealBlueprintFormatServicePriv::TranslateNodesPreservingSelectionOrigin(ScriptNodes, BeforePositions);
 	UnrealBlueprintFormatServicePriv::EnforceCommentContainmentAfterMove(Graph, ScriptNodes, BeforePositions);
 	UnrealBlueprintFormatServicePriv::RunPostLayoutPasses(Graph, Options, R);
+	UnrealBlueprintFormatServicePriv::AccumulateMoveStats(BeforePositions, ScriptNodes, R);
 	return R;
 }

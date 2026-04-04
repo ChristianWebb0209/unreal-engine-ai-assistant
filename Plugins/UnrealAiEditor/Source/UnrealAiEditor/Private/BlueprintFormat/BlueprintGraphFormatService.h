@@ -18,11 +18,20 @@ struct FUnrealBlueprintIrNodeLayoutHint
 	int32 Y = 0;
 };
 
-/** Result of a layout pass (warnings + how many nodes received new positions). */
+/** Result of a layout pass (warnings + structured metrics for tools). */
 struct FUnrealBlueprintGraphFormatResult
 {
 	TArray<FString> Warnings;
+	/** Nodes the primary layout algorithm assigned coordinates (legacy field, same as NodesMoved when no preserve). */
 	int32 NodesPositioned = 0;
+	/** Nodes whose (X,Y) changed vs pre-layout snapshot. */
+	int32 NodesMoved = 0;
+	int32 NodesSkippedPreserve = 0;
+	int32 EntrySubgraphs = 0;
+	int32 DisconnectedNodes = 0;
+	int32 DataOnlyNodesPlaced = 0;
+	int32 KnotsInserted = 0;
+	int32 CommentsAdjusted = 0;
 };
 
 /**

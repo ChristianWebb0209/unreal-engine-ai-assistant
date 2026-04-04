@@ -95,12 +95,12 @@ void UnrealBlueprintCommentReflow::FitCommentAroundNodes(
 	UnrealBlueprintCommentReflowPriv::FitCommentToMemberNodes(Comment, Members, Padding);
 }
 
-void UnrealBlueprintCommentReflow::RefitAllCommentsToGeometricMembers(UEdGraph* Graph, int32 Padding)
+int32 UnrealBlueprintCommentReflow::RefitAllCommentsToGeometricMembers(UEdGraph* Graph, int32 Padding)
 {
 	using namespace UnrealBlueprintCommentReflowPriv;
 	if (!Graph)
 	{
-		return;
+		return 0;
 	}
 	TArray<UEdGraphNode_Comment*> Comments;
 	TArray<UEdGraphNode*> NonComments;
@@ -119,12 +119,17 @@ void UnrealBlueprintCommentReflow::RefitAllCommentsToGeometricMembers(UEdGraph* 
 			NonComments.Add(N);
 		}
 	}
+	int32 Adjusted = 0;
 	for (UEdGraphNode_Comment* Comment : Comments)
 	{
 		if (!Comment)
 		{
 			continue;
 		}
+		const int32 PX = Comment->NodePosX;
+		const int32 PY = Comment->NodePosY;
+		const int32 PW = Comment->NodeWidth;
+		const int32 PH = Comment->NodeHeight;
 		const FNodeRect CommentRect = GetNodeRect(Comment);
 		TArray<UEdGraphNode*> Members;
 		for (UEdGraphNode* Node : NonComments)
@@ -135,5 +140,11 @@ void UnrealBlueprintCommentReflow::RefitAllCommentsToGeometricMembers(UEdGraph* 
 			}
 		}
 		FitCommentToMemberNodes(Comment, Members, Padding);
+		if (Comment->NodePosX != PX || Comment->NodePosY != PY || Comment->NodeWidth != PW
+			|| Comment->NodeHeight != PH)
+		{
+			++Adjusted;
+		}
 	}
+	return Adjusted;
 }
