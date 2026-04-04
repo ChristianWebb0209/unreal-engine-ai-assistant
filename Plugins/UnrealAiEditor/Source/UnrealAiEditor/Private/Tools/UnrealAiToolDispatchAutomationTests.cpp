@@ -627,6 +627,81 @@ bool FUnrealAiBlueprintGraphPatchContractTest::RunTest(const FString& Parameters
 		}
 	}
 
+	// suggested_correct_call for invalid_k2_class: math vs sequence vs branch fallback (Strict_BP02).
+	{
+		UBlueprint* BpSug = LoadObject<UBlueprint>(nullptr, TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+		if (BpSug)
+		{
+			auto RunBadK2 = [&](const TCHAR* K2Path, const TCHAR* ExpectK2InFirstOp) -> bool
+			{
+				TSharedPtr<FJsonObject> OpX = MakeShared<FJsonObject>();
+				OpX->SetStringField(TEXT("op"), TEXT("create_node"));
+				OpX->SetStringField(TEXT("patch_id"), TEXT("badk2"));
+				OpX->SetStringField(TEXT("k2_class"), K2Path);
+				OpX->SetNumberField(TEXT("x"), 0);
+				OpX->SetNumberField(TEXT("y"), 0);
+				TArray<TSharedPtr<FJsonValue>> OpsX;
+				OpsX.Add(MakeShared<FJsonValueObject>(OpX.ToSharedRef()));
+				TSharedPtr<FJsonObject> ArgsX = MakeShared<FJsonObject>();
+				ArgsX->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+				ArgsX->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+				ArgsX->SetArrayField(TEXT("ops"), OpsX);
+				ArgsX->SetBoolField(TEXT("compile"), false);
+				ArgsX->SetBoolField(TEXT("auto_layout"), false);
+				const FUnrealAiToolInvocationResult Rx = UnrealAiDispatchTool(
+					TEXT("blueprint_graph_patch"),
+					ArgsX,
+					nullptr,
+					nullptr,
+					FString(),
+					FString());
+				if (Rx.bOk)
+				{
+					return false;
+				}
+				TSharedPtr<FJsonObject> Ox;
+				TSharedRef<TJsonReader<>> ReaderX = TJsonReaderFactory<>::Create(Rx.ContentForModel);
+				if (!FJsonSerializer::Deserialize(ReaderX, Ox) || !Ox.IsValid())
+				{
+					return false;
+				}
+				const TSharedPtr<FJsonObject>* SugX = nullptr;
+				if (!Ox->TryGetObjectField(TEXT("suggested_correct_call"), SugX) || !SugX || !(*SugX).IsValid())
+				{
+					return false;
+				}
+				const TSharedPtr<FJsonObject>* ArgX = nullptr;
+				if (!(*SugX)->TryGetObjectField(TEXT("arguments"), ArgX) || !ArgX || !(*ArgX).IsValid())
+				{
+					return false;
+				}
+				const TArray<TSharedPtr<FJsonValue>>* OpsOut = nullptr;
+				if (!(*ArgX)->TryGetArrayField(TEXT("ops"), OpsOut) || !OpsOut || OpsOut->Num() < 1)
+				{
+					return false;
+				}
+				const TSharedPtr<FJsonObject>* FirstOp = nullptr;
+				if (!(*OpsOut)[0]->TryGetObject(FirstOp) || !FirstOp || !(*FirstOp).IsValid())
+				{
+					return false;
+				}
+				FString K2Out;
+				return (*FirstOp)->TryGetStringField(TEXT("k2_class"), K2Out) && K2Out == ExpectK2InFirstOp;
+			};
+			TestTrue(
+				TEXT("suggested_correct_call math-ish k2"),
+				RunBadK2(
+					TEXT("/Script/BlueprintGraph.K2Node_FooIntLess"),
+					TEXT("/Script/BlueprintGraph.K2Node_CallFunction")));
+			TestTrue(
+				TEXT("suggested_correct_call sequence-ish k2"),
+				RunBadK2(TEXT("/Script/BlueprintGraph.K2Node_FooSequence"), TEXT("/Script/BlueprintGraph.K2Node_ExecutionSequence")));
+			TestTrue(
+				TEXT("suggested_correct_call generic k2"),
+				RunBadK2(TEXT("/Script/Engine.Actor"), TEXT("/Script/BlueprintGraph.K2Node_IfThenElse")));
+		}
+	}
+
 	// Atomic rollback + minimal successful create_node (StrictTests harness only).
 	{
 		UBlueprint* BpAtomic = LoadObject<UBlueprint>(nullptr, TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));

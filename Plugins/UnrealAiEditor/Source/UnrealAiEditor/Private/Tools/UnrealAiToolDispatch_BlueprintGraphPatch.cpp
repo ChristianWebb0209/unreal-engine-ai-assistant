@@ -897,12 +897,34 @@ namespace UnrealAiBlueprintGraphPatchPriv
 			TArray<TSharedPtr<FJsonValue>> Ops;
 			if (FirstError.Contains(TEXT("create_node requires k2_class")) || FirstError.Contains(TEXT("k2_class not a UK2Node")))
 			{
+				const FString EL = FirstError.ToLower();
+				const bool bMathish = EL.Contains(TEXT("integer math")) || EL.Contains(TEXT("kismetmathlibrary"))
+					|| EL.Contains(TEXT("intless")) || EL.Contains(TEXT("intadd")) || EL.Contains(TEXT("less_int"))
+					|| EL.Contains(TEXT("add_int")) || EL.Contains(TEXT("k2node_math")) || EL.Contains(TEXT("greater_int"))
+					|| EL.Contains(TEXT("equalequal_int"));
+				const bool bSequenceish = EL.Contains(TEXT("k2node_sequence")) || EL.Contains(TEXT("executionsequence"))
+					|| (EL.Contains(TEXT("k2_class not a uk2node")) && EL.Contains(TEXT("sequence"))
+						&& !EL.Contains(TEXT("k2node_executionsequence")));
 				TSharedPtr<FJsonObject> Op = MakeShared<FJsonObject>();
 				Op->SetStringField(TEXT("op"), TEXT("create_node"));
-				Op->SetStringField(TEXT("patch_id"), TEXT("n_branch"));
-				Op->SetStringField(TEXT("k2_class"), TEXT("/Script/BlueprintGraph.K2Node_IfThenElse"));
+				Op->SetStringField(TEXT("patch_id"), TEXT("n_example"));
 				Op->SetNumberField(TEXT("x"), 0);
 				Op->SetNumberField(TEXT("y"), 0);
+				if (bMathish)
+				{
+					Op->SetStringField(TEXT("k2_class"), TEXT("/Script/BlueprintGraph.K2Node_CallFunction"));
+					Op->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.KismetMathLibrary"));
+					Op->SetStringField(TEXT("function_name"), TEXT("Less_IntInt"));
+				}
+				else if (bSequenceish)
+				{
+					Op->SetStringField(TEXT("k2_class"), TEXT("/Script/BlueprintGraph.K2Node_ExecutionSequence"));
+				}
+				else
+				{
+					Op->SetStringField(TEXT("patch_id"), TEXT("n_branch"));
+					Op->SetStringField(TEXT("k2_class"), TEXT("/Script/BlueprintGraph.K2Node_IfThenElse"));
+				}
 				Ops.Add(MakeShareable(new FJsonValueObject(Op.ToSharedRef())));
 			}
 			else if (FirstError.Contains(TEXT("Unknown node ref")) || FirstError.Contains(TEXT("T3D placeholder")))

@@ -28,8 +28,7 @@ namespace UnrealAiToolDispatchArgRepair
 			static const TCHAR* CallFunction = TEXT("/Script/BlueprintGraph.K2Node_CallFunction");
 			if (Low == TEXT("/script/blueprintgraph.k2node_intless") || Low == TEXT("/script/blueprintgraph.k2node_intadd")
 				|| Low == TEXT("/script/blueprintgraph.k2node_lessint") || Low == TEXT("/script/blueprintgraph.k2node_addint")
-				|| Low == TEXT("/script/blueprintgraph.k2node_math") || Low.Contains(TEXT("k2node_intless"))
-				|| Low.Contains(TEXT("k2node_intadd")))
+				|| Low == TEXT("/script/blueprintgraph.k2node_math"))
 			{
 				S = CallFunction;
 			}
