@@ -17,6 +17,7 @@
 #include "Harness/IToolExecutionHost.h"
 #include "Context/IAgentContextService.h"
 #include "Context/AgentContextTypes.h"
+#include "Context/UnrealAiContextWorkingSet.h"
 #include "Misc/SecureHash.h"
 #include "Tools/UnrealAiToolUsageEventLogger.h"
 #include "Tools/UnrealAiToolUsagePrior.h"
@@ -50,7 +51,7 @@ namespace UnrealAiAgentHarnessPriv
 	/** Stop after this many consecutive identical tool failures (same invoke + args). */
 	static constexpr int32 GHarnessRepeatedFailureStopCount = 4;
 	/** How many retries we allow when streamed tool JSON is truncated and never becomes valid. */
-	static constexpr int32 GHarnessStreamToolCallIncompleteMaxRetriesPerRound = 1;
+	static constexpr int32 GHarnessStreamToolCallIncompleteMaxRetriesPerRound = 4;
 	/** Default token budget per agent turn when profile sets maxAgentTurnTokens to 0 (unset in JSON). */
 	static constexpr int32 GHarnessDefaultMaxTurnTokens = 1000000;
 	/** Hard backstop on LLM↔tool iterations if token/repeat limits do not apply first. */
@@ -664,7 +665,11 @@ namespace UnrealAiAgentHarnessPriv
 				else
 				{
 					const FAgentContextState* State = ContextService->GetState(ProjectId, ThreadId);
-					const FString Resolved = FindRecentBlueprintPathFromContextState(State);
+					FString Resolved = State ? UnrealAiContextWorkingSet::FindBlueprintPathForAutofill(*State) : FString();
+					if (Resolved.IsEmpty())
+					{
+						Resolved = FindRecentBlueprintPathFromContextState(State);
+					}
 					if (!Resolved.IsEmpty())
 					{
 						ArgsObj->SetStringField(TEXT("blueprint_path"), Resolved);
@@ -1622,6 +1627,17 @@ namespace UnrealAiAgentHarnessPriv
 			if (!bForceOnFinish && AgeEvents < MaxEvents && AgeMs < MaxMs)
 			{
 				continue;
+			}
+			if (bForceOnFinish && ToolArgumentsJsonOversizedForDeserialize(Tc.ArgumentsJson))
+			{
+				Fail(FString::Printf(
+					TEXT("Tool call arguments exceed harness max size (%d characters; index=%d id=%s name=%s). "
+						 "Split the tool payload, use blueprint_graph_patch `ops_json_path` for large op lists, or reduce inline JSON."),
+					UnrealAiWaitTime::MaxToolArgumentsJsonDeserializeChars,
+					I,
+					*Tc.Id,
+					*Tc.Name));
+				return true;
 			}
 			EmitEnforcementEvent(
 				TEXT("stream_tool_call_incomplete_timeout"),

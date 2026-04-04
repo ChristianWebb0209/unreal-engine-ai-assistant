@@ -127,16 +127,21 @@ namespace UnrealAiWaitTime
 	inline constexpr int32 PlanNodeRepeatedValidationFailFastThreshold = 2;
 
 	// --- Streamed tool-call incomplete guard (SSE can split tool JSON across chunks) ---
-	/** Run-20 step_01: `stream_tool_call_incomplete_timeout` at age_events=64 (age_ms=4) — provider fragmented many tiny SSE chunks before tool JSON closed. */
-	inline constexpr int32 StreamToolIncompleteMaxEvents = 128;
+	/**
+	 * Max stream events while a tool call is still receiving `arguments` deltas before we treat it as stalled.
+	 * Token-granular providers can emit hundreds of tiny SSE chunks per second; keep this very large so we rely
+	 * primarily on StreamToolIncompleteMaxMs instead of a low event budget.
+	 */
+	inline constexpr int32 StreamToolIncompleteMaxEvents = 100000;
 	inline constexpr int32 StreamToolIncompleteMaxMs = 120000; // 2 min
 
 	/**
 	 * `FAgentTurnRunner::TryParseArgumentsJsonComplete`: refuse to call `FJsonSerializer::Deserialize` when the
-	 * streamed `arguments` string is larger than this. Oversize / malformed tool JSON has triggered UE JsonReader
-	 * BufferReader asserts instead of a clean parse failure; treat as "not yet complete" for readiness.
+	 * streamed `arguments` string is larger than this (avoids JsonReader edge cases on huge buffers). On Finish,
+	 * the harness fails with an explicit message instead of spinning until the event timeout. For larger payloads,
+	 * use tool-specific indirection (e.g. blueprint_graph_patch `ops_json_path`).
 	 */
-	inline constexpr int32 MaxToolArgumentsJsonDeserializeChars = 2 * 1024 * 1024;
+	inline constexpr int32 MaxToolArgumentsJsonDeserializeChars = 32 * 1024 * 1024;
 
 	// --- Optional pacing between LLM submits (0 = off) ---
 	inline constexpr int32 HarnessRoundMinDelayMs = 0;
