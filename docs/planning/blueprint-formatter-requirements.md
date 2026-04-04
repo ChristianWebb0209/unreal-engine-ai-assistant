@@ -215,49 +215,33 @@ To plug into `blueprint_format_graph` / `blueprint_apply_ir` / `blueprint_graph_
 
 ## 7. What we have vs. what we lack
 
+See also **[blueprint-formatter-gaps.md](blueprint-formatter-gaps.md)** for competitive context and a checklist aligned with implementation.
+
 ### 7.1 What we already have (in this repo)
 
-- **Blueprint layout engine**: existing Blueprint formatter and layout code under `BlueprintFormat/` that can:
-  - Auto‑layout graphs (`LayoutEntireGraph`, strand‑based layout).
-  - Work with your `blueprint_format_graph` and `blueprint_apply_ir` tools.
-- **Deterministic tool surface**:
-  - `blueprint_format_graph` and `blueprint_apply_ir` already accept layout flags like `layout_scope`, `layout_mode`, `wire_knots`.
-  - Tool contracts and prompts that distinguish IR vs general graph patching.
+- **Blueprint layout engine** under `Plugins/UnrealAiEditor/.../BlueprintFormat/`:
+  - `LayoutEntireGraph`, `LayoutAfterAiIrApply`, `LayoutSelectedNodes`.
+  - **Single exec layout path**: layered DAG (legacy BFS grid / multi‑strand / single‑row strategies and `BlueprintLayoutPolicy` presets were removed).
+  - **User-facing knobs** (Editor Preferences → **Blueprint Formatting** on `UUnrealAiEditorSettings`, mirrored on the Blueprint editor toolbar): spacing density (sparse / medium / dense), **use wire knots**, **preserve existing node positions**, **reflow comment boxes**, and **`BlueprintCommentsMode`**. `UnrealAiBlueprintTools_MakeFormatOptionsFromSettings` maps settings → `FUnrealBlueprintGraphFormatOptions` for tools (no per-call layout JSON).
+  - **Wire knots**: `ApplyWireKnots` uses `EUnrealBlueprintWireKnotAggression` plus optional length/crossing thresholds populated from the settings mapper when knots are enabled.
+  - **Comments**: reflow by geometry; optional **auto region** comment boxes when `BlueprintCommentsMode` is not Off (large exec islands).
+- **Structured tool results**: `layout_nodes_moved`, `layout_nodes_skipped_preserve`, `layout_entry_subgraphs`, `layout_disconnected_nodes`, `layout_data_only_nodes_placed`, `layout_knots_inserted`, `layout_comments_adjusted` (plus legacy `layout_nodes_positioned`).
+- **IR / pipeline**: `blueprint_apply_ir` auto‑promotes to **full‑graph** layout when materialized node count exceeds an internal constexpr threshold; `blueprint_graph_import_t3d` runs post‑import **LayoutEntireGraph** by default (`skip_post_import_format` to opt out).
+- **Read‑only analysis**: `blueprint_get_graph_summary` with `include_layout_analysis:true` adds per‑graph metrics (entries, branch‑like nodes, data‑link crossing proxy).
+- **Verification**: `blueprint_verify_graph` steps include `dead_exec_outputs` and `pin_type_mismatch` (coarse type equality on data links).
 
-### 7.2 What we lack
+### 7.2 What we still lack (vs. original vision)
 
-- A **formal, documented layout policy** capturing:
-  - Preferred lane spacing, branch separation, and reroute thresholds.
-  - Comment injection rules and naming heuristics.
-- A **stable analysis pass** that surfaces graph complexity metrics and semantic clusters as structured data (right now most of this is implicit in how we call the formatter).
-- Explicit **refactor suggestion output** (e.g. “this cluster should be a function named `HandleDamage`”), rather than relying on the LLM to infer that from a messy graph.
-- Per‑project or per‑team **style profiles** (e.g. “compact graphs” vs “spacious graphs with heavy commenting”).
+- **Refactor suggestion output** as structured JSON (helper functions / split Blueprint hints) — still LLM‑driven.
+- **Exec wire knots** and stronger **Sugiyama** crossing minimization (current layered pass is intentionally lightweight).
+- **Golden snapshot / idempotence** tests on real editor graphs (automation covers presets/options; full layout idempotence on assets is follow‑up).
 
-### 7.3 Steps to close the gap
+### 7.3 Remaining steps
 
-1. **Specify a canonical profile** for Blueprint formatting:
-   - Fix concrete numeric defaults for spacing, branch gaps, reroute thresholds, and comment policies.
-   - Document this profile in code + docs so it’s predictable and testable.
-2. **Expose a graph analysis API**:
-   - Build a reusable analysis layer that, given a graph, returns:
-     - Entry nodes, exec clusters, data clusters.
-     - Complexity metrics and structural hints.
-   - Feed this into both the formatter implementation and LLM context (read‑only).
-3. **Align `blueprint_format_graph` implementation with this spec**:
-   - Ensure internal layout heuristics match the lane/branch/comment/reroute rules above.
-   - Add tests that snapshot layout for representative graphs and assert idempotence.
-4. **Add structured refactor suggestions**:
-   - Extend formatter to optionally emit a list of “suggested refactors” as JSON:
-     - Candidate helper functions, macros, or CustomEvents.
-     - Overloaded Blueprints that should be split.
-   - Let the agent decide whether to apply them via `blueprint_graph_patch` / IR tools.
-5. **Support style presets**:
-   - Introduce named presets (e.g. `compact`, `spacious`, `debug-heavy`) that map to different parameter sets, but keep behavior deterministic once chosen.
-6. **Document and prompt‑integrate**:
-   - Add a short section in prompts describing what the formatter does and when to call it (e.g. after large patches, before presenting graphs to users).
-   - Make it clear that manual layout regions (if tagged) will be preserved.
-
-With these steps, the Blueprint formatter evolves from a “black‑box auto layout” into a **predictable, parameterized formatting engine** that aligns with how experienced Unreal developers structure their Blueprints—while remaining fully machine‑driven and testable.
+1. Add **golden Blueprint** harness tests (format twice → stable positions within tolerance).
+2. Optional **exec‑safe** reroute policy behind `bAllowExecKnots`.
+3. **Refactor suggestions** pass (machine‑readable) for overloaded graphs.
+4. Keep **prompts and UnrealAiToolCatalog.json** in sync when changing formatter contracts (layout is settings‑driven; see `layout_scope` / `auto_layout` / verify steps).
 
 ---
 
@@ -277,19 +261,10 @@ This section folds in the previous `blueprint-formatter-expansion` planning note
     - Reserve full‑graph, aggressive knot passes for explicit `blueprint_format_graph` / `blueprint_compile(format_graphs=true)` calls.
   - Consider carefully scoped **exec knotting** only where it does not harm readability (e.g. splitting very long, straight exec wires without altering topology).
 
-### 8.2 Multi‑strand layout (stacked horizontal lanes)
+### 8.2 Multi‑strand layout (historical)
 
-- **Current state**:
-  - Multi‑strand layout is implemented and used by `LayoutEntireGraph` with deterministic ordering (using `NodeGuid` as a tiebreaker).
-- **Design guidance**:
-  - Keep a **primary exec spine** (main event flow) in a stable row; place rarer/deeper branches below or to the side so “happy path” remains visually dominant.
-  - Use exec‑graph analysis from §3.1/3.2 to:
-    - Assign strands for each branch.
-    - Stack strands vertically with consistent gaps.
-  - Document the chosen heuristics in code (already partially done in `BlueprintGraphStrandLayout` and `BlueprintLayoutPolicy.h`) so prompts can reference them.
-- **Implementation steps**:
-  - Ensure `EUnrealBlueprintGraphLayoutStrategy::MultiStrand` is the default for AI‑driven formatting.
-  - Add tests that lock in expected multi‑strand layouts for a few canonical graphs (simple branch, nested branch, sequence).
+- **Current state**: Removed in favor of a **single layered DAG** pipeline; strand/BFS modules and layout presets are no longer in-tree.
+- **Future**: If we reintroduce alternate exec layouts, they should remain **settings‑driven** (not tool JSON) unless product asks otherwise.
 
 ### 8.3 Graph comments and settings integration
 
@@ -335,12 +310,12 @@ This section folds in the previous `blueprint-formatter-expansion` planning note
 
 Bringing both documents together, the roadmap is:
 
-1. **Lock down a canonical layout profile** (spacing, multi‑strand defaults, knot aggression, comment policy) and encode it in `BlueprintLayoutPolicy.h` + settings.
+1. **Lock down a canonical layout profile** (spacing density, knot toggle, preserve/reflow, comment policy) on `UUnrealAiEditorSettings` + `UnrealAiBlueprintTools_MakeFormatOptionsFromSettings`.
 2. **Finish wiring the analysis API** and expose its outputs (clusters, metrics) to both formatter and LLM context.
-3. **Stabilize knot and multi‑strand behavior** with tests:
+3. **Stabilize knot and layered layout behavior** with tests:
    - Pairwise overlap resolution.
    - Knot insertion thresholds.
-   - Multi‑strand ordering invariants.
+   - Idempotence on canonical graphs.
 4. **Integrate `BlueprintCommentsMode`** into formatter decisions, ensuring IR `graph_comment` and automatic comments behave consistently with user settings.
 5. **Implement structured refactor suggestions**, including:
    - Helper functions/macros.

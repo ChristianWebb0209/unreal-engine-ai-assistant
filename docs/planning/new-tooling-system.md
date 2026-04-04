@@ -37,7 +37,7 @@ Following our other documentation, the main goal of this mode is to give tools a
 Taken from arch-analysis.md:
 
 - Autonomix is one of the clearest “big bang” Blueprint creation competitors:
-- - It avoids the hard problem of “LLM must invent Unreal internal GUIDs” by using a GUID placeholder system (symbolic tokens that are resolved deterministically during import).
+- - It avoids the hard problem  of “LLM must invent Unreal internal GUIDs” by using a GUID placeholder system (symbolic tokens that are resolved deterministically during import).
 - - It uses T3D (Unreal clipboard text format) as its authoring medium, which lets the model generate a whole graph in one payload instead of calling node APIs one-by-one.
 - Creation loop (as described):
 - - (For existing BPs) call get_blueprint_info first (pin audit + T3D readback).
@@ -65,3 +65,5 @@ The main agent will handle everything and we will specifically prompt it (in the
 - **Assembly:** `FUnrealAiPromptAssembleParams::bBlueprintBuilderMode` selects the alternate chunk stack.
 
 **Shipped in follow-up (UnrealAiEditor v1+):** `chunks/plan/` + `chunks/plan-node/` split prompts; Blueprint Builder T3D tools (`blueprint_graph_introspect`, `blueprint_export_graph_t3d`, `blueprint_t3d_preflight_validate`, `blueprint_graph_import_t3d`, `blueprint_verify_graph`) with `__UAI_G_NNNNNN__` placeholder resolution; `context_selector.blueprint_builder_core` + score boost and prefix merge via **`UnrealAiBlueprintBuilderToolSurface`** on `bBlueprintBuilderTurn` (**full eligible tool roster**, verbose appendix: expanded summaries + large parameter excerpts; telemetry `surface_profile` **`blueprint_builder_verbose`**); prompt chunk **`13-blueprint-builder-resume.md`** after builder results; `blueprint_verify_graph` steps `links`, `orphan_pins`, `duplicate_node_guids` plus `unknown_steps` reporting; `<unreal_ai_blueprint_builder_result>` re-prompt to main agent; main-agent execution gate for withheld blueprint mutation `tool_id`s.
+
+**Formatter (2026):** Single layered layout engine; spacing density, wire knots, preserve-existing, comment mode, and reflow are **Editor Preferences → Unreal AI Editor → Blueprint Formatting** (Blueprint toolbar combo mirrors the same settings). Tools do not take per-call layout JSON; structured layout metrics on responses; T3D import runs post-import layout unless skipped; `blueprint_get_graph_summary` accepts **`include_layout_analysis`**; verify adds **`dead_exec_outputs`** and **`pin_type_mismatch`**. See `docs/planning/blueprint-formatter-requirements.md` and `docs/planning/blueprint-formatter-gaps.md`.

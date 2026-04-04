@@ -202,8 +202,8 @@ FString UnrealAiBlueprintBuilderToolSurface::BuildAutomatedSubturnHarnessPreambl
 			"1. Read: `blueprint_graph_introspect` (pins include `linked_to` peers), `blueprint_export_graph_t3d`, `blueprint_export_ir`, or `blueprint_get_graph_summary`.\n"
 			"2. **Wiring is explicit:** `blueprint_apply_ir` **`links[]`** and/or `blueprint_graph_patch` **`connect`** in the **same** batch as new nodes; **T3D** must keep export-style pin connection lines — create-only payloads yield **floating nodes**.\n"
 			"3. T3D path: placeholders **`__UAI_G_NNNNNN__`** (six digits) — do **not** invent raw `FGuid` literals; `blueprint_t3d_preflight_validate` → `blueprint_graph_import_t3d`.\n"
-			"4. `blueprint_compile` then `blueprint_verify_graph` e.g. `[\"links\",\"orphan_pins\",\"duplicate_node_guids\"]` — fix and retry until clean when possible.\n"
-			"5. Optional layout: `blueprint_format_graph` / `blueprint_format_selection`.\n"
+			"4. `blueprint_compile` then `blueprint_verify_graph` e.g. `[\"links\",\"orphan_pins\",\"duplicate_node_guids\",\"dead_exec_outputs\",\"pin_type_mismatch\"]` — fix and retry until clean when possible.\n"
+			"5. Layout: `blueprint_format_graph` / `blueprint_format_selection` / IR `auto_layout` — spacing, knots, preserve-existing, and comments follow **Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting** (toolbar combo next to AI format buttons). Prefer `layout_scope: ir_nodes` / `patched_nodes` unless a full-graph reformat is intended; large IR applies may auto-promote to full-graph layout.\n"
 			"\n"
 			"**Fallback** when T3D is a poor fit: `blueprint_apply_ir` / `blueprint_graph_patch` (still require explicit links/connect ops).\n"
 			"\n");
