@@ -1,0 +1,33 @@
+{
+  "suite_id": "strict_project_file_read_smoke",
+  "default_type": "agent",
+  "turns": [
+    {
+      "type": "agent",
+      "request": "Read Config/DefaultEngine.ini and report the first non-empty section header you see.",
+      "assertions": [
+        {
+          "type": "tool_invoke_ok",
+          "tool": "project_file_read_text",
+          "arguments": {
+            "relative_path": "Config/DefaultEngine.ini"
+          }
+        }
+      ]
+    },
+    {
+      "type": "agent",
+      "request": "Read the .uproject file and tell me the project name field if present.",
+      "assertions": [
+        {
+          "type": "tool_invoke_ok",
+          "tool": "project_file_read_text",
+          "arguments": {
+            "relative_path": "TP_FirstPerson.uproject"
+          }
+        }
+      ]
+    }
+  ]
+}
+

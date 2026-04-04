@@ -81,7 +81,9 @@ Thumbs.db
 /tests/long-running-tests/runs/
 /tests/qualitative-tests/runs/
 /tests/strict-tests/runs/
+# Ignore arbitrary JSON under tests (scratch), but track checked-in harness suite definitions.
 /tests/**/*.json
+!/tests/**/suites/**/*.json
 /tests/**/*.jsonl
 
 # Optional local scratch (untracked copies of scripts, experiments)

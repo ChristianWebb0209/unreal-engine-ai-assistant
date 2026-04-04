@@ -1,0 +1,235 @@
+{
+  "suite_id": "context_continuity_corridor_build_57_turns",
+  "default_type": "agent",
+  "coverage_notes": "Single-threaded chat simulating a user incrementally building a small corridor showcase: orientation, naming, blocking, lighting, materials, interaction, polish, and review. Only ask/agent turns; no plan mode. Wording avoids naming automation tools or APIs—natural user goals only. Designed for analyzing prompt/context assembly and continuity across many sequential turns.",
+  "turns": [
+    {
+      "type": "ask",
+      "request": "Before we change anything in the project, give me two sentences on what kind of game or visualization this feels like from what you can tell so far."
+    },
+    {
+      "type": "agent",
+      "request": "We’re going to treat this chunk of work as a milestone called Corridor Pass One—use that phrase when you refer to this slice so our notes stay consistent."
+    },
+    {
+      "type": "ask",
+      "request": "Does Corridor Pass One match what’s already in the level, or are we steering into something new compared to the default setup?"
+    },
+    {
+      "type": "agent",
+      "request": "Sketch a simple folder layout in words: one area for rough blockout meshes, one for materials we iterate on, and one for anything gameplay-related, even if folders are empty at first—then create that structure only if the editor already lets you do that safely."
+    },
+    {
+      "type": "ask",
+      "request": "In one short paragraph, what top-level names did you land on for those three buckets?"
+    },
+    {
+      "type": "agent",
+      "request": "Block out a straight corridor segment with a floor, two walls, and a ceiling—keep scale human-sized, and leave one side open where a door or window might go later."
+    },
+    {
+      "type": "ask",
+      "request": "Roughly how wide and how tall does the corridor feel compared to a doorway you’d expect in real life—over, under, or about right?"
+    },
+    {
+      "type": "agent",
+      "request": "Add a single dominant light so the corridor isn’t completely dark—bias it slightly warm or slightly cool, pick one mood and stick to it for this pass."
+    },
+    {
+      "type": "ask",
+      "request": "Describe the mood in three adjectives after that lighting pass, no technical jargon."
+    },
+    {
+      "type": "agent",
+      "request": "Put something underfoot that reads as worn concrete or old tile—not pristine—and adjust until the floor feels grounded in the space."
+    },
+    {
+      "type": "ask",
+      "request": "Does the floor feel like it belongs with the lighting mood, or is there a clash we should fix later?"
+    },
+    {
+      "type": "agent",
+      "request": "Give the walls a different treatment from the floor so depth reads clearly at a glance, still keeping everything cheap and prototype-friendly."
+    },
+    {
+      "type": "ask",
+      "request": "If you had to explain the wall versus floor read to a non-artist, what would you say?"
+    },
+    {
+      "type": "agent",
+      "request": "Place a simple prop or mesh partway down the corridor—something that could be a bench, crate, or barrier—just to break up the sightline."
+    },
+    {
+      "type": "ask",
+      "request": "What story does that prop suggest, even if we change it later—maintenance, abandonment, or something else?"
+    },
+    {
+      "type": "agent",
+      "request": "Add a second, smaller light near the prop so it gets a little separation from the wall, without turning the whole scene into a spotlight carnival."
+    },
+    {
+      "type": "ask",
+      "request": "Where is your eye drawn first when you look down the corridor now—floor, far wall, or the prop—and why do you think that is?"
+    },
+    {
+      "type": "agent",
+      "request": "Tighten the camera start so a first-time player isn’t staring at a blank wall—position the default view so the corridor invites you forward."
+    },
+    {
+      "type": "ask",
+      "request": "Does the invitation forward feel intentional, or accidental, in one sentence?"
+    },
+    {
+      "type": "agent",
+      "request": "Run through the level in the normal preview way and tell me how many seconds it takes to walk from one end of the blocked corridor to the other at a calm pace—if something prevents that, say exactly what."
+    },
+    {
+      "type": "ask",
+      "request": "Was that walk length closer to five seconds, fifteen seconds, or something else entirely?"
+    },
+    {
+      "type": "agent",
+      "request": "Identify anything that clips through the floor or floats obviously above it in that walk path and fix the worst offender if you can."
+    },
+    {
+      "type": "ask",
+      "request": "After that cleanup, is there still one nagging visual issue you’d queue for a second pass?"
+    },
+    {
+      "type": "agent",
+      "request": "Duplicate the corridor module mentally into a short checklist: floor, walls, ceiling, main light, accent light, prop—confirm each exists in the scene hierarchy in plain language."
+    },
+    {
+      "type": "ask",
+      "request": "Which item on that checklist felt flimsiest when you verified it?"
+    },
+    {
+      "type": "agent",
+      "request": "Introduce a placeholder sound idea only in text—where would a drip, hum, or distant door slam go—then we’ll decide if we add real audio later."
+    },
+    {
+      "type": "ask",
+      "request": "Which of those three sound ideas fits Corridor Pass One best, and why?"
+    },
+    {
+      "type": "agent",
+      "request": "Pick a single color accent that appears somewhere small—trim, emissive strip, or detail—and make sure it doesn’t fight the warm or cool bias you chose earlier."
+    },
+    {
+      "type": "ask",
+      "request": "Name the accent color like you would in a design meeting, not like a shader parameter."
+    },
+    {
+      "type": "agent",
+      "request": "Add a readable label or text panel in the world that says Corridor Pass One somewhere appropriate, sized so it reads in the viewport without dominating the shot."
+    },
+    {
+      "type": "ask",
+      "request": "Does that label help orientation or feel like clutter?"
+    },
+    {
+      "type": "agent",
+      "request": "Prepare for a later interaction: leave a clear spot near the prop where a button or note could sit—don’t build the interaction yet, just clear space and alignment."
+    },
+    {
+      "type": "ask",
+      "request": "If a player approached that spot, what would you want them to try first—look, listen, or touch—and why?"
+    },
+    {
+      "type": "agent",
+      "request": "Sweep the corridor for harsh shadow acne or completely black pockets; soften the worst spot using whatever the project already exposes for lighting quality without exploding build times."
+    },
+    {
+      "type": "ask",
+      "request": "Did that pass change the mood from intimate to clinical, or stay in the same ballpark?"
+    },
+    {
+      "type": "agent",
+      "request": "Capture a still frame that could go into a pitch deck—center the corridor, show depth, keep exposure sane—and save it under the project’s usual output area with a sensible filename."
+    },
+    {
+      "type": "ask",
+      "request": "In one line, what would you caption that image for stakeholders?"
+    },
+    {
+      "type": "agent",
+      "request": "Write a three-bullet internal note: goal of Corridor Pass One, main risk, and next milestone name—keep it under fifty words total."
+    },
+    {
+      "type": "ask",
+      "request": "Which of those three bullets would you want a producer to remember after a five-minute meeting?"
+    },
+    {
+      "type": "agent",
+      "request": "Revisit the milestone name Corridor Pass One and check that every major element we added still supports that title—rename the label in-world if the scene drifted."
+    },
+    {
+      "type": "ask",
+      "request": "If we renamed the milestone, what would be your second choice and why—one sentence?"
+    },
+    {
+      "type": "agent",
+      "request": "Do a consistency pass: wall thickness, ceiling height, and prop scale should feel like one person built them—adjust the outlier that breaks the illusion most."
+    },
+    {
+      "type": "ask",
+      "request": "Which element still feels like a visitor from another project after that pass?"
+    },
+    {
+      "type": "agent",
+      "request": "Add a subtle reason to return down the corridor—something you notice on the way back that you didn’t see heading in, even if it’s just composition or a faint glow."
+    },
+    {
+      "type": "ask",
+      "request": "Describe that return-path detail to someone who hasn’t seen the editor."
+    },
+    {
+      "type": "agent",
+      "request": "Summarize the project settings that matter for this demo—target frame of mind, not marketing—based on what’s in the ordinary project configuration files you can read."
+    },
+    {
+      "type": "ask",
+      "request": "Did anything in those settings surprise you for a corridor-sized slice?"
+    },
+    {
+      "type": "agent",
+      "request": "Search the code or script side of the project for anything referencing the game module or default pawn—report what you find in everyday language, or say you found nothing."
+    },
+    {
+      "type": "ask",
+      "request": "If we later add interaction code, does the current module layout feel like a healthy place to grow, or cramped?"
+    },
+    {
+      "type": "agent",
+      "request": "Clean up transient clutter from this session—extra actors spawned for testing, stray debug draws, duplicate lights—only what you’re confident is safe to remove."
+    },
+    {
+      "type": "ask",
+      "request": "What’s the single biggest thing you’d protect in the scene before handing it to another developer overnight?"
+    },
+    {
+      "type": "agent",
+      "request": "Freeze a verbal snapshot: camera position, what’s selected, and what level or map context is active—so tomorrow’s session can pick up without guessing."
+    },
+    {
+      "type": "ask",
+      "request": "If tomorrow’s session forgot everything except your snapshot paragraph, what would still be ambiguous?"
+    },
+    {
+      "type": "agent",
+      "request": "Close the loop on Corridor Pass One with a short retrospective: what worked, what we punted, and what we should not carry into the next milestone."
+    },
+    {
+      "type": "ask",
+      "request": "Rate your confidence that Corridor Pass One tells a coherent story from entry to exit on a scale of one to five and justify in one sentence."
+    },
+    {
+      "type": "agent",
+      "request": "Leave the editor in a tidy state for the next person: no modal dialogs left open, no half-finished renames obvious in the outliner, and a one-line note in your reply about what they’ll see first."
+    },
+    {
+      "type": "ask",
+      "request": "Finally, compress this whole thread into five bullet talking points I can paste into a standup—no tool names, just outcomes."
+    }
+  ]
+}

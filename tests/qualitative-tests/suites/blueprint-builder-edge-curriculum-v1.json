@@ -1,0 +1,27 @@
+{
+  "suite_id": "blueprint_builder_edge_curriculum_v1",
+  "default_type": "agent",
+  "coverage_notes": "Qualitative / manual triage: vague user language for blueprint editing, delegation vs main-agent tools, T3D-ish workflows, and recap. Not a strict pass/fail suite—use classify_harness_run_jsonl.py and run.jsonl for Blueprint Builder chain events, gate blocks, and tool_finish rates.",
+  "turns": [
+    {
+      "type": "agent",
+      "request": "I'm iterating on gameplay feel. Create a fresh actor blueprint somewhere under /Game/AIHarness/BlueprintBuilderEdges/ with a short memorable name, parented off a plain Actor, so we can mess with it without touching shipped assets."
+    },
+    {
+      "type": "agent",
+      "request": "When that actor runs, I want a clear sign it fired—either an on-screen message or a log line on startup. Wire it up the way this project's system prompt recommends for graph edits."
+    },
+    {
+      "type": "agent",
+      "request": "Something feels off in the event graph—do a sanity pass: exports or dumps are fine, but don't leave obvious broken links or orphan execution if you can help it."
+    },
+    {
+      "type": "agent",
+      "request": "Try to compile whatever we touched. If the editor says you can't do that from here, explain what happened in plain language and what you'd do next."
+    },
+    {
+      "type": "agent",
+      "request": "Give me a tight recap: which assets we touched, whether anything still looks unhappy in the compiler, and one thing you'd test in PIE if you were me."
+    }
+  ]
+}

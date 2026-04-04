@@ -1,0 +1,15 @@
+{
+  "suite_id": "path_focus_mini_v1",
+  "default_type": "agent",
+  "coverage_notes": "Small path-focused probe: underspecified blueprint creation plus explicit path follow-up.",
+  "turns": [
+    {
+      "type": "agent",
+      "request": "Build a blueprint called PathProbeLongRunBP."
+    },
+    {
+      "type": "agent",
+      "request": "Tell me the exact object path of the blueprint you built, and open it."
+    }
+  ]
+}

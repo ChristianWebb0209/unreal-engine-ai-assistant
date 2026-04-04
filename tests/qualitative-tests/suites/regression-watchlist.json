@@ -1,0 +1,75 @@
+{
+  "suite_id": "regression_watchlist_v1",
+  "default_type": "agent",
+  "coverage_notes": "**Watchlist (not promoted to `passed-tests`):** turns that often **complete** historically but are **project-sensitive**, **write-heavy**, **chain-dependent**, or easy to find **subjectively unsatisfying** (see Tool Iteration Log). Run on its own or after `passed-tests`; compare `tool_finish_false` and `run_finished` rates over time. **Includes:** actor moves, MI open, viewport typo framing, asset duplicate, fuzzy typo resolution, PlayerStart search, blueprint peek, physics trace, run-13 character-BP chain (find → deps → overview), visibility toggle, AnimBP skim. **Mar 2026:** Added former realistic-user-agent-basket turns 1–4 (scratch BP vars, referencers, MI tweak) after they passed run-43 but remain write/chain/project-sensitive.",
+  "turns": [
+    {
+      "type": "agent",
+      "request": "Pick any one actor already in the level (not a content asset path), tell me its transform in rough terms, and move it slightly on Z or X so I can see a numeric change—keep it reversible-ish."
+    },
+    {
+      "type": "agent",
+      "request": "Find any reasonable material instance under /Game and open its editor so I can eyeball parameters—if the project only has base materials, say so."
+    },
+    {
+      "type": "agent",
+      "request": "Sorry for typos: can you fram the veiwport on whatever's selected, or if nothing's selected, just tell me selection is empty and suggest one concrete thing to click first?"
+    },
+    {
+      "type": "agent",
+      "request": "Make another copy of a small blueprint or material asset under /Game with a new name (like a _Copy suffix)—editor duplicate, not me copying files in Explorer."
+    },
+    {
+      "type": "agent",
+      "request": "I'm hunting for an asset literally spelled like 'NewGameplayBleuprint' (I know that's probably wrong)—see if you can resolve what I meant and point me at the real thing."
+    },
+    {
+      "type": "agent",
+      "request": "Find something in the current level that looks like a player spawn or PlayerStart. Report one concrete actor path or label you matched; if nothing matches, say so after one serious attempt."
+    },
+    {
+      "type": "agent",
+      "request": "Blueprint read-only: pick a gameplay-oriented blueprint under /Game/Blueprints (use search tools if needed). Give a short summary of what the event graph or main logic seems to do—no edits, no compile."
+    },
+    {
+      "type": "agent",
+      "request": "Physics: from the viewport camera, cast a short segment straight forward into the level. Report hit vs clear miss; if hit, name the actor or component class if you can tell. No destructive edits."
+    },
+    {
+      "type": "agent",
+      "request": "I'm trying to open our old third-person bluepritn under /Game/Bluprints but I can’t remember the exact asset name—find something that looks like the main character controller BP and open it."
+    },
+    {
+      "type": "agent",
+      "request": "If I changed that asset we just found, what else in the project might care, and what does that asset pull in itself? Short answer."
+    },
+    {
+      "type": "agent",
+      "request": "I need a readable overview of how that blueprint is wired—not clicking every node, just the big blocks and flow."
+    },
+    {
+      "type": "agent",
+      "request": "That one actor is ruining my shot—make it disappear from view for a moment without deleting anything."
+    },
+    {
+      "type": "agent",
+      "request": "If there's character animation logic living in a graph somewhere, give me the same kind of high-level read you'd give a normal gameplay blueprint."
+    },
+    {
+      "type": "agent",
+      "request": "Add a scratch float variable named DebugScratchFloat (or similar) on a gameplay Blueprint under /Game/Blueprints. Find the right asset first (search that folder or use what’s already selected)—don’t invent a /Game path. Add the variable, then compile if you changed anything."
+    },
+    {
+      "type": "agent",
+      "request": "On the gameplay-oriented Blueprint under /Game/Blueprints—the one that sounds like a main game or new gameplay BP, not a tiny tutorial stub—add a scratch bool variable called DebugScratchBool (or similar) if you can edit it. Use only paths you get from discovery or search results; compile if needed."
+    },
+    {
+      "type": "agent",
+      "request": "For the same gameplay Blueprint you used before (find it again under /Game/Blueprints if you’re unsure), how many other assets reference it? Reply with the count in one short line, then stop—no long side quests."
+    },
+    {
+      "type": "agent",
+      "request": "Find a Material Instance under /Game (not a base Material). If you find one, bump Roughness slightly and say what you changed. If there is no Material Instance after one honest search, say so and stop—do not invent paths."
+    }
+  ]
+}

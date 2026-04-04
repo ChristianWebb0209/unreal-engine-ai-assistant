@@ -1,0 +1,103 @@
+{
+  "suite_id": "passed_tests_regression_v1",
+  "default_type": "agent",
+  "coverage_notes": "**High-confidence regression only** — mostly read-only tools, honest skips, or ask turns with low flake (see prior analysis). **Moved out:** chain-dependent, write-heavy, or project-sensitive cases are listed in [`regression-watchlist.json`](regression-watchlist.json). Sources still include run-22/run-20/mixed/run-13/fine-tune where applicable; see Tool Iteration Log. **Expectation:** these should usually reach `run_finished` with few `tool_finish_false` on a typical Blank-style project; API/editor drift still possible.",
+  "turns": [
+    {
+      "type": "agent",
+      "request": "What engine/plugin line does this project claim in the little text manifest at the project root? One or two sentences."
+    },
+    {
+      "type": "agent",
+      "request": "If this project has a level sequence or cinematic timeline asset, open it; if there isn't one, say you couldn't find one—don't invent one."
+    },
+    {
+      "type": "agent",
+      "request": "Last check: what's selected in the editor right now, and one sentence on whether the level and content browser state look sane for handoff."
+    },
+    {
+      "type": "ask",
+      "request": "In two or three sentences: are we in the normal editor (not PIE), what level feels open if any, and is anything selected in the level or Content Browser?"
+    },
+    {
+      "type": "agent",
+      "request": "Multi-step viewport exercise: (1) read the active level editor viewport camera transform and FOV, (2) apply a small orbit or dolly so the view visibly changes, (3) briefly summarize the numbers you read and confirm the camera moved. Actually drive the editor—don’t invent numbers."
+    },
+    {
+      "type": "agent",
+      "request": "Show me roughly the first 50 lines of Config/DefaultEngine.ini (or the closest standard engine config path for this project). Mention one non-empty setting line you saw; if the file is missing or unreadable, say what happened."
+    },
+    {
+      "type": "agent",
+      "request": "Search the game source for a symbol tied to this game module (e.g. Blank, or the C++ module name you infer). List up to five file paths you get back, or say you found nothing."
+    },
+    {
+      "type": "ask",
+      "request": "In one short paragraph: which category felt heaviest—viewport/camera, blueprint reading, physics trace, file/config read, asset search, or planning—and did anything fail outright?"
+    },
+    {
+      "type": "agent",
+      "request": "Materials still look like mushy gray—hang back until the editor's actually finished cooking whatever it's cooking."
+    },
+    {
+      "type": "agent",
+      "request": "I'm back after coffee—where's the editor camera roughly right now (position/rotation), and can you swing the view a little left or right so I can tell it actually moved?"
+    },
+    {
+      "type": "agent",
+      "request": "From how I'm looking at the level, if I pointed straight ahead into the scene, would I hit anything solid? What is it in plain words—no level edits."
+    },
+    {
+      "type": "ask",
+      "request": "In one sentence: what should strict deterministic tests verify after an agent request?"
+    },
+    {
+      "type": "agent",
+      "request": "Create a blueprint actor named BP_MassDummy_Controller in the interaction logic area you picked and open it."
+    },
+    {
+      "type": "agent",
+      "request": "Now add BP_MassDummy_Controller_Helper and keep it in the same neighborhood as the main controller."
+    },
+    {
+      "type": "agent",
+      "request": "Create BP_MassDummy_DoorRelay and BP_MassDummy_DoorRelay_Debug in a location that stays organized with the controller assets."
+    },
+    {
+      "type": "agent",
+      "request": "Tell me exactly where those four blueprints live and then open the debug relay one."
+    },
+    {
+      "type": "agent",
+      "request": "Make a duplicate of the main controller for experiments with a clear prototype-style suffix, and keep it near the original."
+    },
+    {
+      "type": "agent",
+      "request": "Add another sibling blueprint called BP_MassDummy_Controller_ProtoB in the same area."
+    },
+    {
+      "type": "agent",
+      "request": "Open BP_MassDummy_Controller_ProtoB and give me a short note that you opened the right one."
+    },
+    {
+      "type": "agent",
+      "request": "Create BP_MassDummy_RouteNode_A and BP_MassDummy_RouteNode_B under the runtime side of that structure."
+    },
+    {
+      "type": "agent",
+      "request": "Duplicate BP_MassDummy_RouteNode_A into a variant for fallback logic and use a name that clearly communicates fallback behavior."
+    },
+    {
+      "type": "agent",
+      "request": "Give me a compact inventory of everything created in this session that starts with BP_MassDummy_, including object paths."
+    },
+    {
+      "type": "ask",
+      "request": "Based on where you placed these assets, does your layout look coherent and scalable, or should one part be reorganized?"
+    },
+    {
+      "type": "agent",
+      "request": "Create one more blueprint actor named BP_MassDummy_SignalHub in the same feature area and open it."
+    }
+  ]
+}

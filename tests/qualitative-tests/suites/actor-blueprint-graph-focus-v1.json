@@ -1,0 +1,19 @@
+{
+  "suite_id": "actor_blueprint_graph_focus_v1",
+  "default_type": "agent",
+  "coverage_notes": "Narrow smoke: actor Blueprint creation and EventGraph signal without multi-surface distraction. Use for regressions on asset_create, build_blueprint handoff, and graph tools.",
+  "turns": [
+    {
+      "type": "agent",
+      "request": "Under /Game/AIHarness/ActorGraphFocus/ create a new Actor Blueprint with a short memorable name, parented to Actor, if the folder exists; otherwise use /Game/AIHarness/MultiSurfaceBuilder/ or /Game/AIHarness/."
+    },
+    {
+      "type": "agent",
+      "request": "For that actor: when the game begins, print a single short line to the screen or log so we can see it fired. Use the plugin's recommended path (build_blueprint handoff if graph mutations are not on your main tool list, then builder tools)."
+    },
+    {
+      "type": "agent",
+      "request": "Compile the Blueprint if needed and report whether the compiler is clean."
+    }
+  ]
+}

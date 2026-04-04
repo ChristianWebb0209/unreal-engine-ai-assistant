@@ -1,0 +1,47 @@
+{
+  "suite_id": "blueprint_natural_thread_v1",
+  "default_type": "agent",
+  "coverage_notes": "Multi-turn stress test: each turn is a vague user message (no asset paths, no tool names, no procedural recipes). Intended to exercise discovery, blueprint authoring, graph editing, and cleanup without telling the agent how to do it.",
+  "turns": [
+    {
+      "type": "agent",
+      "request": "I'm new to this project. Pick any interesting asset you can find in the content and tell me what it is and whether you can open it."
+    },
+    {
+      "type": "agent",
+      "request": "I need a fresh actor blueprint for quick experiments—something I can drop in a level. Create one with a sensible name and parent it off a plain actor."
+    },
+    {
+      "type": "agent",
+      "request": "When that actor runs, I want to see a simple message in the log or on screen so I know it actually fired. Hook that up on startup."
+    },
+    {
+      "type": "agent",
+      "request": "Add an integer field on the actor to count how many times something happens, starting at zero."
+    },
+    {
+      "type": "agent",
+      "request": "Make another actor blueprint in the same vein—related purpose, different asset—so I can compare them side by side."
+    },
+    {
+      "type": "agent",
+      "request": "On one of those actors, add a custom event I could call later from elsewhere, and have it do something visible when it runs."
+    },
+    {
+      "type": "agent",
+      "request": "The event graph is getting hard to follow. Reroute the main execution flow so it's clearer without breaking what runs at start."
+    },
+    {
+      "type": "agent",
+      "request": "Add two integers: a cap for how many jumps or tries are allowed, and a counter for how many have been used. Branch so we only continue when the counter is still under the cap."
+    },
+    {
+      "type": "agent",
+      "request": "Tidy up the graph layout so it isn't a mess—whatever approach fits."
+    },
+    {
+      "type": "agent",
+      "request": "Give me a short recap of which assets we touched in this thread and whether anything is still complaining in the compiler."
+    }
+  ]
+}

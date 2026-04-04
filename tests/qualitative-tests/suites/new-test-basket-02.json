@@ -1,0 +1,27 @@
+{
+  "suite_id": "new_test_basket_02_of_12_refs_mi_through_dolly",
+  "default_type": "agent",
+  "coverage_notes": "**Part 2/12.** Global turns **6–10** of 56.",
+  "turns": [
+    {
+      "type": "agent",
+      "request": "Find any concrete asset under /Game with search, then tell me how many things reference it and how many dependencies it pulls in—even if both are zero."
+    },
+    {
+      "type": "agent",
+      "request": "Find a Material Instance under /Game (not a base Material) and nudge one vector parameter slightly. If only base materials show up after an honest search, say so."
+    },
+    {
+      "type": "agent",
+      "request": "Search the game source for a symbol tied to this project’s main game module name. If nothing turns up, say what the search returned."
+    },
+    {
+      "type": "agent",
+      "request": "Create a new Level Sequence under /Game (pick a subfolder like /Game/Sequences) and open it. If creation fails, report the error."
+    },
+    {
+      "type": "agent",
+      "request": "Dolly the editor camera a small step along where it’s looking, then summarize what happened."
+    }
+  ]
+}
