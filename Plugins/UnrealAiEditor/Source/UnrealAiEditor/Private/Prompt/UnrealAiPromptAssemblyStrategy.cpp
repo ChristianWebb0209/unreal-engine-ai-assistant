@@ -2,6 +2,7 @@
 
 #include "Prompt/UnrealAiPromptChunkUtils.h"
 #include "UnrealAiBlueprintBuilderTargetKind.h"
+#include "UnrealAiEnvironmentBuilderTargetKind.h"
 
 #include <initializer_list>
 
@@ -31,6 +32,19 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 	{
 		FString C;
 		if (UnrealAiPromptChunkUtils::LoadChunk(TEXT("chunks"), FileUnderBlueprintBuilder, C))
+		{
+			if (!Acc.IsEmpty())
+			{
+				Acc += TEXT("\n\n---\n\n");
+			}
+			Acc += C;
+		}
+	};
+
+	auto AppendEnvironmentBuilderChunk = [&Acc](const TCHAR* FileUnderEnvironmentBuilder)
+	{
+		FString C;
+		if (UnrealAiPromptChunkUtils::LoadChunk(TEXT("chunks"), FileUnderEnvironmentBuilder, C))
 		{
 			if (!Acc.IsEmpty())
 			{
@@ -102,6 +116,51 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 		return Acc;
 	}
 
+	if (Params.bEnvironmentBuilderMode)
+	{
+		AppendChunk(TEXT("01-identity.md"));
+		{
+			FString C2;
+			if (UnrealAiPromptChunkUtils::LoadChunk(ChunkSubdir, TEXT("02-operating-modes.md"), C2))
+			{
+				C2 = UnrealAiPromptChunkUtils::ExtractOperatingModeSection(C2, Params.Mode);
+				if (!Acc.IsEmpty())
+				{
+					Acc += TEXT("\n\n---\n\n");
+				}
+				Acc += C2;
+			}
+		}
+		AppendEnvironmentBuilderChunk(TEXT("environment-builder/00-overview.md"));
+		AppendEnvironmentBuilderChunk(TEXT("environment-builder/01-deterministic-loop.md"));
+		AppendEnvironmentBuilderChunk(TEXT("environment-builder/02-unreal-pcg-model.md"));
+		AppendEnvironmentBuilderChunk(TEXT("environment-builder/03-landscape-and-height.md"));
+		AppendEnvironmentBuilderChunk(TEXT("environment-builder/04-foliage-and-instances.md"));
+		AppendEnvironmentBuilderChunk(TEXT("environment-builder/05-scene-safety.md"));
+		AppendEnvironmentBuilderChunk(TEXT("environment-builder/06-verification-ladder.md"));
+		{
+			const FString KindRel = UnrealAiEnvironmentBuilderTargetKind::KindChunkFileName(Params.EnvironmentBuilderTargetKind);
+			FString KindChunk;
+			if (UnrealAiPromptChunkUtils::LoadChunk(TEXT("chunks"), *KindRel, KindChunk) && !KindChunk.IsEmpty())
+			{
+				if (!Acc.IsEmpty())
+				{
+					Acc += TEXT("\n\n---\n\n");
+				}
+				Acc += KindChunk;
+			}
+		}
+		AppendChunk(TEXT("05-context-and-editor.md"));
+		AppendChunk(TEXT("07-safety-banned.md"));
+		AppendChunk(TEXT("08-output-style.md"));
+		UnrealAiPromptChunkUtils::ApplyTemplateTokens(Acc, Params, B);
+		if (!B.SystemOrDeveloperBlock.IsEmpty())
+		{
+			Acc = B.SystemOrDeveloperBlock + TEXT("\n\n---\n\n") + Acc;
+		}
+		return Acc;
+	}
+
 	AppendChunk(TEXT("01-identity.md"));
 
 	{
@@ -123,6 +182,11 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 	if (Params.bInjectBlueprintBuilderResumeChunk)
 	{
 		AppendChunk(TEXT("13-blueprint-builder-resume.md"));
+	}
+	AppendChunk(TEXT("14-build-environment-delegation.md"));
+	if (Params.bInjectEnvironmentBuilderResumeChunk)
+	{
+		AppendChunk(TEXT("15-environment-builder-resume.md"));
 	}
 	AppendChunk(TEXT("05-context-and-editor.md"));
 	AppendChunk(TEXT("10-mvp-gameplay-and-tooling.md"));

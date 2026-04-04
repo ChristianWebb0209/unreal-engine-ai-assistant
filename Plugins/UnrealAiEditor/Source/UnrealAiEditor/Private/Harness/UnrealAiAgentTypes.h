@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Context/AgentContextTypes.h"
 #include "UnrealAiBlueprintBuilderTargetKind.h"
+#include "UnrealAiEnvironmentBuilderTargetKind.h"
 
 /** Stable run identifiers for observability (parent/child workers). */
 struct FUnrealAiRunIds
@@ -124,7 +125,7 @@ struct FUnrealAiToolSurfaceTelemetry
 	FString QueryHash;
 	/** Full ordered roster passed to the tiered index (guardrails + top‑K), with per-tool scoring breakdown. */
 	TArray<FUnrealAiToolSurfaceRankedEntry> RankedTools;
-	/** e.g. default | blueprint_builder_verbose */
+	/** e.g. default | blueprint_builder_verbose | environment_builder_verbose */
 	FString SurfaceProfile;
 	/** Blueprint Builder: max chars allowed for the tiered tool appendix before catalog trim (0 = not builder / default path). */
 	int32 AppendixCharBudgetLimit = 0;
@@ -167,8 +168,8 @@ struct FUnrealAiAgentTurnRequest
 	EUnrealAiBlueprintBuilderTargetKind BlueprintBuilderTargetKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
 
 	/**
-	 * When true (default) on Agent turns that are NOT bBlueprintBuilderTurn, graph mutation tools
-	 * (patch / format / compile / add_variable) are omitted from the tiered tool index — use build-blueprint handoff instead.
+	 * When true (default) on Agent turns that are NOT a Builder sub-turn, catalog-gated tools
+	 * (Blueprint graph mutators, Environment PCG/landscape/foliage mutators) are omitted from the tiered tool index — use the matching handoff tag instead.
 	 */
 	bool bOmitMainAgentBlueprintMutationTools = true;
 
@@ -177,4 +178,15 @@ struct FUnrealAiAgentTurnRequest
 	 * Cleared when UnrealAiTurnLlmRequestBuilder::Build consumes it.
 	 */
 	bool bInjectBlueprintBuilderResumeChunk = false;
+
+	/**
+	 * When true, this turn uses Environment / PCG Builder prompts and the environment-scoped tool surface
+	 * (`agent_surfaces` includes environment_builder). Chained after `<unreal_ai_build_environment>` from the main agent.
+	 */
+	bool bEnvironmentBuilderTurn = false;
+
+	EUnrealAiEnvironmentBuilderTargetKind EnvironmentBuilderTargetKind = EUnrealAiEnvironmentBuilderTargetKind::PcgScene;
+
+	/** One-shot resume chunk after `<unreal_ai_environment_builder_result>` (see `15-environment-builder-resume.md`). */
+	bool bInjectEnvironmentBuilderResumeChunk = false;
 };

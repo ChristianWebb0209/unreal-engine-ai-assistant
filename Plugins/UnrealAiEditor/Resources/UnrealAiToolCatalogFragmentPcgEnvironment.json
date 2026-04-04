@@ -1,0 +1,134 @@
+{
+  "tools": [
+    {
+      "tool_id": "foliage_paint_instances",
+      "summary": "Add foliage instances in radius.",
+      "category": "landscape_foliage_pcg",
+      "tags": [
+        "foliage"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "environment_builder"
+      ],
+      "context_selector": {
+        "priority": 18,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "environment_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "foliage_type": {
+            "type": "string"
+          },
+          "radius": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "foliage_type",
+          "radius"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "Foliage edit APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "landscape_import_heightmap",
+      "summary": "Import heightmap to landscape.",
+      "category": "landscape_foliage_pcg",
+      "tags": [
+        "landscape"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "environment_builder"
+      ],
+      "context_selector": {
+        "priority": 18,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "environment_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "heightmap_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "heightmap_path"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "ALandscape",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "pcg_generate",
+      "summary": "Execute PCG graph in editor.",
+      "category": "landscape_foliage_pcg",
+      "tags": [
+        "pcg"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "environment_builder"
+      ],
+      "context_selector": {
+        "priority": 18,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "environment_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_path"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "UPCGComponent",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    }
+  ]
+}

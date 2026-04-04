@@ -9,8 +9,9 @@
 #include "Misc/UnrealAiRuntimeDefaults.h"
 #include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Prompt/UnrealAiPromptBuilder.h"
-#include "Tools/UnrealAiBlueprintToolGate.h"
+#include "Tools/UnrealAiAgentToolGate.h"
 #include "Tools/UnrealAiBlueprintBuilderToolSurface.h"
+#include "Tools/UnrealAiEnvironmentBuilderToolSurface.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Tools/UnrealAiToolSurfacePipeline.h"
 #include "UnrealAiEditorSettings.h"
@@ -147,11 +148,18 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	P.bIncludePlanDagChunk = (Request.Mode == EUnrealAiAgentMode::Plan);
 	P.bBlueprintBuilderMode = Request.bBlueprintBuilderTurn;
 	P.BlueprintBuilderTargetKind = Request.BlueprintBuilderTargetKind;
+	P.bEnvironmentBuilderMode = Request.bEnvironmentBuilderTurn;
+	P.EnvironmentBuilderTargetKind = Request.EnvironmentBuilderTargetKind;
 
 	const bool bResumeChunk = Request.bInjectBlueprintBuilderResumeChunk;
 	Request.bInjectBlueprintBuilderResumeChunk = false;
 	P.bInjectBlueprintBuilderResumeChunk =
 		bResumeChunk && !Request.bBlueprintBuilderTurn && Request.Mode == EUnrealAiAgentMode::Agent;
+
+	const bool bEnvResumeChunk = Request.bInjectEnvironmentBuilderResumeChunk;
+	Request.bInjectEnvironmentBuilderResumeChunk = false;
+	P.bInjectEnvironmentBuilderResumeChunk =
+		bEnvResumeChunk && !Request.bEnvironmentBuilderTurn && Request.Mode == EUnrealAiAgentMode::Agent;
 
 	const FString SystemContent = UnrealAiPromptBuilder::BuildSystemDeveloperContent(P);
 	FString SystemAugmented = SystemContent;
@@ -196,7 +204,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 
 	const auto ToolSurfaceFilter = [&](const FString& Tid) -> bool
 	{
-		return UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Request, Tid, Catalog);
+		return UnrealAiAgentToolGate::PassesToolSurfaceFilter(Request, Tid, Catalog);
 	};
 
 	FString ToolsJson;
@@ -218,6 +226,20 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 				return false;
 			}
 		}
+		int32 EnvironmentBuilderAppendixBudgetChars = 0;
+		if (Request.bEnvironmentBuilderTurn && Request.Mode == EUnrealAiAgentMode::Agent)
+		{
+			FString EnvBudgetErr;
+			if (!UnrealAiEnvironmentBuilderToolSurface::TryComputeAppendixBudgetFromModelContext(
+					Caps.MaxContextTokens,
+					CharPerTokenApprox,
+					EnvironmentBuilderAppendixBudgetChars,
+					&EnvBudgetErr))
+			{
+				OutError = EnvBudgetErr;
+				return false;
+			}
+		}
 		FString ToolIndexMd;
 		FUnrealAiToolSurfaceTelemetry Tel;
 		const bool bTiered = UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
@@ -230,7 +252,8 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 			true,
 			ToolIndexMd,
 			Tel,
-			BlueprintBuilderAppendixBudgetChars);
+			BlueprintBuilderAppendixBudgetChars,
+			EnvironmentBuilderAppendixBudgetChars);
 		if (!bTiered)
 		{
 			Catalog->BuildCompactToolIndexAppendix(Request.Mode, Caps, PackPtr, ToolSurfaceFilter, ToolIndexMd);

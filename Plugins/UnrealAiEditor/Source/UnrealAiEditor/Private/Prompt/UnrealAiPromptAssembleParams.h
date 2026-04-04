@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Context/AgentContextTypes.h"
 #include "UnrealAiBlueprintBuilderTargetKind.h"
+#include "UnrealAiEnvironmentBuilderTargetKind.h"
 
 /** Parameters for assembling static prompt chunks + transcript tokens (see `prompts/README.md`). */
 struct FUnrealAiPromptAssembleParams
@@ -25,4 +26,10 @@ struct FUnrealAiPromptAssembleParams
 
 	/** Main agent: one-shot resume guidance after builder result (see `13-blueprint-builder-resume.md`). */
 	bool bInjectBlueprintBuilderResumeChunk = false;
+
+	bool bEnvironmentBuilderMode = false;
+
+	EUnrealAiEnvironmentBuilderTargetKind EnvironmentBuilderTargetKind = EUnrealAiEnvironmentBuilderTargetKind::PcgScene;
+
+	bool bInjectEnvironmentBuilderResumeChunk = false;
 };

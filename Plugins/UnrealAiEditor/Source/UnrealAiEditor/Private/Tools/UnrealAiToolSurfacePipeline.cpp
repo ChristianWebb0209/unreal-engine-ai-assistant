@@ -15,8 +15,9 @@
 #include "Misc/SecureHash.h"
 
 #include "Tools/UnrealAiBlueprintBuilderToolSurface.h"
+#include "Tools/UnrealAiEnvironmentBuilderToolSurface.h"
 
-#include "Tools/UnrealAiBlueprintToolGate.h"
+#include "Tools/UnrealAiAgentToolGate.h"
 
 #include "Tools/UnrealAiToolBm25Index.h"
 
@@ -100,7 +101,9 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 
 	FUnrealAiToolSurfaceTelemetry& OutTelemetry,
 
-	const int32 BlueprintBuilderAppendixBudgetChars)
+	const int32 BlueprintBuilderAppendixBudgetChars,
+
+	const int32 EnvironmentBuilderAppendixBudgetChars)
 
 {
 
@@ -148,7 +151,7 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 
 	{
 
-		if (!UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Request, Tid, Catalog))
+		if (!UnrealAiAgentToolGate::PassesToolSurfaceFilter(Request, Tid, Catalog))
 
 		{
 
@@ -156,10 +159,10 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 
 		}
 
-		// Main Agent tiered surface: drop tools that belong only to the Blueprint Builder retrieval bundle so BM25
-		// ranks a smaller editor-centric pool; Blueprint Builder sub-turns still pass the full merged catalog.
+		// Main Agent tiered surface: drop tools that belong only to builder retrieval bundles so BM25
+		// ranks a smaller editor-centric pool; builder sub-turns still pass the full merged catalog.
 
-		if (!Request.bBlueprintBuilderTurn && Catalog)
+		if (!Request.bBlueprintBuilderTurn && !Request.bEnvironmentBuilderTurn && Catalog)
 
 		{
 
@@ -177,7 +180,8 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 
 					Bundle.TrimStartAndEndInline();
 
-					if (Bundle.Equals(TEXT("blueprint_builder"), ESearchCase::IgnoreCase))
+					if (Bundle.Equals(TEXT("blueprint_builder"), ESearchCase::IgnoreCase)
+						|| Bundle.Equals(TEXT("environment_builder"), ESearchCase::IgnoreCase))
 
 					{
 
@@ -216,6 +220,16 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 		UnrealAiBlueprintBuilderToolSurface::AugmentHybridRetrievalQuery(Hybrid);
 
 		OutTelemetry.SurfaceProfile = UnrealAiBlueprintBuilderToolSurface::SurfaceProfileTelemetryId();
+
+	}
+
+	else if (Request.bEnvironmentBuilderTurn)
+
+	{
+
+		UnrealAiEnvironmentBuilderToolSurface::AugmentHybridRetrievalQuery(Hybrid);
+
+		OutTelemetry.SurfaceProfile = UnrealAiEnvironmentBuilderToolSurface::SurfaceProfileTelemetryId();
 
 	}
 
@@ -297,7 +311,7 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 
 			{
 
-				if (Tid == TEXT("blueprint_apply_ir"))
+				if (Tid == TEXT("blueprint_graph_patch"))
 
 				{
 
@@ -373,6 +387,8 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 
 			bool bBpBuilderCore = false;
 
+			bool bEnvBuilderCore = false;
+
 			const TSharedPtr<FJsonObject>* Ctx = nullptr;
 
 			if (Def->TryGetObjectField(TEXT("context_selector"), Ctx) && Ctx && (*Ctx).IsValid())
@@ -383,9 +399,19 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 
 				(*Ctx)->TryGetBoolField(TEXT("blueprint_builder_core"), bBpBuilderCore);
 
+				(*Ctx)->TryGetBoolField(TEXT("environment_builder_core"), bEnvBuilderCore);
+
 			}
 
 			if (Request.bBlueprintBuilderTurn && bBpBuilderCore)
+
+			{
+
+				Row.Score += 3.f;
+
+			}
+
+			if (Request.bEnvironmentBuilderTurn && bEnvBuilderCore)
 
 			{
 
@@ -454,6 +480,14 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 	{
 
 		UnrealAiBlueprintBuilderToolSurface::WidenKeffectiveToFullEligibleRoster(NonGuardrailPoolCount, Keffective);
+
+	}
+
+	if (Request.bEnvironmentBuilderTurn)
+
+	{
+
+		UnrealAiEnvironmentBuilderToolSurface::WidenKeffectiveToFullEligibleRoster(NonGuardrailPoolCount, Keffective);
 
 	}
 
@@ -528,6 +562,28 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 			GuardrailIds,
 
 			Request.BlueprintBuilderTargetKind,
+
+			Ordered);
+
+	}
+
+	if (Request.bEnvironmentBuilderTurn)
+
+	{
+
+		UnrealAiEnvironmentBuilderToolSurface::MergeEnvironmentCoreToolsAfterGuardrails(
+
+			*Catalog,
+
+			Request.Mode,
+
+			Caps,
+
+			PackOptions,
+
+			ToolFilter,
+
+			GuardrailIds,
 
 			Ordered);
 
@@ -616,6 +672,32 @@ bool UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
 			ParamsExcerptMax);
 
 		OutTelemetry.AppendixCharBudgetLimit = BpBudget;
+
+	}
+
+	else if (Request.bEnvironmentBuilderTurn)
+
+	{
+
+		const int32 EnvBudget = EnvironmentBuilderAppendixBudgetChars > 0
+
+			? EnvironmentBuilderAppendixBudgetChars
+
+			: UnrealAiRuntimeDefaults::BlueprintBuilderToolSurfaceBudgetChars;
+
+		UnrealAiEnvironmentBuilderToolSurface::GetVerboseAppendixSettings(
+
+			Ordered.Num(),
+
+			EnvBudget,
+
+			ExpandedCount,
+
+			Budget,
+
+			ParamsExcerptMax);
+
+		OutTelemetry.AppendixCharBudgetLimit = EnvBudget;
 
 	}
 

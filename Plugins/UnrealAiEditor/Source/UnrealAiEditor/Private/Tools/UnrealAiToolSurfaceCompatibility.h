@@ -10,6 +10,7 @@ enum class EUnrealAiToolSurfaceKind : uint8
 {
 	MainAgent,
 	BlueprintBuilder,
+	EnvironmentBuilder,
 };
 
 namespace UnrealAiToolSurfaceCompatibility
@@ -20,6 +21,8 @@ namespace UnrealAiToolSurfaceCompatibility
 	extern const FString GAgentSurfaceToken_MainAgent;
 	/** JSON token: Blueprint Builder sub-turn after handoff. */
 	extern const FString GAgentSurfaceToken_BlueprintBuilder;
+	/** JSON token: Environment / PCG Builder sub-turn after handoff. */
+	extern const FString GAgentSurfaceToken_EnvironmentBuilder;
 
 	/**
 	 * Reads tools[].agent_surfaces (array of strings).

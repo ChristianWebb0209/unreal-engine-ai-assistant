@@ -1,11 +1,11 @@
-#include "Tools/UnrealAiBlueprintToolGate.h"
+#include "Tools/UnrealAiAgentToolGate.h"
 
 #include "Context/AgentContextTypes.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Tools/UnrealAiToolSurfaceCompatibility.h"
 
-bool UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(
+bool UnrealAiAgentToolGate::PassesToolSurfaceFilter(
 	const FUnrealAiAgentTurnRequest& Request,
 	const FString& ToolId,
 	const FUnrealAiToolCatalog* CatalogOpt)
@@ -33,8 +33,15 @@ bool UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(
 	bool bAllSurfaces = false;
 	UnrealAiToolSurfaceCompatibility::ParseAgentSurfaces(*Def, SurfaceTokens, bAllSurfaces);
 
-	const EUnrealAiToolSurfaceKind Kind = Request.bBlueprintBuilderTurn ? EUnrealAiToolSurfaceKind::BlueprintBuilder
-																		 : EUnrealAiToolSurfaceKind::MainAgent;
+	EUnrealAiToolSurfaceKind Kind = EUnrealAiToolSurfaceKind::MainAgent;
+	if (Request.bEnvironmentBuilderTurn)
+	{
+		Kind = EUnrealAiToolSurfaceKind::EnvironmentBuilder;
+	}
+	else if (Request.bBlueprintBuilderTurn)
+	{
+		Kind = EUnrealAiToolSurfaceKind::BlueprintBuilder;
+	}
 
 	return UnrealAiToolSurfaceCompatibility::ToolAllowedOnSurface(SurfaceTokens, bAllSurfaces, Kind);
 }

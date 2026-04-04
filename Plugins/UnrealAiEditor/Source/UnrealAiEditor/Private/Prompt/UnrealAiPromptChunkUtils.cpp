@@ -44,7 +44,7 @@ namespace UnrealAiPromptChunkUtilsPriv
 				"Off — Do not add Blueprint graph comment boxes or extra narrative/section labels in IR unless the user explicitly asks for comments.");
 		case EUnrealAiBlueprintCommentsMode::Verbose:
 			return TEXT(
-				"Verbose — Prefer clear sectioning for Blueprint work: describe intent, use Sequence/structure where it helps readability, and add short readable labels when patching graphs (within blueprint_apply_ir capabilities).");
+				"Verbose — Prefer clear sectioning for Blueprint work: describe intent, use Sequence/structure where it helps readability, and add short readable labels when patching graphs (within blueprint_graph_patch capabilities).");
 		case EUnrealAiBlueprintCommentsMode::Minimal:
 		default:
 			return TEXT(
@@ -58,17 +58,17 @@ namespace UnrealAiPromptChunkUtilsPriv
 		if (P == TEXT("blueprint_only"))
 		{
 			return TEXT(
-				"**Code-type preference: blueprint_only** — Prefer Blueprint graph work (`blueprint_export_ir`, `blueprint_graph_patch`, `blueprint_apply_ir`) and gameplay assets. Avoid introducing or editing C++ under `Source/` unless the user explicitly requires native code. After graph edits, run `blueprint_compile` and fix all reported errors before finishing. Use `asset_rename` for `/Game` assets; use `project_file_move` for on-disk files outside Content if needed.");
+				"**Code-type preference: blueprint_only** — Prefer Blueprint graph work (`blueprint_graph_introspect`, `blueprint_graph_patch`) and gameplay assets. Avoid introducing or editing C++ under `Source/` unless the user explicitly requires native code. After graph edits, run `blueprint_compile` and fix all reported errors before finishing. Use `asset_rename` for `/Game` assets; use `project_file_move` for on-disk files outside Content if needed.");
 		}
 		if (P == TEXT("cpp_only"))
 		{
 			return TEXT(
-				"**Code-type preference: cpp_only** — Prefer C++ changes via `project_file_read_text` / `project_file_write_text` (drafts under `Saved/UnrealAiEditorAgent/` by default; `confirm_project_critical:true` for `Source/`, `Config/`, `.uproject`). Do not call `blueprint_apply_ir`. After native edits, prefer a closed-editor build (`build-editor.ps1`); `cpp_project_compile` in an open editor requires `confirm_external_rebuild:true` plus compiler output until clean.");
+				"**Code-type preference: cpp_only** — Prefer C++ changes via `project_file_read_text` / `project_file_write_text` (drafts under `Saved/UnrealAiEditorAgent/` by default; `confirm_project_critical:true` for `Source/`, `Config/`, `.uproject`). Do not call `blueprint_graph_patch`. After native edits, prefer a closed-editor build (`build-editor.ps1`); `cpp_project_compile` in an open editor requires `confirm_external_rebuild:true` plus compiler output until clean.");
 		}
 		if (P == TEXT("blueprint_first"))
 		{
 			return TEXT(
-				"**Code-type preference: blueprint_first** — Default to Blueprint graphs and `/Game` assets when either approach could work; fall back to C++ when Blueprint or tools are insufficient. Use `blueprint_graph_patch` when arbitrary K2 nodes matter; use `blueprint_apply_ir` when the compact IR ops fit. Always compile: `blueprint_compile` for Blueprints; after substantive C++ use a closed-editor build when possible, or `cpp_project_compile` with `confirm_external_rebuild:true` if the editor is interactive.");
+				"**Code-type preference: blueprint_first** — Default to Blueprint graphs and `/Game` assets when either approach could work; fall back to C++ when Blueprint or tools are insufficient. Use `blueprint_graph_patch` with `semantic_kind` or validated `k2_class` for Kismet edits. Always compile: `blueprint_compile` for Blueprints; after substantive C++ use a closed-editor build when possible, or `cpp_project_compile` with `confirm_external_rebuild:true` if the editor is interactive.");
 		}
 		if (P == TEXT("cpp_first"))
 		{

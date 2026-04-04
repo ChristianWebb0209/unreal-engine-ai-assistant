@@ -18,6 +18,7 @@
 #include "Tools/UnrealAiToolDispatch_EditorMore.h"
 #include "Tools/UnrealAiToolDispatch_BuildPackaging.h"
 #include "Tools/UnrealAiToolDispatch_ExtraFeatures.h"
+#include "Tools/UnrealAiToolDispatch_PcgEnvironment.h"
 #include "Tools/UnrealAiToolDispatch_GenericAssets.h"
 #include "Tools/UnrealAiToolDispatch_SettingsProperties.h"
 #include "Tools/UnrealAiToolJson.h"

@@ -7,7 +7,9 @@
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Harness/FUnrealAiConversationStore.h"
 #include "Tools/UnrealAiBuildBlueprintTag.h"
+#include "Tools/UnrealAiBuildEnvironmentTag.h"
 #include "Tools/UnrealAiBlueprintBuilderToolSurface.h"
+#include "Tools/UnrealAiEnvironmentBuilderToolSurface.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Harness/IAgentRunSink.h"
 #include "Planning/FUnrealAiPlanExecutor.h"
@@ -21,7 +23,7 @@
 #include "Misc/SecureHash.h"
 #include "Tools/UnrealAiToolUsageEventLogger.h"
 #include "Tools/UnrealAiToolUsagePrior.h"
-#include "Tools/UnrealAiBlueprintToolGate.h"
+#include "Tools/UnrealAiAgentToolGate.h"
 #include "GraphBuilder/UnrealAiGraphEditDomain.h"
 #include "Backend/FUnrealAiUsageTracker.h"
 #include "Backend/IUnrealAiPersistence.h"
@@ -102,6 +104,37 @@ namespace UnrealAiAgentHarnessPriv
 	}
 
 	/** asset_apply_properties failures often differ only in property keys; normalize so repeat-failure stop triggers. */
+	/** Summarize blueprint_graph_patch failure error_codes[] for harness nudges (best-effort JSON parse). */
+	static FString TryExtractBlueprintPatchErrorCodesSummary(const FString& ModelToolContent)
+	{
+		TSharedPtr<FJsonObject> Root;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ModelToolContent);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			return FString();
+		}
+		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+		if (!Root->TryGetArrayField(TEXT("error_codes"), Arr) || !Arr)
+		{
+			return FString();
+		}
+		FString Out;
+		const int32 N = FMath::Min(6, Arr->Num());
+		for (int32 i = 0; i < N; ++i)
+		{
+			FString S;
+			if ((*Arr)[i].IsValid() && (*Arr)[i]->TryGetString(S))
+			{
+				if (!Out.IsEmpty())
+				{
+					Out += TEXT(", ");
+				}
+				Out += S;
+			}
+		}
+		return Out.IsEmpty() ? FString() : FString::Printf(TEXT(" Repeated patch error_codes: [%s]."), *Out);
+	}
+
 	static FString NormalizeToolFailureSignatureForRepeatCount(const FString& InvokeName, const FString& InvokeArgs)
 	{
 		if (InvokeName.Equals(TEXT("asset_apply_properties"), ESearchCase::IgnoreCase))
@@ -359,7 +392,7 @@ namespace UnrealAiAgentHarnessPriv
 			|| T.Contains(TEXT("_list_"))
 			|| T.Contains(TEXT("snapshot"))
 			|| T.Contains(TEXT("_status"))
-			|| T == TEXT("blueprint_export_ir");
+			|| T == TEXT("blueprint_graph_introspect");
 	}
 
 	static bool IsLikelyRequiredArgsTool(const FString& ToolName)
@@ -367,8 +400,7 @@ namespace UnrealAiAgentHarnessPriv
 		return ToolName == TEXT("asset_create")
 			|| ToolName == TEXT("asset_rename")
 			|| ToolName == TEXT("blueprint_get_graph_summary")
-			|| ToolName == TEXT("blueprint_export_ir")
-			|| ToolName == TEXT("blueprint_apply_ir")
+			|| ToolName == TEXT("blueprint_graph_introspect")
 			|| ToolName == TEXT("project_file_read_text")
 			|| ToolName == TEXT("project_file_write_text")
 			|| ToolName == TEXT("project_file_move");
@@ -618,7 +650,7 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
-		if (InvokeName != TEXT("blueprint_get_graph_summary") && InvokeName != TEXT("blueprint_export_ir")
+		if (InvokeName != TEXT("blueprint_get_graph_summary") && InvokeName != TEXT("blueprint_graph_introspect")
 			&& InvokeName != TEXT("project_file_read_text")
 			&& InvokeName != TEXT("asset_create"))
 		{
@@ -639,7 +671,7 @@ namespace UnrealAiAgentHarnessPriv
 				ArgsObj->SetStringField(TEXT("relative_path"), DefaultProjectReadRelativePath());
 			}
 		}
-		if (InvokeName == TEXT("blueprint_get_graph_summary") || InvokeName == TEXT("blueprint_export_ir"))
+		if (InvokeName == TEXT("blueprint_get_graph_summary") || InvokeName == TEXT("blueprint_graph_introspect"))
 		{
 			FString BpPath;
 			const bool bHasBpPath = ArgsObj->TryGetStringField(TEXT("blueprint_path"), BpPath) && !BpPath.TrimStartAndEnd().IsEmpty();
@@ -963,6 +995,8 @@ namespace UnrealAiAgentHarnessPriv
 		FString LastToolFailureSignature;
 		/** Latest `suggested_correct_call` JSON from a failed tool (for repeated-validation nudge). */
 		FString LastSuggestedCorrectCallSerialized;
+		/** When the last failing tool was blueprint_graph_patch, trimmed JSON for error_codes extraction. */
+		FString LastFailedBlueprintGraphPatchContent;
 		int32 RepeatedToolFailureCount = 0;
 		TMap<FString, int32> ToolInvokeCountByName;
 		TMap<FString, int32> ToolInvokeCountBySignature;
@@ -2145,11 +2179,11 @@ namespace UnrealAiAgentHarnessPriv
 			&& (SigCount >= GHarnessRepeatedFailureStopCount || NameCount >= 6);
 		EmitEnforcementEvent(TEXT("stream_tool_exec_start"), FString::Printf(TEXT("id=%s name=%s"), *Tc.Id, *InvokeName));
 		if (Request.Mode == EUnrealAiAgentMode::Agent
-			&& !UnrealAiBlueprintToolGate::PassesToolSurfaceFilter(Request, InvokeName, Catalog))
+			&& !UnrealAiAgentToolGate::PassesToolSurfaceFilter(Request, InvokeName, Catalog))
 		{
 			const FString BlockMsg = FString::Printf(
-				TEXT("[Harness][reason=blueprint_tool_withheld] Blocked: tool \"%s\" is reserved for automated Blueprint Builder sub-turns. ")
-				TEXT("Delegate graph edits via <unreal_ai_build_blueprint> (see system prompt), or use read-only / non-mutation blueprint tools on the main agent."),
+				TEXT("[Harness][reason=agent_surface_tool_withheld] Blocked: tool \"%s\" is reserved for a Builder sub-turn (Blueprint or Environment/PCG). ")
+				TEXT("Delegate via <unreal_ai_build_blueprint> or <unreal_ai_build_environment> per the system prompt, or use read-only tools on the main agent."),
 				*InvokeName);
 			if (Sink.IsValid())
 			{
@@ -2170,8 +2204,8 @@ namespace UnrealAiAgentHarnessPriv
 				ExecutedToolCallIds.Add(Tc.Id);
 			}
 			EmitEnforcementEvent(
-				TEXT("blueprint_tool_gate_block"),
-				FString::Printf(TEXT("tool=%s blueprint_builder_only=1"), *InvokeName));
+				TEXT("agent_surface_tool_gate_block"),
+				FString::Printf(TEXT("tool=%s builder_surface_only=1"), *InvokeName));
 			UnrealAiToolUsagePrior::NoteSessionOutcome(InvokeName, false);
 			LastConsecutiveIdenticalOkSignature.Reset();
 			ConsecutiveIdenticalOkCount = 0;
@@ -2304,6 +2338,7 @@ namespace UnrealAiAgentHarnessPriv
 			LastToolFailureSignature.Reset();
 			RepeatedToolFailureCount = 0;
 			LastSuggestedCorrectCallSerialized.Reset();
+			LastFailedBlueprintGraphPatchContent.Reset();
 		}
 		else
 		{
@@ -2325,6 +2360,10 @@ namespace UnrealAiAgentHarnessPriv
 			{
 				LastToolFailureSignature = FailureSig;
 				RepeatedToolFailureCount = 1;
+			}
+			if (InvokeName == TEXT("blueprint_graph_patch"))
+			{
+				LastFailedBlueprintGraphPatchContent = ModelToolContent.Left(12000);
 			}
 		}
 		if (Sink.IsValid())
@@ -2573,7 +2612,8 @@ namespace UnrealAiAgentHarnessPriv
 				LastToolFailureSignature.IsEmpty() ? TEXT("unknown signature") : *LastToolFailureSignature));
 			return;
 		}
-		const bool bRepeatedValidationLoop = RepeatedToolFailureCount >= 3;
+		const bool bRepeatedValidationLoop = RepeatedToolFailureCount >= 3
+			|| (RepeatedToolFailureCount >= 2 && LastToolFailureSignature.StartsWith(TEXT("blueprint_graph_patch|")));
 		if (bRepeatedValidationLoop && Request.Mode != EUnrealAiAgentMode::Ask)
 		{
 			FUnrealAiConversationMessage RepairNudge;
@@ -2581,6 +2621,12 @@ namespace UnrealAiAgentHarnessPriv
 			RepairNudge.Content = TEXT(
 				"[Harness][reason=repeated_validation_failure] The same tool validation failure repeated multiple times. Repair-or-stop now: either call one corrected tool invocation with fixed arguments, or provide a concise blocked summary with the exact failing tool and required fields. Last failing pattern: ");
 			RepairNudge.Content += LastToolFailureSignature;
+			if (LastToolFailureSignature.StartsWith(TEXT("blueprint_graph_patch|")))
+			{
+				RepairNudge.Content += TEXT(
+					" After repeated blueprint_graph_patch failures you must change strategy: call blueprint_graph_introspect (and blueprint_graph_list_pins for one node), use validate_only:true on a smaller ops batch, or split the patch — do not resend the same failing patch JSON.");
+				RepairNudge.Content += UnrealAiAgentHarnessPriv::TryExtractBlueprintPatchErrorCodesSummary(LastFailedBlueprintGraphPatchContent);
+			}
 			if (!LastSuggestedCorrectCallSerialized.IsEmpty())
 			{
 				RepairNudge.Content += TEXT(" If the last tool message included `suggested_correct_call`, use that exact inner tool_id + arguments on the next `unreal_ai_dispatch` retry. suggested_correct_call: ");
@@ -2598,7 +2644,7 @@ namespace UnrealAiAgentHarnessPriv
 			Conv->GetMessagesMutable().Add(LoopNudge);
 		}
 		if (ToolFailCount >= 4 && Request.Mode == EUnrealAiAgentMode::Agent && !bTodoPlanOnly && Request.bOmitMainAgentBlueprintMutationTools
-			&& !Request.bBlueprintBuilderTurn)
+			&& !Request.bBlueprintBuilderTurn && !Request.bEnvironmentBuilderTurn)
 		{
 			FUnrealAiConversationMessage BpNudge;
 			BpNudge.Role = TEXT("user");
@@ -2720,18 +2766,36 @@ namespace UnrealAiAgentHarnessPriv
 		const bool bBbResultParsed =
 			Request.bBlueprintBuilderTurn && UnrealAiBlueprintBuilderResultTag::TryConsume(OrigAssist, BbResultInner, BbResultVisible);
 
+		FString EnvResultInner;
+		FString EnvResultVisible;
+		const bool bEnvResultParsed =
+			Request.bEnvironmentBuilderTurn && UnrealAiEnvironmentBuilderResultTag::TryConsume(OrigAssist, EnvResultInner, EnvResultVisible);
+
 		FString BpInner;
 		FString BpVisible;
-		const bool bBpParsed = !Request.bBlueprintBuilderTurn
+		const bool bBpParsed = !Request.bBlueprintBuilderTurn && !Request.bEnvironmentBuilderTurn
 			&& UnrealAiBuildBlueprintTag::TryConsume(OrigAssist, BpInner, BpVisible);
+
+		FString EnvInner;
+		FString EnvVisibleFromTag;
+		const bool bEnvParsed = !Request.bBlueprintBuilderTurn && !Request.bEnvironmentBuilderTurn
+			&& UnrealAiBuildEnvironmentTag::TryConsume(OrigAssist, EnvInner, EnvVisibleFromTag);
+
 		const bool bBpHandoff = bBpParsed && (Request.Mode == EUnrealAiAgentMode::Agent) && !Request.bBlueprintBuilderTurn
-			&& !Request.ThreadId.Contains(TEXT("_plan_")) && !BpInner.TrimStartAndEnd().IsEmpty();
+			&& !Request.bEnvironmentBuilderTurn && !Request.ThreadId.Contains(TEXT("_plan_")) && !BpInner.TrimStartAndEnd().IsEmpty();
+
+		const bool bEnvHandoff = bEnvParsed && (Request.Mode == EUnrealAiAgentMode::Agent) && !Request.bBlueprintBuilderTurn
+			&& !Request.bEnvironmentBuilderTurn && !Request.ThreadId.Contains(TEXT("_plan_")) && !EnvInner.TrimStartAndEnd().IsEmpty();
 
 		FUnrealAiConversationMessage Am;
 		Am.Role = TEXT("assistant");
 		if (bBpHandoff)
 		{
 			Am.Content = BpVisible;
+		}
+		else if (bEnvHandoff)
+		{
+			Am.Content = EnvVisibleFromTag;
 		}
 		else if (bBbResultParsed)
 		{
@@ -2741,12 +2805,21 @@ namespace UnrealAiAgentHarnessPriv
 				Am.Content = TEXT("Blueprint Builder finished (structured result follows for the main agent).");
 			}
 		}
+		else if (bEnvResultParsed)
+		{
+			Am.Content = EnvResultVisible;
+			if (Am.Content.TrimStartAndEnd().IsEmpty())
+			{
+				Am.Content = TEXT("Environment Builder finished (structured result follows for the main agent).");
+			}
+		}
 		else
 		{
 			Am.Content = OrigAssist;
 		}
 		// Models sometimes emit malformed tag junctions (e.g. closing handoff + opening result) that TryConsume skips.
 		UnrealAiBuildBlueprintTag::StripProtocolMarkersForUi(Am.Content);
+		UnrealAiBuildEnvironmentTag::StripProtocolMarkersForUi(Am.Content);
 		Conv->GetMessagesMutable().Add(Am);
 
 		// Second+ LLM rounds often end with finish_reason=stop and no tool_calls. Models sometimes return an
@@ -2777,8 +2850,8 @@ namespace UnrealAiAgentHarnessPriv
 		// Interactive Agent mode retries empty assistant deltas with a harness nudge. Plan DAG node threads
 		// (`*_plan_*`) run in series; burning multiple LLM rounds here blocks the plan executor and looks
 		// like a hang. Finish the node so the parent plan can advance.
-		if (!bBpHandoff && !bBbResultParsed && bAgentModeWantsToolExecution && Am.Content.TrimStartAndEnd().IsEmpty()
-			&& LlmRound < EffectiveMaxLlmRounds)
+		if (!bBpHandoff && !bEnvHandoff && !bBbResultParsed && !bEnvResultParsed && bAgentModeWantsToolExecution
+			&& Am.Content.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
 		{
 			if (!Request.ThreadId.Contains(TEXT("_plan_")))
 			{
@@ -2850,11 +2923,29 @@ namespace UnrealAiAgentHarnessPriv
 			UnrealAiBuildBlueprintTag::ParseAndStripHandoffMetadata(BpInner, ParsedKind);
 			Request.BlueprintBuilderTargetKind = ParsedKind;
 			Request.bBlueprintBuilderTurn = true;
+			Request.bEnvironmentBuilderTurn = false;
 			EmitEnforcementEvent(TEXT("blueprint_builder_chain"), TEXT("chained_subturn_from_build_blueprint_tag"));
 			FUnrealAiConversationMessage Sub;
 			Sub.Role = TEXT("user");
 			Sub.Content = UnrealAiBlueprintBuilderToolSurface::BuildAutomatedSubturnHarnessPreamble(ParsedKind) + BpInner;
 			Conv->GetMessagesMutable().Add(Sub);
+			AssistantBuffer.Reset();
+			DispatchLlm();
+			return;
+		}
+
+		if (bEnvHandoff)
+		{
+			EUnrealAiEnvironmentBuilderTargetKind ParsedEnvKind = EUnrealAiEnvironmentBuilderTargetKind::PcgScene;
+			UnrealAiBuildEnvironmentTag::ParseAndStripHandoffMetadata(EnvInner, ParsedEnvKind);
+			Request.EnvironmentBuilderTargetKind = ParsedEnvKind;
+			Request.bEnvironmentBuilderTurn = true;
+			Request.bBlueprintBuilderTurn = false;
+			EmitEnforcementEvent(TEXT("environment_builder_chain"), TEXT("chained_subturn_from_build_environment_tag"));
+			FUnrealAiConversationMessage SubEnv;
+			SubEnv.Role = TEXT("user");
+			SubEnv.Content = UnrealAiEnvironmentBuilderToolSurface::BuildAutomatedSubturnHarnessPreamble(ParsedEnvKind) + EnvInner;
+			Conv->GetMessagesMutable().Add(SubEnv);
 			AssistantBuffer.Reset();
 			DispatchLlm();
 			return;
@@ -2872,6 +2963,23 @@ namespace UnrealAiAgentHarnessPriv
 				TEXT("[Blueprint Builder — result for main agent]\n%s"),
 				*BbResultInner);
 			Conv->GetMessagesMutable().Add(Ret);
+			AssistantBuffer.Reset();
+			DispatchLlm();
+			return;
+		}
+
+		if (bEnvResultParsed)
+		{
+			Request.bEnvironmentBuilderTurn = false;
+			Request.EnvironmentBuilderTargetKind = EUnrealAiEnvironmentBuilderTargetKind::PcgScene;
+			Request.bInjectEnvironmentBuilderResumeChunk = true;
+			EmitEnforcementEvent(TEXT("environment_builder_result"), TEXT("return_to_main_agent"));
+			FUnrealAiConversationMessage RetEnv;
+			RetEnv.Role = TEXT("user");
+			RetEnv.Content = FString::Printf(
+				TEXT("[Environment Builder — result for main agent]\n%s"),
+				*EnvResultInner);
+			Conv->GetMessagesMutable().Add(RetEnv);
 			AssistantBuffer.Reset();
 			DispatchLlm();
 			return;
