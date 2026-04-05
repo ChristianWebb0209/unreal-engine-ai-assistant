@@ -535,6 +535,62 @@ namespace UnrealAiToolDispatchArgRepair
 			Op->RemoveField(TEXT("to_pin"));
 		}
 
+		static void RepairSetPinDefaultValueAliases(
+			const TSharedPtr<FJsonObject>& Op,
+			const TSharedPtr<FJsonObject>& Audit,
+			int32 OpIdx)
+		{
+			if (!Op.IsValid())
+			{
+				return;
+			}
+			FString Val;
+			Op->TryGetStringField(TEXT("value"), Val);
+			Val.TrimStartAndEndInline();
+			if (!Val.IsEmpty())
+			{
+				return;
+			}
+			FString DvStr;
+			if (Op->TryGetStringField(TEXT("default_value"), DvStr))
+			{
+				DvStr.TrimStartAndEndInline();
+				if (!DvStr.IsEmpty())
+				{
+					Op->SetStringField(TEXT("value"), DvStr);
+					Op->RemoveField(TEXT("default_value"));
+					AppendGraphPatchRepair(Audit, OpIdx, TEXT("value"), TEXT("<default_value string>"), DvStr);
+				}
+				return;
+			}
+			const TSharedPtr<FJsonValue> Dv = Op->TryGetField(TEXT("default_value"));
+			if (!Dv.IsValid())
+			{
+				return;
+			}
+			FString Coerced;
+			if (Dv->Type == EJson::Boolean)
+			{
+				Coerced = Dv->AsBool() ? TEXT("true") : TEXT("false");
+			}
+			else if (Dv->Type == EJson::Number)
+			{
+				const double N = Dv->AsNumber();
+				Coerced = (FMath::TruncToDouble(N) == N) ? FString::FromInt((int32)N) : FString::SanitizeFloat(N);
+			}
+			else if (Dv->Type == EJson::String)
+			{
+				Coerced = Dv->AsString();
+				Coerced.TrimStartAndEndInline();
+			}
+			if (!Coerced.IsEmpty())
+			{
+				Op->SetStringField(TEXT("value"), Coerced);
+				Op->RemoveField(TEXT("default_value"));
+				AppendGraphPatchRepair(Audit, OpIdx, TEXT("value"), TEXT("<default_value coerced>"), Coerced);
+			}
+		}
+
 		void RepairBlueprintGraphPatchToolArgsImpl(
 			const TSharedPtr<FJsonObject>& Args,
 			const TSharedPtr<FJsonObject>& Audit)
@@ -543,6 +599,7 @@ namespace UnrealAiToolDispatchArgRepair
 			{
 				return;
 			}
+			RepairBlueprintAssetPathArgs(Args);
 			const TArray<TSharedPtr<FJsonValue>>* Ops = nullptr;
 			if (!Args->TryGetArrayField(TEXT("ops"), Ops) || !Ops)
 			{
@@ -595,6 +652,10 @@ namespace UnrealAiToolDispatchArgRepair
 						NormalizeAddVariableTypeString(TypNorm, Audit, OpIdx);
 						Op->SetStringField(TEXT("type"), TypNorm);
 					}
+				}
+				else if (OpName.Equals(TEXT("set_pin_default"), ESearchCase::IgnoreCase))
+				{
+					RepairSetPinDefaultValueAliases(Op, Audit, OpIdx);
 				}
 				else if (OpName.Equals(TEXT("create_node"), ESearchCase::IgnoreCase))
 				{

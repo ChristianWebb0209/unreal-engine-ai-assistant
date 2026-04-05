@@ -338,17 +338,15 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		return nullptr;
 	}
 
-	/** validate_only: resolve guid/bare-guid to graph nodes, or patch_id if listed in VirtualPatchIds (earlier create_node in batch). */
+	/** validate_only: resolve patch_id to transient batch node, else guid/bare-guid on the graph. */
 	static bool TryResolveNodePartValidateOnly(
 		const FString& NodePartIn,
-		const TSet<FString>& VirtualPatchIds,
+		const TMap<FString, UEdGraphNode*>& VirtualPatchNodes,
 		UEdGraph* Graph,
-		UEdGraphNode*& OutRealNode,
-		bool& bOutVirtualPatchRef,
+		UEdGraphNode*& OutNode,
 		FString& Err)
 	{
-		OutRealNode = nullptr;
-		bOutVirtualPatchRef = false;
+		OutNode = nullptr;
 		FString NodePart = NodePartIn;
 		NodePart.TrimStartAndEndInline();
 		if (NodePart.Contains(TEXT("__UAI_G_")))
@@ -358,6 +356,11 @@ namespace UnrealAiBlueprintGraphPatchPriv
 					 "Use guid:<uuid> from blueprint_graph_introspect, or patch_id from this ops[] batch."),
 				*NodePartIn);
 			return false;
+		}
+		if (UEdGraphNode* const* PatchNode = VirtualPatchNodes.Find(NodePart))
+		{
+			OutNode = *PatchNode;
+			return true;
 		}
 		if (NodePart.StartsWith(TEXT("guid:"), ESearchCase::IgnoreCase))
 		{
@@ -377,30 +380,25 @@ namespace UnrealAiBlueprintGraphPatchPriv
 			}
 			if (UEdGraphNode* Found = FindNodeByGraphGuid(Graph, G))
 			{
-				OutRealNode = Found;
+				OutNode = Found;
 				return true;
 			}
 			Err = FString::Printf(TEXT("Node guid not found in graph: %s"), *NodePart);
 			return false;
-		}
-		if (VirtualPatchIds.Contains(NodePart))
-		{
-			bOutVirtualPatchRef = true;
-			return true;
 		}
 		FGuid BareGuid;
 		if (FGuid::Parse(NodePart, BareGuid))
 		{
 			if (UEdGraphNode* GNode = FindNodeByGraphGuid(Graph, BareGuid))
 			{
-				OutRealNode = GNode;
+				OutNode = GNode;
 				return true;
 			}
 			Err = FString::Printf(TEXT("Node guid not found in graph: %s"), *NodePart);
 			return false;
 		}
 		Err = FString::Printf(
-			TEXT("Unknown node ref \"%s\" — use a patch_id from earlier in this batch, guid:..., or export node_guid"),
+			TEXT("Unknown node ref \"%s\" — declare create_node with this patch_id earlier in ops[], or use guid:... / node_guid"),
 			*NodePart);
 		return false;
 	}
@@ -1138,6 +1136,94 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		}
 	}
 
+	static void AppendConnectAvailablePinsJson(
+		const TSharedPtr<FJsonObject>& Payload,
+		UEdGraphNode* FromNode,
+		UEdGraphNode* ToNode)
+	{
+		if (!Payload.IsValid())
+		{
+			return;
+		}
+		if (FromNode)
+		{
+			TArray<TSharedPtr<FJsonValue>> Arr;
+			AppendPinsJson(FromNode, Arr);
+			Payload->SetArrayField(TEXT("available_pins_from"), Arr);
+		}
+		if (ToNode)
+		{
+			TArray<TSharedPtr<FJsonValue>> Arr;
+			AppendPinsJson(ToNode, Arr);
+			Payload->SetArrayField(TEXT("available_pins_to"), Arr);
+		}
+	}
+
+	static bool FindSoleVisibleExecPin(UEdGraphNode* Node, EEdGraphPinDirection WantDir, UEdGraphPin*& OutPin, FString& OutErr)
+	{
+		OutPin = nullptr;
+		OutErr.Reset();
+		if (!Node)
+		{
+			OutErr = TEXT("null node");
+			return false;
+		}
+		TArray<UEdGraphPin*> Hits;
+		for (UEdGraphPin* P : Node->Pins)
+		{
+			if (!P || P->bHidden)
+			{
+				continue;
+			}
+			if (P->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+			{
+				continue;
+			}
+			if (P->Direction != WantDir)
+			{
+				continue;
+			}
+			Hits.Add(P);
+		}
+		if (Hits.Num() == 0)
+		{
+			OutErr = (WantDir == EGPD_Output)
+				? TEXT("no visible exec output pin on node (event overrides have no exec input; use connect with explicit pins or call a function)")
+				: TEXT("no visible exec input pin on node");
+			return false;
+		}
+		if (Hits.Num() > 1)
+		{
+			OutErr = FString::Printf(TEXT("ambiguous exec pins (%d visible matches); use op \"connect\" with explicit pin names"), Hits.Num());
+			return false;
+		}
+		OutPin = Hits[0];
+		return true;
+	}
+
+	struct FValidateOnlySpawnedNodesCleanup
+	{
+		UEdGraph* Graph = nullptr;
+		TArray<UK2Node*>& Spawned;
+
+		explicit FValidateOnlySpawnedNodesCleanup(UEdGraph* InGraph, TArray<UK2Node*>& InSpawned)
+			: Graph(InGraph)
+			, Spawned(InSpawned)
+		{
+		}
+		~FValidateOnlySpawnedNodesCleanup()
+		{
+			for (UK2Node* N : Spawned)
+			{
+				if (N && Graph)
+				{
+					Graph->RemoveNode(N);
+				}
+			}
+			Spawned.Empty();
+		}
+	};
+
 	static FString InferBlueprintGraphPatchErrorCode(const FString& Msg)
 	{
 		if (Msg.Contains(TEXT("create_node requires k2_class")))
@@ -1163,6 +1249,14 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		if (Msg.Contains(TEXT("connect pin not found")))
 		{
 			return TEXT("pin_not_found");
+		}
+		if (Msg.Contains(TEXT("ambiguous exec pins")))
+		{
+			return TEXT("ambiguous_exec_pin");
+		}
+		if (Msg.Contains(TEXT("duplicate create_node patch_id")))
+		{
+			return TEXT("duplicate_patch_id");
 		}
 		if (Msg.Contains(TEXT("Could not connect")))
 		{
@@ -1270,7 +1364,7 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		}
 		TSharedPtr<FJsonObject> Suggested = MakeShared<FJsonObject>();
 		if (FirstError.Contains(TEXT("connect pin not found")) || FirstError.Contains(TEXT("Could not connect"))
-			|| FirstError.Contains(TEXT("set_pin_default: pin")))
+			|| FirstError.Contains(TEXT("connect_exec")) || FirstError.Contains(TEXT("set_pin_default: pin")))
 		{
 			Suggested->SetStringField(TEXT("tool_id"), TEXT("blueprint_graph_list_pins"));
 			TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
@@ -1280,6 +1374,9 @@ namespace UnrealAiBlueprintGraphPatchPriv
 				TEXT("node_ref"),
 				TEXT("Replace with node_guid from blueprint_graph_introspect (bare UUID or guid:UUID)."));
 			Suggested->SetObjectField(TEXT("arguments"), A);
+			Suggested->SetStringField(
+				TEXT("note"),
+				TEXT("Pin failures often include available_pins_from / available_pins_to on the parent error JSON — use those names before calling list_pins again."));
 		}
 		else if (FirstError.Contains(TEXT("K2Node_Event requires")) || FirstError.Contains(TEXT("event_override requires")))
 		{
@@ -1484,6 +1581,10 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		const FString& InGraphName)
 	{
 		TSet<FString> VirtualPatchIds;
+		TMap<FString, UEdGraphNode*> VirtualPatchNodes;
+		TArray<UK2Node*> ValidateSpawnedK2Nodes;
+		TSet<UEdGraphNode*> ValidateSpawnedSet;
+		FValidateOnlySpawnedNodesCleanup ValidateSpawnCleanup(Graph, ValidateSpawnedK2Nodes);
 		TArray<FString> Notes;
 		const UEdGraphSchema_K2* SchemaK2 = GetDefault<UEdGraphSchema_K2>();
 		for (int32 OpIdx = 0; OpIdx < OpsArr.Num(); ++OpIdx)
@@ -1539,7 +1640,7 @@ namespace UnrealAiBlueprintGraphPatchPriv
 				return R;
 			}
 
-			auto FailAt = [&](const FString& E) -> FUnrealAiToolInvocationResult
+			auto FailAt = [&](const FString& E, UEdGraphNode* PinFromNode = nullptr, UEdGraphNode* PinToNode = nullptr) -> FUnrealAiToolInvocationResult
 			{
 				TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 				O->SetBoolField(TEXT("ok"), false);
@@ -1551,7 +1652,8 @@ namespace UnrealAiBlueprintGraphPatchPriv
 					TArray<TSharedPtr<FJsonValue>>{MakeShareable(new FJsonValueString(InferBlueprintGraphPatchErrorCode(E)))});
 				O->SetStringField(
 					TEXT("note"),
-					TEXT("validate_only: no graph changes were made. Fix the op at failed_op_index and retry."));
+					TEXT("validate_only: transient batch nodes were rolled back; the saved graph was not modified. Fix the op at failed_op_index and retry."));
+				AppendConnectAvailablePinsJson(O, PinFromNode, PinToNode);
 				AppendFailedOpSnippetToPayload(&OpsArr, OpIdx, O);
 				AppendBlueprintGraphPatchSuggestedCorrectCall(BlueprintPath, InGraphName, E, O);
 				FUnrealAiToolInvocationResult R;
@@ -1569,9 +1671,22 @@ namespace UnrealAiBlueprintGraphPatchPriv
 				{
 					return FailAt(DryErr);
 				}
-				if (!Pid.IsEmpty())
+				if (VirtualPatchNodes.Contains(Pid))
+				{
+					return FailAt(FString::Printf(TEXT("duplicate create_node patch_id \"%s\" in this ops[] batch"), *Pid));
+				}
+				TArray<FString> SpawnErrs;
+				if (UK2Node* K2 = CreateNodeFromPatchOp(BP, Graph, Op, SpawnErrs))
 				{
 					VirtualPatchIds.Add(Pid);
+					VirtualPatchNodes.Add(Pid, K2);
+					ValidateSpawnedK2Nodes.Add(K2);
+					ValidateSpawnedSet.Add(K2);
+				}
+				else
+				{
+					const FString E = SpawnErrs.Num() > 0 ? SpawnErrs[0] : TEXT("create_node failed during validate_only spawn");
+					return FailAt(E);
 				}
 			}
 			else if (OpName.Equals(TEXT("add_variable"), ESearchCase::IgnoreCase))
@@ -1622,47 +1737,122 @@ namespace UnrealAiBlueprintGraphPatchPriv
 				{
 					return FailAt(TEXT("connect requires from and to as NodeRef.Pin (e.g. n1.Then -> n2.execute)"));
 				}
-				UEdGraphNode *NA = nullptr, *NB = nullptr;
-				bool bFromV = false, bToV = false;
+				UEdGraphNode* NA = nullptr;
+				UEdGraphNode* NB = nullptr;
 				FString Err;
-				if (!TryResolveNodePartValidateOnly(NFrom, VirtualPatchIds, Graph, NA, bFromV, Err))
+				if (!TryResolveNodePartValidateOnly(NFrom, VirtualPatchNodes, Graph, NA, Err))
 				{
 					return FailAt(FString::Printf(TEXT("connect from: %s"), *Err));
 				}
-				if (!TryResolveNodePartValidateOnly(NTo, VirtualPatchIds, Graph, NB, bToV, Err))
+				if (!TryResolveNodePartValidateOnly(NTo, VirtualPatchNodes, Graph, NB, Err))
 				{
 					return FailAt(FString::Printf(TEXT("connect to: %s"), *Err));
 				}
-				if (!bFromV && !bToV)
+				FString PErrA, PErrB;
+				UEdGraphPin* PA = FindPin(NA, PFrom, &PErrA);
+				UEdGraphPin* PB = FindPin(NB, PTo, &PErrB);
+				if (!PA)
 				{
-					FString PErrA, PErrB;
-					UEdGraphPin* PA = FindPin(NA, PFrom, &PErrA);
-					UEdGraphPin* PB = FindPin(NB, PTo, &PErrB);
-					if (!PA)
-					{
-						return FailAt(!PErrA.IsEmpty()
+					return FailAt(
+						!PErrA.IsEmpty()
 							? FString::Printf(TEXT("connect from pin %s: %s"), *FromS, *PErrA)
-							: FString::Printf(TEXT("connect pin not found (%s)"), *FromS));
-					}
-					if (!PB)
-					{
-						return FailAt(!PErrB.IsEmpty()
+							: FString::Printf(TEXT("connect pin not found (%s)"), *FromS),
+						NA,
+						NB);
+				}
+				if (!PB)
+				{
+					return FailAt(
+						!PErrB.IsEmpty()
 							? FString::Printf(TEXT("connect to pin %s: %s"), *ToS, *PErrB)
-							: FString::Printf(TEXT("connect pin not found (%s)"), *ToS));
-					}
-					if (PA->Direction != EGPD_Output || PB->Direction != EGPD_Input)
-					{
-						return FailAt(FString::Printf(
+							: FString::Printf(TEXT("connect pin not found (%s)"), *ToS),
+						NA,
+						NB);
+				}
+				if (PA->Direction != EGPD_Output || PB->Direction != EGPD_Input)
+				{
+					return FailAt(
+						FString::Printf(
 							TEXT("connect requires from=output and to=input; got %s -> %s (swap from/to or fix pin names)"),
 							*PinDebugSummary(PA),
-							*PinDebugSummary(PB)));
+							*PinDebugSummary(PB)),
+						NA,
+						NB);
+				}
+				const bool bBothSpawned = ValidateSpawnedSet.Contains(NA) && ValidateSpawnedSet.Contains(NB);
+				if (bBothSpawned)
+				{
+					FString LinkErr;
+					if (!TryCreateDirectedLink(PA, PB, SchemaK2, &LinkErr))
+					{
+						return FailAt(FString::Printf(TEXT("connect %s -> %s: %s"), *FromS, *ToS, *LinkErr), NA, NB);
 					}
-					(void)SchemaK2;
 				}
 				else
 				{
 					Notes.Add(FString::Printf(
-						TEXT("Op %d (connect): skipped full pin/link checks because one end references a patch_id declared earlier in this batch."),
+						TEXT("Op %d (connect): validated pin names/direction only; TryCreateConnection was not run because at least one endpoint is a saved graph node (avoids mutating user wires during validate_only)."),
+						OpIdx));
+				}
+			}
+			else if (OpName.Equals(TEXT("connect_exec"), ESearchCase::IgnoreCase))
+			{
+				FString FromRef, ToRef;
+				Op->TryGetStringField(TEXT("from_node"), FromRef);
+				if (FromRef.IsEmpty())
+				{
+					Op->TryGetStringField(TEXT("from"), FromRef);
+				}
+				Op->TryGetStringField(TEXT("to_node"), ToRef);
+				if (ToRef.IsEmpty())
+				{
+					Op->TryGetStringField(TEXT("to"), ToRef);
+				}
+				FromRef.TrimStartAndEndInline();
+				ToRef.TrimStartAndEndInline();
+				if (FromRef.Contains(TEXT(".")) || ToRef.Contains(TEXT(".")))
+				{
+					return FailAt(TEXT("connect_exec: from_node/to_node must be a bare patch_id or guid (no .Pin); use op \"connect\" for explicit pins"));
+				}
+				if (FromRef.IsEmpty() || ToRef.IsEmpty())
+				{
+					return FailAt(TEXT("connect_exec requires from_node and to_node (or from / to) as node refs without pin suffix"));
+				}
+				UEdGraphNode* NA = nullptr;
+				UEdGraphNode* NB = nullptr;
+				FString Err;
+				if (!TryResolveNodePartValidateOnly(FromRef, VirtualPatchNodes, Graph, NA, Err))
+				{
+					return FailAt(FString::Printf(TEXT("connect_exec from_node: %s"), *Err));
+				}
+				if (!TryResolveNodePartValidateOnly(ToRef, VirtualPatchNodes, Graph, NB, Err))
+				{
+					return FailAt(FString::Printf(TEXT("connect_exec to_node: %s"), *Err));
+				}
+				UEdGraphPin* PA = nullptr;
+				UEdGraphPin* PB = nullptr;
+				FString ExecErr;
+				if (!FindSoleVisibleExecPin(NA, EGPD_Output, PA, ExecErr))
+				{
+					return FailAt(FString::Printf(TEXT("connect_exec from_node: %s"), *ExecErr), NA, NB);
+				}
+				if (!FindSoleVisibleExecPin(NB, EGPD_Input, PB, ExecErr))
+				{
+					return FailAt(FString::Printf(TEXT("connect_exec to_node: %s"), *ExecErr), NA, NB);
+				}
+				const bool bBothSpawned = ValidateSpawnedSet.Contains(NA) && ValidateSpawnedSet.Contains(NB);
+				if (bBothSpawned)
+				{
+					FString LinkErr;
+					if (!TryCreateDirectedLink(PA, PB, SchemaK2, &LinkErr))
+					{
+						return FailAt(FString::Printf(TEXT("connect_exec: %s"), *LinkErr), NA, NB);
+					}
+				}
+				else
+				{
+					Notes.Add(FString::Printf(
+						TEXT("Op %d (connect_exec): validated sole exec pins only; link simulation skipped (saved graph endpoint)."),
 						OpIdx));
 				}
 			}
@@ -1684,20 +1874,20 @@ namespace UnrealAiBlueprintGraphPatchPriv
 				{
 					return FailAt(TEXT("break_link requires from and to as NodeRef.Pin"));
 				}
-				UEdGraphNode *NA = nullptr, *NB = nullptr;
-				bool bFromV = false, bToV = false;
+				UEdGraphNode* NA = nullptr;
+				UEdGraphNode* NB = nullptr;
 				FString Err;
-				if (!TryResolveNodePartValidateOnly(NFrom, VirtualPatchIds, Graph, NA, bFromV, Err))
+				if (!TryResolveNodePartValidateOnly(NFrom, VirtualPatchNodes, Graph, NA, Err))
 				{
 					return FailAt(FString::Printf(TEXT("break_link from: %s"), *Err));
 				}
-				if (!TryResolveNodePartValidateOnly(NTo, VirtualPatchIds, Graph, NB, bToV, Err))
+				if (!TryResolveNodePartValidateOnly(NTo, VirtualPatchNodes, Graph, NB, Err))
 				{
 					return FailAt(FString::Printf(TEXT("break_link to: %s"), *Err));
 				}
-				if (bFromV || bToV)
+				if (ValidateSpawnedSet.Contains(NA) || ValidateSpawnedSet.Contains(NB))
 				{
-					return FailAt(TEXT("break_link requires both ends to reference existing graph nodes (guid), not batch-local patch_id placeholders"));
+					return FailAt(TEXT("break_link requires both ends to reference saved graph nodes (guid), not batch-local patch_id nodes"));
 				}
 				FString BrA, BrB;
 				UEdGraphPin* PA = FindPin(NA, PFrom, &BrA);
@@ -1764,26 +1954,19 @@ namespace UnrealAiBlueprintGraphPatchPriv
 					return FailAt(TEXT("set_pin_default requires value"));
 				}
 				UEdGraphNode* N = nullptr;
-				bool bV = false;
-				if (!TryResolveNodePartValidateOnly(NPart, VirtualPatchIds, Graph, N, bV, Err))
+				if (!TryResolveNodePartValidateOnly(NPart, VirtualPatchNodes, Graph, N, Err))
 				{
 					return FailAt(Err);
 				}
-				if (bV)
+				FString SpErr;
+				if (!FindPin(N, PName, &SpErr))
 				{
-					Notes.Add(FString::Printf(
-						TEXT("Op %d (set_pin_default): skipped pin existence check for batch-local patch_id."),
-						OpIdx));
-				}
-				else
-				{
-					FString SpErr;
-					if (!FindPin(N, PName, &SpErr))
-					{
-						return FailAt(!SpErr.IsEmpty()
+					return FailAt(
+						!SpErr.IsEmpty()
 							? FString::Printf(TEXT("set_pin_default: %s"), *SpErr)
-							: FString::Printf(TEXT("set_pin_default: pin %s not on node"), *PName));
-					}
+							: FString::Printf(TEXT("set_pin_default: pin %s not on node"), *PName),
+						N,
+						nullptr);
 				}
 			}
 			else if (OpName.Equals(TEXT("create_comment"), ESearchCase::IgnoreCase))
@@ -1803,18 +1986,17 @@ namespace UnrealAiBlueprintGraphPatchPriv
 				Op->TryGetStringField(TEXT("patch_id"), Pid);
 				Op->TryGetStringField(TEXT("node_guid"), GuidStr);
 				UEdGraphNode* N = nullptr;
-				bool bV = false;
 				FString E2;
 				if (!Pid.IsEmpty())
 				{
 					if (VirtualPatchIds.Contains(Pid))
 					{
 						return FailAt(FString::Printf(
-							TEXT("%s cannot target patch_id \"%s\" that only refers to nodes created earlier in this batch — use guid: for existing graph nodes."),
+							TEXT("%s cannot target patch_id \"%s\" declared in this batch — use guid: for existing graph nodes."),
 							*OpName,
 							*Pid));
 					}
-					if (!TryResolveNodePartValidateOnly(Pid, VirtualPatchIds, Graph, N, bV, E2))
+					if (!TryResolveNodePartValidateOnly(Pid, VirtualPatchNodes, Graph, N, E2))
 					{
 						return FailAt(FString::Printf(TEXT("%s: %s"), *OpName, *E2));
 					}
@@ -1826,7 +2008,7 @@ namespace UnrealAiBlueprintGraphPatchPriv
 					{
 						G = FString(TEXT("guid:")) + G;
 					}
-					if (!TryResolveNodePartValidateOnly(G, VirtualPatchIds, Graph, N, bV, E2))
+					if (!TryResolveNodePartValidateOnly(G, VirtualPatchNodes, Graph, N, E2))
 					{
 						return FailAt(FString::Printf(TEXT("%s: %s"), *OpName, *E2));
 					}
@@ -1835,7 +2017,7 @@ namespace UnrealAiBlueprintGraphPatchPriv
 				{
 					return FailAt(FString::Printf(TEXT("%s requires patch_id or node_guid"), *OpName));
 				}
-				if (bV || !N)
+				if (!N)
 				{
 					return FailAt(FString::Printf(TEXT("%s: could not resolve target node"), *OpName));
 				}
@@ -1874,20 +2056,20 @@ namespace UnrealAiBlueprintGraphPatchPriv
 				{
 					return FailAt(TEXT("splice_on_link: insert_patch_id not found in this patch batch (declare create_node earlier)"));
 				}
-				UEdGraphNode *UpNode = nullptr, *DownNode = nullptr;
-				bool bFU = false, bFD = false;
+				UEdGraphNode* UpNode = nullptr;
+				UEdGraphNode* DownNode = nullptr;
 				FString SErr;
-				if (!TryResolveNodePartValidateOnly(NFrom, VirtualPatchIds, Graph, UpNode, bFU, SErr))
+				if (!TryResolveNodePartValidateOnly(NFrom, VirtualPatchNodes, Graph, UpNode, SErr))
 				{
 					return FailAt(FString::Printf(TEXT("splice_on_link from: %s"), *SErr));
 				}
-				if (!TryResolveNodePartValidateOnly(NTo, VirtualPatchIds, Graph, DownNode, bFD, SErr))
+				if (!TryResolveNodePartValidateOnly(NTo, VirtualPatchNodes, Graph, DownNode, SErr))
 				{
 					return FailAt(FString::Printf(TEXT("splice_on_link to: %s"), *SErr));
 				}
-				if (bFU || bFD)
+				if (ValidateSpawnedSet.Contains(UpNode) || ValidateSpawnedSet.Contains(DownNode))
 				{
-					return FailAt(TEXT("splice_on_link requires from/to to reference existing graph nodes (guid), not batch patch_id placeholders"));
+					return FailAt(TEXT("splice_on_link requires from/to to reference saved graph nodes (guid), not batch-local patch_id nodes"));
 				}
 				FString SErrU, SErrD, SErrMi, SErrMo;
 				UEdGraphPin* UpPin = FindPin(UpNode, PFrom, &SErrU);
@@ -1914,7 +2096,8 @@ namespace UnrealAiBlueprintGraphPatchPriv
 		Ok->SetStringField(TEXT("status"), TEXT("patch_validated"));
 		Ok->SetStringField(
 			TEXT("note"),
-			TEXT("validate_only: ops[] passed best-effort static checks; compile may still fail after apply."));
+			TEXT(
+				"validate_only: batch-local create_node ops were spawned on-graph then removed; pins and links between those transient nodes were checked when both connect endpoints were batch-local. Saved-graph endpoints only get pin name/direction checks for connect (no TryCreateConnection). Compile may still fail after apply."));
 		TArray<TSharedPtr<FJsonValue>> NoteVals;
 		for (const FString& N : Notes)
 		{
@@ -1986,10 +2169,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			TEXT("Provide non-empty ops[] or ops_json_path (UTF-8 JSON array of op objects under Saved/ or harness_step/)"));
 	}
 
-	UBlueprint* BP = UnrealAiBlueprintTools_LoadBlueprintGame(Path);
+	FString BpLoadErr;
+	UBlueprint* BP = UnrealAiBlueprintTools_LoadBlueprintGame(Path, &BpLoadErr);
 	if (!BP)
 	{
-		return UnrealAiToolJson::Error(TEXT("Could not load Blueprint (check path and GeneratedClass)"));
+		return UnrealAiToolJson::Error(BpLoadErr.IsEmpty()
+			? TEXT("Could not load Blueprint (check path and registry entry; re-run asset discovery).")
+			: BpLoadErr);
 	}
 	UEdGraph* Graph = UnrealAiBlueprintTools_FindGraphByName(BP, GraphName);
 	if (!Graph)
@@ -2038,8 +2224,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 	const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
 
 	int32 FirstFailedOpIdx = INDEX_NONE;
+	UEdGraphNode* PatchErrConnectFromNode = nullptr;
+	UEdGraphNode* PatchErrConnectToNode = nullptr;
 	for (int32 OpIdx = 0; OpIdx < OpsArr->Num(); ++OpIdx)
 	{
+		PatchErrConnectFromNode = nullptr;
+		PatchErrConnectToNode = nullptr;
 		const TSharedPtr<FJsonValue>& OpVal = (*OpsArr)[OpIdx];
 		const TSharedPtr<FJsonObject>* OpObj = nullptr;
 		if (!OpVal->TryGetObject(OpObj) || !OpObj || !(*OpObj).IsValid())
@@ -2158,6 +2348,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			UEdGraphPin* PB = FindPin(NB, PTo, &PErrB);
 			if (!PA)
 			{
+				PatchErrConnectFromNode = NA;
+				PatchErrConnectToNode = NB;
 				Errors.Add(!PErrA.IsEmpty()
 					? FString::Printf(TEXT("connect from pin %s: %s"), *FromS, *PErrA)
 					: FString::Printf(TEXT("connect pin not found (%s)"), *FromS));
@@ -2166,6 +2358,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			}
 			if (!PB)
 			{
+				PatchErrConnectFromNode = NA;
+				PatchErrConnectToNode = NB;
 				Errors.Add(!PErrB.IsEmpty()
 					? FString::Printf(TEXT("connect to pin %s: %s"), *ToS, *PErrB)
 					: FString::Printf(TEXT("connect pin not found (%s)"), *ToS));
@@ -2175,6 +2369,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			FString LinkErr;
 			if (!TryCreateDirectedLink(PA, PB, Schema, &LinkErr))
 			{
+				PatchErrConnectFromNode = NA;
+				PatchErrConnectToNode = NB;
 				Errors.Add(FString::Printf(TEXT("connect %s -> %s: %s"), *FromS, *ToS, *LinkErr));
 				FirstFailedOpIdx = OpIdx;
 				break;
@@ -2183,6 +2379,82 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 			Rec->SetStringField(TEXT("op"), TEXT("connect"));
 			Rec->SetStringField(TEXT("from"), FromS);
 			Rec->SetStringField(TEXT("to"), ToS);
+			Applied.Add(MakeShareable(new FJsonValueObject(Rec.ToSharedRef())));
+		}
+		else if (OpName.Equals(TEXT("connect_exec"), ESearchCase::IgnoreCase))
+		{
+			FString FromRef, ToRef;
+			Op->TryGetStringField(TEXT("from_node"), FromRef);
+			if (FromRef.IsEmpty())
+			{
+				Op->TryGetStringField(TEXT("from"), FromRef);
+			}
+			Op->TryGetStringField(TEXT("to_node"), ToRef);
+			if (ToRef.IsEmpty())
+			{
+				Op->TryGetStringField(TEXT("to"), ToRef);
+			}
+			FromRef.TrimStartAndEndInline();
+			ToRef.TrimStartAndEndInline();
+			if (FromRef.Contains(TEXT(".")) || ToRef.Contains(TEXT(".")))
+			{
+				Errors.Add(TEXT("connect_exec: from_node/to_node must be a bare patch_id or guid (no .Pin); use op \"connect\" for explicit pins"));
+				FirstFailedOpIdx = OpIdx;
+				break;
+			}
+			if (FromRef.IsEmpty() || ToRef.IsEmpty())
+			{
+				Errors.Add(TEXT("connect_exec requires from_node and to_node (or from / to) as node refs without pin suffix"));
+				FirstFailedOpIdx = OpIdx;
+				break;
+			}
+			FString Err;
+			UEdGraphNode* NA = ResolveNodePart(FromRef, PatchMap, Graph, Err);
+			if (!NA)
+			{
+				Errors.Add(FString::Printf(TEXT("connect_exec from_node: %s"), *Err));
+				FirstFailedOpIdx = OpIdx;
+				break;
+			}
+			UEdGraphNode* NB = ResolveNodePart(ToRef, PatchMap, Graph, Err);
+			if (!NB)
+			{
+				Errors.Add(FString::Printf(TEXT("connect_exec to_node: %s"), *Err));
+				FirstFailedOpIdx = OpIdx;
+				break;
+			}
+			UEdGraphPin* PA = nullptr;
+			UEdGraphPin* PB = nullptr;
+			FString ExecErr;
+			if (!FindSoleVisibleExecPin(NA, EGPD_Output, PA, ExecErr))
+			{
+				PatchErrConnectFromNode = NA;
+				PatchErrConnectToNode = NB;
+				Errors.Add(FString::Printf(TEXT("connect_exec from_node: %s"), *ExecErr));
+				FirstFailedOpIdx = OpIdx;
+				break;
+			}
+			if (!FindSoleVisibleExecPin(NB, EGPD_Input, PB, ExecErr))
+			{
+				PatchErrConnectFromNode = NA;
+				PatchErrConnectToNode = NB;
+				Errors.Add(FString::Printf(TEXT("connect_exec to_node: %s"), *ExecErr));
+				FirstFailedOpIdx = OpIdx;
+				break;
+			}
+			FString LinkErr;
+			if (!TryCreateDirectedLink(PA, PB, Schema, &LinkErr))
+			{
+				PatchErrConnectFromNode = NA;
+				PatchErrConnectToNode = NB;
+				Errors.Add(FString::Printf(TEXT("connect_exec: %s"), *LinkErr));
+				FirstFailedOpIdx = OpIdx;
+				break;
+			}
+			TSharedPtr<FJsonObject> Rec = MakeShared<FJsonObject>();
+			Rec->SetStringField(TEXT("op"), TEXT("connect_exec"));
+			Rec->SetStringField(TEXT("from_node"), FromRef);
+			Rec->SetStringField(TEXT("to_node"), ToRef);
 			Applied.Add(MakeShareable(new FJsonValueObject(Rec.ToSharedRef())));
 		}
 		else if (OpName.Equals(TEXT("set_pin_default"), ESearchCase::IgnoreCase))
@@ -2648,6 +2920,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphPatch(const TShared
 		O->SetArrayField(TEXT("errors"), EArr);
 		O->SetArrayField(TEXT("error_codes"), CodeArr);
 		O->SetArrayField(TEXT("applied_partial"), TArray<TSharedPtr<FJsonValue>>());
+		AppendConnectAvailablePinsJson(O, PatchErrConnectFromNode, PatchErrConnectToNode);
 		AppendBlueprintGraphPatchSuggestedCorrectCall(Path, GraphName, Errors[0], O);
 		FUnrealAiToolInvocationResult R;
 		R.bOk = false;
@@ -2760,10 +3033,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphListPins(const TSha
 			TEXT("node_ref or guid is required: pass the node's graph GUID from blueprint_graph_introspect (node_guid) or blueprint_graph_patch applied[].node_guid. "
 				 "Ephemeral patch_id strings from a prior patch only work inside the same blueprint_graph_patch call, not as node_ref here."));
 	}
-	UBlueprint* BP = UnrealAiBlueprintTools_LoadBlueprintGame(Path);
+	FString BpLoadErr;
+	UBlueprint* BP = UnrealAiBlueprintTools_LoadBlueprintGame(Path, &BpLoadErr);
 	if (!BP)
 	{
-		return UnrealAiToolJson::Error(TEXT("Could not load Blueprint"));
+		return UnrealAiToolJson::Error(BpLoadErr.IsEmpty() ? TEXT("Could not load Blueprint") : BpLoadErr);
 	}
 	UEdGraph* Graph = UnrealAiBlueprintTools_FindGraphByName(BP, GraphName);
 	if (!Graph)

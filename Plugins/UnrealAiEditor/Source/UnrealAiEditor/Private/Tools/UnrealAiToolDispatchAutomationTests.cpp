@@ -796,6 +796,133 @@ bool FUnrealAiBlueprintGraphPatchContractTest::RunTest(const FString& Parameters
 			TestTrue(TEXT("validate_only bad: parse"), FJsonSerializer::Deserialize(RVbr, OVb) && OVb.IsValid());
 			TestEqual(TEXT("validate_only failed_op_index"), static_cast<int32>(OVb->GetNumberField(TEXT("failed_op_index"))), 1);
 
+			// validate_only: two batch-local branches — Then->Then must fail (output->output) with virtual pin checks.
+			{
+				TArray<TSharedPtr<FJsonValue>> OpsTT;
+				TSharedPtr<FJsonObject> OpA = MakeShared<FJsonObject>();
+				OpA->SetStringField(TEXT("op"), TEXT("create_node"));
+				OpA->SetStringField(TEXT("patch_id"), TEXT("v_tt_a"));
+				OpA->SetStringField(TEXT("semantic_kind"), TEXT("branch"));
+				OpA->SetNumberField(TEXT("x"), -29000);
+				OpA->SetNumberField(TEXT("y"), -29000);
+				OpsTT.Add(MakeShared<FJsonValueObject>(OpA.ToSharedRef()));
+				TSharedPtr<FJsonObject> OpB = MakeShared<FJsonObject>();
+				OpB->SetStringField(TEXT("op"), TEXT("create_node"));
+				OpB->SetStringField(TEXT("patch_id"), TEXT("v_tt_b"));
+				OpB->SetStringField(TEXT("semantic_kind"), TEXT("branch"));
+				OpB->SetNumberField(TEXT("x"), -28800);
+				OpB->SetNumberField(TEXT("y"), -29000);
+				OpsTT.Add(MakeShared<FJsonValueObject>(OpB.ToSharedRef()));
+				TSharedPtr<FJsonObject> OpC = MakeShared<FJsonObject>();
+				OpC->SetStringField(TEXT("op"), TEXT("connect"));
+				OpC->SetStringField(TEXT("from"), TEXT("v_tt_a.Then"));
+				OpC->SetStringField(TEXT("to"), TEXT("v_tt_b.Then"));
+				OpsTT.Add(MakeShared<FJsonValueObject>(OpC.ToSharedRef()));
+				TSharedPtr<FJsonObject> ArgsTT = MakeShared<FJsonObject>();
+				ArgsTT->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+				ArgsTT->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+				ArgsTT->SetBoolField(TEXT("validate_only"), true);
+				ArgsTT->SetArrayField(TEXT("ops"), OpsTT);
+				const FUnrealAiToolInvocationResult RTT = UnrealAiDispatchTool(
+					TEXT("blueprint_graph_patch"),
+					ArgsTT,
+					nullptr,
+					nullptr,
+					FString(),
+					FString());
+				TestFalse(TEXT("validate_only Then->Then: bOk"), RTT.bOk);
+				TSharedPtr<FJsonObject> OTT;
+				TSharedRef<TJsonReader<>> RTTr = TJsonReaderFactory<>::Create(RTT.ContentForModel);
+				TestTrue(TEXT("validate_only Then->Then: parse"), FJsonSerializer::Deserialize(RTTr, OTT) && OTT.IsValid());
+				TestEqual(TEXT("validate_only Then->Then: failed_op_index"), static_cast<int32>(OTT->GetNumberField(TEXT("failed_op_index"))), 2);
+				const TArray<TSharedPtr<FJsonValue>>* PinsTo = nullptr;
+				TestTrue(
+					TEXT("validate_only Then->Then: available_pins_to"),
+					OTT->TryGetArrayField(TEXT("available_pins_to"), PinsTo) && PinsTo && PinsTo->Num() > 0);
+			}
+
+			// validate_only: Then->execute between two batch-local branches should validate.
+			{
+				TArray<TSharedPtr<FJsonValue>> OpsOK;
+				TSharedPtr<FJsonObject> OpA = MakeShared<FJsonObject>();
+				OpA->SetStringField(TEXT("op"), TEXT("create_node"));
+				OpA->SetStringField(TEXT("patch_id"), TEXT("v_te_a"));
+				OpA->SetStringField(TEXT("semantic_kind"), TEXT("branch"));
+				OpA->SetNumberField(TEXT("x"), -29200);
+				OpA->SetNumberField(TEXT("y"), -29000);
+				OpsOK.Add(MakeShared<FJsonValueObject>(OpA.ToSharedRef()));
+				TSharedPtr<FJsonObject> OpB = MakeShared<FJsonObject>();
+				OpB->SetStringField(TEXT("op"), TEXT("create_node"));
+				OpB->SetStringField(TEXT("patch_id"), TEXT("v_te_b"));
+				OpB->SetStringField(TEXT("semantic_kind"), TEXT("branch"));
+				OpB->SetNumberField(TEXT("x"), -29000);
+				OpB->SetNumberField(TEXT("y"), -29000);
+				OpsOK.Add(MakeShared<FJsonValueObject>(OpB.ToSharedRef()));
+				TSharedPtr<FJsonObject> OpC = MakeShared<FJsonObject>();
+				OpC->SetStringField(TEXT("op"), TEXT("connect"));
+				OpC->SetStringField(TEXT("from"), TEXT("v_te_a.Then"));
+				OpC->SetStringField(TEXT("to"), TEXT("v_te_b.execute"));
+				OpsOK.Add(MakeShared<FJsonValueObject>(OpC.ToSharedRef()));
+				TSharedPtr<FJsonObject> ArgsOK = MakeShared<FJsonObject>();
+				ArgsOK->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+				ArgsOK->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+				ArgsOK->SetBoolField(TEXT("validate_only"), true);
+				ArgsOK->SetArrayField(TEXT("ops"), OpsOK);
+				const FUnrealAiToolInvocationResult ROK = UnrealAiDispatchTool(
+					TEXT("blueprint_graph_patch"),
+					ArgsOK,
+					nullptr,
+					nullptr,
+					FString(),
+					FString());
+				TestTrue(TEXT("validate_only Then->execute: bOk"), ROK.bOk);
+			}
+
+			// apply: bad connect includes available_pins_to on failure (transaction cancelled).
+			{
+				TArray<TSharedPtr<FJsonValue>> OpsBadPin;
+				TSharedPtr<FJsonObject> OpA = MakeShared<FJsonObject>();
+				OpA->SetStringField(TEXT("op"), TEXT("create_node"));
+				OpA->SetStringField(TEXT("patch_id"), TEXT("uai_badpin_a"));
+				OpA->SetStringField(TEXT("semantic_kind"), TEXT("branch"));
+				OpA->SetNumberField(TEXT("x"), -29400);
+				OpA->SetNumberField(TEXT("y"), -29200);
+				OpsBadPin.Add(MakeShared<FJsonValueObject>(OpA.ToSharedRef()));
+				TSharedPtr<FJsonObject> OpB = MakeShared<FJsonObject>();
+				OpB->SetStringField(TEXT("op"), TEXT("create_node"));
+				OpB->SetStringField(TEXT("patch_id"), TEXT("uai_badpin_b"));
+				OpB->SetStringField(TEXT("semantic_kind"), TEXT("branch"));
+				OpB->SetNumberField(TEXT("x"), -29200);
+				OpB->SetNumberField(TEXT("y"), -29200);
+				OpsBadPin.Add(MakeShared<FJsonValueObject>(OpB.ToSharedRef()));
+				TSharedPtr<FJsonObject> OpC = MakeShared<FJsonObject>();
+				OpC->SetStringField(TEXT("op"), TEXT("connect"));
+				OpC->SetStringField(TEXT("from"), TEXT("uai_badpin_a.Then"));
+				OpC->SetStringField(TEXT("to"), TEXT("uai_badpin_b.NotARealPin"));
+				OpsBadPin.Add(MakeShared<FJsonValueObject>(OpC.ToSharedRef()));
+				TSharedPtr<FJsonObject> ArgsBadPin = MakeShared<FJsonObject>();
+				ArgsBadPin->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
+				ArgsBadPin->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));
+				ArgsBadPin->SetBoolField(TEXT("compile"), false);
+				ArgsBadPin->SetBoolField(TEXT("auto_layout"), false);
+				ArgsBadPin->SetArrayField(TEXT("ops"), OpsBadPin);
+				const FUnrealAiToolInvocationResult RBP = UnrealAiDispatchTool(
+					TEXT("blueprint_graph_patch"),
+					ArgsBadPin,
+					nullptr,
+					nullptr,
+					FString(),
+					FString());
+				TestFalse(TEXT("apply bad pin: bOk"), RBP.bOk);
+				TSharedPtr<FJsonObject> OBP;
+				TSharedRef<TJsonReader<>> RBPr = TJsonReaderFactory<>::Create(RBP.ContentForModel);
+				TestTrue(TEXT("apply bad pin: parse"), FJsonSerializer::Deserialize(RBPr, OBP) && OBP.IsValid());
+				const TArray<TSharedPtr<FJsonValue>>* PinsToApply = nullptr;
+				TestTrue(
+					TEXT("apply bad pin: available_pins_to"),
+					OBP->TryGetArrayField(TEXT("available_pins_to"), PinsToApply) && PinsToApply && PinsToApply->Num() > 0);
+			}
+
 			TSharedPtr<FJsonObject> ArgsEvShape = MakeShared<FJsonObject>();
 			ArgsEvShape->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Blueprints/StrictTests/Strict_BP02.Strict_BP02"));
 			ArgsEvShape->SetStringField(TEXT("graph_name"), TEXT("EventGraph"));

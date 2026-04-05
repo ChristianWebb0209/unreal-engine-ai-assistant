@@ -54,7 +54,7 @@
     },
     {
       "tool_id": "blueprint_graph_patch",
-      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Atomic: if any op fails, the transaction is cancelled (nothing persists; applied_partial is always []). Failure JSON: status patch_errors (or patch_validate_errors when validate_only), errors[], error_codes[], failed_op_index, optional failed_op or failed_op_json snippet, suggested_correct_call (error-kind-specific: e.g. list_pins for bad links, Character Jump/Landed pattern for event_override / missing CallFunction — not a generic IfThenElse default), note. Anti-pattern: T3D placeholders __UAI_G_NNNNNN__ — use guid:UUID from blueprint_graph_introspect or patch_id from this batch. For very large op lists, use ops_json_path (project-relative UTF-8 file: root JSON array of ops) under Saved/ or harness_step/ — mutually exclusive with inline ops[]. Resolver preflight repairs create_node k2_class aliases, event_override hoisting, Character Jump/Landed call targets, connect link_from/link_to and split from_node+from_pin into from/to, add_variable type aliases; resolver_audit may list graph_patch_repairs. Primary UE 5.7 graph mutator: ops[] or ops_json_path on blueprint_path (/Game) and graph_name. create_node (UK2Node), create_comment, connect, break_link, splice_on_link, set_pin_default, add_variable, remove_node, move_node. auto_layout defaults true with layout_scope patched_nodes; full_graph reformats entire script graph. Formatter follows Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Atomic: if any op fails, the transaction is cancelled (nothing persists; applied_partial is always []). Failure JSON: status patch_errors (or patch_validate_errors when validate_only), errors[], error_codes[], failed_op_index, optional failed_op or failed_op_json snippet, optional available_pins_from / available_pins_to (pin name, direction, category) on connect/connect_exec pin failures, suggested_correct_call (error-kind-specific: e.g. list_pins for bad links, Character Jump/Landed pattern for event_override / missing CallFunction — not a generic IfThenElse default), note. validate_only: create_node ops are spawned on-graph transiently then removed; connect between two batch-local nodes runs TryCreateConnection; mixed batch/graph endpoints get pin name+direction checks only. Anti-pattern: T3D placeholders __UAI_G_NNNNNN__ — use guid:UUID from blueprint_graph_introspect or patch_id from this batch. For very large op lists, use ops_json_path (project-relative UTF-8 file: root JSON array of ops) under Saved/ or harness_step/ — mutually exclusive with inline ops[]. Resolver preflight repairs create_node k2_class aliases, event_override hoisting, Character Jump/Landed call targets, connect link_from/link_to and split from_node+from_pin into from/to, add_variable type aliases; resolver_audit may list graph_patch_repairs. Primary UE 5.7 graph mutator: ops[] or ops_json_path on blueprint_path (/Game) and graph_name. create_node (UK2Node), create_comment, connect, connect_exec (sole visible exec out → sole exec in; node refs without .Pin), break_link, splice_on_link, set_pin_default, add_variable, remove_node, move_node. auto_layout defaults true with layout_scope patched_nodes; full_graph reformats entire script graph. Formatter follows Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -106,6 +106,10 @@
             ],
             "description": "patched_nodes: layout only nodes created in this patch (create_node/create_comment), then translate cluster using node bounding boxes and push any overlapping non-patch script nodes right (AABB + gap). full_graph: LayoutEntireGraph on the script graph—use only when an explicit reformat is intended."
           },
+          "validate_only": {
+            "type": "boolean",
+            "description": "When true, validate ops[] without persisting: create_node instances are spawned on the graph then removed. connect between two batch-local nodes simulates TryCreateConnection; if either endpoint is a saved graph node, only pin resolution and output→input direction are checked (wires on saved nodes are not altered)."
+          },
           "ops_json_path": {
             "type": "string",
             "minLength": 1,
@@ -135,7 +139,12 @@
                     "k2_class": {
                       "type": "string",
                       "minLength": 1,
-                      "description": "UK2Node class object path, e.g. /Script/BlueprintGraph.K2Node_IfThenElse. Use K2Node_ prefix in /Script paths (not UK2Node_). Bare K2Node_* is accepted and expanded to /Script/BlueprintGraph.* (K2Node_Enhanced* → /Script/InputBlueprintNodes.*). Integer math/compare has no K2Node_IntLess/IntAdd — use K2Node_CallFunction + /Script/Engine.KismetMathLibrary + Less_IntInt / Add_IntInt / etc. Do not put node_guid on create_node (schema rejects it). Do not use __UAI_G_* in connect refs (T3D-only)."
+                      "description": "UK2Node class object path, e.g. /Script/BlueprintGraph.K2Node_IfThenElse. Omit when using semantic_kind instead. If both are set, k2_class wins. Use K2Node_ prefix in /Script paths (not UK2Node_). Bare K2Node_* is accepted and expanded to /Script/BlueprintGraph.* (K2Node_Enhanced* → /Script/InputBlueprintNodes.*). Integer math/compare has no K2Node_IntLess/IntAdd — use K2Node_CallFunction + /Script/Engine.KismetMathLibrary + Less_IntInt / Add_IntInt / etc. Do not put node_guid on create_node (schema rejects it). Do not use __UAI_G_* in connect refs (T3D-only)."
+                    },
+                    "semantic_kind": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Preferred alternative to k2_class: branch | execution_sequence | call_library_function | variable_get | variable_set | event_override (alias event) | custom_event | dynamic_cast. Required by the graph patch implementation when k2_class is omitted. Must appear in this object for resolver schema validation (additionalProperties: false)."
                     },
                     "event_name": {
                       "type": "string",
@@ -200,16 +209,15 @@
                       "properties": {
                         "function_name": {
                           "type": "string",
-                          "description": "Event or function name on outer class (e.g. ReceiveBeginPlay)."
+                          "description": "Event or function name on outer class (e.g. Landed, Jump, ReceiveBeginPlay)."
                         },
                         "outer_class_path": {
                           "type": "string",
-                          "description": "Class that declares the member (e.g. /Script/Engine.Actor)."
+                          "description": "Class that declares the member (e.g. /Script/Engine.Character for Landed/Jump). Optional for several common lifecycle names — the engine defaults outer_class when omitted; still set explicitly when unsure."
                         }
                       },
                       "required": [
-                        "function_name",
-                        "outer_class_path"
+                        "function_name"
                       ]
                     },
                     "variable_name": {
@@ -235,8 +243,7 @@
                   },
                   "required": [
                     "op",
-                    "patch_id",
-                    "k2_class"
+                    "patch_id"
                   ]
                 },
                 {
@@ -386,6 +393,55 @@
                     "op": {
                       "type": "string",
                       "enum": [
+                        "connect_exec"
+                      ]
+                    },
+                    "from_node": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Node ref only (patch_id from this batch, guid:uuid, or bare UUID). Must not contain '.'; use op connect for explicit pins."
+                    },
+                    "to_node": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Node ref only for the exec input target."
+                    },
+                    "from": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Alias of from_node when to is set (both must be node-only refs)."
+                    },
+                    "to": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Alias of to_node when from is set."
+                    }
+                  },
+                  "required": [
+                    "op"
+                  ],
+                  "oneOf": [
+                    {
+                      "required": [
+                        "from_node",
+                        "to_node"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "from",
+                        "to"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
                         "set_pin_default"
                       ]
                     },
@@ -414,45 +470,94 @@
                     "value": {
                       "type": "string",
                       "description": "Default string as editor expects for this pin category."
+                    },
+                    "default_value": {
+                      "type": "string",
+                      "description": "Alias of value (models often use this name); resolver copies to value before apply."
                     }
                   },
                   "required": [
-                    "op",
-                    "value"
+                    "op"
                   ],
                   "oneOf": [
                     {
                       "required": [
-                        "ref"
+                        "ref",
+                        "value"
                       ]
                     },
                     {
                       "required": [
-                        "node_ref"
+                        "node_ref",
+                        "value"
                       ]
                     },
                     {
                       "required": [
                         "patch_id",
-                        "pin"
+                        "pin",
+                        "value"
                       ]
                     },
                     {
                       "required": [
                         "patch_id",
-                        "pin_name"
+                        "pin_name",
+                        "value"
                       ]
                     },
                     {
                       "required": [
                         "node_guid",
-                        "pin"
+                        "pin",
+                        "value"
                       ]
                     },
                     {
                       "required": [
                         "node_guid",
-                        "pin_name"
+                        "pin_name",
+                        "value"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "ref",
+                        "default_value"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "node_ref",
+                        "default_value"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "patch_id",
+                        "pin",
+                        "default_value"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "patch_id",
+                        "pin_name",
+                        "default_value"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "node_guid",
+                        "pin",
+                        "default_value"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "node_guid",
+                        "pin_name",
+                        "default_value"
                       ]
                     }
                   ]
