@@ -174,7 +174,7 @@ struct FUnrealAiAgentTurnRequest
 	bool bOmitMainAgentBlueprintMutationTools = true;
 
 	/**
-	 * One-shot: after `<unreal_ai_blueprint_builder_result>`, inject `13-blueprint-builder-resume.md` into the main-agent system prompt once.
+	 * One-shot: after `<unreal_ai_blueprint_builder_result>`, inject `blueprint-builder/09-resume-on-main-agent.md` into the main-agent system prompt once.
 	 * Cleared when UnrealAiTurnLlmRequestBuilder::Build consumes it.
 	 */
 	bool bInjectBlueprintBuilderResumeChunk = false;
@@ -187,6 +187,6 @@ struct FUnrealAiAgentTurnRequest
 
 	EUnrealAiEnvironmentBuilderTargetKind EnvironmentBuilderTargetKind = EUnrealAiEnvironmentBuilderTargetKind::PcgScene;
 
-	/** One-shot resume chunk after `<unreal_ai_environment_builder_result>` (see `15-environment-builder-resume.md`). */
+	/** One-shot resume chunk after `<unreal_ai_environment_builder_result>` (`environment-builder/08-resume-on-main-agent.md`). */
 	bool bInjectEnvironmentBuilderResumeChunk = false;
 };

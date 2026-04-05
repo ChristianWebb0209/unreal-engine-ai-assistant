@@ -250,6 +250,17 @@ void FUnrealAiChatRunSink::OnPlanningDecision(
 		QueueStepsPending));
 }
 
+void FUnrealAiChatRunSink::OnSubagentBuilderHandoff(const FString& BuilderDisplayName)
+{
+	if (!Transcript.IsValid() || BuilderDisplayName.IsEmpty())
+	{
+		return;
+	}
+	// Prefix marks harness-injected user rows (muted bubble + "--- Harness ---" in plain-text export).
+	Transcript->AddUserMessage(
+		FString::Printf(TEXT("[Harness] Delegated to %s."), *BuilderDisplayName));
+}
+
 void FUnrealAiChatRunSink::OnEnforcementEvent(const FString& EventType, const FString& Detail)
 {
 	if (Transcript.IsValid())
@@ -257,7 +268,9 @@ void FUnrealAiChatRunSink::OnEnforcementEvent(const FString& EventType, const FS
 		const bool bHideInternalBackgroundOps =
 			EventType.Equals(TEXT("background_op"), ESearchCase::IgnoreCase)
 			|| EventType.Equals(TEXT("tool_selector_ranks"), ESearchCase::IgnoreCase)
-			|| EventType.StartsWith(TEXT("tool_surface_"), ESearchCase::IgnoreCase);
+			|| EventType.StartsWith(TEXT("tool_surface_"), ESearchCase::IgnoreCase)
+			|| EventType.Equals(TEXT("blueprint_builder_chain"), ESearchCase::IgnoreCase)
+			|| EventType.Equals(TEXT("environment_builder_chain"), ESearchCase::IgnoreCase);
 
 		if (!bHideInternalBackgroundOps)
 		{

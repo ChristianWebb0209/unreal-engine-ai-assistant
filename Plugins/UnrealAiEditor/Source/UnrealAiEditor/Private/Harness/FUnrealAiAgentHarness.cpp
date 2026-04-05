@@ -2649,7 +2649,7 @@ namespace UnrealAiAgentHarnessPriv
 			FUnrealAiConversationMessage BpNudge;
 			BpNudge.Role = TEXT("user");
 			BpNudge.Content = TEXT(
-				"[Harness][reason=multi_tool_failure_round] Multiple tool failures this round. For Blueprint graph mutations from the main agent, use the <unreal_ai_build_blueprint> handoff (see 12-build-blueprint-delegation). Use only tool_id values from the current tool appendix—never invent names. If still blocked, summarize the exact error text and stop.");
+				"[Harness][reason=multi_tool_failure_round] Multiple tool failures this round. For Blueprint graph mutations from the main agent, use the <unreal_ai_build_blueprint> handoff (see prompts/chunks/blueprint-builder/08-delegation-from-main-agent.md). Use only tool_id values from the current tool appendix—never invent names. If still blocked, summarize the exact error text and stop.");
 			Conv->GetMessagesMutable().Add(BpNudge);
 			EmitEnforcementEvent(TEXT("blueprint_mutation_handoff_nudge"), FString::Printf(TEXT("tool_fail_count=%d"), ToolFailCount));
 		}
@@ -2925,6 +2925,10 @@ namespace UnrealAiAgentHarnessPriv
 			Request.bBlueprintBuilderTurn = true;
 			Request.bEnvironmentBuilderTurn = false;
 			EmitEnforcementEvent(TEXT("blueprint_builder_chain"), TEXT("chained_subturn_from_build_blueprint_tag"));
+			if (Sink.IsValid())
+			{
+				Sink->OnSubagentBuilderHandoff(TEXT("Blueprint Builder"));
+			}
 			FUnrealAiConversationMessage Sub;
 			Sub.Role = TEXT("user");
 			Sub.Content = UnrealAiBlueprintBuilderToolSurface::BuildAutomatedSubturnHarnessPreamble(ParsedKind) + BpInner;
@@ -2942,6 +2946,10 @@ namespace UnrealAiAgentHarnessPriv
 			Request.bEnvironmentBuilderTurn = true;
 			Request.bBlueprintBuilderTurn = false;
 			EmitEnforcementEvent(TEXT("environment_builder_chain"), TEXT("chained_subturn_from_build_environment_tag"));
+			if (Sink.IsValid())
+			{
+				Sink->OnSubagentBuilderHandoff(TEXT("Environment Builder"));
+			}
 			FUnrealAiConversationMessage SubEnv;
 			SubEnv.Role = TEXT("user");
 			SubEnv.Content = UnrealAiEnvironmentBuilderToolSurface::BuildAutomatedSubturnHarnessPreamble(ParsedEnvKind) + EnvInner;

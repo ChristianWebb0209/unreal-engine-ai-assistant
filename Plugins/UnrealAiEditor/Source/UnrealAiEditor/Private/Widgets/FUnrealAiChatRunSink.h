@@ -38,6 +38,7 @@ public:
 	virtual void OnPlanDraftReady(const FString& DagJsonText) override;
 	virtual void OnPlanHarnessSubTurnComplete() override;
 	virtual void OnPlanningDecision(const FString& ModeUsed, const TArray<FString>& TriggerReasons, int32 ReplanCount, int32 QueueStepsPending) override;
+	virtual void OnSubagentBuilderHandoff(const FString& BuilderDisplayName) override;
 	virtual void OnEnforcementEvent(const FString& EventType, const FString& Detail) override;
 	virtual void OnEnforcementSummary(
 		int32 ActionIntentTurns,
