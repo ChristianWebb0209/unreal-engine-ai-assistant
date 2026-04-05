@@ -70,6 +70,20 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 		}
 	};
 
+	/** Paths under `prompts/chunks/` (not `chunks/common/`) — builder handoffs, plan DAG, etc. */
+	auto AppendUnderChunksTree = [&Acc](const TCHAR* RelFromChunksRoot)
+	{
+		FString C;
+		if (UnrealAiPromptChunkUtils::LoadChunk(TEXT("chunks"), RelFromChunksRoot, C))
+		{
+			if (!Acc.IsEmpty())
+			{
+				Acc += TEXT("\n\n---\n\n");
+			}
+			Acc += C;
+		}
+	};
+
 	if (Params.bBlueprintBuilderMode)
 	{
 		AppendChunk(TEXT("01-identity.md"));
@@ -178,15 +192,15 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 
 	AppendChunk(TEXT("03-complexity-and-todo-plan.md"));
 	AppendChunk(TEXT("04-tool-calling-contract.md"));
-	AppendChunk(TEXT("12-build-blueprint-delegation.md"));
+	AppendUnderChunksTree(TEXT("blueprint-builder/08-delegation-from-main-agent.md"));
 	if (Params.bInjectBlueprintBuilderResumeChunk)
 	{
-		AppendChunk(TEXT("13-blueprint-builder-resume.md"));
+		AppendUnderChunksTree(TEXT("blueprint-builder/09-resume-on-main-agent.md"));
 	}
-	AppendChunk(TEXT("14-build-environment-delegation.md"));
+	AppendUnderChunksTree(TEXT("environment-builder/07-delegation-from-main-agent.md"));
 	if (Params.bInjectEnvironmentBuilderResumeChunk)
 	{
-		AppendChunk(TEXT("15-environment-builder-resume.md"));
+		AppendUnderChunksTree(TEXT("environment-builder/08-resume-on-main-agent.md"));
 	}
 	AppendChunk(TEXT("05-context-and-editor.md"));
 	AppendChunk(TEXT("10-mvp-gameplay-and-tooling.md"));
@@ -237,7 +251,7 @@ EUnrealAiPromptAssemblyKind UnrealAiPromptAssembly::GetEffectiveAssemblyKind()
 
 const IUnrealAiPromptAssemblyStrategy& UnrealAiPromptAssembly::GetStrategyForKind(const EUnrealAiPromptAssemblyKind Kind)
 {
-	static FUnrealAiLinearPromptAssemblyStrategy GLegacy(TEXT("chunks"));
+	static FUnrealAiLinearPromptAssemblyStrategy GLegacy(TEXT("chunks/common"));
 	switch (Kind)
 	{
 	case EUnrealAiPromptAssemblyKind::LegacyChunks:

@@ -1,6 +1,6 @@
 # Core tool pack (catalog hint)
 
-These tools have **`context_selector.always_include_in_core_pack`: true** in `UnrealAiToolCatalog.json` — useful default allowlist seeds for routing prompts.
+These tools have **`context_selector.always_include_in_core_pack`: true** in `tools.main.json` (merged catalog) — useful default allowlist seeds for routing prompts.
 
 | tool_id | category |
 |---------|----------|

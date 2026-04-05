@@ -10,7 +10,7 @@ public:
 	virtual FString BuildSystemDeveloperContent(const FUnrealAiPromptAssembleParams& Params) const = 0;
 };
 
-/** Linear assembly from `prompts/chunks/*.md` (see `UnrealAiPromptAssemblyStrategy.cpp`). */
+/** Linear assembly from `prompts/chunks/common/*.md` plus `chunks/<domain>/**` (see `UnrealAiPromptAssemblyStrategy.cpp`). */
 class FUnrealAiLinearPromptAssemblyStrategy final : public IUnrealAiPromptAssemblyStrategy
 {
 public:

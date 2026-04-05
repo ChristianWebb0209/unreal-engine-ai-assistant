@@ -5,6 +5,6 @@
 
 namespace UnrealAiPromptBuilder
 {
-	/** Loads `prompts/chunks/*.md` via `FUnrealAiLinearPromptAssemblyStrategy`. */
+	/** Loads `prompts/chunks/common/*.md` (and domain subtrees) via `FUnrealAiLinearPromptAssemblyStrategy`. */
 	FString BuildSystemDeveloperContent(const FUnrealAiPromptAssembleParams& Params);
 }

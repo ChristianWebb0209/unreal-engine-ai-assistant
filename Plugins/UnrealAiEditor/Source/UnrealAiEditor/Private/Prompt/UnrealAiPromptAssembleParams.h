@@ -18,15 +18,16 @@ struct FUnrealAiPromptAssembleParams
 	/** Plan-mode node execution: Agent turn on thread id `*_plan_*` (serial DAG node harness). */
 	bool bIncludePlanNodeExecutionChunk = false;
 
-	/** Blueprint Builder sub-turn: alternate prompt stack under `prompts/chunks/blueprint-builder/`. */
+	/** Blueprint Builder sub-turn: `prompts/chunks/common/*` prefix + `prompts/chunks/blueprint-builder/*` domain stack. */
 	bool bBlueprintBuilderMode = false;
 
 	/** Sub-turn domain from `<unreal_ai_build_blueprint>` frontmatter; selects `blueprint-builder/kinds/*.md`. */
 	EUnrealAiBlueprintBuilderTargetKind BlueprintBuilderTargetKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
 
-	/** Main agent: one-shot resume guidance after builder result (see `13-blueprint-builder-resume.md`). */
+	/** Main agent: one-shot resume guidance after builder result (`blueprint-builder/09-resume-on-main-agent.md`). */
 	bool bInjectBlueprintBuilderResumeChunk = false;
 
+	/** Environment Builder sub-turn: `prompts/chunks/common/*` prefix + `prompts/chunks/environment-builder/*` domain stack. */
 	bool bEnvironmentBuilderMode = false;
 
 	EUnrealAiEnvironmentBuilderTargetKind EnvironmentBuilderTargetKind = EUnrealAiEnvironmentBuilderTargetKind::PcgScene;

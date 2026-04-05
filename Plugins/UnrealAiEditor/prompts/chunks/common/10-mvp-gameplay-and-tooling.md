@@ -2,7 +2,7 @@
 
 {{CODE_TYPE_PREFERENCE}}
 
-The project targets **gameplay Blueprint** workflows on **UE 5.7**. **Before following any playbook below:** the **tiered tool appendix** for this request is the source of truth (`04-tool-calling-contract.md`). On the **default main Agent**, Blueprint **graph mutations** are often **not** listed—use **`<unreal_ai_build_blueprint>`** with the right **`target_kind`** (`12-build-blueprint-delegation.md`) for substantive graph edits, compile-after-patch flows, and format-graph passes. When **`blueprint_graph_patch`**, **`blueprint_compile`**, etc. **are** in the appendix (Blueprint Builder sub-turn or power-user roster), apply the full gameplay depth below.
+The project targets **gameplay Blueprint** workflows on **UE 5.7**. **Before following any playbook below:** the **tiered tool appendix** for this request is the source of truth (`04-tool-calling-contract.md`). On the **default main Agent**, Blueprint **graph mutations** are often **not** listed—use **`<unreal_ai_build_blueprint>`** with the right **`target_kind`** (`blueprint-builder/08-delegation-from-main-agent.md`) for substantive graph edits, compile-after-patch flows, and format-graph passes. When **`blueprint_graph_patch`**, **`blueprint_compile`**, etc. **are** in the appendix (Blueprint Builder sub-turn or power-user roster), apply the full gameplay depth below.
 
 ## Principles
 

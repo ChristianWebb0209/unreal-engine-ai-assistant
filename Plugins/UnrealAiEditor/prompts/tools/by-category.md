@@ -1,6 +1,6 @@
 # Tool catalog by category (prompt-facing)
 
-Derived from `UnrealAiToolCatalog.json`. Table cells list **ask** and **agent**; **`plan`** appears only in the JSON (`modes.plan` per tool).
+Derived from the merged catalog (`tools.main.json` + `tools.blueprint.json` + `tools.environment.json`). Table cells list **ask** and **agent**; **`plan`** appears only in the JSON (`modes.plan` per tool).
 
 ## `animation_sequencer`
 
@@ -36,7 +36,7 @@ Derived from `UnrealAiToolCatalog.json`. Table cells list **ask** and **agent**;
 
 ## `banned`
 
-_No catalog entries._ Placeholder tools for generic network access, raw exec strings, arbitrary process/Python execution, and non–project-scoped delete were removed from `UnrealAiToolCatalog.json` (they had no native handlers). Use **`console_command`** (allow-list keys by default; optional legacy wide exec in editor settings), **`project_file_*`** / **`asset_delete`**, and other scoped tools instead.
+_No catalog entries._ Placeholder tools for generic network access, raw exec strings, arbitrary process/Python execution, and non–project-scoped delete were removed from the merged catalog (they had no native handlers). Use **`console_command`** (allow-list keys by default; optional legacy wide exec in editor settings), **`project_file_*`** / **`asset_delete`**, and other scoped tools instead.
 
 ## `blueprints`
 

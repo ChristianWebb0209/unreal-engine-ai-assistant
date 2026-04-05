@@ -6,7 +6,7 @@
 
 namespace UnrealAiPromptChunkUtils
 {
-	/** Resolves `.../Plugins/UnrealAiEditor/prompts/<Subdir>` (e.g. `chunks`). */
+	/** Resolves `.../Plugins/UnrealAiEditor/prompts/<Subdir>` (e.g. `chunks` or `chunks/common`). */
 	FString ResolvePromptSubdir(const TCHAR* Subdir);
 
 	bool LoadChunk(const TCHAR* Subdir, const TCHAR* FileName, FString& Out);
