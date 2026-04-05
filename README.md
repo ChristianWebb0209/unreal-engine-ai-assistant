@@ -1,4 +1,4 @@
-﻿# Unreal AI Editor
+# Unreal AI Editor
 
 **Unreal AI Editor** is a **free, open-source** Unreal Engine plugin that brings a full **agentic AI assistant** into the editor: streaming chat, a large **tool catalog** for assets and levels, Blueprint graph authoring via a compact **IR format**, local persistence, and bring-your-own API keys (OpenRouter, Anthropic, OpenAI, and similar). You pay **only** for whichever LLM provider you choose—**no** subscription to us, **no** lock-in, and **no** separate product server. The goal is **feature depth comparable to commercial Unreal AI assistants** that often sell for **$100+** on marketplaces—while staying **local-first**, auditable, and under your control.
 
