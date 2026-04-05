@@ -1,4 +1,4 @@
-# Prompt chunking, pruning, and context efficiency
+﻿# Prompt chunking, pruning, and context efficiency
 
 This document captures **design and trade-off thinking** for reducing token cost and protecting quality: how static instructions are composed, where tokens actually go, how we might evolve chunking, and how to **measure** pruning safely.
 
@@ -67,7 +67,7 @@ Nothing here is a commitment to implement; it is a shared vocabulary for iterati
 
 - **`KMin` / `KMax`:** `UnrealAiRuntimeDefaults::ToolKMin` / `ToolKMax`; fed into `UnrealAiToolKPolicy::ComputeEffectiveK`.
 - **Effective `K`:** Chosen from `{KMin, mid, KMax}` based on **margin** between the top two **non-guard** BM25-blended scores (`S0`, `S1`): clear leader → **`KMin`**; muddy middle → **`(KMin+KMax)/2`**; flat leaderboard → **`KMax`**.
-- **Guardrail floor:** Tools with `context_selector.always_include_in_core_pack` in **`UnrealAiToolCatalog.json`** are **always** listed first (in global score order among guardrails). **`eligible ≈ (#guardrails) + K`** for the tiered roster. **Raising `K` only adds non-guard tail tools**—it does not replace auditing guardrails.
+- **Guardrail floor:** Tools with `context_selector.always_include_in_core_pack` in **`tools.main.json`** are **always** listed first (in global score order among guardrails). **`eligible ≈ (#guardrails) + K`** for the tiered roster. **Raising `K` only adds non-guard tail tools**—it does not replace auditing guardrails.
 
 **“Obscure tooling KMin/KMax bumps”** means: **conditionally raise the floor and/or ceiling** for effective `K` when lexical retrieval is weak or the domain is niche, so **more non-guard tools** stay visible without always paying the cost on crisp queries.
 

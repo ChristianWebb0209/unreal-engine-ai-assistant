@@ -1,4 +1,4 @@
-# Agent harness: testing & iteration (single entry point)
+﻿# Agent harness: testing & iteration (single entry point)
 
 Give this file to any new agent or contributor. It is the single entry point for continuing work on the Unreal AI Editor testing harness, prompts, tool catalog, and dispatch.
 
@@ -10,13 +10,13 @@ Index of all `docs/` files: [docs/README.md](../README.md)
 | Layer | What “good” looks like |
 |--------|-------------------------|
 | Prompts (`prompts/chunks/*.md`) | System/developer instructions match real tool behavior, naming, and safety. Chunks are assembled in `UnrealAiPromptBuilder.cpp`. |
-| Tool catalog (`Resources/UnrealAiToolCatalog.json`) | Each `tool_id` has accurate `summary`, JSON Schema `parameters`, and `modes` flags. |
+| Tool catalog (`Resources/tools.main.json`) | Each `tool_id` has accurate `summary`, JSON Schema `parameters`, and `modes` flags. |
 | Dispatch (`UnrealAiToolDispatch*.cpp`) | Every catalog tool either runs, returns structured `not_implemented`, or validates input with clear JSON errors. |
 | Harness (chat loop + persistence) | LLM transport → tool execution → persistence all connect; artifacts land under `Saved/UnrealAiEditor/HarnessRuns/<timestamp>/`. |
 
 ### Main Agent vs Blueprint Builder
 
-- **Default Agent:** `bOmitMainAgentBlueprintMutationTools` + **`agent_surfaces`** in [`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) filter which Blueprint graph tools appear in the tiered appendix (`UnrealAiBlueprintToolGate`, `UnrealAiToolSurfaceCompatibility`).
+- **Default Agent:** `bOmitMainAgentBlueprintMutationTools` + **`agent_surfaces`** in [`tools.main.json`](../../Plugins/UnrealAiEditor/Resources/tools.main.json) filter which Blueprint graph tools appear in the tiered appendix (`UnrealAiBlueprintToolGate`, `UnrealAiToolSurfaceCompatibility`).
 - **Handoff:** main agent uses **`<unreal_ai_build_blueprint>`** with **`target_kind`**; harness chains a builder sub-turn (`UnrealAiBuildBlueprintTag`, `FUnrealAiAgentHarness`) with **`blueprint-builder/`** prompt chunks and **`UnrealAiBlueprintBuilderToolSurface`**.
 - **Escape hatch:** `bOmitMainAgentBlueprintMutationTools == false` disables surface gating for power users.
 - **Validators:** `scripts/Validate-UnrealAiToolCatalog.ps1`, `scripts/verify_tool_catalog_meta.py`, `scripts/audit_tool_agent_surfaces.py` (CI: `.github/workflows/validate-tool-catalog.yml`).
@@ -111,7 +111,7 @@ From Output Log:
 | Area | Path |
 |------|------|
 | System prompt chunks | `Plugins/UnrealAiEditor/prompts/chunks/` |
-| Tool definitions | `Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json` |
+| Tool definitions | `Plugins/UnrealAiEditor/Resources/tools.main.json` |
 | Tool implementation | `Plugins/UnrealAiEditor/Source/.../Tools/UnrealAiToolDispatch*.cpp` |
 | Long-running headed suites | `tests/qualitative-tests/` (`run-qualitative-headed.ps1`, suite JSON, `runs/` outputs); see [`tests/qualitative-tests/README.md`](../tests/qualitative-tests/README.md) |
 | Blueprint curriculum iteration (agents) | [`BLUEPRINT_CURRICULUM_AGENT_LOOP.md`](BLUEPRINT_CURRICULUM_AGENT_LOOP.md) |

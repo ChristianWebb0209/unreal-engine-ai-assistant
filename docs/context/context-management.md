@@ -529,8 +529,8 @@ Sub-turn **rails** (max sub-turns, cancel, optional wall clock), **auto-continue
 
 | Chunk | Role |
 |-------|------|
-| [`05-context-and-editor.md`](../../Plugins/UnrealAiEditor/prompts/chunks/05-context-and-editor.md) | How to interpret `{{CONTEXT_SERVICE_OUTPUT}}`, `@` paths, stale snapshots |
-| [`03-complexity-and-todo-plan.md`](../../Plugins/UnrealAiEditor/prompts/chunks/03-complexity-and-todo-plan.md) | `{{COMPLEXITY_BLOCK}}`, todo plan discipline |
+| [`05-context-and-editor.md`](../../Plugins/UnrealAiEditor/prompts/chunks/common/05-context-and-editor.md) | How to interpret `{{CONTEXT_SERVICE_OUTPUT}}`, `@` paths, stale snapshots |
+| [`03-complexity-and-todo-plan.md`](../../Plugins/UnrealAiEditor/prompts/chunks/common/03-complexity-and-todo-plan.md) | `{{COMPLEXITY_BLOCK}}`, todo plan discipline |
 
 ---
 

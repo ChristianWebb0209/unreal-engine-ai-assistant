@@ -1,4 +1,4 @@
-# Unreal AI Editor
+﻿# Unreal AI Editor
 
 **Unreal AI Editor** is a **free, open-source** Unreal Engine plugin that brings a full **agentic AI assistant** into the editor: streaming chat, a large **tool catalog** for assets and levels, Blueprint graph authoring via a compact **IR format**, local persistence, and bring-your-own API keys (OpenRouter, Anthropic, OpenAI, and similar). You pay **only** for whichever LLM provider you choose—**no** subscription to us, **no** lock-in, and **no** separate product server. The goal is **feature depth comparable to commercial Unreal AI assistants** that often sell for **$100+** on marketplaces—while staying **local-first**, auditable, and under your control.
 
@@ -94,7 +94,7 @@ This is where **`conversation.json`** is read/written, LLM rounds are bounded, a
 <details>
 <summary><strong>Tooling components</strong></summary>
 
-**Tool catalog, execution host, and dispatch** split by concern: **catalog loader** (`UnrealAiToolCatalog.json`), **tool surface pipeline** entry (for eligibility when enabled), **Blueprint surface gate** (`UnrealAiBlueprintToolGate` / builder roster), **execution host** (permissions + invocation), and **dispatch** modules (actors/world, assets, Blueprint, editor UI, search, PIE, etc.).
+**Tool catalog, execution host, and dispatch** split by concern: **catalog loader** (`tools.main.json`), **tool surface pipeline** entry (for eligibility when enabled), **Blueprint surface gate** (`UnrealAiBlueprintToolGate` / builder roster), **execution host** (permissions + invocation), and **dispatch** modules (actors/world, assets, Blueprint, editor UI, search, PIE, etc.).
 
 Narrowing **which tools appear** and **tiered markdown** for `unreal_ai_dispatch` is a separate pipeline from **docs vector retrieval**â€”see [`docs/tooling/tools-expansion.md`](docs/tooling/tools-expansion.md) and the companion view **Tool surface graph**. Narrative catalog: [`docs/tooling/tool-registry.md`](docs/tooling/tool-registry.md).
 
@@ -307,7 +307,7 @@ The repo includes the UE **First Person BP** sample (Blueprint-only game, copied
 
 - **In-editor UI:** **Window → Unreal AI** and **Tools → Unreal AI** (Agent Chat, AI Settings, Quick Start, Help, **Debug**). Toolbar button and **Ctrl+K** for Agent Chat.
 - **Agent Chat:** Streaming replies, tool call cards, todo plans, context attachments, per-thread persistence under `%LOCALAPPDATA%\UnrealAiEditor\` (Windows).
-- **Tools:** Broad catalog in `Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json`—scene/asset/source search, editor snapshots, Blueprint **compile** / **export IR** / **apply IR**, generic **asset** create/export/apply properties, packaging helpers, and more (see catalog and dispatch modules under `Plugins/UnrealAiEditor/Source/.../Tools/`).
+- **Tools:** Broad catalog in `Plugins/UnrealAiEditor/Resources/tools.main.json`—scene/asset/source search, editor snapshots, Blueprint **compile** / **export IR** / **apply IR**, generic **asset** create/export/apply properties, packaging helpers, and more (see catalog and dispatch modules under `Plugins/UnrealAiEditor/Source/.../Tools/`).
 - **Settings:** API keys, models, usage stats, presets—persisted locally; optional OpenRouter and other providers.
 - **No product backend:** networking is **only** to LLM APIs you configure (plus optional local tooling such as MCP on localhost, if you wire it).
 

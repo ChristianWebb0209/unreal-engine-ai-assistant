@@ -1,13 +1,19 @@
-# Todo List
-
-## Core Functionality
-
-- None of the main tools really seem to work too well. 
-
-### Problems List:
+# Todo List:
 
 - I made a sphere named MySphere and asked agent to focus. It responded by first doing a fuzzy search. Our context window is way too narrow at the start. At least the most likely scene objects, maybe including most recently created, should be included as default context. Success metric for this is that query should know to call just one tool, actor focus in scene, because it knows the scene enough from default.
-- Simply saying "make me a cool blueprint" failed completely. My plugin really sucks.
+- Text glitch where it bunches up and doesn't animate dropping down correctly
+- Editor follow shouldn't be able to be enabled on two running agents at the same time
+- Editor follow should be off by default since it causes a lot of lag
+- Subagents should have a more rich indication to the user that they are working
+- - Maybe something graph based and each concurrent agent is shown side by side next to each other
+- We should have the chats just be named by the first user message, and not do anything complicated with custom prompts to decide a name
+- - It named my chat after the second message I sent for some reason?
+- (big task) Implement everything in docs\planning\agent-editor-responsiveness-streaming.md
+- blueprint_graph_patch still fails tremendously for some reason
+- All tools should have names that are shown to the user so it doesn't show a tool call like blueprint_graph_patch
+- Agent occasionally switches to front view in viewport for no discernable reason
+- We should make agent types for each of the blueprint types, then one is just for general blueprint stuff, instead of having one type that does all different types of blueprint
+- We need to make a demo for the project preferrably using OpenScreen
 
 ## Subagents and plan mode
 

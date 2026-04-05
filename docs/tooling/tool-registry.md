@@ -3,7 +3,7 @@
 **Version:** 1.1  
 **Target engine:** Unreal Engine 5.5+ (minor API names may drift — confirm against your installed `Engine/Source` before implementation.)  
 
-**Canonical machine-readable catalog:** A **single JSON** ships with the editor plugin: [`Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) (`meta` + `tools[]`). Runtime execution: `FUnrealAiToolExecutionHost` + `UnrealAiToolDispatch.cpp` in `Private/Tools/`. Extend handlers there and keep this document in sync for narrative/Epic links.
+**Canonical machine-readable catalog:** The editor plugin loads [`Plugins/UnrealAiEditor/Resources/tools.main.json`](../../Plugins/UnrealAiEditor/Resources/tools.main.json) (`meta` + main roster `tools[]`) and merges [`tools.blueprint.json`](../../Plugins/UnrealAiEditor/Resources/tools.blueprint.json) and [`tools.environment.json`](../../Plugins/UnrealAiEditor/Resources/tools.environment.json) (`FUnrealAiToolCatalog::LoadFromPlugin`). Runtime execution: `FUnrealAiToolExecutionHost` + `UnrealAiToolDispatch.cpp` in `Private/Tools/`. Extend handlers there and keep this document in sync for narrative/Epic links.
 
 **This Markdown file** remains the **human-readable** narrative, Epic links, and engineering notes.
 
@@ -61,7 +61,7 @@ Every tool below follows this schema (suitable for export to JSON for OpenAI/Ant
 | **`threading`** | Typically **game thread** for editor mutation. |
 | **`failure_modes`** | User-visible errors. |
 | **`doc_links`** | Epic doc URLs (API / guides). |
-| **`status`** | Authoritative values and meanings: [`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) `meta.status_legend` (`implemented`, `future`, `designed`, `deprecated`). The per-tool **status** cells in the tables below are not auto-synced—prefer the JSON for each `tool_id`. |
+| **`status`** | Authoritative values and meanings: [`tools.main.json`](../../Plugins/UnrealAiEditor/Resources/tools.main.json) `meta.status_legend` (`implemented`, `future`, `designed`, `deprecated`). The per-tool **status** cells in the tables below are not auto-synced—prefer the JSON for each `tool_id`. |
 
 **Ask mode:** Only tools with `permission: read` (and optionally explicit read-only context tools).  
 **Agent / Plan:** Catalog entries allowed by mode flags, then **tiered eligibility** and **`agent_surfaces`** (main Agent vs Blueprint Builder) further narrow what appears in the tool appendix—see [Main Agent vs Blueprint Builder](#main-agent-vs-blueprint-builder-default-product-path) above.
@@ -696,7 +696,7 @@ These are the first implementation wave. Each row is expanded in its domain sect
 | Field | Value |
 |-------|--------|
 | **summary** | Structured **`ops[]`** on a **`/Game`** script graph: **`create_node`**, **`create_comment`** (`member_node_refs` + reflow), **`connect`**, **`break_link`**, **`splice_on_link`** (insert on one exec edge), **`set_pin_default`**, **`add_variable`**, **`remove_node`**, **`move_node`**. Optional **`auto_layout`** (default **true**), **`layout_scope`** `patched_nodes` \| **`full_graph`**. Formatter options follow Editor Preferences → Unreal AI Editor → Blueprint Formatting. **`compile`** default true. |
-| **parameters** | Full JSON Schema **`oneOf`** per op in [`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json). **`patch_id`** is batch-local; disk nodes use **`guid:`** from **`blueprint_graph_introspect`** or **`applied[].node_guid`**. |
+| **parameters** | Full JSON Schema **`oneOf`** per op in [`tools.main.json`](../../Plugins/UnrealAiEditor/Resources/tools.main.json). **`patch_id`** is batch-local; disk nodes use **`guid:`** from **`blueprint_graph_introspect`** or **`applied[].node_guid`**. |
 | **returns** | Success: `ok`, `applied[]`, `blueprint_status`, `compiled`, **`auto_layout`**, **`layout_scope`**, **`layout_applied`**, **`layout_nodes_positioned`**, **`formatter_available`**. Failure: `status` **`patch_errors`**, `errors[]`, **`error_codes[]`**, **`applied_partial`** always **`[]`** (transaction cancelled), **`note`**, **`suggested_correct_call`**. |
 | **side_effects** | asset; layout; compile (optional) |
 | **permission** | `write` |
@@ -1011,13 +1011,13 @@ These are the first implementation wave. Each row is expanded in its domain sect
 | **threading** | Game thread. |
 | **failure_modes** | Unknown key (default mode); invalid args for `r_vsync`; blocked legacy substring. |
 | **doc_links** | [Console commands](https://dev.epicgames.com/documentation/en-us/unreal-engine/console-commands-in-unreal-engine) |
-| **status** | See `UnrealAiToolCatalog.json` (`implemented`). |
+| **status** | See `tools.main.json` (`implemented`). |
 
 ---
 
 ## Intentionally absent tool shapes (no catalog stubs)
 
-These capabilities are **not** exposed as tools in `UnrealAiToolCatalog.json` (older placeholder entries were removed):
+These capabilities are **not** exposed as tools in `tools.main.json` (older placeholder entries were removed):
 
 | Capability | Approach instead |
 |------------|------------------|

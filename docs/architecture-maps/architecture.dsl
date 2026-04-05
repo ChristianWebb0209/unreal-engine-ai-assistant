@@ -1,4 +1,4 @@
-// C4 workspace for architecture maps (exported to SVG via scripts/export-architecture-maps.ps1).
+﻿// C4 workspace for architecture maps (exported to SVG via scripts/export-architecture-maps.ps1).
 // Diagram readability: very long single-line descriptions render as one stretched horizontal line in SVGs
 // (no automatic wrap). Prefer splitting description strings with \n at clause boundaries or ~60-80 characters.
 // Keep relationship labels short; put narrative detail in the readme prose block (see file tail) or docs/.
@@ -53,7 +53,7 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
             }
 
             tools = container "Tooling Runtime" "Tool catalog, dispatch, execution host, optional tool surface pipeline\n(lexical eligibility + tiered markdown for unreal_ai_dispatch)." "C++" "Core" {
-                catalogLoader = component "Tool Catalog Loader" "Loads/parses UnrealAiToolCatalog.json; builds native tools[] or dispatch index.\nTiered appendix: roster lines + expanded parameter excerpts under budget\n(BuildCompactToolIndexAppendixTiered)." "FUnrealAiToolCatalog" "Core"
+                catalogLoader = component "Tool Catalog Loader" "Loads/parses tools.main.json; builds native tools[] or dispatch index.\nTiered appendix: roster lines + expanded parameter excerpts under budget\n(BuildCompactToolIndexAppendixTiered)." "FUnrealAiToolCatalog" "Core"
                 toolSurfacePipeline = component "Tool Surface Pipeline" "Default on (toggle ToolEligibilityTelemetryEnabled in UnrealAiRuntimeDefaults.h).\nAgent + dispatch round 1: shaping, BM25, bias, session prior blend,\ndynamic K, guardrails, tiered markdown.\nSeparate from docs vector retrieval." "UnrealAiToolSurfacePipeline" "Core"
                 toolQueryShaper = component "Tool Query Shaper" "Cheap heuristic intent line (verbs/objects) + hybrid query string.\nPrevents a bad extractor from dominating raw user text." "UnrealAiToolQueryShaper" "Core"
                 toolLexicalIndex = component "Tool Lexical Index (BM25)" "In-memory BM25 over enabled tool text (id, summary, category, tags).\nKeyword leg for hybrid retrievalâ€”not embeddings." "FUnrealAiToolBm25Index" "Core"
@@ -480,7 +480,7 @@ BEGIN_README_MAP harness-components
 This is where **`conversation.json`** is read/written, LLM rounds are bounded, and tool rounds connect to dispatch. For iteration, artifacts, and what â€œgoodâ€ looks like in tests, see [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](docs/tooling/AGENT_HARNESS_HANDOFF.md).
 END_README_MAP
 BEGIN_README_MAP tooling-components
-**Tool catalog, execution host, and dispatch** split by concern: **catalog loader** (`UnrealAiToolCatalog.json`), **tool surface pipeline** entry (for eligibility when enabled), **Blueprint surface gate** (`UnrealAiBlueprintToolGate` / builder roster), **execution host** (permissions + invocation), and **dispatch** modules (actors/world, assets, Blueprint, editor UI, search, PIE, etc.).
+**Tool catalog, execution host, and dispatch** split by concern: **catalog loader** (`tools.main.json`), **tool surface pipeline** entry (for eligibility when enabled), **Blueprint surface gate** (`UnrealAiBlueprintToolGate` / builder roster), **execution host** (permissions + invocation), and **dispatch** modules (actors/world, assets, Blueprint, editor UI, search, PIE, etc.).
 
 Narrowing **which tools appear** and **tiered markdown** for `unreal_ai_dispatch` is a separate pipeline from **docs vector retrieval**â€”see [`docs/tooling/tools-expansion.md`](docs/tooling/tools-expansion.md) and the companion view **Tool surface graph**. Narrative catalog: [`docs/tooling/tool-registry.md`](docs/tooling/tool-registry.md).
 END_README_MAP

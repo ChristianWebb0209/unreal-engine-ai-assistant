@@ -12,7 +12,7 @@ This document is for an **autonomous maintainer agent** (or human) that improves
 
 **Broader harness context:** [`AGENT_HARNESS_HANDOFF.md`](AGENT_HARNESS_HANDOFF.md)
 
-**Architecture note:** headed curricula exercise the **full** tool path. On the **default main Agent**, Blueprint **graph mutators** are often **not** on the roster (`agent_surfaces` + `bOmitMainAgentBlueprintMutationTools`); the model is expected to **hand off** via **`<unreal_ai_build_blueprint>`** for patch/IR/compile loops. Failures that look like “model tried `blueprint_graph_patch` but tool was missing” often mean prompt/catalog drift—align with [`prompts/chunks/04-tool-calling-contract.md`](../../Plugins/UnrealAiEditor/prompts/chunks/04-tool-calling-contract.md) and [`12-build-blueprint-delegation.md`](../../Plugins/UnrealAiEditor/prompts/chunks/12-build-blueprint-delegation.md).
+**Architecture note:** headed curricula exercise the **full** tool path. On the **default main Agent**, Blueprint **graph mutators** are often **not** on the roster (`agent_surfaces` + `bOmitMainAgentBlueprintMutationTools`); the model is expected to **hand off** via **`<unreal_ai_build_blueprint>`** for patch/IR/compile loops. Failures that look like “model tried `blueprint_graph_patch` but tool was missing” often mean prompt/catalog drift—align with [`prompts/chunks/common/04-tool-calling-contract.md`](../../Plugins/UnrealAiEditor/prompts/chunks/common/04-tool-calling-contract.md) and [`blueprint-builder/08-delegation-from-main-agent.md`](../../Plugins/UnrealAiEditor/prompts/chunks/blueprint-builder/08-delegation-from-main-agent.md).
 
 ---
 
@@ -51,7 +51,7 @@ Do **not** “improve” metrics by weakening turn requirements or skipping tool
    | Symptom | Likely owner |
    |---------|----------------|
    | Model skips tools / wrong tool order | `Plugins/UnrealAiEditor/prompts/chunks/*.md`, especially `04-tool-calling-contract.md` |
-   | Invalid JSON args / schema mismatch | `Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json` |
+   | Invalid JSON args / schema mismatch | `Plugins/UnrealAiEditor/Resources/tools.main.json` |
    | Tool returns misleading or strict errors | `Plugins/UnrealAiEditor/Source/.../Tools/UnrealAiToolDispatch*.cpp` |
    | Repeatable without LLM | Add **`WITH_DEV_AUTOMATION_TESTS`** case in [`UnrealAiToolDispatchAutomationTests.cpp`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tools/UnrealAiToolDispatchAutomationTests.cpp) or domain tests |
    | Rate limits / timeouts | Model profile / throttling; not a prompt fix |
@@ -128,7 +128,7 @@ Use these when graduating a turn. Remove the used item from this list in the sam
 | Layer | Path |
 |--------|------|
 | Prompts | `Plugins/UnrealAiEditor/prompts/chunks/` |
-| Catalog | `Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json` |
+| Catalog | `Plugins/UnrealAiEditor/Resources/tools.main.json` |
 | Dispatch | `Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tools/UnrealAiToolDispatch*.cpp` |
 | Headless tests | `Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tools/UnrealAiToolDispatchAutomationTests.cpp` |
 | This suite | `tests/qualitative-tests/suites/blueprint-creation-curriculum-v1.json` |

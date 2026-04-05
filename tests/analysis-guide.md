@@ -1,4 +1,4 @@
-# Headed long-running harness — analysis guide
+﻿# Headed long-running harness — analysis guide
 
 This document is for **future agents and humans** who need to **find the latest headed batch**, **interpret artifacts**, and **turn failures into concrete improvements**. It aligns with how this repo records quality work in [`tool-iteration-log.md`](tool-iteration-log.md) (freeform dated entries).
 
@@ -110,7 +110,7 @@ Improvements almost always fall into **one or more** of these. Use them to **cla
 
 ### 2. Tools
 
-**What it covers:** **Tool catalog** surface ([`UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json)), **tool schemas**, **modes** (ask / agent / plan), **core pack** and routing, **tiered / dispatch** surfaces ([`UnrealAiToolSurfacePipeline`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tools/UnrealAiToolSurfacePipeline.cpp)), **tool matrices** and smoke runners.
+**What it covers:** **Tool catalog** surface ([`tools.main.json`](../../Plugins/UnrealAiEditor/Resources/tools.main.json)), **tool schemas**, **modes** (ask / agent / plan), **core pack** and routing, **tiered / dispatch** surfaces ([`UnrealAiToolSurfacePipeline`](../../Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tools/UnrealAiToolSurfacePipeline.cpp)), **tool matrices** and smoke runners.
 
 **Symptoms:** Wrong tool in roster; model never sees a tool; duplicate `fast` mode confusion; `tool_start` for wrong `tool_id`.
 

@@ -1,4 +1,4 @@
-# Tool Iteration Log
+﻿# Tool Iteration Log
 
 Chronicle of changes aimed at headed harness quality and API reliability. Entries are **numbered** (`Entry N`) with a short title; body is freeform bullets or paragraphs. **Newest changes appear first** (highest entry number at the top). When adding a note, prepend **`## Entry M — …`** where **M** is one greater than the current highest number (do not renumber existing entries).
 
@@ -112,7 +112,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 - **Mutation intent heuristic:** `UserLikelyRequestsMutation` now uses whole-word matching for mutation tokens, avoiding substring false-positives (`compile` inside `compilers`/`compiling`) while keeping `mutation_read_only_note` logging behavior.
 - **Tool dispatch fallback paths:** `blueprint_export_ir` now returns `ErrorWithSuggestedCall` when `blueprint_path` is missing; arg repair accepts additional blueprint path key aliases (`path`, `blueprint`) in `RepairBlueprintAssetPathArgs`.
 - **Embedding stall mitigation:** Reduced embedding timeout budget (`EmbeddingHttpTimeoutSec` 15s → 8s) and tightened embedding wait padding in `FOpenAiCompatibleEmbeddingProvider` so retrieval fails faster to lexical fallback instead of holding the turn.
-- **Prompt/catalog/suite updates:** Tightened required-arg/path language in `02-operating-modes.md`, `04-tool-calling-contract.md`, `10-mvp-gameplay-and-tooling.md`, and key `UnrealAiToolCatalog.json` summaries (`asset_create`, `project_file_read_text`, `blueprint_get_graph_summary`, `blueprint_export_ir`). Pruned `pre-release-natural-gaps/suite.json` to failure-focused turns only (prop attach mutation, controls wiring, messy BP tidy, scratch-duplicate rename) with clearer mutation/read-only intent.
+- **Prompt/catalog/suite updates:** Tightened required-arg/path language in `02-operating-modes.md`, `04-tool-calling-contract.md`, `10-mvp-gameplay-and-tooling.md`, and key `tools.main.json` summaries (`asset_create`, `project_file_read_text`, `blueprint_get_graph_summary`, `blueprint_export_ir`). Pruned `pre-release-natural-gaps/suite.json` to failure-focused turns only (prop attach mutation, controls wiring, messy BP tidy, scratch-duplicate rename) with clearer mutation/read-only intent.
 - **Build verification:** `./build-editor.ps1 -Headless` initially hit LNK1104 DLL lock; rerun with `./build-editor.ps1 -Restart -Headless` succeeded.
 
 ---
@@ -176,7 +176,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 - **`UnrealAiWaitTimePolicy.h`:** **`HarnessSyncIdleAbortMs`** **3000 → 12000** — headed sync idle abort was tight for post-tool assistant completion (run-29 **step_03** missing `run_finished`).
 - **Prompts:** **`10-mvp-gameplay-and-tooling.md`** — multiple-match line now includes **`blueprint_apply_ir`** in the forbidden-guess list. **`04-tool-calling-contract.md`** — multiple-asset hits explicitly name **`blueprint_apply_ir`**, **`asset_find_referencers`**, **`asset_get_dependencies`**, etc.
-- **`UnrealAiToolCatalog.json`:** **`blueprint_apply_ir`** / **`asset_find_referencers`** summaries: use **`object_path`** from discovery only.
+- **`tools.main.json`:** **`blueprint_apply_ir`** / **`asset_find_referencers`** summaries: use **`object_path`** from discovery only.
 - **`realistic-user-agent-basket-rerun/suite.json`:** Turn 1 — explicit discover → **`blueprint_apply_ir`** only with paths from tool output. Turn 3 — **`asset_find_referencers`** with path from discovery + conclude without unrelated tool chains.
 - **Doc:** [`run-29-basket-followup.md`](run-29-basket-followup.md) lists these under **Fixes applied (Entry 30)**.
 - **Build:** Recompile plugin (`.\build-editor.ps1 -Headless` or `-Restart` if LNK1104) before re-running the headed basket.
@@ -250,7 +250,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 - **Problem (run-25):** `asset_index_fuzzy_search` returned multiple Blueprints; model called **`blueprint_export_ir`** with a path not in the result set (`SimpleBlueprint`), then recovered—**`tool_finish_false`** still counted 1 on [`tests/qualitative-tests/runs/run-25-20260328-210131_814`](tests/qualitative-tests/runs/run-25-20260328-210131_814) / [`harness-classification.json`](tests/qualitative-tests/runs/run-25-20260328-210131_814/harness-classification.json) (`tool_finish_false`: 1, `run_finished_true`: 1 for the single `step_01` `run.jsonl`).
 - **`10-mvp-gameplay-and-tooling.md`:** New bullet **Multiple fuzzy/registry matches**—only use **`object_path`** values from the discovery result; pick from the list or narrow the query; no invented `/Game/...`; no **`blueprint_export_ir` / `blueprint_get_graph_summary` / `blueprint_compile`** on guessed names.
 - **`04-tool-calling-contract.md`:** New bullet **Multiple asset hits** under discovery.
-- **`UnrealAiToolCatalog.json`:** **`asset_index_fuzzy_search`** and **`blueprint_export_ir`** summaries extended with the same constraint (downstream paths must come from results).
+- **`tools.main.json`:** **`asset_index_fuzzy_search`** and **`blueprint_export_ir`** summaries extended with the same constraint (downstream paths must come from results).
 - **`tests/qualitative-tests/realistic-user-agent-basket-rerun/suite.json`:** Expanded from one turn to **five**: (1) scratch-float “that blueprint” regression; (2) gameplay BP disambiguation + scratch bool; (3) referencer count after discovery; (4) Material Instance roughness tweak with honest skip if no MI; (5) **plan** turn—small orientation checklist DAG aligned with **`02-operating-modes.md`**. Did **not** restore old run-22 steps 2–7 (Entry 20 easy passes). `coverage_notes` updated for what to measure (`tool_finish_false`, discovery order, plan node count).
 - **Validation:** `run-qualitative-headed.ps1 -ScenarioFolder tests\qualitative-tests\realistic-user-agent-basket-rerun -DryRun` succeeds (**5** turns). Re-run **headed** (no `-DryRun`) locally to produce `runs/run-*` with per-step `run.jsonl`, then `python tests/classify_harness_run_jsonl.py --batch-root <that folder>` and compare per-step **`tool_finish_false`** to the run-25 baseline above.
 - **Build:** JSON + markdown only for this entry; no C++ changes in this change set.
@@ -303,7 +303,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 ## Entry 17 — run-20 follow-up: suite trim, anti-example-leak, TTFT idle skip, SSE tool event cap
 
 - **`tests/qualitative-tests/realistic-user-agent-basket-rerun/suite.json`:** Dropped run-20 easy-pass turns (duplicate under `/Game`, typo asset resolution); `coverage_notes` now describe the run-20–focused subset (7 turns).
-- **`04-tool-calling-contract.md` / `UnrealAiToolCatalog.json`:** Minimal JSON examples framed as **shape-only**; `project_file_read_text` line uses `<actual_basename>.uproject` + rule text (no literal `MyProject.uproject` / `MyGame.uproject` in catalog summary).
+- **`04-tool-calling-contract.md` / `tools.main.json`:** Minimal JSON examples framed as **shape-only**; `project_file_read_text` line uses `<actual_basename>.uproject` + rule text (no literal `MyProject.uproject` / `MyGame.uproject` in catalog summary).
 - **`UnrealAiTurnLlmRequestBuilder.cpp`:** System prompt gains factual **Project workspace** line: manifest **basename** from `FPaths::GetCleanFilename(GetProjectFilePath())` so the model can ground `relative_path` without copying doc placeholders.
 - **`UnrealAiHarnessScenarioRunner.cpp` — `TryHarnessIdleAbort`:** Headed scenario skips idle abort while **`HasActiveLlmTransportRequest()`** and **no assistant delta yet** (`awaiting_first_assistant_delta`); avoids false abort when time-to-first-token exceeds **`HarnessSyncIdleAbortMs`** (3s).
 - **`UnrealAiWaitTimePolicy.h`:** **`StreamToolIncompleteMaxEvents`** 64 → **128** — run-20 step_01 hit cap at **`age_events=64`** (`age_ms=4`, fragmented SSE) before tool JSON closed.
@@ -313,7 +313,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 ## Entry 16 — run-13 class: `project_file_read_text` suggestion + harness `suggested_correct_call` nudge
 
 - **`UnrealAiToolDispatch_ProjectFiles.cpp`:** Missing `relative_path` for **`project_file_read_text`** now builds **`suggested_correct_call`** from **`FPaths::GetProjectFilePath()`** (project-relative via **`FPaths::MakePathRelativeTo`**), not a hardcoded **`Config/DefaultEngine.ini`** only; clearer error text mentions `.uproject` manifest vs config.
-- **`UnrealAiToolCatalog.json` / `04-tool-calling-contract.md`:** Catalog summary + one minimal **`project_file_read_text`** example with **`MyProject.uproject`**.
+- **`tools.main.json` / `04-tool-calling-contract.md`:** Catalog summary + one minimal **`project_file_read_text`** example with **`MyProject.uproject`**.
 - **`FUnrealAiAgentHarness.cpp`:** When **`RepeatedToolFailureCount >= 3`**, the existing **`[Harness][reason=repeated_validation_failure]`** line may append the last resolver **`suggested_correct_call`** JSON (capped); enforcement event **`suggested_call_validation_nudge`**. **`LastSuggestedCorrectCallSerialized`** resets each LLM round and on tool success.
 - **`UnrealAiToolDispatchAutomationTests.cpp`:** Asserts suggested **`relative_path`** matches **`FPaths::GetCleanFilename(GetProjectFilePath())`** when the project file is known.
 - **Truncated `run.jsonl` (e.g. run-13 step_06 / step_17):** No code change; if needed, correlate with **`editor_console_saved.log`** / batch exit for that run.
@@ -361,7 +361,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 ## Entry 11 — asset referencers/deps: `path` alias
 
 - **`UnrealAiToolDispatch_GenericAssets.cpp`:** `asset_find_referencers` / `asset_get_dependencies` accept `path` when `object_path` empty; clearer error if both missing.
-- **`UnrealAiToolCatalog.json`:** Descriptions clarify `object_path` vs `content_browser_sync_asset`’s `path`.
+- **`tools.main.json`:** Descriptions clarify `object_path` vs `content_browser_sync_asset`’s `path`.
 - **`04-tool-calling-contract.md`:** Short subsection on path parameter names + minimal referencers example.
 
 ---
@@ -403,7 +403,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 ## Entry 6 — viewport framing errors
 
 - **`UnrealAiToolDispatch_Viewport.cpp`:** `viewport_frame_actors` rejects bad `actor_paths` (`PersistentLevel` / `WorldSettings` alone, empty); suggests `scene_fuzzy_search`. `viewport_frame_selection` errors point to discovery + camera tools.
-- **`UnrealAiToolCatalog.json`:** Summaries/failure_modes aligned.
+- **`tools.main.json`:** Summaries/failure_modes aligned.
 - **`04-tool-calling-contract.md`:** Example path + “never PersistentLevel alone”.
 
 ---
@@ -413,13 +413,13 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 - **`UnrealAiHarnessScenarioRunner.cpp`:** Plan waits per segment (`PlanSubTurnEvent` + `WaitForDoneOrPlanSubTurnWhilePumpingGameThread`), fresh `HarnessSyncWaitMs` each segment.
 - **`IAgentRunSink.h` / `FAgentRunFileSink`:** `OnPlanHarnessSubTurnComplete()`; executor emits after planner continuation and on node boundaries (not when pause-for-build).
 - **`FUnrealAiPlanExecutor.cpp`:** Wiring above.
-- **`UnrealAiToolCatalog.json` / `UnrealAiToolCatalog.cpp`:** Removed redundant `modes.fast`; Agent mode no longer falls back to `fast`.
+- **`tools.main.json` / `UnrealAiToolCatalog.cpp`:** Removed redundant `modes.fast`; Agent mode no longer falls back to `fast`.
 
 ---
 
 ## Entry 4 — catalog nudges (localized)
 
-- **`UnrealAiToolCatalog.json`:** `asset_index_fuzzy_search` — prefer one bounded fuzzy call over asking user first; `material_get_usage_summary` — retry fuzzy search before “not found”.
+- **`tools.main.json`:** `asset_index_fuzzy_search` — prefer one bounded fuzzy call over asking user first; `material_get_usage_summary` — retry fuzzy search before “not found”.
 
 ---
 
@@ -429,7 +429,7 @@ Chronicle of changes aimed at headed harness quality and API reliability. Entrie
 
 **Testing:** Headed long-running harness under `tests/qualitative-tests/runs/`; `harness-classification.json` is coarse; `run.jsonl` is precise for arguments.
 
-- **`UnrealAiToolCatalog.json`:** `content_browser_sync_asset` — resolvable object path, not “folder string”; viewport frame tools — `actor_paths` required vs selection variant.
+- **`tools.main.json`:** `content_browser_sync_asset` — resolvable object path, not “folder string”; viewport frame tools — `actor_paths` required vs selection variant.
 - **`UnrealAiToolDispatch_Context.cpp` — `content_browser_sync_asset`:** Empty args → `suggested_correct_call` → `asset_index_fuzzy_search`.
 - **`UnrealAiToolDispatch_Viewport.cpp` — `viewport_frame_actors`:** Missing paths → `ErrorWithSuggestedCall` toward selection / search.
 - **`04-tool-calling-contract.md`:** Don’t use `{}` when schema has required fields; “Required arguments (schema-first)”; examples for sync + frame actors.

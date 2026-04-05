@@ -1,6 +1,6 @@
-# Guide: auditing the tool catalog using harness and test results
+﻿# Guide: auditing the tool catalog using harness and test results
 
-**Audience:** Humans or coding agents reviewing [`Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json`](../../Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json) for **redundancy**, **unused / underused** entries, and **inaccurate** (misleading or broken) tools.
+**Audience:** Humans or coding agents reviewing [`Plugins/UnrealAiEditor/Resources/tools.main.json`](../../Plugins/UnrealAiEditor/Resources/tools.main.json) for **redundancy**, **unused / underused** entries, and **inaccurate** (misleading or broken) tools.
 
 **Related:** [`tool-registry.md`](tool-registry.md), [`tests/tool-iteration-log.md`](../../tests/tool-iteration-log.md) (numbered changelog; optional coverage audit notes), [`.cursor/rules/testing-long-running-harness.mdc`](../../.cursor/rules/testing-long-running-harness.mdc).
 
@@ -26,7 +26,7 @@ Always prefer the **latest** long-running batch unless the task names a specific
 1. **Batch pointer:** [`tests/qualitative-tests/last-suite-summary.json`](../../tests/qualitative-tests/last-suite-summary.json) — read `batch_output_folder` / `batch_stamp`.
 2. **Classification rollup:** `harness-classification.json` inside that batch folder (from [`tests/classify_harness_run_jsonl.py`](../../tests/classify_harness_run_jsonl.py) if present).
 3. **Per-turn artifacts:** under the batch folder, each suite’s `turns/**/run.jsonl` — lines with `"type":"tool_finish"` (and deltas if you need tool names from stream events, depending on logger format).
-4. **Catalog:** `UnrealAiToolCatalog.json` — `meta.categories`, per-tool `summary`, `parameters`, `permission`, `side_effects`, `status`, `modes`.
+4. **Catalog:** `tools.main.json` — `meta.categories`, per-tool `summary`, `parameters`, `permission`, `side_effects`, `status`, `modes`.
 5. **Optional:** static coverage table in [`tests/tool-iteration-log.md`](../../tests/tool-iteration-log.md) — which tools are **high/low/gap/policy** for current vague suites.
 
 **Minimum extraction for an agent script or manual pass:**
@@ -117,7 +117,7 @@ Always prefer the **latest** long-running batch unless the task names a specific
 1. **Resolve latest batch** from `tests/qualitative-tests/last-suite-summary.json` → set `BATCH_ROOT`.
 2. **Load** `BATCH_ROOT/harness-classification.json` and note **global failure mix** (429 vs tool vs policy). If 429 dominates, **down-rank** conclusions about tool accuracy for that batch.
 3. **Scan** all `BATCH_ROOT/**/run.jsonl` for `tool_finish` lines; aggregate **per-tool** success/failure and invocation counts.
-4. **Join** with full `tools[]` list from `UnrealAiToolCatalog.json` — tools with **zero** invocations get tag **`no_opportunity_in_batch`** unless suite text clearly required them (then tag **`avoidance`** for follow-up).
+4. **Join** with full `tools[]` list from `tools.main.json` — tools with **zero** invocations get tag **`no_opportunity_in_batch`** unless suite text clearly required them (then tag **`avoidance`** for follow-up).
 5. **Classify** each tool into: **redundant_candidate**, **unused_expected**, **unused_suspicious**, **inaccurate_from_failures**, **policy_intentional**, using §§3–5.
 6. **Produce** a short report: **Top 5** `tool_finish` failures by count, **Top 5** redundant pairs, **Top 5** “suspicious unused” with **why** tests did not cover them.
 7. **Recommend** concrete PRs: catalog-only vs code vs new harness turns — **one category per PR** when possible.
