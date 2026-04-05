@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Ensure tools with exclusive agent_surfaces (single environment_builder, blueprint_builder,
-or main_agent) live in the matching meta.tool_catalog_fragments file, and fragment contents stay exclusive.
+Ensure exclusive agent_surfaces are stored in the correct catalog file:
+  - blueprint_builder-only -> tools.blueprint.json (fragment)
+  - environment_builder-only -> tools.environment.json (fragment)
+  - main_agent-only -> tools.main.json primary tools[] (not in fragment files)
 
-Convention:
-  blueprint_builder -> tools.blueprint.json
-  environment_builder -> tools.environment.json
-  main_agent -> tools.main.json
+Primary document: tools.main.json (meta + main roster; same merge rules as C++ loader).
 
 Run from repo root: python scripts/audit_subagent_exclusive_fragments.py
 Exit 1 on violation.
@@ -21,13 +20,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from unreal_ai_tool_catalog_merge import load_merged_catalog  # noqa: E402
 
-EXPECTED_PATH_BY_BUNDLE = {
+PRIMARY_CATALOG_REL = "tools.main.json"
+EXPECTED_FRAGMENT_PATH_BY_BUNDLE = {
     "environment_builder": "tools.environment.json",
     "blueprint_builder": "tools.blueprint.json",
-    "main_agent": "tools.main.json",
 }
-
-EXCLUSIVE_BUNDLES = frozenset(EXPECTED_PATH_BY_BUNDLE.keys())
+FRAGMENT_EXCLUSIVE_BUNDLES = frozenset(EXPECTED_FRAGMENT_PATH_BY_BUNDLE.keys())
 
 
 def norm_surfaces(raw) -> list[str] | None:
@@ -74,9 +72,14 @@ def load_fragment_specs(resources_dir: Path, catalog: dict) -> list[tuple[str, s
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
-    catalog_path = root / "Plugins" / "UnrealAiEditor" / "Resources" / "UnrealAiToolCatalog.json"
+    catalog_path = root / "Plugins" / "UnrealAiEditor" / "Resources" / PRIMARY_CATALOG_REL
     resources_dir = catalog_path.parent
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    primary_tool_ids: set[str] = set()
+    for t in catalog.get("tools") or []:
+        if isinstance(t, dict) and isinstance(t.get("tool_id"), str) and t["tool_id"]:
+            primary_tool_ids.add(t["tool_id"])
+
     merged = load_merged_catalog()
     tools_merged = merged.get("tools") or []
     by_id_merged = {t["tool_id"]: t for t in tools_merged if isinstance(t, dict) and t.get("tool_id")}
@@ -91,9 +94,9 @@ def main() -> int:
 
     bundle_to_ids: dict[str, set[str]] = {}
     for b, rel, ids in frag_rows:
-        if b in EXCLUSIVE_BUNDLES:
+        if b in FRAGMENT_EXCLUSIVE_BUNDLES:
             bundle_to_ids[b] = ids
-            expected = EXPECTED_PATH_BY_BUNDLE.get(b)
+            expected = EXPECTED_FRAGMENT_PATH_BY_BUNDLE.get(b)
             if expected and rel != expected:
                 errors.append(
                     f"fragment for retrieval_bundle={b!r} uses path {rel!r}; expected {expected!r}."
@@ -106,16 +109,27 @@ def main() -> int:
         if not tid:
             continue
         surf = norm_surfaces(t.get("agent_surfaces"))
-        if surf and len(surf) == 1 and surf[0] in EXCLUSIVE_BUNDLES:
-            token = surf[0]
-            if tid not in bundle_to_ids.get(token, set()):
+        if surf == ["environment_builder"]:
+            if tid not in bundle_to_ids.get("environment_builder", set()):
                 errors.append(
-                    f"{tid}: agent_surfaces={surf!r} but tool_id not listed in "
-                    f"{EXPECTED_PATH_BY_BUNDLE[token]}."
+                    f"{tid}: agent_surfaces=['environment_builder'] but tool_id not listed in "
+                    f"{EXPECTED_FRAGMENT_PATH_BY_BUNDLE['environment_builder']}."
+                )
+        elif surf == ["blueprint_builder"]:
+            if tid not in bundle_to_ids.get("blueprint_builder", set()):
+                errors.append(
+                    f"{tid}: agent_surfaces=['blueprint_builder'] but tool_id not listed in "
+                    f"{EXPECTED_FRAGMENT_PATH_BY_BUNDLE['blueprint_builder']}."
+                )
+        elif surf == ["main_agent"]:
+            if tid not in primary_tool_ids:
+                errors.append(
+                    f"{tid}: agent_surfaces=['main_agent'] only must be defined in {PRIMARY_CATALOG_REL} tools[], "
+                    f"not only in a fragment."
                 )
 
     for b, rel, ids in frag_rows:
-        if b not in EXCLUSIVE_BUNDLES:
+        if b not in FRAGMENT_EXCLUSIVE_BUNDLES:
             continue
         for tid in ids:
             defn = by_id_merged.get(tid)
@@ -137,10 +151,10 @@ def main() -> int:
                 continue
             tid = t.get("tool_id")
             surf = norm_surfaces(t.get("agent_surfaces"))
-            if surf and len(surf) == 1 and surf[0] in EXCLUSIVE_BUNDLES:
+            if surf and len(surf) == 1 and surf[0] in FRAGMENT_EXCLUSIVE_BUNDLES:
                 errors.append(
-                    f"{tid}: exclusive agent_surfaces={surf!r} should live only in fragment "
-                    f"({EXPECTED_PATH_BY_BUNDLE[surf[0]]}), not in main UnrealAiToolCatalog.json tools[]."
+                    f"{tid}: exclusive agent_surfaces={surf!r} must live in fragment "
+                    f"({EXPECTED_FRAGMENT_PATH_BY_BUNDLE[surf[0]]}), not in {PRIMARY_CATALOG_REL} tools[]."
                 )
 
     if errors:
@@ -152,8 +166,8 @@ def main() -> int:
     print(
         f"audit_subagent_exclusive_fragments: OK ({len(tools_merged)} merged tools; "
         f"blueprint={len(bundle_to_ids.get('blueprint_builder', ()))}, "
-        f"environment={len(bundle_to_ids.get('environment_builder', ()))}, "
-        f"main={len(bundle_to_ids.get('main_agent', ()))})."
+        f"environment={len(bundle_to_ids.get('environment_builder', ()))}; "
+        f"primary roster={len(primary_tool_ids)})."
     )
     return 0
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Audit UnrealAiToolCatalog.json for Main Agent vs Blueprint Builder alignment.
+Audit tools.main.json (merged with fragments) for Main Agent vs Blueprint Builder alignment.
 
 Rules (default Agent uses bOmitMainAgentBlueprintMutationTools + agent_surfaces):
 - Blueprint-family tools with permission "write" must either declare

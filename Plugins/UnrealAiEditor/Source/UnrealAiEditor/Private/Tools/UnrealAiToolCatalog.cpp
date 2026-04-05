@@ -87,7 +87,7 @@ bool FUnrealAiToolCatalog::LoadFromPlugin()
 		return false;
 	}
 
-	const FString Path = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Resources"), TEXT("UnrealAiToolCatalog.json"));
+	const FString Path = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Resources"), TEXT("tools.main.json"));
 	FString JsonStr;
 	if (!FFileHelper::LoadFileToString(JsonStr, *Path))
 	{
@@ -424,7 +424,7 @@ void FUnrealAiToolCatalog::BuildUnrealAiDispatchToolsJson(
 	ArgsProp->SetStringField(TEXT("type"), TEXT("object"));
 	ArgsProp->SetStringField(
 		TEXT("description"),
-		TEXT("Arguments object for that tool; must satisfy the tool JSON schema (often in plugin Resources/UnrealAiToolCatalog.json)."));
+		TEXT("Arguments object for that tool; must satisfy the tool JSON schema (often in plugin Resources/tools.main.json)."));
 	ArgsProp->SetBoolField(TEXT("additionalProperties"), true);
 	TSharedPtr<FJsonObject> Props = MakeShared<FJsonObject>();
 	Props->SetObjectField(TEXT("tool_id"), ToolIdProp);

@@ -233,7 +233,7 @@ bool UnrealAiToolCatalogMatrixRunner::RunAndWriteJson(const FString& MatrixFilte
 	{
 		if (OutViolationMessages)
 		{
-			OutViolationMessages->Add(TEXT("CatalogMatrix: failed to load UnrealAiToolCatalog.json"));
+			OutViolationMessages->Add(TEXT("CatalogMatrix: failed to load tools.main.json"));
 		}
 		return false;
 	}

@@ -1,3 +1,4175 @@
 {
-  "tools": []
+  "meta": {
+    "catalog_version": "1.1.0",
+    "ue_target": "5.7+",
+    "schema_ref": "plugins/UnrealAiEditor/Resources/tools.main.json validated by scripts/Validate-UnrealAiToolCatalog.ps1; agent contracts: docs/planning/deterministic-tool-contracts.md",
+    "generated_at": "2026-03-20T23:38:27+00:00",
+    "categories": [
+      "animation_sequencer",
+      "assets_content",
+      "audio_metasounds",
+      "blueprints",
+      "build_packaging",
+      "capture_vision",
+      "console_exec",
+      "diagnostics_logs",
+      "editor_ui_navigation",
+      "landscape_foliage_pcg",
+      "materials_rendering",
+      "physics_collision",
+      "pie_play",
+      "project_files_search",
+      "selection_framing",
+      "viewport_camera",
+      "world_actors",
+      "exec",
+      "settings_properties"
+    ],
+    "tool_count": 84,
+    "retrieval_index": {
+      "bm25_document_formula": "tool_id + summary + category + tags + tool_surface.domain_tags",
+      "indexed_fields": [
+        "tool_id",
+        "summary",
+        "category",
+        "tags",
+        "tool_surface.domain_tags"
+      ],
+      "not_indexed_fields": [
+        "parameters",
+        "failure_modes",
+        "ue_entry_points",
+        "routing"
+      ],
+      "query_shaper_alignment": "Summaries and tags should mirror the query shaper's domain vocabulary so top-K retrieval can keep the tool roster compact."
+    },
+    "optimization": {
+      "tiered_appendix_char_budget": 900,
+      "tool_surface_budget_chars": 12000,
+      "additional_properties_false": "All newly added family tools publish strict argument schemas and rely on the resolver for legacy alias repair.",
+      "avoid_schema_aliases": "Expose one canonical key per concept in the catalog; compatibility aliases belong in the resolver.",
+      "core_pack_discipline": "Keep core-pack entries small and high-frequency; prefer top-K retrieval for the long tail."
+    },
+    "naming_patterns": {
+      "query_get": "Use *_query or *_get for read-only discovery tools.",
+      "set_apply": "Use *_set or *_apply for state changes when the operation behaves like a property write.",
+      "search_fuzzy": "Use search/fuzzy tool ids for project or scene discovery before precise writes.",
+      "viewport_prefix": "Viewport families consolidate camera, frame, and capture operations under shared prefixes.",
+      "project_file_prefix": "Project-file tools continue to use project_file_* for project-scoped disk I/O.",
+      "console_escape": "Console access stays behind console_command and never expands into arbitrary shell execution.",
+      "settings_envelope": "setting_query and setting_apply use a domain/key envelope; the resolver projects to the internal settings backend shape before dispatch.",
+      "imperative_verbs": "Use imperative verbs for one-shot actions such as compile, open, save, start, and stop."
+    },
+    "status_legend": {
+      "implemented": "Dispatcher has a UE handler in UnrealAiToolDispatch*.cpp; calls may still fail with invalid args or engine state.",
+      "future": "Staged capability in catalog; implementation may be partial — verify in source.",
+      "designed": "Contract drafted; behavior may be incomplete."
+    },
+    "tool_surface": {
+      "description": "Optional per-tool overrides under tools[].tool_surface — domain_tags, centrality, worst_case_cost, requires_strict_args (tools-expansion.md). Tiered eligibility, usage prior, JSONL logging, and repair nudges are toggled in source: Plugins/UnrealAiEditor/.../Misc/UnrealAiRuntimeDefaults.h (not environment variables).",
+      "runtime_defaults_header": "Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h"
+    },
+    "agent_surfaces": {
+      "description": "Optional per-tool array tools[].agent_surfaces lists which agent pipelines may surface or invoke the tool. Orthogonal to modes (ask/agent/plan) and to builder_domains / blueprint_builder_core / environment_builder_core. Parsed in UnrealAiToolSurfaceCompatibility; enforced in UnrealAiAgentToolGate when Agent mode and bOmitMainAgentBlueprintMutationTools is true.",
+      "tokens": {
+        "all": "Single entry [\"all\"] (any case) or missing/empty field: no surface restriction (same eligibility as pre-tag catalogs).",
+        "main_agent": "Main agent turn (not a Blueprint or Environment Builder sub-turn).",
+        "blueprint_builder": "Blueprint Builder sub-turn after build-blueprint handoff.",
+        "environment_builder": "Environment / PCG Builder sub-turn after build-environment handoff."
+      },
+      "escape_hatch": "When bOmitMainAgentBlueprintMutationTools is false, surface gating is bypassed for power users."
+    },
+    "resolver_contract": {
+      "version": "2.2.0",
+      "architecture_doc": "docs/planning/new-tools-schema/resolver-architecture.md",
+      "notes": "Catalog tools may declare tools[].agent_surfaces for surface compatibility (main_agent / blueprint_builder / environment_builder / all); omit_from_main_agent_surface removed. No resolver inference for operation/capture_kind/target/value_kind; explicit catalog required fields only. No Levenshtein tool_id autocorrect (suggestions only). Alias table + path canonicalization only. Validates before dispatch; resolver_audit on results."
+    },
+    "invocation": {
+      "focused_flag": "Optional JSON field \"focused\": true on supported tools. Stripped before handlers; after a successful run the editor opens or foregrounds the related Blueprint, asset, Content Browser selection, or project source file in the IDE. Tools list this property explicitly where the catalog schema is strict (additionalProperties: false)."
+    },
+    "tool_catalog_fragments": [
+      {
+        "path": "tools.blueprint.json",
+        "retrieval_bundle": "blueprint_builder"
+      },
+      {
+        "path": "tools.environment.json",
+        "retrieval_bundle": "environment_builder"
+      }
+    ],
+    "tool_catalog_fragments_notes": "Optional array: each entry is a string (path under Resources/) or object { path, retrieval_bundle }. Fragment files must be { \"tools\": [ ... ] }. Merged tools may receive retrieval_bundle; main Agent tiered BM25 omits retrieval_bundle=blueprint_builder and =environment_builder (builder sub-turns still see the full merged catalog). Primary catalog file is tools.main.json (meta + main roster tools). Additional fragments: tools.blueprint.json, tools.environment.json."
+  },
+  "tools": [
+    {
+      "tool_id": "actor_attach_to",
+      "summary": "Attach child actor to parent.",
+      "category": "world_actors",
+      "tags": [
+        "actor"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 50,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "child_path": {
+            "type": "string",
+            "description": "World path of the child actor (same as child_actor_path)."
+          },
+          "parent_path": {
+            "type": "string",
+            "description": "World path of the parent actor (same as parent_actor_path)."
+          },
+          "child_actor_path": {
+            "type": "string",
+            "description": "Alias for child_path."
+          },
+          "parent_actor_path": {
+            "type": "string",
+            "description": "Alias for parent_path."
+          },
+          "actor_path": {
+            "type": "string",
+            "description": "When paired with parent_path or parent_actor_path, treated as the child actor path."
+          },
+          "socket": {
+            "type": "string"
+          }
+        }
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "AActor::AttachToActor",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "actor_destroy",
+      "summary": "Destroy an actor in the editor world. Refused for engine streaming/HLOD/WorldPartition infrastructure actors (class/path heuristics)—only delete user-authored props/meshes you can justify.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "destructive"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 42,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          },
+          "confirm": {
+            "type": "string",
+            "description": "Assent to delete: DELETE, yes, y, true, confirm, or 1 (case-insensitive)."
+          }
+        },
+        "required": [
+          "actor_path"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "destructive",
+      "ue_entry_points": "UWorld::DestroyActor",
+      "threading": "game_thread",
+      "failure_modes": [
+        "ok:false when actor_path matches built-in protected types (HLOD / WorldPartition helpers): choose a different actor or fix the user's mesh instead."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "actor_find_by_label",
+      "summary": "Find actors by outliner label, internal actor name, full object path substring, or exact actor_path match.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "search"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 64,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "TActorIterator; UGameplayStatics",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "actor_get_transform",
+      "summary": "Read actor transform and mobility.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 68,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "AActor::GetActorTransform",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "actor_set_transform",
+      "summary": "Mutate/set actor transform in the loaded level. Use this after scene_fuzzy_search when you need a concrete position/rotation/scale change; do not use for discovery or status-only checks (use scene_fuzzy_search or actor_get_transform). Omit `transform` and top-level location/rotation/scale to keep the current pose (useful with `teleport_physics` only). Use `transform` object, or top-level `location`/`rotation`/`scale` number arrays [x,y,z]. `actor_path` accepts full path or a unique suffix (e.g. PersistentLevel.Actor_UAID_...).",
+      "category": "world_actors",
+      "tags": [
+        "actor"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 60,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          },
+          "transform": {
+            "type": "object",
+            "description": "Optional if using top-level location[]/rotation[]/scale[] instead. Arrays inside transform also accepted ([x,y,z] form)."
+          },
+          "location": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Optional when transform omitted: [x,y,z] applied with current rotation/scale."
+          },
+          "rotation": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Optional when transform omitted: [pitch,yaw,roll] with current location/scale."
+          },
+          "scale": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Optional when transform omitted: [x,y,z] scale with current location/rotation."
+          },
+          "teleport_physics": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "actor_path"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "AActor::SetActorTransform",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "actor_get_visibility",
+      "summary": "Read whether an actor is currently hidden in the editor.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "visibility",
+        "read",
+        "property"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 49,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "actor",
+          "property",
+          "visibility",
+          "hidden",
+          "read"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "AActor::IsTemporarilyHiddenInEditor",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "actor_set_visibility",
+      "summary": "Toggle actor visibility.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "visibility",
+        "property",
+        "write"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 48,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          },
+          "hidden": {
+            "type": "boolean"
+          },
+          "affect_children": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "actor_path",
+          "hidden"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "AActor visibility APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "tool_surface": {
+        "domain_tags": [
+          "actor",
+          "property",
+          "visibility",
+          "hidden"
+        ]
+      },
+      "status": "implemented"
+    },
+    {
+      "tool_id": "actor_blueprint_toggle_visibility",
+      "summary": "Toggle whether the actor is temporarily hidden in the editor (flips current state). Prefer actor_set_visibility when you need an explicit hidden true/false.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "visibility"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 47,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_path"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "AActor::SetIsTemporarilyHiddenInEditor",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "actor_spawn_from_class",
+      "summary": "Spawn an actor in the editor world. Requires class_path + location[3] + rotation[3]. If exact transform is unknown, use explicit safe defaults (e.g. location [0,0,100], rotation [0,0,0]) instead of omitting fields.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "level"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 62,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "class_path": {
+            "type": "string",
+            "description": "Must be a subclass of AActor (e.g. /Game/MyActor.MyActor_C or /Script/Engine.StaticMeshActor). Components (USceneComponent, etc.) cannot be spawned as actors."
+          },
+          "location": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "rotation": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "folder_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "class_path",
+          "location",
+          "rotation"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "UWorld::SpawnActor; FScopedTransaction",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Missing required args: class_path, location, and rotation are mandatory; `{}` is invalid."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "animation_blueprint_get_graph_summary",
+      "summary": "Summarize AnimBlueprint graphs.",
+      "category": "animation_sequencer",
+      "tags": [
+        "animation"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 22,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "anim_blueprint_path": {
+            "type": "string"
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open this AnimBlueprint in the editor."
+          }
+        },
+        "required": [
+          "anim_blueprint_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UAnimBlueprint",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "asset_delete",
+      "summary": "Delete assets.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "destructive"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 38,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confirm": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_paths"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "destructive",
+      "ue_entry_points": "ObjectTools::DeleteObjects",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_duplicate",
+      "summary": "Duplicate asset to new path.",
+      "category": "assets_content",
+      "tags": [
+        "asset"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 52,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_path": {
+            "type": "string"
+          },
+          "dest_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_path",
+          "dest_path"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "IAssetTools::DuplicateAsset",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_get_metadata",
+      "summary": "Read asset metadata and dependencies summary.",
+      "category": "assets_content",
+      "tags": [
+        "asset"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 76,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IAssetRegistry; FAssetData",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_import",
+      "summary": "Import files via automated import pipeline.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "import"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 22,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "destination_path": {
+            "type": "string"
+          },
+          "import_options": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "source_files",
+          "destination_path"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "FAssetImportTask",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "asset_open_editor",
+      "summary": "Open an asset in its native editor when you already have an exact object path (for example from asset_index_fuzzy_search or asset_registry_query). Use for inspection/focus, not discovery.",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "content",
+        "ui"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 82,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Canonical asset object path. Preferred key. Example: /Game/Blueprints/MyBP.MyBP."
+          },
+          "asset_path": {
+            "type": "string",
+            "description": "Compatibility alias for object_path."
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, foreground the asset editor (redundant with tool behavior if already opening)."
+          }
+        },
+        "required": [
+          "object_path"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "UAssetEditorSubsystem::OpenEditorForAsset",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/UAssetEditorSubsystem"
+      ],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_registry_query",
+      "summary": "Query Asset Registry for deterministic listing by exact path/class filters. You must pass at least path_filter (or class_name)—unbounded full-registry scans are rejected. `{}` is invalid. Use asset_index_fuzzy_search for fuzzy name discovery under a path_prefix.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "registry"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 78,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path_filter": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Package path prefix (for example /Game or /Game/Blueprints). Preferred key."
+          },
+          "filter": {
+            "type": "string",
+            "description": "Compatibility alias for path_filter."
+          },
+          "object_path": {
+            "type": "string",
+            "description": "Compatibility alias: object path converted to package path for path_filter."
+          },
+          "class_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Single class path filter (for example /Script/Engine.Blueprint). Preferred key."
+          },
+          "class_paths": {
+            "type": "array",
+            "description": "Compatibility alias for class_name; first entry is used.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "class_filters": {
+            "type": "array",
+            "description": "Compatibility alias for class_name; first entry is used.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "class_names": {
+            "type": "array",
+            "description": "Compatibility alias for class_name; first entry is used. Short names are expanded to /Script/Engine.<Name>.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "filters": {
+            "type": "array",
+            "description": "Compatibility alias for structured callers. Primary shape is array entries like {\"key\":\"class\",\"value\":\"/Script/Engine.Blueprint\"} and {\"key\":\"path\",\"value\":\"/Game\"}; object shape with path_prefix/path_filter is also tolerated at runtime.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "value"
+              ]
+            }
+          },
+          "max_results": {
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "anyOf": [
+          {
+            "required": [
+              "path_filter"
+            ]
+          },
+          {
+            "required": [
+              "class_name"
+            ]
+          }
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IAssetRegistry::GetAssets; FARFilter",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Neither path_filter nor class_name: provide a bounded filter (handler rejects empty filters)."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_rename",
+      "summary": "Rename/move asset and optionally fix references.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "destructive"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 40,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_path": {
+            "type": "string"
+          },
+          "dest_path": {
+            "type": "string"
+          },
+          "fix_references": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source_path",
+          "dest_path"
+        ]
+      },
+      "side_effects": "refs",
+      "permission": "destructive",
+      "ue_entry_points": "IAssetTools::RenameAssets",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_save_packages",
+      "summary": "Persist dirty package changes to disk. Use after compile/edit/mutation passes so editor state matches files on disk; do not use for discovery or read-only status checks. When all_dirty is true, saves all dirty packages (no explicit paths required).",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "save"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 55,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "all_dirty": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "UEditorLoadingAndSavingUtils::SavePackages",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "audio_component_preview",
+      "summary": "Preview sound in editor.",
+      "category": "audio_metasounds",
+      "tags": [
+        "audio"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 15,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sound_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sound_path"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "Audio preview APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "blueprint_graph_list_pins",
+      "summary": "Read-only: pins[] (name, direction, category, optional default_value). Needs blueprint_path and node_ref OR guid (real graph GUID). Does not resolve patch_id strings from other tool calls.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "graph",
+        "read",
+        "pins"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 73,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Blueprint under /Game."
+          },
+          "graph_name": {
+            "type": "string",
+            "description": "Defaults to EventGraph."
+          },
+          "node_ref": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Graph node GUID as in blueprint_graph_introspect node_guid, or guid:{uuid}. Must exist on the saved graph."
+          },
+          "guid": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Alias for node_ref."
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ],
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "node_ref"
+                ]
+              },
+              {
+                "required": [
+                  "guid"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UBlueprint; UEdGraphNode::Pins",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Blueprint or graph not found.",
+        "node_ref not a valid GUID or node absent from graph.",
+        "patch_id from a prior blueprint_graph_patch cannot target this read-only tool—use node_guid from disk."
+      ],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/blueprints-visual-scripting-in-unreal-engine"
+      ],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "blueprint_get_graph_summary",
+      "summary": "Read-only (main Agent + builder): bounded summary of Blueprint graph(s) for an existing asset. `blueprint_path` is required and must be a concrete /Game Blueprint object_path (prefer reuse from asset_index_fuzzy_search/asset_registry_query results; do not guess names). Optional graph_name narrows to one graph; omit to summarize ubergraph + functions + macros. Set include_layout_analysis:true to add entry/branch counts and a data-link crossing proxy per graph.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 70,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "description": "Blueprint asset object path under /Game (aliases: object_path, asset_path). Not a level actor path."
+          },
+          "graph_name": {
+            "type": "string",
+            "description": "Optional; when set, only that graph is summarized if it exists."
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open this Blueprint (and graph when named)."
+          },
+          "include_layout_analysis": {
+            "type": "boolean",
+            "description": "When true, each graph object includes script_node_count, entry_node_count, branch_like_node_count, data_link_crossing_proxy, etc."
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UBlueprint; FBlueprintEditorUtils",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Load failure: verify path with asset_index_fuzzy_search; create asset first if missing.",
+        "Wrong path kind: PersistentLevel actor paths are not Blueprint assets—use /Game/... object paths."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "collision_trace_editor_world",
+      "summary": "Line/sphere trace in editor world (collision, raycast, hit from camera or points).",
+      "category": "physics_collision",
+      "tags": [
+        "physics"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 20,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "collision",
+          "line",
+          "trace",
+          "raycast",
+          "sweep",
+          "hit",
+          "physics",
+          "editor",
+          "world",
+          "viewport"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "start": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "end": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UWorld::LineTrace",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "console_command",
+      "summary": "Run a bounded editor console exec via allow-list keys (default). command must be a key: stat_fps, stat_unit, stat_gpu (no args); r_vsync requires args \"0\" or \"1\"; viewmode_lit | viewmode_unlit | viewmode_wireframe (no args). Unsafe legacy: pass raw console text only if Editor Settings → Console command: legacy wide exec, or set UNREAL_AI_CONSOLE_COMMAND_LEGACY_EXEC=1.",
+      "category": "console_exec",
+      "tags": [
+        "console"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 50,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Allow-list key (e.g. stat_fps, r_vsync). Legacy wide-exec mode: full console line."
+          },
+          "args": {
+            "type": "string",
+            "description": "Optional. For r_vsync only: \"0\" or \"1\". For legacy wide-exec: appended after command with a space."
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "GEngine->Exec (allow-listed expansion in UnrealAiToolDispatch_Console.cpp)",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Unknown command key (default mode)",
+        "r_vsync without args 0/1",
+        "Legacy mode: substring policy blocks quit/exit/shader rebuild/crash"
+      ],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/console-commands-in-unreal-engine"
+      ],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "content_browser_navigate_folder",
+      "summary": "Navigate Content Browser to a folder.",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "content_browser"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 58,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "folder_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "folder_path"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "FContentBrowserModule",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "content_browser_sync_asset",
+      "summary": "Focus the Content Browser on a registered asset by object path (`path` / `object_path`). Resolves via the asset registry—use a full `/Game/.../Name.Name` (or equivalent) path. Folder-only strings are not reliable; to find an asset first, use `asset_index_fuzzy_search` or `asset_registry_query`, then sync the concrete path.",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "content_browser"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 81,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Asset object path to sync (aliases: object_path, asset_path). Must resolve in the asset registry—not a substitute for folder navigation."
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, also open the asset editor for this path when it is an object path."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "FContentBrowserModule sync APIs",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Missing path or empty arguments: provide path/object_path/asset_path.",
+        "Path does not resolve to an asset: use discovery tools or correct the object path."
+      ],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/content-browser-in-unreal-engine"
+      ],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "cook_content_for_platform",
+      "summary": "Cook content for a platform (UAT).",
+      "category": "build_packaging",
+      "tags": [
+        "build"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 12,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "platform": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform"
+        ]
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "UAT/UnrealAutomationTool",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "editor_get_selection",
+      "summary": "Return only the current editor selection (paths and labels); may be empty. Do not use as scene-wide discovery—use scene_fuzzy_search when the user asks to find actors in the level.",
+      "category": "selection_framing",
+      "tags": [
+        "selection",
+        "editor"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 84,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "include_non_actor": {
+            "type": "boolean",
+            "description": "Reserved for future non-actor UObject selection rows; currently ignored—only selected AActors are returned."
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "GEditor->GetSelectedActors(); USelection",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/UEditorEngine"
+      ],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "editor_get_mode",
+      "summary": "Read the current active editor mode.",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "editor",
+        "mode",
+        "read",
+        "setting"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 41,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "editor",
+          "mode",
+          "setting",
+          "read"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FEditorModeTools",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "editor_set_mode",
+      "summary": "Switch editor mode (Place, Landscape, ... allow-listed).",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "editor",
+        "mode",
+        "setting",
+        "write"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 40,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode_id"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "FEditorModeTools / FEdMode",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "tool_surface": {
+        "domain_tags": [
+          "editor",
+          "mode",
+          "setting"
+        ]
+      },
+      "status": "implemented"
+    },
+    {
+      "tool_id": "editor_set_selection",
+      "summary": "Replace editor selection with level actors only. Paths must be world/level actor paths (e.g. ...PersistentLevel.ActorName), not /Game/.../Asset.Asset content object paths. For Content Browser assets use content_browser_sync_asset, asset_open_editor, or asset_index_fuzzy_search to resolve paths first.",
+      "category": "selection_framing",
+      "tags": [
+        "selection"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 83,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "additive": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "actor_paths"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "GEditor->SelectActor; SelectNone",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Passing /Game/... asset paths returns ok:false with suggested_correct_call toward content_browser_sync_asset; use scene_fuzzy_search to discover level actor paths."
+      ],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/UEditorEngine"
+      ],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "entity_get_property",
+      "summary": "Read a single allowlisted property from an entity (currently actor-focused). Prefer this for generic property reads when key-based access is requested.",
+      "category": "properties_settings",
+      "tags": [
+        "entity",
+        "property",
+        "read",
+        "actor"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 59,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "entity",
+          "property",
+          "actor",
+          "visibility",
+          "hidden"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "entity_type": {
+            "type": "string",
+            "enum": [
+              "actor"
+            ]
+          },
+          "entity_ref": {
+            "type": "string",
+            "description": "Entity identifier. For actor, pass full world actor path."
+          },
+          "property": {
+            "type": "string",
+            "enum": [
+              "hidden_in_editor",
+              "visible",
+              "visibility"
+            ]
+          }
+        },
+        "required": [
+          "entity_type",
+          "entity_ref",
+          "property"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "Actor/editor property read adapters",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "entity_set_property",
+      "summary": "Set a single allowlisted property on an entity (currently actor-focused). Prefer this for key-based property writes when exact property names are known.",
+      "category": "properties_settings",
+      "tags": [
+        "entity",
+        "property",
+        "write",
+        "actor"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 58,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "entity",
+          "property",
+          "actor",
+          "visibility",
+          "hidden"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "entity_type": {
+            "type": "string",
+            "enum": [
+              "actor"
+            ]
+          },
+          "entity_ref": {
+            "type": "string",
+            "description": "Entity identifier. For actor, pass full world actor path."
+          },
+          "property": {
+            "type": "string",
+            "enum": [
+              "hidden_in_editor",
+              "visible"
+            ]
+          },
+          "value": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entity_type",
+          "entity_ref",
+          "property",
+          "value"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "Actor/editor property write adapters",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "setting_query",
+      "summary": "Read one allowlisted setting using the domain/key settings envelope. Model-facing settings read; the resolver maps the envelope to the legacy internal settings backend.",
+      "category": "settings_properties",
+      "tags": [
+        "settings",
+        "read",
+        "editor",
+        "viewport",
+        "project",
+        "envelope"
+      ],
+      "tier": "standard",
+      "naming_family": "settings",
+      "paired_tool_id": "setting_apply",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 66,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "settings",
+          "editor",
+          "viewport",
+          "project",
+          "plugin",
+          "cvar"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "type": "string",
+            "enum": [
+              "editor_preference",
+              "project_setting",
+              "cvar",
+              "viewport_session",
+              "plugin_setting",
+              "map_world_settings"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "description": "Allowlisted setting key inside the chosen domain."
+          },
+          "scope": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "project_path": {
+                "type": "string"
+              },
+              "plugin_id": {
+                "type": "string"
+              },
+              "map_path": {
+                "type": "string"
+              },
+              "viewport_id": {
+                "type": "string"
+              }
+            }
+          },
+          "value_kind": {
+            "type": "string",
+            "enum": [
+              "bool",
+              "int",
+              "float",
+              "string",
+              "enum",
+              "linear_color",
+              "vector"
+            ]
+          }
+        },
+        "required": [
+          "domain",
+          "key"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_singleton",
+        "legacy_targets": [
+          {
+            "tool_id": "setting_query"
+          }
+        ],
+        "resolver_notes": "Resolver projects domain/key to scope/key for the internal settings reader; validation uses the canonical setting_query schema."
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FEditorViewportClient / module settings / ini read",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "setting_apply",
+      "summary": "Write one allowlisted setting using the domain/key settings envelope. Model-facing settings write; the resolver maps the envelope to the legacy internal settings backend.",
+      "category": "settings_properties",
+      "tags": [
+        "settings",
+        "write",
+        "editor",
+        "viewport",
+        "project",
+        "envelope"
+      ],
+      "tier": "standard",
+      "naming_family": "settings",
+      "paired_tool_id": "setting_query",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 65,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "settings",
+          "editor",
+          "viewport",
+          "project",
+          "plugin",
+          "cvar"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "type": "string",
+            "enum": [
+              "editor_preference",
+              "project_setting",
+              "cvar",
+              "viewport_session",
+              "plugin_setting",
+              "map_world_settings"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "description": "Allowlisted setting key inside the chosen domain."
+          },
+          "scope": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "project_path": {
+                "type": "string"
+              },
+              "plugin_id": {
+                "type": "string"
+              },
+              "map_path": {
+                "type": "string"
+              },
+              "viewport_id": {
+                "type": "string"
+              }
+            }
+          },
+          "value_kind": {
+            "type": "string",
+            "enum": [
+              "bool",
+              "int",
+              "float",
+              "string",
+              "enum",
+              "linear_color",
+              "vector"
+            ]
+          },
+          "value": {},
+          "confirm": {
+            "type": "boolean"
+          },
+          "dry_run": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "domain",
+          "key",
+          "value"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_singleton",
+        "legacy_targets": [
+          {
+            "tool_id": "setting_apply"
+          }
+        ],
+        "resolver_notes": "Resolver projects domain/key/value to scope/key/value for the internal settings writer; validation uses the canonical setting_apply schema."
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "FEditorViewportClient / module settings / ini write",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "editor_state_snapshot_read",
+      "summary": "Read a deterministic editor/world snapshot (JSON). Use when context may be stale or before risky edits; optional asset/viewport slices via flags.",
+      "category": "diagnostics_logs",
+      "tags": [
+        "context",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 80,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "include_assets": {
+            "type": "boolean",
+            "description": "If true, include summarized asset/Content Browser context when implemented."
+          },
+          "include_viewport": {
+            "type": "boolean",
+            "description": "If true, include viewport/camera hints when implemented."
+          }
+        },
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FUnrealAiContextService patterns",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "engine_message_log_read",
+      "summary": "Read recent Message Log / log tail.",
+      "category": "diagnostics_logs",
+      "tags": [
+        "logs",
+        "diagnostics"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 50,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "max_lines": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_lines"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FMessageLogModule or FFileHelper on project log",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/logging-in-unreal-engine"
+      ],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "global_tab_focus",
+      "summary": "Bring a registered dock tab to front.",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "ui",
+        "tabs"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 38,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tab_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tab_id"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "FGlobalTabmanager::TryInvokeTab",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "material_get_usage_summary",
+      "summary": "List referencers for a material. If not found in the registry, the path may be wrong for this project—retry discovery with asset_index_fuzzy_search before concluding the asset is absent.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 58,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IAssetRegistry::GetReferencers",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Not found: verify material_path with asset_index_fuzzy_search; path may not exist in this project."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "material_graph_summarize",
+      "summary": "Read-only inventory of a base Material's expression graph (class + editor position + stable expression GUID per node). Prefer material_graph_export for links to material inputs and between nodes. For Material Instances, use the parent Material path or material_instance_* parameter tools.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "graph",
+        "read",
+        "expressions"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "main_agent",
+        "blueprint_builder"
+      ],
+      "context_selector": {
+        "priority": 57,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string",
+            "description": "Object path of a base Material (UMaterial), not a Material Instance."
+          },
+          "max_expressions": {
+            "type": "number",
+            "description": "Cap on rows returned (default 200, max 2000)."
+          }
+        },
+        "required": [
+          "material_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UMaterial::GetExpressionCollection",
+      "threading": "game_thread",
+      "failure_modes": [
+        "material_path is a Material Instance: load the parent Material asset or use MI parameter tools.",
+        "Very large graphs: raise max_expressions or filter in follow-up tooling."
+      ],
+      "doc_links": [],
+      "status": "implemented",
+      "builder_domains": [
+        "material_graph"
+      ]
+    },
+    {
+      "tool_id": "material_graph_export",
+      "summary": "Blueprint Builder material_graph: structured export of base Material expressions (GUID, class, editor position), per-node FExpressionInput links (to_input + from_expression_guid + from_output_index), and material_inputs[] root slot wiring (BaseColor, Normal, …). Pair with material_graph_patch and material_graph_compile.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "graph",
+        "read",
+        "export"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "main_agent",
+        "blueprint_builder"
+      ],
+      "context_selector": {
+        "priority": 58,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string",
+            "description": "Object path of a base Material (UMaterial)."
+          },
+          "max_expressions": {
+            "type": "number",
+            "description": "Cap on expressions returned (default 500, max 4000)."
+          }
+        },
+        "required": [
+          "material_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UMaterial, UMaterialExpression reflection",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Material Instance path: use parent Material or MI parameter tools."
+      ],
+      "doc_links": [],
+      "status": "implemented",
+      "builder_domains": [
+        "material_graph"
+      ]
+    },
+    {
+      "tool_id": "material_graph_validate",
+      "summary": "Blueprint Builder material_graph: list orphan expressions (not reachable from any material root input via wired inputs) and report compile_error_or_pending (IsCompilingOrHadCompileError). Read-only; does not modify the graph.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "graph",
+        "validate"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "agent_surfaces": [
+        "main_agent",
+        "blueprint_builder"
+      ],
+      "context_selector": {
+        "priority": 55,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UMaterial graph traversal",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented",
+      "builder_domains": [
+        "material_graph"
+      ]
+    },
+    {
+      "tool_id": "material_instance_get_scalar_parameter",
+      "summary": "Read one scalar parameter value from a Material Instance.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 49,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string"
+          },
+          "parameter_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_path",
+          "parameter_name"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UMaterialInstance parameter read APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "material_instance_set_parameter",
+      "summary": "Set a scalar or vector parameter on a Material Instance (main Agent and builder; not a Blueprint graph mutator). Pass value_kind (scalar|vector) with material_path and parameter_name; include value or linear_color per branch. No silent value_kind inference.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "parameter",
+        "write",
+        "scalar",
+        "vector",
+        "value_kind"
+      ],
+      "tier": "standard",
+      "naming_family": "composite",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 52,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "material",
+          "material instance",
+          "parameter",
+          "scalar",
+          "vector"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "value_kind": {
+            "type": "string",
+            "enum": [
+              "scalar",
+              "vector"
+            ]
+          },
+          "material_path": {
+            "type": "string"
+          },
+          "parameter_name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          },
+          "linear_color": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "value_kind",
+          "material_path",
+          "parameter_name"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_family",
+        "legacy_targets": [
+          {
+            "tool_id": "material_instance_set_parameter"
+          }
+        ],
+        "resolver_notes": "Resolver branches on value_kind and preserves it with material_path/parameter fields; dispatch routes by value_kind."
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "UMaterialInstance editing APIs",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Base Material path: use asset_open_editor on the Material, duplicate to MI, then pass the MI path."
+      ],
+      "doc_links": [],
+      "status": "implemented",
+      "builder_domains": [
+        "material_instance"
+      ]
+    },
+    {
+      "tool_id": "material_instance_get_vector_parameter",
+      "summary": "Read one vector parameter value from a Material Instance.",
+      "category": "materials_rendering",
+      "tags": [
+        "material",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 48,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "material_path": {
+            "type": "string"
+          },
+          "parameter_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_path",
+          "parameter_name"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UMaterialInstance parameter read APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "menu_command_invoke",
+      "summary": "Execute a pre-registered editor command ID.",
+      "category": "editor_ui_navigation",
+      "tags": [
+        "ui",
+        "command"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 35,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id"
+        ]
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "FUICommandList::ExecuteAction",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "metasound_open_editor",
+      "summary": "Open MetaSound source.",
+      "category": "audio_metasounds",
+      "tags": [
+        "audio"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 16,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "asset_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_path"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "MetaSound editor",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "outliner_folder_move",
+      "summary": "Move actors to an outliner folder.",
+      "category": "world_actors",
+      "tags": [
+        "outliner"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 44,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "folder_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_paths",
+          "folder_name"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "FActorFolders / world outliner",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "package_project",
+      "summary": "Full package build.",
+      "category": "build_packaging",
+      "tags": [
+        "build"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 10,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "configuration": {
+            "type": "string"
+          }
+        },
+        "required": []
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "UAT package",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "physics_impulse_actor",
+      "summary": "Apply impulse (PIE-oriented).",
+      "category": "physics_collision",
+      "tags": [
+        "physics"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 15,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actor_path": {
+            "type": "string"
+          },
+          "impulse": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "actor_path",
+          "impulse"
+        ]
+      },
+      "side_effects": "play",
+      "permission": "write",
+      "ue_entry_points": "Physics in PIE",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "pie_start",
+      "summary": "Start Play-In-Editor. Optional mode: \"viewport\" (default, in-process PIE) or \"standalone\" (new process when supported). Use pie_status to verify running state and pair with pie_stop when finished.",
+      "category": "pie_play",
+      "tags": [
+        "pie"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 50,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "viewport",
+              "standalone"
+            ],
+            "description": "viewport = in-process PIE (default). standalone = separate process when supported."
+          }
+        },
+        "required": []
+      },
+      "side_effects": "play",
+      "permission": "exec",
+      "ue_entry_points": "UEditorEngine::PlayInEditor",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/play-in-editor-in-unreal-engine"
+      ],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "pie_status",
+      "summary": "Return PIE / play-session state: playing_in_editor, play_session_request_queued, play_session_in_progress. Use for status verification before/after pie_start or before deciding whether pie_stop is needed; do not use to actually start or stop play.",
+      "category": "pie_play",
+      "tags": [
+        "pie",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 62,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "GEditor->PlayWorld",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "pie_stop",
+      "summary": "Stop current PIE session started via pie_start. Use when playtest/run requests are complete or to cleanly end runtime checks.",
+      "category": "pie_play",
+      "tags": [
+        "pie"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 48,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "play",
+      "permission": "exec",
+      "ue_entry_points": "GEditor->EndPlayMap",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "project_file_read_text",
+      "summary": "Read a text file anywhere under the project directory (path relative to project root; Saved/, Intermediate/, etc. allowed). During a headed harness turn, paths may use the virtual prefix `harness_step/` to read files beside the current turn’s `run.jsonl` (harness batch output), e.g. `harness_step/UnrealAiDiscoveryNotes.txt`. `relative_path` is required (`file_path` alias). Do not call with `{}` repeatedly: pass a concrete project-relative file path or use suggested_correct_call. For engine/plugin lines, read this project’s `.uproject` manifest using the actual basename (see system context “Project workspace” when present—not a placeholder name). Large or binary files may be truncated or unsuitable—use max_bytes.",
+      "category": "project_files_search",
+      "tags": [
+        "filesystem",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 66,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "relative_path": {
+            "type": "string",
+            "description": "Project-relative file path (preferred key). Alias: file_path."
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Legacy alias for relative_path."
+          },
+          "max_bytes": {
+            "type": "integer"
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open this file in the configured source IDE (best-effort)."
+          }
+        },
+        "required": [
+          "relative_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FFileHelper::LoadFileToString",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "project_file_write_text",
+      "summary": "Write a text file under the project. Default safe location: Saved/UnrealAiEditorAgent/ (no extra flag). Writes elsewhere require confirm:true and confirm_project_critical:true. Always blocked: Binaries/, Intermediate/, DerivedDataCache/. Uses atomic replace. harness_step/ unchanged for harness turns.",
+      "category": "project_files_search",
+      "tags": [
+        "filesystem"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 18,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "relative_path": {
+            "type": "string"
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Legacy alias for relative_path."
+          },
+          "content": {
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "confirm_project_critical": {
+            "type": "boolean",
+            "description": "Must be true to write outside Saved/UnrealAiEditorAgent/ (e.g. Config/, Source/, .uproject)."
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open the written file in the configured source IDE (best-effort)."
+          }
+        },
+        "required": [
+          "relative_path",
+          "content"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "destructive",
+      "ue_entry_points": "FFileHelper atomic write (temp + IFileManager::Move)",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "project_file_move",
+      "summary": "Move or rename under the project. Source and destination must both be under Saved/UnrealAiEditorAgent/ unless confirm_project_critical:true. Binaries/, Intermediate/, DerivedDataCache/ blocked. confirm:true required.",
+      "category": "project_files_search",
+      "tags": [
+        "filesystem",
+        "destructive"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 22,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from_relative_path": {
+            "type": "string",
+            "description": "Source path relative to project root. Aliases: from_path, source_relative_path."
+          },
+          "to_relative_path": {
+            "type": "string",
+            "description": "Destination path relative to project root. Aliases: to_path, dest_relative_path."
+          },
+          "replace_existing": {
+            "type": "boolean",
+            "description": "If true, overwrite destination when it already exists."
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "confirm_project_critical": {
+            "type": "boolean",
+            "description": "True if either path is outside Saved/UnrealAiEditorAgent/."
+          }
+        },
+        "required": [
+          "from_relative_path",
+          "to_relative_path"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "destructive",
+      "ue_entry_points": "IFileManager::Move",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "cpp_project_compile",
+      "summary": "Compile via Engine Build.bat (Windows). Blocked in normal interactive editor unless confirm_external_rebuild:true, or editor was started with -unattended, or running under automation. Prefer closing the editor and building from a script. Returns messages and raw_log_tail.",
+      "category": "project_files_search",
+      "tags": [
+        "native",
+        "compile",
+        "build"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 26,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target_name": {
+            "type": "string",
+            "description": "UBT target name (usually <UProjectBasename>Editor). Blueprint-only projects still use this editor target; game code may be empty."
+          },
+          "platform": {
+            "type": "string",
+            "description": "Default Win64."
+          },
+          "configuration": {
+            "type": "string",
+            "description": "Default Development."
+          },
+          "confirm_external_rebuild": {
+            "type": "boolean",
+            "description": "Must be true when the editor is interactive (not -unattended / not automation) so the user explicitly accepts an external UBT process."
+          }
+        },
+        "required": []
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "Build.bat / UBT",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Missing Windows SDK or Build.bat",
+        "Long-running; editor may appear busy"
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "render_target_readback_editor",
+      "summary": "Capture a UTextureRenderTarget2D to disk.",
+      "category": "capture_vision",
+      "tags": [
+        "vision",
+        "render_target"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 25,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "asset_path": {
+            "type": "string"
+          },
+          "export_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_path",
+          "export_path"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "RenderTarget readback APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "sequencer_open",
+      "summary": "Open Level Sequence in Sequencer.",
+      "category": "animation_sequencer",
+      "tags": [
+        "sequencer",
+        "cinematic"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 24,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sequence_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence_path"
+        ]
+      },
+      "side_effects": "ui",
+      "permission": "write",
+      "ue_entry_points": "Sequencer module; UAssetEditorSubsystem",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/cinematics-and-movies-in-unreal-engine"
+      ],
+      "status": "future"
+    },
+    {
+      "tool_id": "shader_compile_wait",
+      "summary": "Wait for shader compile completion.",
+      "category": "build_packaging",
+      "tags": [
+        "rendering"
+      ],
+      "tier": "future",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 10,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "exec",
+      "permission": "exec",
+      "ue_entry_points": "Shader compile",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "future"
+    },
+    {
+      "tool_id": "source_search_symbol",
+      "summary": "Fuzzy grep project text files under Source/, Config/, and Plugins/*/Source/ (Cursor-style): typo-tolerant; ranks paths and filenames even when the user misspells or only partially remembers a name. Returns path_matches plus optional line_matches inside files. Stops after a wall-clock budget (max_wall_ms, default 12s, max 120s) with timed_out partial results. For Content assets under /Game, use asset_index_fuzzy_search (Asset Registry index).",
+      "category": "project_files_search",
+      "tags": [
+        "source",
+        "search",
+        "grep",
+        "fuzzy"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 58,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Approximate text; may be misspelled. Matched against relative paths, filenames, and (optionally) lines."
+          },
+          "glob": {
+            "type": "string",
+            "description": "Semicolon-separated extension globs, e.g. *.cpp;*.h;*.hpp;*.cs. Defaults to common C++ and config extensions."
+          },
+          "max_hits": {
+            "type": "integer",
+            "description": "Max path_matches returned (line_matches budget scales with this)."
+          },
+          "max_files_to_scan": {
+            "type": "integer",
+            "description": "Cap files opened for line-level fuzzy matching (highest path scores first)."
+          },
+          "include_line_matches": {
+            "type": "boolean",
+            "description": "If true, scan text inside top-ranked files for fuzzy line hits."
+          },
+          "max_wall_ms": {
+            "type": "integer",
+            "description": "Wall-clock time budget in milliseconds (default 12000, clamped 500–120000). Stops early with timed_out and partial matches."
+          },
+          "time_budget_ms": {
+            "type": "integer",
+            "description": "Alias for max_wall_ms."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IFileManager::FindFilesRecursive; FFileHelper",
+      "threading": "game_thread",
+      "failure_modes": [
+        "timed_out true: partial path/line results; tighten glob, raise max_wall_ms, or reduce max_files_to_scan.",
+        "roots_enumeration_partial true: file list was cut short while discovering roots; narrow scope or raise max_wall_ms."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "scene_fuzzy_search",
+      "summary": "Search actors in the loaded editor world/level (not Content Browser assets). For /Game assets use asset_index_fuzzy_search. With a non-empty query, fuzzy-ranks by label/name/class/path/tags (listing_mode fuzzy_ranked). With no query (e.g. {} or only filters), returns the first max_results actors in stable world iteration order—no ranking (listing_mode enumeration_first_n); optional class_name_substring narrows by UClass short name. By default excludes engine streaming/HLOD/WorldPartition helper actors; use include_engine_internals:true only for diagnostics. Stops after max_wall_ms (default 12s) or max_actors_to_visit.",
+      "category": "world_actors",
+      "tags": [
+        "actor",
+        "search",
+        "grep",
+        "fuzzy",
+        "scene"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 62,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "If non-empty: fuzzy match against label, name, class, path, tags. If omitted or empty: first max_results actors in iteration order (see listing_mode enumeration_first_n); optional class_name_substring still applies."
+          },
+          "class_name_substring": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Optional filter: actor UClass short name must contain this substring (case-insensitive), e.g. StaticMesh, PointLight, PlayerStart. Use for type-first level discovery without a text query; combine with query to narrow by label/name within that class."
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Cap on returned rows. Fuzzy mode: best matches first after sort. Enumeration mode: first N in visit order (no sort)."
+          },
+          "include_hidden": {
+            "type": "boolean",
+            "description": "If true, include actors hidden in the editor."
+          },
+          "max_wall_ms": {
+            "type": "integer",
+            "description": "Wall-clock time budget in milliseconds (default 12000, clamped 500–120000)."
+          },
+          "time_budget_ms": {
+            "type": "integer",
+            "description": "Alias for max_wall_ms."
+          },
+          "max_actors_to_visit": {
+            "type": "integer",
+            "description": "Max actor iterator steps (default 500000, clamped 5000–2000000); stops with actors_truncated."
+          },
+          "include_engine_internals": {
+            "type": "boolean",
+            "description": "If true, do not apply built-in excludes for HLOD/streaming helpers (still applies exclude_class_substrings). Default false."
+          },
+          "exclude_class_substrings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional extra class-name substrings to exclude from matches (case-insensitive)."
+          }
+        }
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "TActorIterator; AActor::GetActorLabel",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Empty query uses enumeration_first_n (arbitrary visit order)—pass query for ranked fuzzy matches.",
+        "timed_out true: partial matches; narrow query, raise max_wall_ms, or raise max_actors_to_visit.",
+        "actors_truncated true: iterator cap hit; raise max_actors_to_visit or narrow search.",
+        "High actors_excluded_by_policy: many engine-internal actors skipped; use include_engine_internals only if you truly need them."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_index_fuzzy_search",
+      "summary": "Search the Asset Registry under path_prefix (default /Game). With a non-empty query, fuzzy-ranks matches (listing_mode fuzzy_ranked). With no query, returns the first max_results assets in registry enumeration order under path_prefix—no ranking (listing_mode enumeration_first_n); optional class_name_substring filters by class path substring. `{}` is valid (bounded first-N sample under /Game). Stops after max_assets_to_scan or max_wall_ms (default 12s, max 120s)—see truncated, timed_out, assets_visited. Downstream tools must use object_path from results—do not invent paths.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "search",
+        "grep",
+        "fuzzy",
+        "registry"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 64,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "If non-empty: fuzzy-ranked search over name, path, class. If omitted or empty: first max_results assets under path_prefix in enumeration order (listing_mode enumeration_first_n); combine with class_name_substring or a narrow path_prefix to scope."
+          },
+          "search_string": {
+            "type": "string",
+            "description": "Legacy alias for query. Prefer query; accepted for compatibility with older prompts."
+          },
+          "filter": {
+            "type": "string",
+            "description": "Compatibility alias for query (deprecated). Prefer query."
+          },
+          "name_prefix": {
+            "type": "string",
+            "description": "Compatibility alias for query (deprecated). Prefer query."
+          },
+          "path_prefix": {
+            "type": "string",
+            "description": "Package path prefix (default /Game if omitted). Applies to both fuzzy and enumeration modes."
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Cap on returned rows. Fuzzy mode: best matches after sort. Enumeration mode: first N in visit order (no sort)."
+          },
+          "max_assets_to_scan": {
+            "type": "integer",
+            "description": "Max asset registry entries visited during enumeration (stops early; see truncated and assets_visited in results)."
+          },
+          "class_name_substring": {
+            "type": "string",
+            "description": "Optional filter: asset class path must contain this substring (e.g. Texture2D, StaticMesh, Blueprint). With no query, first max_results matching assets in enumeration order."
+          },
+          "max_wall_ms": {
+            "type": "integer",
+            "description": "Wall-clock time budget in milliseconds (default 12000, clamped 500–120000). Stops enumeration early with timed_out and partial ranked matches."
+          },
+          "time_budget_ms": {
+            "type": "integer",
+            "description": "Alias for max_wall_ms."
+          }
+        }
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IAssetRegistry::EnumerateAssets",
+      "threading": "game_thread",
+      "failure_modes": [
+        "truncated true: raise max_assets_to_scan or narrow path_prefix.",
+        "timed_out true: partial matches; narrow path_prefix, add class_name_substring, raise max_wall_ms, or raise max_assets_to_scan."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "tool_audit_append",
+      "summary": "Append line to tool audit log file.",
+      "category": "diagnostics_logs",
+      "tags": [
+        "audit"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 75,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tool_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "asset_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_id",
+          "status",
+          "summary"
+        ]
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "Plugin logging (FFileHelper)",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "designed"
+    },
+    {
+      "tool_id": "viewport_camera_control",
+      "summary": "Unified viewport camera tool. Required: operation (dolly|orbit|pan|pilot|get_transform|set_transform) — explicit; no inference from payload shape. Prefer over branch-specific viewport_camera_* tools.",
+      "category": "viewport_camera",
+      "tags": [
+        "viewport",
+        "camera",
+        "orbit",
+        "pan",
+        "dolly",
+        "pilot",
+        "operation"
+      ],
+      "tier": "tier1_mvp",
+      "naming_family": "composite",
+      "paired_tool_id": "viewport_camera_get_transform",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 92,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "viewport",
+          "camera",
+          "transform",
+          "orbit",
+          "pilot",
+          "frame"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "dolly",
+              "orbit",
+              "pan",
+              "pilot",
+              "get_transform",
+              "set_transform"
+            ]
+          },
+          "dolly_units": {
+            "type": "number"
+          },
+          "fov_delta": {
+            "type": "number"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "dolly",
+              "fov"
+            ]
+          },
+          "pivot": {
+            "type": "string"
+          },
+          "yaw_deg": {
+            "type": "number"
+          },
+          "pitch_deg": {
+            "type": "number"
+          },
+          "radius": {
+            "type": "number"
+          },
+          "relative": {
+            "type": "boolean"
+          },
+          "delta": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "space": {
+            "type": "string",
+            "enum": [
+              "world",
+              "camera"
+            ]
+          },
+          "actor_path": {
+            "type": "string"
+          },
+          "unpilot": {
+            "type": "boolean"
+          },
+          "viewport_index": {
+            "type": "integer"
+          },
+          "location": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "rotation": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "b_snap": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_family",
+        "legacy_targets": [
+          {
+            "tool_id": "viewport_camera_control"
+          }
+        ],
+        "resolver_notes": "Resolver branches on operation and projects operation plus handler-specific fields; dispatch routes by operation."
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "FEditorViewportClient camera APIs",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Missing or invalid operation returns a suggested_correct_call with the canonical operation field.",
+        "Use get_transform before set_transform if the current camera state may be stale."
+      ],
+      "doc_links": [
+        "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FEditorViewportClient"
+      ],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "viewport_capture",
+      "summary": "Capture the editor viewport. Required: capture_kind immediate_png or after_frames (explicit; no inference). Prefer over legacy viewport_capture_* split tools.",
+      "category": "capture_vision",
+      "tags": [
+        "viewport",
+        "capture",
+        "vision",
+        "screenshot",
+        "capture_kind"
+      ],
+      "tier": "tier1_mvp",
+      "naming_family": "composite",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 91,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "viewport",
+          "capture",
+          "screenshot",
+          "vision",
+          "png"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "capture_kind": {
+            "type": "string",
+            "enum": [
+              "immediate_png",
+              "after_frames"
+            ]
+          },
+          "filename_slug": {
+            "type": "string"
+          },
+          "delay_frames": {
+            "type": "integer"
+          },
+          "resolution_scale": {
+            "type": "number"
+          },
+          "include_ui": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "capture_kind"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_family",
+        "legacy_targets": [
+          {
+            "tool_id": "viewport_capture"
+          }
+        ],
+        "resolver_notes": "Resolver branches on capture_kind and preserves it in projected args; dispatch routes by capture_kind."
+      },
+      "side_effects": "disk",
+      "permission": "write",
+      "ue_entry_points": "FTSTicker + FScreenshotRequest",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Missing or invalid capture_kind returns a suggested_correct_call with the canonical capture_kind field."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "viewport_frame",
+      "summary": "Frame the viewport on selection or explicit actors. Required: target selection or actors (explicit; no inference). Prefer over split viewport_frame_* tools.",
+      "category": "selection_framing",
+      "tags": [
+        "viewport",
+        "frame",
+        "selection",
+        "actors",
+        "target"
+      ],
+      "tier": "tier1_mvp",
+      "naming_family": "composite",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 89,
+        "always_include_in_core_pack": true,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "viewport",
+          "frame",
+          "selection",
+          "actor bounds",
+          "focus"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "type": "string",
+            "enum": [
+              "selection",
+              "actors"
+            ]
+          },
+          "actor_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "margin_scale": {
+            "type": "number"
+          },
+          "pitch_bias": {
+            "type": "number"
+          },
+          "yaw_bias": {
+            "type": "number"
+          },
+          "orthographic": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_family",
+        "legacy_targets": [
+          {
+            "tool_id": "viewport_frame"
+          }
+        ],
+        "resolver_notes": "Resolver branches on target and preserves it in projected args; dispatch routes by target."
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "AActor::GetComponentsBoundingBox; FEditorViewportClient",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Missing or invalid target returns a suggested_correct_call with the canonical target field."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "viewport_get_view_mode",
+      "summary": "Read the current editor viewport rendering mode.",
+      "category": "viewport_camera",
+      "tags": [
+        "viewport",
+        "rendering",
+        "read",
+        "setting"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 46,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "view",
+          "mode",
+          "rendering",
+          "viewport"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FEditorViewportClient view mode APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "viewport_set_view_mode",
+      "summary": "Switch editor viewport rendering mode (Lit, Wireframe, Unlit, …). Does not require actor selection or viewport framing—call this tool directly when the user asks to change view mode.",
+      "category": "viewport_camera",
+      "tags": [
+        "viewport",
+        "rendering",
+        "setting",
+        "write"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 45,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "unlit",
+          "wireframe",
+          "lit",
+          "view",
+          "mode",
+          "rendering",
+          "viewport"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "view_mode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "view_mode"
+        ]
+      },
+      "side_effects": "scene",
+      "permission": "write",
+      "ue_entry_points": "FEditorViewportClient view mode APIs",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_create",
+      "summary": "Create a new asset under /Game via IAssetTools (asset_class path + optional factory_class). Use for Blueprint assets/materials/sounds/etc. `{}` is invalid: `package_path`, `asset_name`, and `asset_class` are required on first attempt. Never call this tool until those fields are concrete (prefer values from context/discovery/history). Keep package_path under /Game. For Character/Pawn gameplay, create a Blueprint asset (/Script/Engine.Blueprint) then set parent_class via blueprint_graph_patch create_if_missing flow.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "write"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 76,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "package_path": {
+            "type": "string",
+            "description": "Long package path folder under /Game, e.g. /Game/AI/Generated"
+          },
+          "asset_name": {
+            "type": "string",
+            "description": "Asset name without path"
+          },
+          "asset_class": {
+            "type": "string",
+            "description": "Native asset UClass path (not content path), e.g. /Script/Engine.Blueprint, /Script/Engine.Material, /Script/LevelSequence.LevelSequence. Do not pass gameplay actor classes like /Script/Engine.Character here."
+          },
+          "class_path": {
+            "type": "string",
+            "description": "Compatibility alias for asset_class. Prefer asset_class."
+          },
+          "factory_class": {
+            "type": "string",
+            "description": "Optional UFactory class path when the engine requires a factory"
+          },
+          "focused": {
+            "type": "boolean",
+            "description": "After success, open the new asset in its editor (uses object_path from the result)."
+          }
+        },
+        "required": [
+          "package_path",
+          "asset_name",
+          "asset_class"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "IAssetTools::CreateAsset",
+      "threading": "game_thread",
+      "failure_modes": [
+        "missing_required_fields: package_path, asset_name, and asset_class are required (`class_path` is alias for asset_class)."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_export_properties",
+      "summary": "Read/export editable UObject properties under /Game as JSON (reflection). For a Blueprint asset, keys are properties on the UBlueprint editor object—not inherited component defaults on the generated class (e.g. CharacterMovement.JumpZVelocity). For those, use blueprint_set_component_default. Read-only inspector before asset_apply_properties on the same object_path.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 77,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_path": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "Compatibility alias for object_path."
+          }
+        },
+        "required": [
+          "object_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FProperty::ExportTextItem",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_apply_properties",
+      "summary": "Write/apply flat JSON property deltas on the loaded asset UObject under /Game (reflection / ImportText)—top-level keys only, no nested component objects. For Blueprint assets this targets the UBlueprint object, not class-default component properties (use blueprint_set_component_default for e.g. CharacterMovement.JumpZVelocity). Mutation tool: use after a concrete object_path is known; prefer dry_run before irreversible edits. `{}` is invalid: object_path + properties are required. Materials do not have Text/UMG fields—if you see status material_text_property_confusion, use in-world text (TextRenderActor/UMG) instead of inventing Text on Material assets.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "write"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 75,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "object_path": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object",
+            "description": "Map of property name to JSON value"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "If true, validate only (no transaction)"
+          }
+        },
+        "required": [
+          "object_path",
+          "properties"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "FProperty::ImportText",
+      "threading": "game_thread",
+      "failure_modes": [
+        "status material_text_property_confusion: property keys look like Text/widget fields on a Material/MaterialInstance; follow suggested_correct_call or use level text actors.",
+        "status apply_errors: unknown or non-editable property names—use asset_export_properties first to list valid keys for this object_path (Blueprint: UBlueprint fields only; not component CDO defaults).",
+        "Nested JSON under properties (e.g. CharacterMovement: { JumpZVelocity }) is not supported—use blueprint_set_component_default for component class defaults on Actor Blueprints."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "asset_graph_query",
+      "summary": "Read Asset Registry graph relations for one asset. Required: relation (referencers|dependencies) and object_path. Prefer over split referencers/dependencies tools.",
+      "category": "assets_content",
+      "tags": [
+        "asset",
+        "read",
+        "dependencies",
+        "referencers",
+        "graph",
+        "relation"
+      ],
+      "tier": "standard",
+      "naming_family": "composite",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 76,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "asset",
+          "dependency graph",
+          "referencers",
+          "dependencies",
+          "asset registry"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "relation": {
+            "type": "string",
+            "enum": [
+              "referencers",
+              "dependencies"
+            ]
+          },
+          "object_path": {
+            "type": "string",
+            "description": "Full asset object path copied from discovery tools such as asset_index_fuzzy_search or asset_registry_query."
+          }
+        },
+        "required": [
+          "relation",
+          "object_path"
+        ]
+      },
+      "routing": {
+        "strategy": "legacy_family",
+        "legacy_targets": [
+          {
+            "tool_id": "asset_graph_query"
+          }
+        ],
+        "resolver_notes": "Resolver branches on relation and preserves it with object_path; dispatch routes by relation."
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "IAssetRegistry::GetReferencers / GetDependencies",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "level_sequence_create_asset",
+      "summary": "Create a Level Sequence asset under /Game (typed shortcut over asset_create).",
+      "category": "animation_sequencer",
+      "tags": [
+        "sequencer",
+        "asset",
+        "write"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 72,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "package_path": {
+            "type": "string"
+          },
+          "asset_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "package_path",
+          "asset_name"
+        ]
+      },
+      "side_effects": "asset",
+      "permission": "write",
+      "ue_entry_points": "ULevelSequence; IAssetTools::CreateAsset",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "blueprint_graph_introspect",
+      "summary": "Read-only: enumerate nodes with node_guid, class, title, and pins (name, direction, category, linked_to[] of {node_guid, pin_name} per wire). Use with blueprint_graph_patch connect or blueprint_graph_introspect links; empty linked_to means unwired.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "read"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 72,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "graph_name": {
+            "type": "string"
+          },
+          "focused": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FEdGraphUtilities",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
+      "tool_id": "blueprint_verify_graph",
+      "summary": "Post-edit verification: optional steps (default [\"links\"]): links (null/cross-graph pin links), orphan_pins (disconnected exec inputs on impure K2 nodes), duplicate_node_guids, dead_exec_outputs (CallFunction nodes with unlinked exec outputs), pin_type_mismatch (coarse category/subcategory/object equality on data links). Unknown step strings listed in unknown_steps output.",
+      "category": "blueprints",
+      "tags": [
+        "blueprint",
+        "verify"
+      ],
+      "tier": "standard",
+      "modes": {
+        "ask": false,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 70,
+        "always_include_in_core_pack": false,
+        "embedding_hint": null,
+        "blueprint_builder_core": true
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "graph_name": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "blueprint_path"
+        ]
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UEdGraphPin",
+      "threading": "game_thread",
+      "failure_modes": [],
+      "doc_links": [],
+      "status": "implemented"
+    }
+  ]
 }

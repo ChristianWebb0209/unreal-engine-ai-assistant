@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Load UnrealAiToolCatalog.json and merge meta.tool_catalog_fragments into tools list (same rules as C++ loader)."""
+"""Load tools.main.json and merge meta.tool_catalog_fragments into tools list (same rules as C++ loader)."""
 from __future__ import annotations
 
 import json
@@ -46,7 +46,7 @@ def _load_fragment_tools(resources_dir: Path, spec, repo_root: Path) -> list[tup
 
 def load_merged_catalog(repo_root: Path | None = None) -> dict:
     root = repo_root or Path(__file__).resolve().parents[1]
-    path = root / "Plugins" / "UnrealAiEditor" / "Resources" / "UnrealAiToolCatalog.json"
+    path = root / "Plugins" / "UnrealAiEditor" / "Resources" / "tools.main.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     resources_dir = path.parent
     tools_by_id: dict[str, dict] = {}

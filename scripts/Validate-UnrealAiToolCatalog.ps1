@@ -1,6 +1,6 @@
 #requires -Version 5.1
 <#
-  Structural validation for Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json.
+  Structural validation for Plugins/UnrealAiEditor/Resources/tools.main.json (primary tool catalog).
   Fails the build/CI if JSON is invalid, tool_count mismatches, or tool_id duplicates exist.
   Run from repo root: .\scripts\Validate-UnrealAiToolCatalog.ps1
 #>
@@ -13,7 +13,7 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($CatalogPath)) {
-    $CatalogPath = Join-Path $RepoRoot 'Plugins\UnrealAiEditor\Resources\UnrealAiToolCatalog.json'
+    $CatalogPath = Join-Path $RepoRoot 'Plugins\UnrealAiEditor\Resources\tools.main.json'
 }
 
 if (-not (Test-Path -LiteralPath $CatalogPath)) {

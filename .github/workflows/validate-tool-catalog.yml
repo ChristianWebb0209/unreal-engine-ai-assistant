@@ -3,15 +3,25 @@ name: Validate tool catalog
 on:
   push:
     paths:
-      - 'Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json'
+      - 'Plugins/UnrealAiEditor/Resources/tools.main.json'
+      - 'Plugins/UnrealAiEditor/Resources/tools.blueprint.json'
+      - 'Plugins/UnrealAiEditor/Resources/tools.environment.json'
       - 'scripts/Validate-UnrealAiToolCatalog.ps1'
       - 'scripts/audit_tool_agent_surfaces.py'
+      - 'scripts/audit_subagent_exclusive_fragments.py'
+      - 'scripts/unreal_ai_tool_catalog_merge.py'
+      - 'scripts/verify_tool_catalog_meta.py'
       - '.github/workflows/validate-tool-catalog.yml'
   pull_request:
     paths:
-      - 'Plugins/UnrealAiEditor/Resources/UnrealAiToolCatalog.json'
+      - 'Plugins/UnrealAiEditor/Resources/tools.main.json'
+      - 'Plugins/UnrealAiEditor/Resources/tools.blueprint.json'
+      - 'Plugins/UnrealAiEditor/Resources/tools.environment.json'
       - 'scripts/Validate-UnrealAiToolCatalog.ps1'
       - 'scripts/audit_tool_agent_surfaces.py'
+      - 'scripts/audit_subagent_exclusive_fragments.py'
+      - 'scripts/unreal_ai_tool_catalog_merge.py'
+      - 'scripts/verify_tool_catalog_meta.py'
       - '.github/workflows/validate-tool-catalog.yml'
   workflow_dispatch:
 
@@ -22,7 +32,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate UnrealAiToolCatalog.json
+      - name: Validate tools.main.json (merged catalog)
         shell: pwsh
         run: ./scripts/Validate-UnrealAiToolCatalog.ps1
 

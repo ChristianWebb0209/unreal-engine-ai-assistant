@@ -15,7 +15,7 @@ struct FUnrealAiToolPackOptions
 };
 
 /**
- * Loads Resources/UnrealAiToolCatalog.json plus optional meta.tool_catalog_fragments (JSON files under Resources/).
+ * Loads Resources/tools.main.json plus optional meta.tool_catalog_fragments (JSON files under Resources/).
  * Fragments append or override tools by tool_id; optional per-fragment retrieval_bundle is copied onto merged tools
  * for main-agent BM25 filtering (see UnrealAiToolSurfacePipeline).
  */
