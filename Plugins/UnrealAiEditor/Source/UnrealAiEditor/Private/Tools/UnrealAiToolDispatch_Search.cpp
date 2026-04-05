@@ -181,26 +181,31 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 	const TArray<const TCHAR*> QueryAliases = {TEXT("search"), TEXT("q"), TEXT("text"), TEXT("needle"), TEXT("match")};
 	(void)UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(Args, TEXT("query"), QueryAliases, Query);
 	Query.TrimStartAndEndInline();
-	bool bQueryCoerced = false;
-	if (Query.IsEmpty())
+	const bool bFuzzyMode = !Query.IsEmpty();
+
+	FString ClassNameSubstring;
+	if (Args.IsValid())
 	{
-		Query = TEXT("PlayerStart");
-		bQueryCoerced = true;
-		if (Args.IsValid())
-		{
-			Args->SetStringField(TEXT("query"), Query);
-		}
+		Args->TryGetStringField(TEXT("class_name_substring"), ClassNameSubstring);
 	}
+	ClassNameSubstring.TrimStartAndEndInline();
+
 	int32 MaxResults = 50;
 	double MR = 0.0;
-	if (Args->TryGetNumberField(TEXT("max_results"), MR))
+	if (Args.IsValid() && Args->TryGetNumberField(TEXT("max_results"), MR))
 	{
 		MaxResults = FMath::Clamp(static_cast<int32>(MR), 1, 500);
 	}
 	bool bIncludeHidden = false;
-	Args->TryGetBoolField(TEXT("include_hidden"), bIncludeHidden);
+	if (Args.IsValid())
+	{
+		Args->TryGetBoolField(TEXT("include_hidden"), bIncludeHidden);
+	}
 	bool bIncludeEngineInternals = false;
-	Args->TryGetBoolField(TEXT("include_engine_internals"), bIncludeEngineInternals);
+	if (Args.IsValid())
+	{
+		Args->TryGetBoolField(TEXT("include_engine_internals"), bIncludeEngineInternals);
+	}
 	TArray<FString> ExtraExcludeClassSubstrings;
 	{
 		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
@@ -227,7 +232,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 
 	int32 MaxActorsToVisit = 500000;
 	double MAV = 0.0;
-	if (Args->TryGetNumberField(TEXT("max_actors_to_visit"), MAV))
+	if (Args.IsValid() && Args->TryGetNumberField(TEXT("max_actors_to_visit"), MAV))
 	{
 		MaxActorsToVisit = FMath::Clamp(static_cast<int32>(MAV), 5000, 2000000);
 	}
@@ -287,6 +292,28 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 		{
 			continue;
 		}
+		if (!ClassNameSubstring.IsEmpty()
+			&& !A->GetClass()->GetName().Contains(ClassNameSubstring, ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+
+		if (!bFuzzyMode)
+		{
+			if (Hits.Num() >= MaxResults)
+			{
+				break;
+			}
+			FHit H;
+			H.Score = 100.f;
+			H.ActorPath = A->GetPathName();
+			H.Label = A->GetActorLabel();
+			H.ClassName = A->GetClass()->GetName();
+			H.MatchedField = TEXT("enumeration");
+			Hits.Add(MoveTemp(H));
+			continue;
+		}
+
 		FString TagsJoined;
 		for (const FName& Tg : A->Tags)
 		{
@@ -330,9 +357,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 		Hits.Add(MoveTemp(H));
 	}
 
-	Hits.Sort([](const FHit& A, const FHit& B) { return A.Score > B.Score; });
-	const bool bLowConfidence = (Hits.Num() == 0 || Hits[0].Score < 40.f);
-	if (Hits.Num() > MaxResults)
+	if (bFuzzyMode)
+	{
+		Hits.Sort([](const FHit& A, const FHit& B) { return A.Score > B.Score; });
+	}
+	const bool bLowConfidence = bFuzzyMode && (Hits.Num() == 0 || Hits[0].Score < 40.f);
+	if (bFuzzyMode && Hits.Num() > MaxResults)
 	{
 		Hits.SetNum(MaxResults);
 	}
@@ -353,7 +383,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_SceneFuzzySearch(const TSharedPtr
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("tool"), TEXT("scene_fuzzy_search"));
 	O->SetStringField(TEXT("query"), Query);
-	O->SetBoolField(TEXT("query_coerced"), bQueryCoerced);
+	O->SetStringField(TEXT("listing_mode"), bFuzzyMode ? TEXT("fuzzy_ranked") : TEXT("enumeration_first_n"));
+	O->SetBoolField(TEXT("query_coerced"), false);
+	if (!ClassNameSubstring.IsEmpty())
+	{
+		O->SetStringField(TEXT("class_name_substring"), ClassNameSubstring);
+	}
 	O->SetNumberField(TEXT("max_wall_ms"), static_cast<double>(MaxWallMs));
 	O->SetNumberField(TEXT("elapsed_ms"), (FPlatformTime::Seconds() - StartSec) * 1000.0);
 	O->SetBoolField(TEXT("timed_out"), bTimedOut);
@@ -440,18 +475,16 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 		TEXT("needle"),
 		TEXT("match")
 	};
-	const bool bHadCanonicalQuery = UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(Args, TEXT("query"), QueryAliases, Query);
+	(void)UnrealAiToolDispatchArgRepair::TryGetStringFieldCanonical(Args, TEXT("query"), QueryAliases, Query);
 	Query.TrimStartAndEndInline();
-	const bool bQueryCoerced = !bHadCanonicalQuery || Query.IsEmpty();
+	const bool bFuzzyMode = !Query.IsEmpty();
 
-	bool bExplicitPathPrefix = false;
 	FString PathPrefix;
 	if (Args.IsValid() && Args->TryGetStringField(TEXT("path_prefix"), PathPrefix))
 	{
 		PathPrefix.TrimStartAndEndInline();
-		bExplicitPathPrefix = !PathPrefix.IsEmpty();
 	}
-	if (!bExplicitPathPrefix)
+	if (PathPrefix.IsEmpty())
 	{
 		PathPrefix = TEXT("/Game");
 	}
@@ -460,44 +493,31 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 		PathPrefix = TEXT("/") + PathPrefix;
 	}
 
-	if (bQueryCoerced)
+	FString ClassSubstring;
+	if (Args.IsValid())
 	{
-		// Deterministic one-shot recovery for empty query: use a bounded default instead of failing.
-		Query = TEXT("Blueprint");
-		if (!bExplicitPathPrefix)
-		{
-			PathPrefix = TEXT("/Game/Blueprints");
-		}
-		if (Args.IsValid())
-		{
-			Args->SetStringField(TEXT("query"), Query);
-			if (!bExplicitPathPrefix)
-			{
-				Args->SetStringField(TEXT("path_prefix"), PathPrefix);
-			}
-		}
+		Args->TryGetStringField(TEXT("class_name_substring"), ClassSubstring);
 	}
+	ClassSubstring.TrimStartAndEndInline();
+	const FString ClassSubstringLower = ClassSubstring.ToLower();
+	const bool bHasClassFilter = !ClassSubstringLower.IsEmpty();
 
 	int32 MaxResults = 80;
 	double MR = 0.0;
-	if (Args->TryGetNumberField(TEXT("max_results"), MR))
+	if (Args.IsValid() && Args->TryGetNumberField(TEXT("max_results"), MR))
 	{
 		MaxResults = FMath::Clamp(static_cast<int32>(MR), 1, 500);
 	}
 	int32 MaxAssetsToScan = 12000;
 	double MS = 0.0;
-	if (Args->TryGetNumberField(TEXT("max_assets_to_scan"), MS))
+	if (Args.IsValid() && Args->TryGetNumberField(TEXT("max_assets_to_scan"), MS))
 	{
 		MaxAssetsToScan = FMath::Clamp(static_cast<int32>(MS), 100, 500000);
 	}
 	const int32 MaxWallMs = ParseMaxWallMs(Args, SearchWallMsDefault);
 	const double StartSec = FPlatformTime::Seconds();
 	const double DeadlineSec = StartSec + static_cast<double>(MaxWallMs) / 1000.0;
-	FString ClassSubstring;
-	Args->TryGetStringField(TEXT("class_name_substring"), ClassSubstring);
 	const FString QLower = Query.ToLower();
-	const FString ClassSubstringLower = ClassSubstring.ToLower();
-	const bool bHasClassFilter = !ClassSubstringLower.IsEmpty();
 
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 	IAssetRegistry& AR = ARM.Get();
@@ -521,21 +541,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 	bool bTruncated = false;
 	bool bTimedOut = false;
 
-	const auto OnAsset = [&](const FAssetData& AD)
-	{
-		const float S = ScoreAssetDataForFuzzyQuery(AD, Query, QLower, bHasClassFilter, ClassSubstringLower);
-		if (S < 1.f)
-		{
-			return;
-		}
-		FHit H;
-		H.Score = S;
-		H.ObjectPath = AD.GetObjectPathString();
-		H.AssetName = AD.AssetName.ToString();
-		H.ClassPath = AD.AssetClassPath.ToString();
-		Hits.Add(MoveTemp(H));
-	};
-
 	AR.EnumerateAssets(
 		Filter,
 		[&](const FAssetData& AD) -> bool
@@ -554,13 +559,48 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 				bTruncated = true;
 				return false;
 			}
-			OnAsset(AD);
+			if (!bFuzzyMode)
+			{
+				if (Hits.Num() >= MaxResults)
+				{
+					return false;
+				}
+				if (bHasClassFilter)
+				{
+					const FString ClsRow = AD.AssetClassPath.ToString();
+					if (!ClsRow.Contains(ClassSubstringLower, ESearchCase::IgnoreCase))
+					{
+						return true;
+					}
+				}
+				FHit H;
+				H.Score = 100.f;
+				H.ObjectPath = AD.GetObjectPathString();
+				H.AssetName = AD.AssetName.ToString();
+				H.ClassPath = AD.AssetClassPath.ToString();
+				Hits.Add(MoveTemp(H));
+				return true;
+			}
+			const float S = ScoreAssetDataForFuzzyQuery(AD, Query, QLower, bHasClassFilter, ClassSubstringLower);
+			if (S < 1.f)
+			{
+				return true;
+			}
+			FHit H;
+			H.Score = S;
+			H.ObjectPath = AD.GetObjectPathString();
+			H.AssetName = AD.AssetName.ToString();
+			H.ClassPath = AD.AssetClassPath.ToString();
+			Hits.Add(MoveTemp(H));
 			return true;
 		});
 
-	Hits.Sort([](const FHit& A, const FHit& B) { return A.Score > B.Score; });
-	const bool bLowConfidence = (Hits.Num() == 0 || Hits[0].Score < 40.f);
-	if (Hits.Num() > MaxResults)
+	if (bFuzzyMode)
+	{
+		Hits.Sort([](const FHit& A, const FHit& B) { return A.Score > B.Score; });
+	}
+	const bool bLowConfidence = bFuzzyMode && (Hits.Num() == 0 || Hits[0].Score < 40.f);
+	if (bFuzzyMode && Hits.Num() > MaxResults)
 	{
 		Hits.SetNum(MaxResults);
 	}
@@ -580,7 +620,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("tool"), TEXT("asset_index_fuzzy_search"));
 	O->SetStringField(TEXT("query"), Query);
-	O->SetBoolField(TEXT("query_coerced"), bQueryCoerced);
+	O->SetStringField(TEXT("listing_mode"), bFuzzyMode ? TEXT("fuzzy_ranked") : TEXT("enumeration_first_n"));
+	O->SetBoolField(TEXT("query_coerced"), false);
+	if (!ClassSubstring.IsEmpty())
+	{
+		O->SetStringField(TEXT("class_name_substring"), ClassSubstring);
+	}
 	O->SetStringField(TEXT("path_prefix"), PathPrefix);
 	O->SetBoolField(TEXT("truncated"), bTruncated);
 	O->SetBoolField(TEXT("timed_out"), bTimedOut);

@@ -20,7 +20,7 @@ FUnrealAiToolExecutionHost::FUnrealAiToolExecutionHost(FUnrealAiBackendRegistry*
 {
 	if (!Catalog.LoadFromPlugin())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("UnrealAiToolCatalog: failed to load Resources/UnrealAiToolCatalog.json"));
+		UE_LOG(LogTemp, Warning, TEXT("UnrealAiToolCatalog: failed to load Resources/tools.main.json"));
 	}
 }
 

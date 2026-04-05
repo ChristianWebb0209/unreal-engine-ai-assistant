@@ -16,8 +16,13 @@ class UUnrealAiEditorSettings;
  */
 void UnrealAiNormalizeBlueprintObjectPath(FString& BlueprintObjectPath);
 
-/** Load a /Game Blueprint asset (same rules as other blueprint_* tools). */
-UBlueprint* UnrealAiBlueprintTools_LoadBlueprintGame(const FString& BlueprintObjectPath);
+/**
+ * Load a /Game Blueprint asset (same rules as other blueprint_* tools).
+ * @param OutFailureDetail If non-null, filled when return is nullptr (registry vs load hints).
+ */
+UBlueprint* UnrealAiBlueprintTools_LoadBlueprintGame(
+	const FString& BlueprintObjectPath,
+	FString* OutFailureDetail = nullptr);
 bool UnrealAiBlueprintTools_IsGameWritableBlueprintPath(const FString& BlueprintObjectPath);
 UEdGraph* UnrealAiBlueprintTools_FindGraphByName(UBlueprint* BP, const FString& GraphName);
 /** Pin-type parsing for internal Blueprint helpers; returns false if the token is not recognized (no silent Boolean fallback). */

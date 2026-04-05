@@ -96,16 +96,43 @@ namespace UnrealAiBlueprintToolsPriv
 		return Pkg.StartsWith(TEXT("/Game/")) || Pkg == TEXT("/Game");
 	}
 
-	static UBlueprint* LoadBlueprint(const FString& PathIn)
+	static UBlueprint* LoadBlueprint(const FString& PathIn, FString* OutFailureDetail = nullptr)
 	{
 		FString Path = PathIn;
 		NormalizeBlueprintObjectPath(Path);
-		// Some malformed blueprint assets in harness content can assert during load
-		// (e.g. GeneratedClass == null). Check registry tags first and fail closed.
+		if (Path.IsEmpty())
+		{
+			if (OutFailureDetail)
+			{
+				*OutFailureDetail = TEXT("blueprint_path is empty after normalization.");
+			}
+			return nullptr;
+		}
+		if (Path.Contains(TEXT("..")))
+		{
+			if (OutFailureDetail)
+			{
+				*OutFailureDetail = TEXT("blueprint_path must not contain '..'.");
+			}
+			return nullptr;
+		}
+
+		// Registry hints only: tags can be stale or incomplete while the asset still loads.
+		enum class ERegistryBlueprintHint : uint8
+		{
+			Ok,
+			NotInRegistry,
+			BadGeneratedClassTag,
+		};
+		ERegistryBlueprintHint RegHint = ERegistryBlueprintHint::Ok;
 		{
 			FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 			const FAssetData AD = ARM.Get().GetAssetByObjectPath(FSoftObjectPath(Path));
-			if (AD.IsValid())
+			if (!AD.IsValid())
+			{
+				RegHint = ERegistryBlueprintHint::NotInRegistry;
+			}
+			else
 			{
 				FString GeneratedClassTag;
 				if (!AD.GetTagValue(FName(TEXT("GeneratedClass")), GeneratedClassTag)
@@ -113,15 +140,42 @@ namespace UnrealAiBlueprintToolsPriv
 					|| GeneratedClassTag.Equals(TEXT("None"), ESearchCase::IgnoreCase)
 					|| GeneratedClassTag.Equals(TEXT("null"), ESearchCase::IgnoreCase))
 				{
-					return nullptr;
+					RegHint = ERegistryBlueprintHint::BadGeneratedClassTag;
 				}
 			}
 		}
+
 		if (UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *Path))
 		{
 			return BP;
 		}
-		return Cast<UBlueprint>(FSoftObjectPath(Path).TryLoad());
+		if (UBlueprint* BP = Cast<UBlueprint>(FSoftObjectPath(Path).TryLoad()))
+		{
+			return BP;
+		}
+
+		if (OutFailureDetail)
+		{
+			switch (RegHint)
+			{
+			case ERegistryBlueprintHint::NotInRegistry:
+				*OutFailureDetail = FString::Printf(
+					TEXT("No asset registry entry for '%s'. Run asset_index_fuzzy_search or asset_registry_query and use matches[].object_path / assets[].object_path exactly."),
+					*Path);
+				break;
+			case ERegistryBlueprintHint::BadGeneratedClassTag:
+				*OutFailureDetail = FString::Printf(
+					TEXT("Could not load '%s' as UBlueprint. Registry shows missing or invalid GeneratedClass (save/recompile the Blueprint in-editor, or confirm the object path points at the Blueprint asset, not a different type)."),
+					*Path);
+				break;
+			default:
+				*OutFailureDetail = FString::Printf(
+					TEXT("LoadObject/TryLoad failed for '%s' as UBlueprint (wrong asset type, unloadable package, or path typo)."),
+					*Path);
+				break;
+			}
+		}
+		return nullptr;
 	}
 
 	static UEdGraph* FindGraphByName(UBlueprint* BP, const FString& GraphName)
@@ -524,10 +578,17 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintSetComponentDefault(cons
 		return UnrealAiToolJson::Error(TEXT("blueprint_path must be under /Game."));
 	}
 
-	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path);
+	FString LoadErr;
+	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path, &LoadErr);
 	if (!BP || !BP->GeneratedClass)
 	{
-		return UnrealAiToolJson::Error(UnrealAiBlueprintLoadHint(Path));
+		if (BP && !BP->GeneratedClass)
+		{
+			return UnrealAiToolJson::Error(FString::Printf(
+				TEXT("Blueprint '%s' loaded but GeneratedClass is null — open and recompile in the editor."),
+				*Path));
+		}
+		return UnrealAiToolJson::Error(LoadErr.IsEmpty() ? UnrealAiBlueprintLoadHint(Path) : LoadErr);
 	}
 
 	UObject* CDO = BP->GeneratedClass->GetDefaultObject();
@@ -594,10 +655,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintCompile(const TSharedPtr
 			TEXT("blueprint_compile"),
 			SuggestedArgs);
 	}
-	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path);
+	FString LoadErr;
+	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path, &LoadErr);
 	if (!BP)
 	{
-		return UnrealAiToolJson::Error(UnrealAiBlueprintLoadHint(Path));
+		return UnrealAiToolJson::Error(LoadErr.IsEmpty() ? UnrealAiBlueprintLoadHint(Path) : LoadErr);
 	}
 	bool bFormatGraphs = false;
 	Args->TryGetBoolField(TEXT("format_graphs"), bFormatGraphs);
@@ -671,10 +733,11 @@ static FUnrealAiToolInvocationResult DispatchBlueprintFormatLayout(
 	FString GraphName;
 	Args->TryGetStringField(TEXT("graph_name"), GraphName);
 	UnrealAiBlueprintToolsPriv::NormalizeBlueprintObjectPath(Path);
-	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path);
+	FString LoadErr;
+	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path, &LoadErr);
 	if (!BP)
 	{
-		return UnrealAiToolJson::Error(UnrealAiBlueprintLoadHint(Path));
+		return UnrealAiToolJson::Error(LoadErr.IsEmpty() ? UnrealAiBlueprintLoadHint(Path) : LoadErr);
 	}
 	UEdGraph* Graph = nullptr;
 	if (!GraphName.IsEmpty())
@@ -798,10 +861,11 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGetGraphSummary(const TS
 	Args->TryGetStringField(TEXT("graph_name"), GraphName);
 	bool bIncludeLayoutAnalysis = false;
 	Args->TryGetBoolField(TEXT("include_layout_analysis"), bIncludeLayoutAnalysis);
-	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path);
+	FString LoadErr;
+	UBlueprint* BP = UnrealAiBlueprintToolsPriv::LoadBlueprint(Path, &LoadErr);
 	if (!BP)
 	{
-		return UnrealAiToolJson::Error(UnrealAiBlueprintLoadHint(Path));
+		return UnrealAiToolJson::Error(LoadErr.IsEmpty() ? UnrealAiBlueprintLoadHint(Path) : LoadErr);
 	}
 	TArray<UEdGraph*> Graphs;
 	if (!GraphName.IsEmpty())
@@ -903,9 +967,9 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AnimBlueprintGetGraphSummary(cons
 	return UnrealAiDispatch_BlueprintGetGraphSummary(Fake);
 }
 
-UBlueprint* UnrealAiBlueprintTools_LoadBlueprintGame(const FString& BlueprintObjectPath)
+UBlueprint* UnrealAiBlueprintTools_LoadBlueprintGame(const FString& BlueprintObjectPath, FString* OutFailureDetail)
 {
-	return UnrealAiBlueprintToolsPriv::LoadBlueprint(BlueprintObjectPath);
+	return UnrealAiBlueprintToolsPriv::LoadBlueprint(BlueprintObjectPath, OutFailureDetail);
 }
 
 bool UnrealAiBlueprintTools_IsGameWritableBlueprintPath(const FString& BlueprintObjectPath)

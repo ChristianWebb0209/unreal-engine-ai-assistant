@@ -169,11 +169,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintGraphIntrospect(const TS
 	FString GraphName;
 	Args->TryGetStringField(TEXT("graph_name"), GraphName);
 	UnrealAiNormalizeBlueprintObjectPath(Path);
-	UBlueprint* BP = UnrealAiBlueprintTools_LoadBlueprintGame(Path);
+	FString LoadErr;
+	UBlueprint* BP = UnrealAiBlueprintTools_LoadBlueprintGame(Path, &LoadErr);
 	if (!BP)
 	{
-		return UnrealAiToolJson::Error(
-			FString::Printf(TEXT("Could not load Blueprint at %s. Resolve path via asset search first."), *Path));
+		return UnrealAiToolJson::Error(LoadErr.IsEmpty()
+			? FString::Printf(TEXT("Could not load Blueprint at %s. Resolve path via asset search first."), *Path)
+			: LoadErr);
 	}
 	FString GErr;
 	UEdGraph* Graph = UnrealAiBlueprintT3d::ResolveTargetGraph(BP, GraphName, GErr);
@@ -250,11 +252,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_BlueprintVerifyGraph(const TShare
 	FString GraphName;
 	Args->TryGetStringField(TEXT("graph_name"), GraphName);
 	UnrealAiNormalizeBlueprintObjectPath(Path);
-	UBlueprint* BP = UnrealAiBlueprintTools_LoadBlueprintGame(Path);
+	FString LoadErr;
+	UBlueprint* BP = UnrealAiBlueprintTools_LoadBlueprintGame(Path, &LoadErr);
 	if (!BP)
 	{
-		return UnrealAiToolJson::Error(
-			FString::Printf(TEXT("Could not load Blueprint at %s. Resolve path via asset search first."), *Path));
+		return UnrealAiToolJson::Error(LoadErr.IsEmpty()
+			? FString::Printf(TEXT("Could not load Blueprint at %s. Resolve path via asset search first."), *Path)
+			: LoadErr);
 	}
 	FString GErr;
 	UEdGraph* Graph = UnrealAiBlueprintT3d::ResolveTargetGraph(BP, GraphName, GErr);

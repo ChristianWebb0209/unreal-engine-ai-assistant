@@ -6,13 +6,13 @@
 
 class FUnrealAiBackendRegistry;
 
-/** Game-thread tool execution; loads Resources/UnrealAiToolCatalog.json and dispatches to UE5 handlers. */
+/** Game-thread tool execution; loads Resources/tools.main.json and dispatches to UE5 handlers. */
 class FUnrealAiToolExecutionHost final : public IToolExecutionHost
 {
 public:
 	explicit FUnrealAiToolExecutionHost(FUnrealAiBackendRegistry* InRegistry);
 
-	/** Reload Resources/UnrealAiToolCatalog.json (e.g. after catalog edits). */
+	/** Reload Resources/tools.main.json (e.g. after catalog edits). */
 	void ReloadCatalog();
 
 	virtual void SetToolSession(const FString& ProjectId, const FString& ThreadId) override;
