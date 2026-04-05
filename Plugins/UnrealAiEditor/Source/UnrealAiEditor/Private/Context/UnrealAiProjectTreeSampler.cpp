@@ -1,5 +1,6 @@
 #include "Context/UnrealAiProjectTreeSampler.h"
 
+#include "Observability/UnrealAiGameThreadPerf.h"
 #include "UnrealAiEditorSettings.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformTime.h"
@@ -246,44 +247,47 @@ namespace UnrealAiProjectTreeSampler
 		bool bScanTruncated = false;
 		const double DeadlineSec = FPlatformTime::Seconds() + GProjectTreeMaxScanSeconds;
 
-		AR.EnumerateAssets(
-			Filter,
-			[&](const FAssetData& AD) -> bool
-			{
-				++VisitCount;
-				if (VisitCount > GProjectTreeMaxRegistryVisits)
+		{
+			UNREALAI_GT_PERF_SCOPE("Context.ProjectTreeSampler.EnumerateAssets");
+			AR.EnumerateAssets(
+				Filter,
+				[&](const FAssetData& AD) -> bool
 				{
-					bScanTruncated = true;
-					return false;
-				}
-				if ((VisitCount & 0x3FF) == 0 && FPlatformTime::Seconds() >= DeadlineSec)
-				{
-					bScanTruncated = true;
-					return false;
-				}
+					++VisitCount;
+					if (VisitCount > GProjectTreeMaxRegistryVisits)
+					{
+						bScanTruncated = true;
+						return false;
+					}
+					if ((VisitCount & 0x3FF) == 0 && FPlatformTime::Seconds() >= DeadlineSec)
+					{
+						bScanTruncated = true;
+						return false;
+					}
 
-				const FString ObjPath = AD.GetObjectPathString();
-				const FString Top = NormalizeTopFolder(ObjPath);
-				if (!Top.IsEmpty() && !ShouldExcludeFromPreferredInference(Top))
-				{
-					TopFolders.FindOrAdd(Top) += 1;
-				}
+					const FString ObjPath = AD.GetObjectPathString();
+					const FString Top = NormalizeTopFolder(ObjPath);
+					if (!Top.IsEmpty() && !ShouldExcludeFromPreferredInference(Top))
+					{
+						TopFolders.FindOrAdd(Top) += 1;
+					}
 
-				const FString PkgPath = AD.PackagePath.ToString();
-				if (ShouldExcludeFromPreferredInference(PkgPath))
-				{
+					const FString PkgPath = AD.PackagePath.ToString();
+					if (ShouldExcludeFromPreferredInference(PkgPath))
+					{
+						return true;
+					}
+					if (AD.AssetClassPath == BlueprintClassPath)
+					{
+						BlueprintFolders.FindOrAdd(PkgPath) += 1;
+					}
+					else if (AD.AssetClassPath.GetAssetName().ToString().Contains(TEXT("MaterialInstance"), ESearchCase::IgnoreCase))
+					{
+						MaterialInstanceFolders.FindOrAdd(PkgPath) += 1;
+					}
 					return true;
-				}
-				if (AD.AssetClassPath == BlueprintClassPath)
-				{
-					BlueprintFolders.FindOrAdd(PkgPath) += 1;
-				}
-				else if (AD.AssetClassPath.GetAssetName().ToString().Contains(TEXT("MaterialInstance"), ESearchCase::IgnoreCase))
-				{
-					MaterialInstanceFolders.FindOrAdd(PkgPath) += 1;
-				}
-				return true;
-			});
+				});
+		}
 
 		InOutSummary.TopLevelFolders.Reset();
 		TopFolders.KeySort([](const FString& A, const FString& B) { return A < B; });

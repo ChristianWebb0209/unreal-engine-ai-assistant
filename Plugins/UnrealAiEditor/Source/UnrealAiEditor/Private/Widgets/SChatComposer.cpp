@@ -739,7 +739,7 @@ void SChatComposer::Construct(const FArguments& InArgs)
 		{
 			if (const TSharedPtr<SChatComposer> C = WeakComposer.Pin())
 			{
-				C->Invalidate(EInvalidateWidgetReason::Layout);
+				C->Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 			}
 		});
 	}
@@ -1887,6 +1887,20 @@ FReply SChatComposer::OnSendClicked()
 
 	MessageList->AddUserMessage(Prompt, AgentMode);
 
+	if (Session.IsValid() && Session->ChatName.IsEmpty())
+	{
+		if (IUnrealAiPersistence* PersistForTitle = BackendRegistry->GetPersistence())
+		{
+			const FString Title = UnrealAiMakeChatTabTitleFromUserMessage(Prompt);
+			if (!Title.IsEmpty())
+			{
+				Session->ChatName = Title;
+				PersistForTitle->SetThreadChatName(ProjectId, ThreadIdStr, Title);
+				Session->OnChatNameChanged.Broadcast();
+			}
+		}
+	}
+
 	FUnrealAiAgentTurnRequest Req;
 	Req.ProjectId = ProjectId;
 	Req.ThreadId = ThreadIdStr;
@@ -1902,7 +1916,8 @@ FReply SChatComposer::OnSendClicked()
 		Persist,
 		ProjectId,
 		ThreadIdStr,
-		AgentMode);
+		AgentMode,
+		BackendRegistry->GetToolCatalog());
 	if (AgentMode == EUnrealAiAgentMode::Plan)
 	{
 		FUnrealAiPlanExecutorStartOptions PlanOpts;
@@ -1991,7 +2006,8 @@ void SChatComposer::HandlePlanDraftBuild(const FString& DagJson)
 		Persist,
 		ProjectId,
 		ThreadIdStr,
-		EUnrealAiAgentMode::Plan);
+		EUnrealAiAgentMode::Plan,
+		BackendRegistry->GetToolCatalog());
 
 	ActivePlanExecutor = FUnrealAiPlanExecutor::ResumeExecutionFromDag(Harness, BackendRegistry->GetContextService(), Req, Sink, DagJson);
 }

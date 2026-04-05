@@ -1,5 +1,6 @@
 #include "Harness/UnrealAiHarnessTpmThrottle.h"
 
+#include "Async/Async.h"
 #include "Harness/ILlmTransport.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Misc/UnrealAiRuntimeDefaults.h"
@@ -102,12 +103,14 @@ namespace UnrealAiHarnessTpmThrottle
 			return T;
 		}
 
-		static void WaitForWindowRoom(
+		/** Holds the mutex only while inspecting events; sleeps outside the lock. */
+		static void WaitForWindowRoomImpl(
 			const TCHAR* LogLabel,
 			TArray<TPair<double, int32>>& Events,
 			const int32 BudgetTpm,
 			const int32 EstimateTokens,
-			const double WindowSec)
+			const double WindowSec,
+			FCriticalSection& Mutex)
 		{
 			const int32 Cap = EffectiveBudgetTpm(BudgetTpm);
 			if (Cap <= 0 || EstimateTokens <= 0)
@@ -121,62 +124,75 @@ namespace UnrealAiHarnessTpmThrottle
 
 			for (int32 Iter = 0; Iter < 100000; ++Iter)
 			{
-				const double Now = FPlatformTime::Seconds();
-				int32 Sum = 0;
-				PruneAndSum(Now, WindowSec, Events, Sum);
-
-				if (Sum + EstimateTokens <= Cap)
+				double WaitSec = 0.0;
+				bool bAdmitted = false;
+				bool bEscapeProceed = false;
 				{
-					if (LogAccum > 0.5)
+					FScopeLock Lock(&Mutex);
+					const double Now = FPlatformTime::Seconds();
+					int32 Sum = 0;
+					PruneAndSum(Now, WindowSec, Events, Sum);
+
+					if (Sum + EstimateTokens <= Cap)
+					{
+						if (LogAccum > 0.5)
+						{
+							UE_LOG(
+								LogTemp,
+								Display,
+								TEXT("UnrealAi harness TPM: %s budget ok after %.1fs wait (window_sum=%d est=%d budget=%d)."),
+								LogLabel,
+								LogAccum,
+								Sum,
+								EstimateTokens,
+								Cap);
+						}
+						bAdmitted = true;
+					}
+					else if (Events.Num() == 0)
 					{
 						UE_LOG(
 							LogTemp,
-							Display,
-							TEXT("UnrealAi harness TPM: %s budget ok after %.1fs wait (window_sum=%d est=%d budget=%d)."),
+							Warning,
+							TEXT("UnrealAi harness TPM: %s estimate %d exceeds admission cap %d (budget=%d) with empty window; proceeding."),
 							LogLabel,
-							LogAccum,
-							Sum,
 							EstimateTokens,
-							Cap);
+							Cap,
+							BudgetTpm);
+						bEscapeProceed = true;
 					}
+					else
+					{
+						const double Oldest = OldestEventTime(Events);
+						WaitSec = (Oldest + WindowSec) - Now + 0.001;
+						if (WaitSec < kMinSlice)
+						{
+							WaitSec = kMinSlice;
+						}
+						WaitSec = FMath::Min(WaitSec, kMaxSleepSec);
+
+						if (LogAccum < 0.01)
+						{
+							UE_LOG(
+								LogTemp,
+								Warning,
+								TEXT("UnrealAi harness TPM: %s waiting %.2fs (window_sum=%d + est=%d > cap=%d, budget=%d)."),
+								LogLabel,
+								WaitSec,
+								Sum,
+								EstimateTokens,
+								Cap,
+								BudgetTpm);
+						}
+						LogAccum += WaitSec;
+					}
+				}
+
+				if (bAdmitted || bEscapeProceed)
+				{
 					return;
 				}
 
-				if (Events.Num() == 0)
-				{
-					UE_LOG(
-						LogTemp,
-						Warning,
-						TEXT("UnrealAi harness TPM: %s estimate %d exceeds admission cap %d (budget=%d) with empty window; proceeding."),
-						LogLabel,
-						EstimateTokens,
-						Cap,
-						BudgetTpm);
-					return;
-				}
-
-				const double Oldest = OldestEventTime(Events);
-				double WaitSec = (Oldest + WindowSec) - Now + 0.001;
-				if (WaitSec < kMinSlice)
-				{
-					WaitSec = kMinSlice;
-				}
-				WaitSec = FMath::Min(WaitSec, kMaxSleepSec);
-
-				if (LogAccum < 0.01)
-				{
-					UE_LOG(
-						LogTemp,
-						Warning,
-						TEXT("UnrealAi harness TPM: %s waiting %.2fs (window_sum=%d + est=%d > cap=%d, budget=%d)."),
-						LogLabel,
-						WaitSec,
-						Sum,
-						EstimateTokens,
-						Cap,
-						BudgetTpm);
-				}
-				LogAccum += WaitSec;
 				FPlatformProcess::SleepNoStats(static_cast<float>(WaitSec));
 			}
 
@@ -193,7 +209,6 @@ namespace UnrealAiHarnessTpmThrottle
 			Events.Emplace(Now, Tokens);
 		}
 
-		/** Token estimate for one embedding `input` string (matches MaybeWaitBeforeEmbeddingRequest before WaitForWindowRoom). */
 		static int32 EstimateEmbeddingInputTokens(const int32 InputUtf16CharCount)
 		{
 			const bool bStrict = IsStrictTpmEnabled();
@@ -238,7 +253,6 @@ namespace UnrealAiHarnessTpmThrottle
 		int32 PromptEst = 1;
 		if (bStrict)
 		{
-			// Pessimistic chars→tokens (smaller divisor ⇒ more tokens) + JSON/chat envelope overhead.
 			const int32 Div = UnrealAiRuntimeDefaults::HarnessTpmPromptDivisor;
 			const int64 Ceil = (Chars + static_cast<int64>(Div) - 1) / static_cast<int64>(Div);
 			PromptEst = static_cast<int32>(FMath::Min<int64>(Ceil, INT32_MAX));
@@ -257,6 +271,95 @@ namespace UnrealAiHarnessTpmThrottle
 		return static_cast<int32>(FMath::Min<int64>(Total, INT32_MAX));
 	}
 
+	namespace
+	{
+		static bool WouldWaitBeforeChatRequestImpl(const FUnrealAiLlmRequest& Req, int32 CharPerTokenApprox)
+		{
+			int32 ChatBudget = 0;
+			int32 EmbedBudget = 0;
+			GetBudgets(ChatBudget, EmbedBudget);
+			(void)EmbedBudget;
+			if (ChatBudget <= 0)
+			{
+				return false;
+			}
+			const int32 Est = EstimateChatFootprintTokens(Req, CharPerTokenApprox);
+			const int32 Cap = EffectiveBudgetTpm(ChatBudget);
+			if (Cap <= 0 || Est <= 0)
+			{
+				return false;
+			}
+			FScopeLock Lock(&GTpmMutex);
+			const double Now = FPlatformTime::Seconds();
+			int32 Sum = 0;
+			PruneAndSum(Now, GetWindowSeconds(), GChatEvents, Sum);
+			if (Sum + Est <= Cap)
+			{
+				return false;
+			}
+			if (GChatEvents.Num() == 0)
+			{
+				return false;
+			}
+			return true;
+		}
+	}
+
+	bool WouldWaitBeforeChatRequest(const FUnrealAiLlmRequest& Req, int32 CharPerTokenApprox)
+	{
+		return WouldWaitBeforeChatRequestImpl(Req, CharPerTokenApprox);
+	}
+
+	void WaitForChatAdmissionAsync(
+		double MinDelayWallSeconds,
+		const FUnrealAiLlmRequest& Req,
+		int32 CharPerTokenApprox,
+		TFunction<void()> OnGameThreadContinue)
+	{
+		if (!OnGameThreadContinue)
+		{
+			return;
+		}
+
+		int32 ChatBudget = 0;
+		int32 EmbedBudget = 0;
+		GetBudgets(ChatBudget, EmbedBudget);
+		(void)EmbedBudget;
+
+		FUnrealAiLlmRequest ReqCopy(Req);
+		const double WindowSec = GetWindowSeconds();
+
+		Async(
+			EAsyncExecution::ThreadPool,
+			[MinDelayWallSeconds,
+			 ReqCopy = MoveTemp(ReqCopy),
+			 CharPerTokenApprox,
+			 ChatBudget,
+			 WindowSec,
+			 Continuation = MoveTemp(OnGameThreadContinue)]() mutable
+			{
+				if (MinDelayWallSeconds > 1e-6)
+				{
+					FPlatformProcess::SleepNoStats(static_cast<float>(MinDelayWallSeconds));
+				}
+				if (ChatBudget > 0)
+				{
+					const int32 Est = EstimateChatFootprintTokens(ReqCopy, CharPerTokenApprox);
+					WaitForWindowRoomImpl(TEXT("chat"), GChatEvents, ChatBudget, Est, WindowSec, GTpmMutex);
+				}
+				TFunction<void()> GtWork = MoveTemp(Continuation);
+				AsyncTask(
+					ENamedThreads::GameThread,
+					[GtWork = MoveTemp(GtWork)]() mutable
+					{
+						if (GtWork)
+						{
+							GtWork();
+						}
+					});
+			});
+	}
+
 	void MaybeWaitBeforeChatRequest(const FUnrealAiLlmRequest& Req, int32 CharPerTokenApprox)
 	{
 		int32 ChatBudget = 0;
@@ -269,8 +372,7 @@ namespace UnrealAiHarnessTpmThrottle
 		}
 
 		const int32 Est = EstimateChatFootprintTokens(Req, CharPerTokenApprox);
-		FScopeLock Lock(&GTpmMutex);
-		WaitForWindowRoom(TEXT("chat"), GChatEvents, ChatBudget, Est, GetWindowSeconds());
+		WaitForWindowRoomImpl(TEXT("chat"), GChatEvents, ChatBudget, Est, GetWindowSeconds(), GTpmMutex);
 	}
 
 	void RecordChatCompletionTokens(int32 TotalTokens)
@@ -298,8 +400,7 @@ namespace UnrealAiHarnessTpmThrottle
 			return;
 		}
 		const int32 Est = EstimateEmbeddingInputTokens(InputUtf16CharCount);
-		FScopeLock Lock(&GTpmMutex);
-		WaitForWindowRoom(TEXT("embedding"), GEmbeddingEvents, EmbedBudget, Est, GetWindowSeconds());
+		WaitForWindowRoomImpl(TEXT("embedding"), GEmbeddingEvents, EmbedBudget, Est, GetWindowSeconds(), GTpmMutex);
 	}
 
 	void MaybeWaitBeforeEmbeddingBatchRequest(const TArray<FString>& InputTexts)
@@ -323,8 +424,13 @@ namespace UnrealAiHarnessTpmThrottle
 			}
 		}
 		const int32 Est = static_cast<int32>(FMath::Min<int64>(SumEst, INT32_MAX));
-		FScopeLock Lock(&GTpmMutex);
-		WaitForWindowRoom(TEXT("embedding_batch"), GEmbeddingEvents, EmbedBudget, FMath::Max(1, Est), GetWindowSeconds());
+		WaitForWindowRoomImpl(
+			TEXT("embedding_batch"),
+			GEmbeddingEvents,
+			EmbedBudget,
+			FMath::Max(1, Est),
+			GetWindowSeconds(),
+			GTpmMutex);
 	}
 
 	void RecordEmbeddingTokens(int32 TotalTokens)

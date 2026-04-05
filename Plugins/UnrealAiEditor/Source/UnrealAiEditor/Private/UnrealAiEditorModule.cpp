@@ -52,6 +52,7 @@
 #include "Misc/UnrealAiRecentUiTracker.h"
 #include "Misc/Guid.h"
 #include "Observability/UnrealAiBackgroundOpsLog.h"
+#include "Observability/UnrealAiGameThreadPerf.h"
 #include "WorkspaceMenuStructureModule.h"
 #include "Containers/Ticker.h"
 #include "Framework/Application/SlateApplication.h"
@@ -89,6 +90,8 @@ static IConsoleObject* GUnrealAiDumpContextRankPolicyConsole = nullptr;
 static IConsoleObject* GUnrealAiDumpContextDecisionLogsConsole = nullptr;
 static IConsoleObject* GUnrealAiRetrievalRebuildConsole = nullptr;
 static IConsoleObject* GUnrealAiRetrievalWaitConsole = nullptr;
+static IConsoleObject* GUnrealAiGtPerfDumpConsole = nullptr;
+static IConsoleObject* GUnrealAiGtPerfResetConsole = nullptr;
 
 static void RegisterUnrealAiEditorKeyBindings()
 {
@@ -1615,10 +1618,47 @@ void FUnrealAiEditorModule::StartupModule()
 				S.ChunksIndexed);
 		}),
 		ECVF_Default);
+
+	GUnrealAiGtPerfDumpConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.GtPerf.Dump"),
+		TEXT("Write Saved/UnrealAiPerf/gt-perf-<utc>.jsonl from the in-memory perf ring (perf is on by default; unrealai.GtPerf 0 to disable)."),
+		FConsoleCommandDelegate::CreateLambda([]()
+		{
+			const FString Path = UnrealAiGameThreadPerf::DumpRecordsToSavedDir();
+			if (Path.IsEmpty())
+			{
+				UE_LOG(LogTemp, Warning, TEXT("UnrealAi.GtPerf.Dump: failed to write file."));
+			}
+			else
+			{
+				UE_LOG(LogTemp, Display, TEXT("UnrealAi.GtPerf.Dump: wrote %s"), *Path);
+			}
+		}),
+		ECVF_Default);
+
+	GUnrealAiGtPerfResetConsole = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("UnrealAi.GtPerf.Reset"),
+		TEXT("Clear the in-memory Unreal AI game-thread perf ring buffer."),
+		FConsoleCommandDelegate::CreateLambda([]()
+		{
+			UnrealAiGameThreadPerf::ResetRecords();
+			UE_LOG(LogTemp, Display, TEXT("UnrealAi.GtPerf.Reset: cleared."));
+		}),
+		ECVF_Default);
 }
 
 void FUnrealAiEditorModule::ShutdownModule()
 {
+	if (GUnrealAiGtPerfDumpConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiGtPerfDumpConsole);
+		GUnrealAiGtPerfDumpConsole = nullptr;
+	}
+	if (GUnrealAiGtPerfResetConsole)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiGtPerfResetConsole);
+		GUnrealAiGtPerfResetConsole = nullptr;
+	}
 	if (GUnrealAiDumpContextWindowConsole)
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(GUnrealAiDumpContextWindowConsole);
@@ -1805,7 +1845,12 @@ void FUnrealAiEditorModule::HydrateEditorFocusFromJsonRoot(const TSharedPtr<FJso
 			b = false;
 		}
 	}
+	const bool bPrev = GUnrealAiModule->bEditorFocusEnabled;
 	GUnrealAiModule->bEditorFocusEnabled = b;
+	if (bPrev != b)
+	{
+		OnEditorFocusPolicyChanged().Broadcast();
+	}
 }
 
 void FUnrealAiEditorModule::SetEditorFocusEnabled(bool bEnabled)
@@ -1824,28 +1869,30 @@ void FUnrealAiEditorModule::SetEditorFocusEnabled(bool bEnabled)
 	{
 		if (IUnrealAiPersistence* P = GUnrealAiModule->BackendRegistry->GetPersistence())
 		{
+			TSharedPtr<FJsonObject> Root;
 			FString Json;
 			if (P->LoadSettingsJson(Json) && !Json.IsEmpty())
 			{
-				TSharedPtr<FJsonObject> Root;
 				const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
-				if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
-				{
-					TSharedPtr<FJsonObject> UiObj = MakeShared<FJsonObject>();
-					const TSharedPtr<FJsonObject>* ExistingUi = nullptr;
-					if (Root->TryGetObjectField(TEXT("ui"), ExistingUi) && ExistingUi && ExistingUi->IsValid())
-					{
-						UiObj = UnrealAiEditorModulePriv::CloneJsonObjectShallow(*ExistingUi);
-					}
-					UiObj->SetBoolField(TEXT("editorFocus"), bEnabled);
-					Root->SetObjectField(TEXT("ui"), UiObj);
-					FString Out;
-					const TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
-					if (FJsonSerializer::Serialize(Root.ToSharedRef(), W))
-					{
-						P->SaveSettingsJson(Out);
-					}
-				}
+				FJsonSerializer::Deserialize(Reader, Root);
+			}
+			if (!Root.IsValid())
+			{
+				Root = MakeShared<FJsonObject>();
+			}
+			TSharedPtr<FJsonObject> UiObj = MakeShared<FJsonObject>();
+			const TSharedPtr<FJsonObject>* ExistingUi = nullptr;
+			if (Root->TryGetObjectField(TEXT("ui"), ExistingUi) && ExistingUi && ExistingUi->IsValid())
+			{
+				UiObj = UnrealAiEditorModulePriv::CloneJsonObjectShallow(*ExistingUi);
+			}
+			UiObj->SetBoolField(TEXT("editorFocus"), bEnabled);
+			Root->SetObjectField(TEXT("ui"), UiObj);
+			FString Out;
+			const TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
+			if (FJsonSerializer::Serialize(Root.ToSharedRef(), W))
+			{
+				P->SaveSettingsJson(Out);
 			}
 		}
 	}

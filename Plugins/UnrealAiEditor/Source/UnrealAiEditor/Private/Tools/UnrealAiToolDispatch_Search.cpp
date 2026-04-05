@@ -9,9 +9,11 @@
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
+#include "Engine/Blueprint.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
+#include "UObject/UObjectGlobals.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
@@ -519,6 +521,22 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 	const double DeadlineSec = StartSec + static_cast<double>(MaxWallMs) / 1000.0;
 	const FString QLower = Query.ToLower();
 
+	FString MinBlueprintParentClassPath;
+	if (Args.IsValid())
+	{
+		Args->TryGetStringField(TEXT("minimum_blueprint_parent_class_path"), MinBlueprintParentClassPath);
+		if (MinBlueprintParentClassPath.IsEmpty())
+		{
+			Args->TryGetStringField(TEXT("blueprint_minimum_parent_class_path"), MinBlueprintParentClassPath);
+		}
+	}
+	MinBlueprintParentClassPath.TrimStartAndEndInline();
+	UClass* MinBlueprintParentClass = nullptr;
+	if (!MinBlueprintParentClassPath.IsEmpty())
+	{
+		MinBlueprintParentClass = LoadObject<UClass>(nullptr, *MinBlueprintParentClassPath);
+	}
+
 	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 	IAssetRegistry& AR = ARM.Get();
 
@@ -599,6 +617,25 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 	{
 		Hits.Sort([](const FHit& A, const FHit& B) { return A.Score > B.Score; });
 	}
+	if (MinBlueprintParentClass)
+	{
+		TArray<FHit> ParentFiltered;
+		ParentFiltered.Reserve(Hits.Num());
+		for (FHit& H : Hits)
+		{
+			if (!H.ClassPath.Contains(TEXT("Blueprint"), ESearchCase::IgnoreCase))
+			{
+				continue;
+			}
+			UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *H.ObjectPath);
+			if (!BP || !BP->ParentClass || !BP->ParentClass->IsChildOf(MinBlueprintParentClass))
+			{
+				continue;
+			}
+			ParentFiltered.Add(MoveTemp(H));
+		}
+		Hits = MoveTemp(ParentFiltered);
+	}
 	const bool bLowConfidence = bFuzzyMode && (Hits.Num() == 0 || Hits[0].Score < 40.f);
 	if (bFuzzyMode && Hits.Num() > MaxResults)
 	{
@@ -625,6 +662,16 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_AssetIndexFuzzySearch(const TShar
 	if (!ClassSubstring.IsEmpty())
 	{
 		O->SetStringField(TEXT("class_name_substring"), ClassSubstring);
+	}
+	if (!MinBlueprintParentClassPath.IsEmpty())
+	{
+		O->SetStringField(TEXT("minimum_blueprint_parent_class_path"), MinBlueprintParentClassPath);
+		if (!MinBlueprintParentClass)
+		{
+			O->SetStringField(
+				TEXT("blueprint_parent_filter_notice"),
+				TEXT("minimum_blueprint_parent_class_path did not load as a UClass; parent filter was not applied."));
+		}
 	}
 	O->SetStringField(TEXT("path_prefix"), PathPrefix);
 	O->SetBoolField(TEXT("truncated"), bTruncated);

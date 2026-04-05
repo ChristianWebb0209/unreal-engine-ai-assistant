@@ -17,4 +17,10 @@ namespace UnrealAiPromptChunkUtils
 		FString& Doc,
 		const FUnrealAiPromptAssembleParams& P,
 		const FAgentContextBuildResult& B);
+
+	/**
+	 * Cheap fingerprint of markdown under `prompts/chunks` (recursive). Recomputes at most every ~2.5s
+	 * so callers can invalidate caches when prompt files change without stat storming every LLM round.
+	 */
+	uint32 GetPromptsLooseSignatureThrottled();
 }

@@ -1,5 +1,7 @@
 #include "Tools/UnrealAiBlueprintFunctionResolve.h"
 
+#include "Kismet/KismetMathLibrary.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "UObject/Class.h"
 
 void UnrealAiBlueprintFunctionResolve::SplitCombinedClassPathAndFunctionName(
@@ -48,6 +50,25 @@ UFunction* UnrealAiBlueprintFunctionResolve::ResolveCallFunction(UClass* Class, 
 	if (UFunction* Fn = Class->FindFunctionByName(FnName, EIncludeSuperFlag::IncludeSuper))
 	{
 		return Fn;
+	}
+	// MakeLiteralInt/Float/Bool (and related) are declared on UKismetSystemLibrary, not UKismetMathLibrary.
+	// Prompts and older examples often use KismetMathLibrary; resolve on the requested class first, then fall back.
+	if (N.StartsWith(TEXT("MakeLiteral"), ESearchCase::IgnoreCase))
+	{
+		if (UClass* SysLib = UKismetSystemLibrary::StaticClass())
+		{
+			return SysLib->FindFunctionByName(FnName, EIncludeSuperFlag::IncludeSuper);
+		}
+	}
+	// Common mistaken names (not real UFunctions on UKismetMathLibrary).
+	if (Class == UKismetMathLibrary::StaticClass())
+	{
+		if (N.Equals(TEXT("Equal_IntInt"), ESearchCase::IgnoreCase))
+		{
+			N = TEXT("EqualEqual_IntInt");
+			InOutFunctionName = N;
+			return Class->FindFunctionByName(FName(*N), EIncludeSuperFlag::IncludeSuper);
+		}
 	}
 	return nullptr;
 }

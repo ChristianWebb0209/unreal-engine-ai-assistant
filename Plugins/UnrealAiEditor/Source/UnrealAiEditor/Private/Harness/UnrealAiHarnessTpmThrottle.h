@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Templates/Function.h"
 
 struct FUnrealAiLlmRequest;
 
@@ -13,6 +14,22 @@ namespace UnrealAiHarnessTpmThrottle
 {
 	/** Conservative token footprint for the next chat completion (prompt estimate + max output cap). */
 	int32 EstimateChatFootprintTokens(const FUnrealAiLlmRequest& Req, int32 CharPerTokenApprox);
+
+	/**
+	 * True if MaybeWaitBeforeChatRequest would sleep (window over cap with non-empty event window).
+	 * Instant checks only; call from game thread.
+	 */
+	bool WouldWaitBeforeChatRequest(const FUnrealAiLlmRequest& Req, int32 CharPerTokenApprox);
+
+	/**
+	 * Runs MinDelayWallSeconds sleep (if > 0) and chat TPM admission wait on a worker thread, then invokes
+	 * OnGameThreadContinue on the game thread. Use when WouldWaitBeforeChatRequest is true or min-delay pacing applies.
+	 */
+	void WaitForChatAdmissionAsync(
+		double MinDelayWallSeconds,
+		const FUnrealAiLlmRequest& Req,
+		int32 CharPerTokenApprox,
+		TFunction<void()> OnGameThreadContinue);
 
 	/** Block until the chat window has room for EstimateTokens (no-op if disabled). */
 	void MaybeWaitBeforeChatRequest(const FUnrealAiLlmRequest& Req, int32 CharPerTokenApprox);

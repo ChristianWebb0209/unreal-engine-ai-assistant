@@ -27,28 +27,24 @@ bool FUnrealAiBlueprintMakeFormatOptionsFromSettingsTest::RunTest(const FString&
 {
 	(void)Parameters;
 	UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
-	const EUnrealAiBlueprintFormatSpacingDensity SavedDensity = St->BlueprintFormatSpacingDensity;
 	const bool SavedKnots = St->bBlueprintFormatUseWireKnots;
 	const bool SavedPreserve = St->bBlueprintFormatPreserveExistingPositions;
 
-	St->BlueprintFormatSpacingDensity = EUnrealAiBlueprintFormatSpacingDensity::Sparse;
 	St->bBlueprintFormatUseWireKnots = true;
 	St->bBlueprintFormatPreserveExistingPositions = true;
-	const FUnrealBlueprintGraphFormatOptions Sparse = UnrealAiBlueprintTools_MakeFormatOptionsFromSettings(St);
-	TestEqual(TEXT("sparse SpacingX"), Sparse.SpacingX, 480);
-	TestEqual(TEXT("sparse SpacingY"), Sparse.SpacingY, 240);
-	TestEqual(TEXT("sparse BranchVerticalGap"), Sparse.BranchVerticalGap, 64);
-	TestTrue(TEXT("sparse knots"), Sparse.WireKnotAggression != EUnrealBlueprintWireKnotAggression::Off);
-	TestTrue(TEXT("sparse preserve"), Sparse.bPreserveExistingPositions);
+	const FUnrealBlueprintGraphFormatOptions WithKnots = UnrealAiBlueprintTools_MakeFormatOptionsFromSettings(St);
+	TestEqual(TEXT("default SpacingX"), WithKnots.SpacingX, 400);
+	TestEqual(TEXT("default SpacingY"), WithKnots.SpacingY, 200);
+	TestEqual(TEXT("default BranchVerticalGap"), WithKnots.BranchVerticalGap, 48);
+	TestTrue(TEXT("knots on"), WithKnots.WireKnotAggression != EUnrealBlueprintWireKnotAggression::Off);
+	TestTrue(TEXT("preserve on"), WithKnots.bPreserveExistingPositions);
 
-	St->BlueprintFormatSpacingDensity = EUnrealAiBlueprintFormatSpacingDensity::Dense;
 	St->bBlueprintFormatUseWireKnots = false;
-	const FUnrealBlueprintGraphFormatOptions Dense = UnrealAiBlueprintTools_MakeFormatOptionsFromSettings(St);
-	TestEqual(TEXT("dense SpacingX"), Dense.SpacingX, 320);
-	TestEqual(TEXT("dense knots off"), Dense.WireKnotAggression, EUnrealBlueprintWireKnotAggression::Off);
-	TestEqual(TEXT("dense max wire"), Dense.MaxWireLengthBeforeReroute, 0);
+	const FUnrealBlueprintGraphFormatOptions KnotsOff = UnrealAiBlueprintTools_MakeFormatOptionsFromSettings(St);
+	TestEqual(TEXT("knots off SpacingX unchanged"), KnotsOff.SpacingX, 400);
+	TestEqual(TEXT("knots off aggression"), KnotsOff.WireKnotAggression, EUnrealBlueprintWireKnotAggression::Off);
+	TestEqual(TEXT("knots off max wire"), KnotsOff.MaxWireLengthBeforeReroute, 0);
 
-	St->BlueprintFormatSpacingDensity = SavedDensity;
 	St->bBlueprintFormatUseWireKnots = SavedKnots;
 	St->bBlueprintFormatPreserveExistingPositions = SavedPreserve;
 

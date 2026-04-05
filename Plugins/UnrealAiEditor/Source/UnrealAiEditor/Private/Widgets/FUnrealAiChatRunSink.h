@@ -8,6 +8,7 @@
 class FUnrealAiChatTranscript;
 struct FUnrealAiChatUiSession;
 class IUnrealAiPersistence;
+class FUnrealAiToolCatalog;
 
 /** Bridges harness streaming events to FUnrealAiChatTranscript (chat UI). */
 class FUnrealAiChatRunSink final : public IAgentRunSink
@@ -19,7 +20,8 @@ public:
 		IUnrealAiPersistence* InPersistence,
 		const FString& InProjectId,
 		const FString& InThreadId,
-		EUnrealAiAgentMode InAgentMode = EUnrealAiAgentMode::Agent);
+		EUnrealAiAgentMode InAgentMode = EUnrealAiAgentMode::Agent,
+		FUnrealAiToolCatalog* InToolCatalog = nullptr);
 
 	virtual void OnRunStarted(const FUnrealAiRunIds& Ids) override;
 	virtual void OnContextUserMessages(const TArray<FString>& Messages) override;
@@ -68,4 +70,5 @@ private:
 	/** Incomplete line tails from streamed tokens; strip "--- Section ---" only on full lines. */
 	FString AssistantStreamLineCarry;
 	FString ThinkingStreamLineCarry;
+	FUnrealAiToolCatalog* ToolCatalog = nullptr;
 };

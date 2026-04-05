@@ -58,6 +58,16 @@ FUnrealAiVectorIndexStore* FUnrealAiRetrievalService::GetOrCreateStore(const FSt
 	TUniquePtr<FUnrealAiVectorIndexStore>& StorePtr = CachedStoresByProject.FindOrAdd(ProjectId);
 	if (!StorePtr.IsValid())
 	{
+		FUnrealAiVectorIndexStore CooldownProbe(ProjectId);
+		FUnrealAiVectorManifest CooldownManifest;
+		if (CooldownProbe.LoadManifest(CooldownManifest)
+			&& CooldownManifest.VectorDbOpenRetryNotBeforeUtc > FDateTime::UtcNow())
+		{
+			OutError = FString::Printf(
+				TEXT("Vector SQLite open skipped: cooldown active until %s."),
+				*CooldownManifest.VectorDbOpenRetryNotBeforeUtc.ToIso8601());
+			return nullptr;
+		}
 		StorePtr = MakeUnique<FUnrealAiVectorIndexStore>(ProjectId);
 	}
 	if (!StorePtr->Initialize(OutError))

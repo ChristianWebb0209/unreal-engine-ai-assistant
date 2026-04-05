@@ -1,6 +1,5 @@
 #include "Harness/FUnrealAiAgentHarness.h"
 
-#include "Async/Async.h"
 #include "Containers/Ticker.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Templates/SharedPointer.h"
@@ -30,12 +29,14 @@
 #include "Memory/FUnrealAiMemoryCompactor.h"
 #include "Memory/IUnrealAiMemoryService.h"
 #include "Harness/UnrealAiLlmInvocationService.h"
+#include "Harness/UnrealAiLlmStreamCoalescer.h"
 #include "Harness/UnrealAiHarnessTpmThrottle.h"
 #include "Misc/UnrealAiEditorModalMonitor.h"
 #include "Misc/UnrealAiHarnessProgressTelemetry.h"
 #include "Misc/UnrealAiRuntimeDefaults.h"
 #include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Observability/UnrealAiBackgroundOpsLog.h"
+#include "Observability/UnrealAiGameThreadPerf.h"
 #include "Widgets/UnrealAiToolUi.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -43,6 +44,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "HAL/PlatformTime.h"
 
 #include <atomic>
 
@@ -133,6 +135,33 @@ namespace UnrealAiAgentHarnessPriv
 			}
 		}
 		return Out.IsEmpty() ? FString() : FString::Printf(TEXT(" Repeated patch error_codes: [%s]."), *Out);
+	}
+
+	/** Compact expected_vs_actual from blueprint_graph_patch JSON for harness nudges. */
+	static FString TryExtractBlueprintPatchExpectedVsActualSummary(const FString& ModelToolContent)
+	{
+		TSharedPtr<FJsonObject> Root;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ModelToolContent);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			return FString();
+		}
+		const TSharedPtr<FJsonObject>* Eva = nullptr;
+		if (!Root->TryGetObjectField(TEXT("expected_vs_actual"), Eva) || !Eva || !(*Eva).IsValid())
+		{
+			return FString();
+		}
+		FString Req, Act;
+		(*Eva)->TryGetStringField(TEXT("required_minimum_class"), Req);
+		(*Eva)->TryGetStringField(TEXT("blueprint_parent_class"), Act);
+		if (Req.IsEmpty() && Act.IsEmpty())
+		{
+			return FString();
+		}
+		return FString::Printf(
+			TEXT(" expected_vs_actual: required_minimum_class=%s blueprint_parent_class=%s."),
+			Req.IsEmpty() ? TEXT("?") : *Req,
+			Act.IsEmpty() ? TEXT("?") : *Act);
 	}
 
 	static FString NormalizeToolFailureSignatureForRepeatCount(const FString& InvokeName, const FString& InvokeArgs)
@@ -335,7 +364,7 @@ namespace UnrealAiAgentHarnessPriv
 		static const TCHAR* Tokens[] = {
 			TEXT("fix"), TEXT("apply"), TEXT("change"), TEXT("adjust"), TEXT("tune"),
 			TEXT("reduce"), TEXT("increase"), TEXT("set "), TEXT("compile"), TEXT("save"),
-			TEXT("resolve"), TEXT("make ")
+			TEXT("resolve"), TEXT("make "), TEXT("add"), TEXT("implement")
 		};
 		for (const TCHAR* K : Tokens)
 		{
@@ -815,7 +844,8 @@ namespace UnrealAiAgentHarnessPriv
 		}
 		if (!Root->TryGetStringField(TEXT("tool_id"), OutInvokeName) || OutInvokeName.TrimStartAndEnd().IsEmpty())
 		{
-			OutError = TEXT("unreal_ai_dispatch: missing or empty tool_id");
+			OutError = TEXT(
+				"unreal_ai_dispatch: missing or empty tool_id. Expected JSON shape: {\"tool_id\":\"<catalog_tool_id>\",\"arguments\":{...}}");
 			return false;
 		}
 		OutInvokeName.TrimStartAndEndInline();
@@ -1044,6 +1074,9 @@ namespace UnrealAiAgentHarnessPriv
 		TArray<FString> CurrentRoundExecutedToolNames;
 		std::atomic<bool> bCancelled{false};
 		std::atomic<bool> bTerminal{false};
+		/** Bumped when scheduling LLM submit or on Fail/Cancel so async admission continuations do not submit stale runs. */
+		std::atomic<uint32> ThrottleAdmissionSerial{0};
+		TSharedPtr<FUnrealAiLlmStreamCoalescer> LlmStreamCoalescer;
 		/** Best-effort query fingerprint for tool usage JSONL (tools-expansion §2.5). */
 		FString UsageQueryHash;
 		int32 UnwrapFailuresThisRound = 0;
@@ -1052,7 +1085,9 @@ namespace UnrealAiAgentHarnessPriv
 		int32 AskAnswerRepairNudgeCount = 0;
 
 		void HandleEvent(const FUnrealAiLlmStreamEvent& Ev);
+		void FlushLlmStreamCoalescerBeforeCancel();
 		void DispatchLlm(bool bRetrySameRound = false);
+		void DispatchLlmSubmitHttpAfterAdmission(FUnrealAiLlmRequest&& LlmReq, uint32 AdmitSerial);
 		void CompleteToolPath();
 		void StartOrContinueStreamedToolExecution();
 		void ExecuteSingleToolCall(int32 ToolIndex);
@@ -1115,6 +1150,12 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
+		UnrealAiGameThreadPerf::SetLlmRoundCorrelation(-1);
+		ThrottleAdmissionSerial.fetch_add(1, std::memory_order_relaxed);
+		if (LlmStreamCoalescer.IsValid())
+		{
+			LlmStreamCoalescer->ShutdownDropPending();
+		}
 		UE_LOG(
 			LogTemp,
 			Display,
@@ -1135,6 +1176,11 @@ namespace UnrealAiAgentHarnessPriv
 		if (!bTerminal.compare_exchange_strong(Expected, true, std::memory_order_relaxed))
 		{
 			return;
+		}
+		UnrealAiGameThreadPerf::SetLlmRoundCorrelation(-1);
+		if (LlmStreamCoalescer.IsValid())
+		{
+			LlmStreamCoalescer->ShutdownDropPending();
 		}
 		UE_LOG(LogTemp, Display, TEXT("UnrealAi harness: runner_terminal_set result=success"));
 		bCompleteToolPathReschedulePending = false;
@@ -1407,6 +1453,9 @@ namespace UnrealAiAgentHarnessPriv
 		LastSuggestedCorrectCallSerialized.Reset();
 
 		FUnrealAiLlmRequest LlmReq;
+		{
+			UNREALAI_GT_PERF_SCOPE("Harness.DispatchLlm.Build");
+			UnrealAiGameThreadPerf::SetLlmRoundCorrelation(LlmRound);
 		FString BuildErr;
 		TArray<FString> ContextUserMsgs;
 		const FString RetrievalTurnKey = FString::Printf(
@@ -1492,8 +1541,9 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			Sink->OnContextUserMessages(ContextUserMsgs);
 		}
+		}
 
-		// Optional pacing to reduce request burstiness and provider 429 rate limits.
+		double MinDelaySleepSec = 0.0;
 		const int32 MinDelayMs = FMath::Clamp(UnrealAiWaitTime::HarnessRoundMinDelayMs, 0, 5000);
 		if (MinDelayMs > 0 && LastLlmSubmitSeconds > 0.0)
 		{
@@ -1501,23 +1551,79 @@ namespace UnrealAiAgentHarnessPriv
 			const double ElapsedMs = (NowSec - LastLlmSubmitSeconds) * 1000.0;
 			if (ElapsedMs < static_cast<double>(MinDelayMs))
 			{
-				const float SleepSec = static_cast<float>((static_cast<double>(MinDelayMs) - ElapsedMs) / 1000.0);
-				if (SleepSec > 0.0f)
+				MinDelaySleepSec = (static_cast<double>(MinDelayMs) - ElapsedMs) / 1000.0;
+				if (MinDelaySleepSec > 0.0)
 				{
-					UE_LOG(LogTemp, Display, TEXT("UnrealAi harness: pacing LLM dispatch by %.2fs (min_delay_ms=%d)."), SleepSec, MinDelayMs);
-					FPlatformProcess::SleepNoStats(SleepSec);
+					UE_LOG(
+						LogTemp,
+						Display,
+						TEXT("UnrealAi harness: pacing LLM dispatch by %.2fs (min_delay_ms=%d)."),
+						MinDelaySleepSec,
+						MinDelayMs);
 				}
 			}
 		}
 
-		UnrealAiHarnessTpmThrottle::MaybeWaitBeforeChatRequest(LlmReq, CharPerTokenApprox);
+		const bool bNeedAsyncAdmission =
+			(MinDelaySleepSec > 1e-6)
+			|| UnrealAiHarnessTpmThrottle::WouldWaitBeforeChatRequest(LlmReq, CharPerTokenApprox);
+		const uint32 AdmitSerial = ThrottleAdmissionSerial.fetch_add(1, std::memory_order_relaxed) + 1;
 
+		if (bNeedAsyncAdmission)
+		{
+			const TWeakPtr<FAgentTurnRunner> WeakSelf = AsShared();
+			FUnrealAiLlmRequest SubmitCopy(LlmReq);
+			UnrealAiHarnessTpmThrottle::WaitForChatAdmissionAsync(
+				MinDelaySleepSec,
+				LlmReq,
+				CharPerTokenApprox,
+				[WeakSelf, AdmitSerial, SubmitCopy = MoveTemp(SubmitCopy)]() mutable
+				{
+					const TSharedPtr<FAgentTurnRunner> Self = WeakSelf.Pin();
+					if (!Self.IsValid())
+					{
+						return;
+					}
+					Self->DispatchLlmSubmitHttpAfterAdmission(MoveTemp(SubmitCopy), AdmitSerial);
+				});
+			return;
+		}
+
+		UnrealAiHarnessTpmThrottle::MaybeWaitBeforeChatRequest(LlmReq, CharPerTokenApprox);
+		DispatchLlmSubmitHttpAfterAdmission(MoveTemp(LlmReq), AdmitSerial);
+	}
+
+	void FAgentTurnRunner::DispatchLlmSubmitHttpAfterAdmission(FUnrealAiLlmRequest&& LlmReq, const uint32 AdmitSerial)
+	{
+		if (bCancelled.load(std::memory_order_relaxed) || bTerminal.load(std::memory_order_relaxed))
+		{
+			return;
+		}
+		if (ThrottleAdmissionSerial.load(std::memory_order_relaxed) != AdmitSerial)
+		{
+			return;
+		}
+		UnrealAiGameThreadPerf::SetLlmRoundCorrelation(LlmRound);
+		UNREALAI_GT_PERF_SCOPE("Harness.DispatchLlm.SubmitHttp");
 		if (Sink.IsValid())
 		{
 			Sink->OnLlmRequestPreparedForHttp(Request, RunId, LlmRound, EffectiveMaxLlmRounds, LlmReq);
 		}
 
 		const TSharedPtr<FAgentTurnRunner> Self = AsShared();
+		if (!LlmStreamCoalescer.IsValid())
+		{
+			LlmStreamCoalescer = MakeShared<FUnrealAiLlmStreamCoalescer>();
+		}
+		FUnrealAiLlmStreamCoalescer::FConfig CoalescerCfg;
+		CoalescerCfg.bImmediateFlush = bHeadedScenarioSyncRun;
+		LlmStreamCoalescer->Begin(
+			CoalescerCfg,
+			[Self](const FUnrealAiLlmStreamEvent& Ev)
+			{
+				Self->HandleEvent(Ev);
+			});
+		const TSharedPtr<FUnrealAiLlmStreamCoalescer> CoalescerForCb = LlmStreamCoalescer;
 		UnrealAiHarnessProgressTelemetry::NotifyLlmSubmit();
 		UE_LOG(LogTemp, Display,
 			TEXT("UnrealAi harness: LLM round %d/%d — submitting HTTP request (stream=%s). "
@@ -1529,13 +1635,12 @@ namespace UnrealAiAgentHarnessPriv
 		Invoker.SubmitStreamChatCompletion(
 			LlmReq,
 			FUnrealAiLlmStreamCallback::CreateLambda(
-				[Self](const FUnrealAiLlmStreamEvent& Ev)
+				[CoalescerForCb](const FUnrealAiLlmStreamEvent& Ev)
 				{
-					AsyncTask(ENamedThreads::GameThread,
-							  [Self, Ev]()
-							  {
-								  Self->HandleEvent(Ev);
-							  });
+					if (CoalescerForCb.IsValid())
+					{
+						CoalescerForCb->Enqueue(Ev);
+					}
 				}));
 		LastLlmSubmitSeconds = FPlatformTime::Seconds();
 	}
@@ -1832,6 +1937,14 @@ namespace UnrealAiAgentHarnessPriv
 		Fail(TEXT("HTTP response completed without a terminal stream Finish event (incomplete SSE or provider error)."));
 	}
 
+	void FAgentTurnRunner::FlushLlmStreamCoalescerBeforeCancel()
+	{
+		if (LlmStreamCoalescer.IsValid())
+		{
+			LlmStreamCoalescer->FlushAllSynchronouslyOnGameThread();
+		}
+	}
+
 	void FAgentTurnRunner::HandleEvent(const FUnrealAiLlmStreamEvent& Ev)
 	{
 		if (bCancelled.load(std::memory_order_relaxed) || bTerminal.load(std::memory_order_relaxed))
@@ -1842,6 +1955,7 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
+		UNREALAI_GT_PERF_SCOPE("Harness.HandleEvent");
 		switch (Ev.Type)
 		{
 		case EUnrealAiLlmStreamEventType::AssistantDelta:
@@ -2246,7 +2360,11 @@ namespace UnrealAiAgentHarnessPriv
 				return;
 			}
 		}
-		const FUnrealAiToolInvocationResult Inv = Tools->InvokeTool(InvokeName, InvokeArgs, Tc.Id);
+		FUnrealAiToolInvocationResult Inv;
+		{
+			UNREALAI_GT_PERF_SCOPE("Harness.ToolInvoke");
+			Inv = Tools->InvokeTool(InvokeName, InvokeArgs, Tc.Id);
+		}
 		CurrentRoundExecutedToolNames.Add(InvokeName);
 		const FString DialogFootnote = FUnrealAiEditorModalMonitor::ConsumePendingToolDialogFootnote();
 		FString ModelToolContent = Inv.bOk ? Inv.ContentForModel : Inv.ErrorMessage;
@@ -2626,6 +2744,9 @@ namespace UnrealAiAgentHarnessPriv
 				RepairNudge.Content += TEXT(
 					" After repeated blueprint_graph_patch failures you must change strategy: call blueprint_graph_introspect (and blueprint_graph_list_pins for one node), use validate_only:true on a smaller ops batch, or split the patch — do not resend the same failing patch JSON.");
 				RepairNudge.Content += UnrealAiAgentHarnessPriv::TryExtractBlueprintPatchErrorCodesSummary(LastFailedBlueprintGraphPatchContent);
+				RepairNudge.Content += UnrealAiAgentHarnessPriv::TryExtractBlueprintPatchExpectedVsActualSummary(LastFailedBlueprintGraphPatchContent);
+				RepairNudge.Content += TEXT(
+					" When retrying, quote the prior tool message verbatim for errors[] / errors_detail / expected_vs_actual — do not paraphrase or invent engine facts (e.g. function existence) unless they appear in that JSON.");
 			}
 			if (!LastSuggestedCorrectCallSerialized.IsEmpty())
 			{
@@ -2700,9 +2821,13 @@ namespace UnrealAiAgentHarnessPriv
 		}
 		{
 			const FString LastRealUser = GetLastRealUserMessage(Conv->GetMessages());
-			const bool bNeedsMutationFollowthrough = Request.Mode == EUnrealAiAgentMode::Agent
-				&& UserLikelyRequestsMutation(LastRealUser)
-				&& ExecutedToolNames.Num() > 0;
+			const bool bHandoffBuilderTurn = Request.bBlueprintBuilderTurn || Request.bEnvironmentBuilderTurn;
+			const bool bMutationFromText = UserLikelyRequestsMutation(LastRealUser);
+			// Main user text often says "make …"; the automated `<unreal_ai_build_blueprint>` / environment handoff user
+			// line is usually a YAML/spec ("Goal: Add …") that omits those verbs. Still treat non-empty handoff text as
+			// mutation work so we can nudge off read-only tool loops on builder sub-turns.
+			const bool bNeedsMutationFollowthrough = Request.Mode == EUnrealAiAgentMode::Agent && ExecutedToolNames.Num() > 0
+				&& (bMutationFromText || (bHandoffBuilderTurn && !LastRealUser.IsEmpty()));
 			if (bNeedsMutationFollowthrough)
 			{
 				if (!bMutationIntentCounted)
@@ -2722,9 +2847,43 @@ namespace UnrealAiAgentHarnessPriv
 				if (bAllReadOnly && MutationFollowthroughNudgeCount < 2)
 				{
 					++MutationFollowthroughNudgeCount;
-					EmitEnforcementEvent(
-						TEXT("mutation_read_only_note"),
-						TEXT("mutation-intent user message but only read/discovery tools this round; harness not injecting follow-up nudge"));
+					FString NudgeBody;
+					if (Request.bBlueprintBuilderTurn)
+					{
+						NudgeBody = TEXT(
+							"[Harness][reason=blueprint_builder_mutation_followthrough] This Blueprint Builder sub-turn only used read-only Blueprint tools. "
+							"Do not repeat the same blueprint_graph_introspect (or other discovery-only) call with identical arguments. "
+							"Implement the handoff using blueprint_graph_patch, then blueprint_compile or blueprint_verify_graph as needed, "
+							"or return <unreal_ai_blueprint_builder_result> with a concise blocker if you cannot proceed.");
+					}
+					else if (Request.bEnvironmentBuilderTurn)
+					{
+						NudgeBody = TEXT(
+							"[Harness][reason=environment_builder_mutation_followthrough] This Environment Builder sub-turn only used read-only tools. "
+							"Do not repeat identical discovery calls; use mutation tools from your appendix for this handoff, "
+							"or return <unreal_ai_environment_builder_result> with a concise blocker.");
+					}
+					else if (Request.bOmitMainAgentBlueprintMutationTools)
+					{
+						NudgeBody = TEXT(
+							"[Harness][reason=main_agent_mutation_followthrough] The user request implies edits, but this main-agent turn only used read-only tools. "
+							"Do not loop on the same discovery tool. Emit <unreal_ai_build_blueprint> with concrete paths and target_kind for Kismet work "
+							"(or <unreal_ai_build_environment> for PCG/landscape/foliage), or use write tools that actually appear in your current tool appendix.");
+					}
+					else
+					{
+						NudgeBody = TEXT(
+							"[Harness][reason=mutation_followthrough] Read-only tools ran for a request that likely needs edits. "
+							"Continue with write or mutation tools from your appendix; avoid repeating identical discovery calls.");
+					}
+					if (Conv.IsValid() && !NudgeBody.IsEmpty())
+					{
+						FUnrealAiConversationMessage Mn;
+						Mn.Role = TEXT("user");
+						Mn.Content = MoveTemp(NudgeBody);
+						Conv->GetMessagesMutable().Add(Mn);
+					}
+					EmitEnforcementEvent(TEXT("mutation_followthrough_nudge"), TEXT("injected_read_only_stall_guidance"));
 				}
 			}
 		}
@@ -3035,13 +3194,16 @@ void FUnrealAiAgentHarness::FailInProgressTurnForScenarioIdleAbort()
 
 void FUnrealAiAgentHarness::CancelTurn()
 {
+	UnrealAiGameThreadPerf::SetLlmRoundCorrelation(-1);
 	if (Context && ActiveRunner.IsValid())
 	{
 		Context->CancelRetrievalPrefetchForThread(ActiveRunner->Request.ProjectId, ActiveRunner->Request.ThreadId);
 	}
 	if (ActiveRunner.IsValid())
 	{
+		ActiveRunner->FlushLlmStreamCoalescerBeforeCancel();
 		ActiveRunner->bCancelled.store(true, std::memory_order_relaxed);
+		ActiveRunner->ThrottleAdmissionSerial.fetch_add(1, std::memory_order_relaxed);
 	}
 	if (Transport.IsValid())
 	{
@@ -3138,22 +3300,6 @@ void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TS
 	FUnrealAiRunIds Ids;
 	Ids.RunId = Runner->RunId;
 	Sink->OnRunStarted(Ids);
-
-	// Chat naming is a first-turn-only instruction. We inject it into the LLM conversation,
-	// but it is never shown in the chat UI because the UI transcript is driven by chat send/stream events.
-	const bool bFirstUserMessageInThread = (Runner->Conv->GetMessages().Num() == 0);
-	if (bFirstUserMessageInThread)
-	{
-		FUnrealAiConversationMessage NameInstr;
-		NameInstr.Role = TEXT("system");
-		NameInstr.Content = TEXT(
-			"[Hidden] Chat naming:\n"
-			"On your FIRST assistant reply in this chat, you MUST append exactly one token:\n"
-			"<chat-name: \"<short name>\"> \n"
-			"The chat name should be 3-8 words, human-friendly, and derived from the user's goal.\n"
-			"Do not explain the token to the user. The application will strip the token from visible output.\n");
-		Runner->Conv->GetMessagesMutable().Add(NameInstr);
-	}
 
 	FUnrealAiConversationMessage UserMsg;
 	UserMsg.Role = TEXT("user");

@@ -82,7 +82,7 @@ All **numbered** files below live under **`prompts/chunks/common/`** unless note
 |------|-----------|
 | 1 | `common/01-identity.md` |
 | 2 | `common/02-operating-modes.md` (mode slice) |
-| 3–10 | `blueprint-builder/00-overview.md` … `07-graph-patch-canonical.md` (fixed order) |
+| 3–9 | `blueprint-builder/00-overview.md` … `03-fail-safe-handoff.md`, `05-verification-ladder.md` … `07-graph-patch-canonical.md` (fixed order; T3D/IR chunk removed—see `07` Catalog scope) |
 | 11 | `blueprint-builder/kinds/<target_kind>.md` from handoff YAML (`UnrealAiBlueprintBuilderTargetKind`) |
 | 12 | `common/05-context-and-editor.md` |
 | 13 | `common/07-safety-banned.md` |

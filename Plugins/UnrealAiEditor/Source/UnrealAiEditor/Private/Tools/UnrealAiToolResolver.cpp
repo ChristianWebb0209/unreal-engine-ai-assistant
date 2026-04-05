@@ -807,7 +807,8 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 
 	const TMap<FString, FString> ToolAliases = {
 		{TEXT("scene_fuzzy_search.query"), TEXT("scene_fuzzy_search")},
-		{TEXT("asset_destroy"), TEXT("asset_delete")}
+		{TEXT("asset_destroy"), TEXT("asset_delete")},
+		{TEXT("blueprint_graph_get_graph_summary"), TEXT("blueprint_get_graph_summary")}
 	};
 
 	if (const FString* Alias = ToolAliases.Find(Result.CanonicalToolId))
@@ -850,6 +851,47 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 	if (Result.CanonicalToolId == TEXT("blueprint_graph_patch"))
 	{
 		UnrealAiToolDispatchArgRepair::RepairBlueprintGraphPatchToolArgs(Result.ResolvedArguments, Result.Audit);
+		{
+			FString Ls;
+			if (Result.ResolvedArguments->TryGetStringField(TEXT("layout_scope"), Ls))
+			{
+				Ls.TrimStartAndEndInline();
+				if (!Ls.IsEmpty()
+					&& !Ls.Equals(TEXT("patched_nodes"), ESearchCase::IgnoreCase)
+					&& !Ls.Equals(TEXT("full_graph"), ESearchCase::IgnoreCase)
+					&& !Ls.Equals(TEXT("patched_nodes_and_downstream_exec"), ESearchCase::IgnoreCase))
+				{
+					Result.FailureResult = BuildResolverError(
+						Result.Audit,
+						FString::Printf(
+							TEXT("blueprint_graph_patch: layout_scope must be patched_nodes, patched_nodes_and_downstream_exec, or full_graph (got '%s')"),
+							*Ls),
+						Result.CanonicalToolId,
+						nullptr);
+					Result.Audit->SetNumberField(TEXT("latency_ms"), (FPlatformTime::Seconds() - ResolveStartSeconds) * 1000.0);
+					return Result;
+				}
+			}
+			FString La;
+			if (Result.ResolvedArguments->TryGetStringField(TEXT("layout_anchor"), La))
+			{
+				La.TrimStartAndEndInline();
+				if (!La.IsEmpty()
+					&& !La.Equals(TEXT("neighbor"), ESearchCase::IgnoreCase)
+					&& !La.Equals(TEXT("below_existing"), ESearchCase::IgnoreCase))
+				{
+					Result.FailureResult = BuildResolverError(
+						Result.Audit,
+						FString::Printf(
+							TEXT("blueprint_graph_patch: layout_anchor must be neighbor or below_existing (got '%s')"),
+							*La),
+						Result.CanonicalToolId,
+						nullptr);
+					Result.Audit->SetNumberField(TEXT("latency_ms"), (FPlatformTime::Seconds() - ResolveStartSeconds) * 1000.0);
+					return Result;
+				}
+			}
+		}
 		FString OpsJsonRel;
 		Result.ResolvedArguments->TryGetStringField(TEXT("ops_json_path"), OpsJsonRel);
 		OpsJsonRel.TrimStartAndEndInline();

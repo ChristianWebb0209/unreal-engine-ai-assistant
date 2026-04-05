@@ -6,7 +6,11 @@
 #include "Widgets/SPlanDraftBuildPanel.h"
 #include "Context/UnrealAiProjectId.h"
 #include "Widgets/SToolCallCard.h"
+#include "Widgets/UnrealAiToolDisplayName.h"
+#include "Backend/UnrealAiBackendRegistry.h"
+#include "Tools/UnrealAiToolCatalog.h"
 #include "Widgets/UnrealAiChatTranscript.h"
+#include "Widgets/UnrealAiChatTranscriptStyle.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Style/UnrealAiEditorStyle.h"
@@ -63,20 +67,10 @@ namespace UnrealAiChatListUi
 		{
 			return Body;
 		}
-		FTextBlockStyle CaptionStyle =
-			FCoreStyle::Get().GetWidgetStyle<FTextBlockStyle>(TEXT("NormalText"));
-		CaptionStyle.SetFont(FUnrealAiEditorStyle::FontBodySmall());
-		CaptionStyle.SetColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted());
 		return SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 2.f)
 			[
-				SNew(SMultiLineEditableText)
-					.IsReadOnly(true)
-					.AutoWrapText(true)
-					.AllowContextMenu(true)
-					.SelectAllTextWhenFocused(false)
-					.TextStyle(&CaptionStyle)
-					.Text(FText::FromString(Caption))
+				::UnrealAiChatTranscriptStyle::MakeStepTimingCaptionRow(Caption)
 			]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
@@ -311,7 +305,8 @@ void SChatMessageList::HydrateTranscriptFromPersistedConversation(const TArray<F
 	if (Transcript.IsValid())
 	{
 		Transcript->Clear();
-		Transcript->HydrateFromConversationMessages(Messages);
+		const FUnrealAiToolCatalog* Cat = BackendRegistry.IsValid() ? BackendRegistry->GetToolCatalog() : nullptr;
+		Transcript->HydrateFromConversationMessages(Messages, Cat);
 	}
 	RebuildTranscript();
 	ForceScrollToBottomAndFollow();
@@ -419,6 +414,10 @@ void SChatMessageList::RebuildTranscript()
 									  ]
 							  ]);
 
+				const TSharedRef<SWidget> UserChrome = ::UnrealAiChatTranscriptStyle::WrapTranscriptBlockBody(
+					B,
+					UserBubble,
+					::EUnrealAiChatTranscriptChromeMode::Full);
 				if (B.Id == PendingUserAnimId)
 				{
 					MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListRowMargin)
@@ -426,7 +425,7 @@ void SChatMessageList::RebuildTranscript()
 							SNew(SChatUserMessageAnimated)
 								.OwnerList(WeakList)
 								[
-									UserBubble
+									UserChrome
 								]
 						];
 				}
@@ -434,7 +433,7 @@ void SChatMessageList::RebuildTranscript()
 				{
 					MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListRowMargin)
 						[
-							UserBubble
+							UserChrome
 						];
 				}
 			}
@@ -442,11 +441,15 @@ void SChatMessageList::RebuildTranscript()
 		case EUnrealAiChatBlockKind::Thinking:
 			{
 				TSharedPtr<SThinkingSubline> Th;
+				const TSharedRef<SWidget> ThinkingCol = UnrealAiChatListUi::WrapWithStepCaption(
+					B.StepTimingCaption,
+					SAssignNew(Th, SThinkingSubline));
 				MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 					[
-						UnrealAiChatListUi::WrapWithStepCaption(
-							B.StepTimingCaption,
-							SAssignNew(Th, SThinkingSubline))
+						::UnrealAiChatTranscriptStyle::WrapTranscriptBlockBody(
+							B,
+							ThinkingCol,
+							::EUnrealAiChatTranscriptChromeMode::Full)
 					];
 				Th->SetFullText(B.ThinkingText);
 				ActiveThinkingWidget = Th;
@@ -468,41 +471,49 @@ void SChatMessageList::RebuildTranscript()
 				TSharedPtr<SThinkingSubline> ThinkLine;
 
 				const TSharedRef<SWidget> AssistantBubble =
-					SNew(SBox)
-						.RenderOpacity(0.92f)
-						.Clipping(EWidgetClipping::ClipToBounds)
-						.Padding(FMargin(4.f, 3.f, 4.f, 3.f))
+					SNew(SBorder)
+						.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.AssistantBubble")))
+						.Padding(FMargin(10.f, 9.f))
 						[
-							SAssignNew(As, SAssistantStreamBlock)
-								.bEnableTypewriter(bTw)
-								.TypewriterCps(Cps)
-								.OnRevealTick(FSimpleDelegate::CreateSP(this, &SChatMessageList::OnAssistantRevealTick))
+							SNew(SBox)
+								.HAlign(HAlign_Fill)
+								.RenderOpacity(0.92f)
+								.Clipping(EWidgetClipping::ClipToBounds)
+								.Padding(FMargin(4.f, 3.f, 4.f, 3.f))
+								[
+									SAssignNew(As, SAssistantStreamBlock)
+										.bEnableTypewriter(bTw)
+										.TypewriterCps(Cps)
+										.OnRevealTick(FSimpleDelegate::CreateSP(this, &SChatMessageList::OnAssistantRevealTick))
+								]
 						];
 
 				if (bMergedThinking)
 				{
+					const TSharedRef<SWidget> MergedCaptionWidget = MergedThinkingCaption.IsEmpty()
+						? StaticCastSharedRef<SWidget>(SNullWidget::NullWidget)
+						: ::UnrealAiChatTranscriptStyle::MakeStepTimingCaptionRow(MergedThinkingCaption);
+					const TSharedRef<SWidget> MergedColumn = SNew(SVerticalBox)
+						+ SVerticalBox::Slot()
+							  .AutoHeight()
+							  .Padding(0.f, 0.f, 0.f, MergedThinkingCaption.IsEmpty() ? 0.f : 3.f)
+						[
+							MergedCaptionWidget
+						]
+						+ SVerticalBox::Slot().AutoHeight()
+						[
+							AssistantBubble
+						]
+						+ SVerticalBox::Slot().AutoHeight()
+						[
+							SAssignNew(ThinkLine, SThinkingSubline)
+						];
 					MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 						[
-							SNew(SVerticalBox)
-							+ SVerticalBox::Slot()
-								  .AutoHeight()
-								  .Padding(0.f, 0.f, 0.f, MergedThinkingCaption.IsEmpty() ? 0.f : 3.f)
-							[
-								SNew(STextBlock)
-									.Visibility(
-										MergedThinkingCaption.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
-									.Text(FText::FromString(MergedThinkingCaption))
-									.Font(FUnrealAiEditorStyle::FontBodySmall())
-									.ColorAndOpacity(FUnrealAiEditorStyle::ColorDebugMuted())
-							]
-							+ SVerticalBox::Slot().AutoHeight()
-							[
-								AssistantBubble
-							]
-							+ SVerticalBox::Slot().AutoHeight()
-							[
-								SAssignNew(ThinkLine, SThinkingSubline)
-							]
+							::UnrealAiChatTranscriptStyle::WrapTranscriptBlockBody(
+								B,
+								MergedColumn,
+								::EUnrealAiChatTranscriptChromeMode::Full)
 						];
 					ThinkLine->SetFullText(Transcript->Blocks[i - 1].ThinkingText);
 					ActiveThinkingWidget = ThinkLine;
@@ -511,7 +522,10 @@ void SChatMessageList::RebuildTranscript()
 				{
 					MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 						[
-							AssistantBubble
+							::UnrealAiChatTranscriptStyle::WrapTranscriptBlockBody(
+								B,
+								AssistantBubble,
+								::EUnrealAiChatTranscriptChromeMode::Full)
 						];
 				}
 
@@ -520,44 +534,58 @@ void SChatMessageList::RebuildTranscript()
 			}
 			break;
 		case EUnrealAiChatBlockKind::ToolCall:
+		{
+			const FUnrealAiToolCatalog* Cat = BackendRegistry.IsValid() ? BackendRegistry->GetToolCatalog() : nullptr;
+			const FString ToolTitle = !B.ToolDisplayTitle.IsEmpty()
+				? B.ToolDisplayTitle
+				: UnrealAiResolveToolUserFacingName(B.ToolName, Cat);
+			const TSharedRef<SWidget> ToolBody = UnrealAiChatListUi::WrapWithStepCaption(
+				B.StepTimingCaption,
+				SNew(SToolCallCard)
+					.ToolName(B.ToolName)
+					.ToolDisplayTitle(ToolTitle)
+					.ArgumentsPreview(B.ToolArgsPreview)
+					.ResultPreview(B.ToolResultPreview)
+					.bRunning(B.bToolRunning)
+					.bSuccess(B.bToolOk)
+					.EditorPresentation(B.ToolEditorPresentation)
+					.bInitiallyCollapsed(!ExpandedToolCallBlockIds.Contains(B.Id))
+					.OnExpansionChanged(FOnBooleanValueChanged::CreateLambda(
+						[this, BlockId = B.Id](bool bExpanded)
+						{
+							if (bSuppressToolExpansionCallbacks)
+							{
+								return;
+							}
+							if (bExpanded)
+							{
+								ExpandedToolCallBlockIds.Add(BlockId);
+							}
+							else
+							{
+								ExpandedToolCallBlockIds.Remove(BlockId);
+							}
+						})));
 			MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 				[
-					UnrealAiChatListUi::WrapWithStepCaption(
-						B.StepTimingCaption,
-						SNew(SToolCallCard)
-							.ToolName(B.ToolName)
-							.ArgumentsPreview(B.ToolArgsPreview)
-							.ResultPreview(B.ToolResultPreview)
-							.bRunning(B.bToolRunning)
-							.bSuccess(B.bToolOk)
-							.EditorPresentation(B.ToolEditorPresentation)
-							.bInitiallyCollapsed(!ExpandedToolCallBlockIds.Contains(B.Id))
-							.OnExpansionChanged(FOnBooleanValueChanged::CreateLambda(
-								[this, BlockId = B.Id](bool bExpanded)
-								{
-									if (bSuppressToolExpansionCallbacks)
-									{
-										return;
-									}
-									if (bExpanded)
-									{
-										ExpandedToolCallBlockIds.Add(BlockId);
-									}
-									else
-									{
-										ExpandedToolCallBlockIds.Remove(BlockId);
-									}
-								})))
+					::UnrealAiChatTranscriptStyle::WrapTranscriptBlockBody(
+						B,
+						ToolBody,
+						::EUnrealAiChatTranscriptChromeMode::AccentBarOnly)
 				];
 			break;
+		}
 		case EUnrealAiChatBlockKind::TodoPlan:
 			MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 				[
-					SNew(STodoPlanPanel)
-						.Title(B.TodoTitle)
-						.PlanJson(B.TodoJson)
-						.BackendRegistry(BackendRegistry)
-						.Session(Session)
+					::UnrealAiChatTranscriptStyle::WrapTranscriptBlockBody(
+						B,
+						SNew(STodoPlanPanel)
+							.Title(B.TodoTitle)
+							.PlanJson(B.TodoJson)
+							.BackendRegistry(BackendRegistry)
+							.Session(Session),
+						::EUnrealAiChatTranscriptChromeMode::AccentBarOnly)
 				];
 			break;
 		case EUnrealAiChatBlockKind::PlanDraftPending:
@@ -566,68 +594,86 @@ void SChatMessageList::RebuildTranscript()
 				const FString ThreadIdStr = Session->ThreadId.ToString(EGuidFormats::DigitsWithHyphens);
 				MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 					[
-						SNew(SPlanDraftBuildPanel)
-							.InitialDagJson(B.TodoJson)
-							.BlockId(B.Id)
-							.BackendRegistry(BackendRegistry)
-							.Session(Session)
-							.Transcript(Transcript)
-							.ProjectId(UnrealAiProjectId::GetCurrentProjectId())
-							.ThreadId(ThreadIdStr)
+						::UnrealAiChatTranscriptStyle::WrapTranscriptBlockBody(
+							B,
+							SNew(SPlanDraftBuildPanel)
+								.InitialDagJson(B.TodoJson)
+								.BlockId(B.Id)
+								.BackendRegistry(BackendRegistry)
+								.Session(Session)
+								.Transcript(Transcript)
+								.ProjectId(UnrealAiProjectId::GetCurrentProjectId())
+								.ThreadId(ThreadIdStr),
+							::EUnrealAiChatTranscriptChromeMode::AccentBarOnly)
 					];
 			}
 			break;
 		case EUnrealAiChatBlockKind::RunProgress:
 			{
 				const bool bExpanded = ExpandedRunProgressBlockIds.Contains(B.Id);
+				const FTextBlockStyle& TranscriptBodyStyle =
+					::UnrealAiChatTranscriptStyle::TranscriptReadOnlyBodyTextStyle();
+				const TSharedRef<SWidget> RunBody =
+					SNew(SBorder)
+						.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.ChatRunProgress")))
+						.Padding(FMargin(8.f))
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot().AutoHeight()
+							[
+								SNew(SMultiLineEditableText)
+									.IsReadOnly(true)
+									.AutoWrapText(true)
+									.AllowContextMenu(true)
+									.SelectAllTextWhenFocused(false)
+									.TextStyle(&TranscriptBodyStyle)
+									.Text(FText::FromString(B.ProgressLabel))
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 6.f, 0.f, 0.f)
+							[
+								SNew(SButton)
+									.Visibility(B.ProgressDetails.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+									.Text(bExpanded ? LOCTEXT("HideRunDetails", "Hide details") : LOCTEXT("ShowRunDetails", "Show details"))
+									.OnClicked_Lambda([this, BlockId = B.Id]()
+									{
+										if (ExpandedRunProgressBlockIds.Contains(BlockId))
+										{
+											ExpandedRunProgressBlockIds.Remove(BlockId);
+										}
+										else
+										{
+											ExpandedRunProgressBlockIds.Add(BlockId);
+										}
+										ScheduleRebuildTranscript();
+										return FReply::Handled();
+									})
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 6.f, 0.f, 0.f)
+							[
+								SNew(SMultiLineEditableText)
+									.Visibility(bExpanded ? EVisibility::Visible : EVisibility::Collapsed)
+									.IsReadOnly(true)
+									.AutoWrapText(true)
+									.AllowContextMenu(true)
+									.SelectAllTextWhenFocused(false)
+									.TextStyle(&TranscriptBodyStyle)
+									.Text(FText::FromString(B.ProgressDetails))
+							]
+						];
 				MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
 					[
-						SNew(SBorder)
-							.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.ChatRunProgress")))
-							.Padding(FMargin(8.f))
-							[
-								SNew(SVerticalBox)
-								+ SVerticalBox::Slot().AutoHeight()
-								[
-									SNew(SMultiLineEditableText)
-										.IsReadOnly(true)
-										.AutoWrapText(true)
-										.Text(FText::FromString(B.ProgressLabel))
-								]
-								+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 6.f, 0.f, 0.f)
-								[
-									SNew(SButton)
-										.Visibility(B.ProgressDetails.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
-										.Text(bExpanded ? LOCTEXT("HideRunDetails", "Hide details") : LOCTEXT("ShowRunDetails", "Show details"))
-										.OnClicked_Lambda([this, BlockId = B.Id]()
-										{
-											if (ExpandedRunProgressBlockIds.Contains(BlockId))
-											{
-												ExpandedRunProgressBlockIds.Remove(BlockId);
-											}
-											else
-											{
-												ExpandedRunProgressBlockIds.Add(BlockId);
-											}
-											ScheduleRebuildTranscript();
-											return FReply::Handled();
-										})
-								]
-								+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 6.f, 0.f, 0.f)
-								[
-									SNew(SMultiLineEditableText)
-										.Visibility(bExpanded ? EVisibility::Visible : EVisibility::Collapsed)
-										.IsReadOnly(true)
-										.AutoWrapText(true)
-										.Text(FText::FromString(B.ProgressDetails))
-								]
-							]
+						::UnrealAiChatTranscriptStyle::WrapTranscriptBlockBody(
+							B,
+							RunBody,
+							::EUnrealAiChatTranscriptChromeMode::Full)
 					];
 			}
 			break;
 		case EUnrealAiChatBlockKind::Notice:
-			MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
-				[
+			{
+				const FTextBlockStyle& TranscriptBodyStyle =
+					::UnrealAiChatTranscriptStyle::TranscriptReadOnlyBodyTextStyle();
+				const TSharedRef<SWidget> NoticeBody =
 					SNew(SBorder)
 						.BorderImage(
 							B.bRunCancelled
@@ -640,9 +686,19 @@ void SChatMessageList::RebuildTranscript()
 							SNew(SMultiLineEditableText)
 								.IsReadOnly(true)
 								.AutoWrapText(true)
+								.AllowContextMenu(true)
+								.SelectAllTextWhenFocused(false)
+								.TextStyle(&TranscriptBodyStyle)
 								.Text(FText::FromString(B.NoticeText))
-						]
-				];
+						];
+				MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
+					[
+						::UnrealAiChatTranscriptStyle::WrapTranscriptBlockBody(
+							B,
+							NoticeBody,
+							::EUnrealAiChatTranscriptChromeMode::Full)
+					];
+			}
 			break;
 		default:
 			break;

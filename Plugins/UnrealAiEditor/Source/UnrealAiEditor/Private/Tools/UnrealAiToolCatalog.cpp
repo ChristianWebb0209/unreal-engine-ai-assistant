@@ -10,9 +10,34 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "Harness/UnrealAiAgentTypes.h"
 
 namespace UnrealAiToolCatalogPriv
 {
+	static uint32 HashCapsFingerprint(const FUnrealAiModelCapabilities& Caps)
+	{
+		uint32 H = GetTypeHash(Caps.bSupportsNativeTools);
+		H = HashCombine(H, GetTypeHash(Caps.ModelIdForApi));
+		H = HashCombine(H, GetTypeHash(Caps.ProviderId));
+		return H;
+	}
+
+	static uint32 HashPackFingerprint(const FUnrealAiToolPackOptions* PackOptions)
+	{
+		if (!PackOptions)
+		{
+			return 0;
+		}
+		uint32 H = PackOptions->bRestrictToCorePack ? 1u : 0u;
+		TArray<FString> Extra = PackOptions->AdditionalToolIds;
+		Extra.Sort();
+		for (const FString& E : Extra)
+		{
+			H = HashCombine(H, GetTypeHash(E));
+		}
+		return H;
+	}
+
 	static bool PassesModeAndPack(
 		const TSharedPtr<FJsonObject>& Obj,
 		EUnrealAiAgentMode Mode,
@@ -230,6 +255,10 @@ bool FUnrealAiToolCatalog::LoadFromPlugin()
 
 	Root = Parsed;
 	bLoaded = true;
+	++CatalogContentRevision;
+	CachedLlmToolsJsonKey = 0;
+	CachedLlmToolsJson.Reset();
+	CachedDispatchNativeToolsJson.Reset();
 	return true;
 }
 
@@ -364,6 +393,30 @@ void FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode(
 	{
 		return;
 	}
+	TArray<FString> PassToolIds;
+	ForEachEnabledToolForMode(
+		Mode,
+		Caps,
+		PackOptions,
+		ToolIdFilter,
+		[&PassToolIds](const FString& Tid, const TSharedPtr<FJsonObject>&)
+		{
+			PassToolIds.Add(Tid);
+		});
+	PassToolIds.Sort();
+	uint32 CacheKey = GetTypeHash(Mode);
+	CacheKey = HashCombine(CacheKey, CatalogContentRevision);
+	CacheKey = HashCombine(CacheKey, UnrealAiToolCatalogPriv::HashCapsFingerprint(Caps));
+	CacheKey = HashCombine(CacheKey, UnrealAiToolCatalogPriv::HashPackFingerprint(PackOptions));
+	for (const FString& Tid : PassToolIds)
+	{
+		CacheKey = HashCombine(CacheKey, GetTypeHash(Tid));
+	}
+	if (CacheKey == CachedLlmToolsJsonKey && !CachedLlmToolsJson.IsEmpty())
+	{
+		OutJsonArray = CachedLlmToolsJson;
+		return;
+	}
 	TArray<TSharedPtr<FJsonValue>> ToolsOut;
 	ForEachEnabledToolForMode(
 		Mode,
@@ -371,29 +424,29 @@ void FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode(
 		PackOptions,
 		ToolIdFilter,
 		[&](const FString& Tid, const TSharedPtr<FJsonObject>& Obj)
-	{
-		FString Summary;
-		Obj->TryGetStringField(TEXT("summary"), Summary);
-		const TSharedPtr<FJsonObject>* Params = nullptr;
-		TSharedPtr<FJsonObject> ParamsToUse;
-		if (Obj->TryGetObjectField(TEXT("parameters"), Params) && Params->IsValid())
 		{
-			ParamsToUse = *Params;
-		}
-		else
-		{
-			ParamsToUse = MakeShared<FJsonObject>();
-			ParamsToUse->SetStringField(TEXT("type"), TEXT("object"));
-		}
-		TSharedPtr<FJsonObject> Func = MakeShared<FJsonObject>();
-		Func->SetStringField(TEXT("name"), Tid);
-		Func->SetStringField(TEXT("description"), Summary);
-		Func->SetObjectField(TEXT("parameters"), ParamsToUse);
-		TSharedPtr<FJsonObject> Wrap = MakeShared<FJsonObject>();
-		Wrap->SetStringField(TEXT("type"), TEXT("function"));
-		Wrap->SetObjectField(TEXT("function"), Func);
-		ToolsOut.Add(MakeShared<FJsonValueObject>(Wrap.ToSharedRef()));
-	});
+			FString Summary;
+			Obj->TryGetStringField(TEXT("summary"), Summary);
+			const TSharedPtr<FJsonObject>* Params = nullptr;
+			TSharedPtr<FJsonObject> ParamsToUse;
+			if (Obj->TryGetObjectField(TEXT("parameters"), Params) && Params->IsValid())
+			{
+				ParamsToUse = *Params;
+			}
+			else
+			{
+				ParamsToUse = MakeShared<FJsonObject>();
+				ParamsToUse->SetStringField(TEXT("type"), TEXT("object"));
+			}
+			TSharedPtr<FJsonObject> Func = MakeShared<FJsonObject>();
+			Func->SetStringField(TEXT("name"), Tid);
+			Func->SetStringField(TEXT("description"), Summary);
+			Func->SetObjectField(TEXT("parameters"), ParamsToUse);
+			TSharedPtr<FJsonObject> Wrap = MakeShared<FJsonObject>();
+			Wrap->SetStringField(TEXT("type"), TEXT("function"));
+			Wrap->SetObjectField(TEXT("function"), Func);
+			ToolsOut.Add(MakeShared<FJsonValueObject>(Wrap.ToSharedRef()));
+		});
 	FString Out;
 	TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
 	if (!FJsonSerializer::Serialize(ToolsOut, W))
@@ -401,6 +454,8 @@ void FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode(
 		return;
 	}
 	OutJsonArray = Out;
+	CachedLlmToolsJsonKey = CacheKey;
+	CachedLlmToolsJson = Out;
 }
 
 void FUnrealAiToolCatalog::BuildUnrealAiDispatchToolsJson(
@@ -413,6 +468,11 @@ void FUnrealAiToolCatalog::BuildUnrealAiDispatchToolsJson(
 	if (!Caps.bSupportsNativeTools || !bLoaded)
 	{
 		OutJsonArray = TEXT("[]");
+		return;
+	}
+	if (!CachedDispatchNativeToolsJson.IsEmpty())
+	{
+		OutJsonArray = CachedDispatchNativeToolsJson;
 		return;
 	}
 	TSharedPtr<FJsonObject> ToolIdProp = MakeShared<FJsonObject>();
@@ -455,6 +515,7 @@ void FUnrealAiToolCatalog::BuildUnrealAiDispatchToolsJson(
 		return;
 	}
 	OutJsonArray = Out;
+	CachedDispatchNativeToolsJson = Out;
 }
 
 void FUnrealAiToolCatalog::BuildCompactToolIndexAppendix(

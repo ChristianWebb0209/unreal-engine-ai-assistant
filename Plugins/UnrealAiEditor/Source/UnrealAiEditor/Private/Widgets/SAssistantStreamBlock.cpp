@@ -58,7 +58,8 @@ void SAssistantStreamBlock::SyncMarkdownBody()
 			SetRenderOpacity(Opac);
 		}
 	}
-	Invalidate(EInvalidateWidgetReason::Paint);
+	// Replacing the markdown subtree requires layout + prepass; paint-only leaves stale line heights until the next frame.
+	Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Prepass | EInvalidateWidgetReason::Paint);
 }
 
 void SAssistantStreamBlock::SetFullText(const FString& Full, bool bInstantReveal)

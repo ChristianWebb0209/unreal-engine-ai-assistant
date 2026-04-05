@@ -11,7 +11,8 @@ bool UnrealAiTryGetBlueprintGraphSelectedNodes(
 	UBlueprint* BP,
 	UEdGraph* GraphOrFocused,
 	TArray<UEdGraphNode*>& OutSelected,
-	FString* OutError)
+	FString* OutError,
+	bool bBringTargetGraphToFront)
 {
 	OutSelected.Reset();
 	if (!BP)
@@ -47,7 +48,10 @@ bool UnrealAiTryGetBlueprintGraphSelectedNodes(
 		return false;
 	}
 
-	Ed->OpenGraphAndBringToFront(TargetGraph, false);
+	if (bBringTargetGraphToFront)
+	{
+		Ed->OpenGraphAndBringToFront(TargetGraph, false);
+	}
 
 	UnrealAiAppendSelectedGraphNodesForGraph(Ed, TargetGraph, OutSelected);
 

@@ -12,6 +12,7 @@
 #include "Context/UnrealAiRecentUiRanking.h"
 #include "Memory/IUnrealAiMemoryService.h"
 #include "Observability/UnrealAiBackgroundOpsLog.h"
+#include "Observability/UnrealAiGameThreadPerf.h"
 #include "Retrieval/IUnrealAiRetrievalService.h"
 #include "Retrieval/UnrealAiRetrievalObservability.h"
 #if WITH_EDITOR
@@ -598,6 +599,7 @@ void FUnrealAiContextService::CancelRetrievalPrefetchForThread(const FString& Pr
 
 FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgentContextBuildOptions& Options)
 {
+	UNREALAI_GT_PERF_SCOPE("Context.BuildContextWindow");
 	FAgentContextBuildResult Result;
 	const bool bVerbose = Options.bVerboseContextBuild;
 	auto AddTraceLine = [&Result, bVerbose](const FString& Line)
@@ -712,8 +714,10 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 	}
 	BuildRetrievalUtilityOptions(ActiveProjectId, SessionKey(ActiveProjectId, ActiveThreadId), EffectiveOptions);
 	TArray<FUnrealAiRetrievalSnippet> RetrievalSnippets;
-	if (RetrievalService && RetrievalService->IsEnabledForProject(ActiveProjectId))
 	{
+		UNREALAI_GT_PERF_SCOPE("Context.BuildContextWindow.Retrieval");
+		if (RetrievalService && RetrievalService->IsEnabledForProject(ActiveProjectId))
+		{
 		FUnrealAiRetrievalQuery RetrievalQuery;
 		RetrievalQuery.ProjectId = ActiveProjectId;
 		RetrievalQuery.ThreadId = ActiveThreadId;
@@ -798,10 +802,12 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 		{
 			AddTraceLine(FString::Printf(TEXT("Retrieval hook enabled: snippets=%d"), RetrievalResult.Snippets.Num()));
 		}
+		}
 	}
 
 	FProjectTreeSummary CachedTreeForIngestion;
 	{
+		UNREALAI_GT_PERF_SCOPE("Context.BuildContextWindow.ProjectTree");
 		const FDateTime PrevUpdated = ProjectTreeByProjectId.Contains(ActiveProjectId)
 			? ProjectTreeByProjectId[ActiveProjectId].UpdatedUtc
 			: FDateTime::MinValue();
@@ -845,54 +851,61 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 	}
 
 	FString Block;
-	const UnrealAiContextCandidates::FUnifiedContextBuildResult Unified =
-		UnrealAiContextCandidates::BuildUnifiedContext(Working, EffectiveOptions, MemoryService, &RetrievalSnippets, Budget, &CachedTreeForIngestion);
-	for (const FString& Line : Unified.TraceLines)
+	UnrealAiContextCandidates::FUnifiedContextBuildResult Unified;
 	{
-		AddTraceLine(Line);
+		UNREALAI_GT_PERF_SCOPE("Context.BuildContextWindow.UnifiedContext");
+		Unified = UnrealAiContextCandidates::BuildUnifiedContext(
+			Working, EffectiveOptions, MemoryService, &RetrievalSnippets, Budget, &CachedTreeForIngestion);
+		for (const FString& Line : Unified.TraceLines)
+		{
+			AddTraceLine(Line);
+		}
+		if (bVerbose)
+		{
+			int32 ActionableTargetAnchors = 0;
+			for (const UnrealAiContextCandidates::FContextCandidateEnvelope& Packed : Unified.Packed)
+			{
+				if (Packed.Type == UnrealAiContextRankingPolicy::ECandidateType::ToolResult
+					&& (Packed.Payload.Contains(TEXT("/Game/")) || Packed.Payload.Contains(TEXT("PersistentLevel."))))
+				{
+					++ActionableTargetAnchors;
+				}
+			}
+			AddTraceLine(FString::Printf(TEXT("[Ranker] actionable_target_anchors_kept=%d"), ActionableTargetAnchors));
+			int32 ActionableTargetAnchorDrops = 0;
+			for (const UnrealAiContextCandidates::FContextCandidateEnvelope& Dropped : Unified.Dropped)
+			{
+				if (Dropped.DropReason == TEXT("pack:budget_anchor_actionable_target"))
+				{
+					++ActionableTargetAnchorDrops;
+				}
+			}
+			AddTraceLine(FString::Printf(TEXT("[Ranker] actionable_target_anchor_drops=%d"), ActionableTargetAnchorDrops));
+		}
+		Block = Unified.ContextBlock;
+		if (UnrealAiContextDecisionLogger::ShouldLogDecisions(Options.bVerboseContextBuild))
+		{
+			const FString InvocationReason = !Options.ContextBuildInvocationReason.IsEmpty()
+				? Options.ContextBuildInvocationReason
+				: TEXT("unspecified");
+			UnrealAiContextDecisionLogger::WriteDecisionLog(
+				ActiveProjectId,
+				ActiveThreadId,
+				InvocationReason,
+				EffectiveOptions,
+				Budget,
+				Unified,
+				Block);
+		}
 	}
-	if (bVerbose)
 	{
-		int32 ActionableTargetAnchors = 0;
-		for (const UnrealAiContextCandidates::FContextCandidateEnvelope& Packed : Unified.Packed)
-		{
-			if (Packed.Type == UnrealAiContextRankingPolicy::ECandidateType::ToolResult
-				&& (Packed.Payload.Contains(TEXT("/Game/")) || Packed.Payload.Contains(TEXT("PersistentLevel."))))
-			{
-				++ActionableTargetAnchors;
-			}
-		}
-		AddTraceLine(FString::Printf(TEXT("[Ranker] actionable_target_anchors_kept=%d"), ActionableTargetAnchors));
-		int32 ActionableTargetAnchorDrops = 0;
-		for (const UnrealAiContextCandidates::FContextCandidateEnvelope& Dropped : Unified.Dropped)
-		{
-			if (Dropped.DropReason == TEXT("pack:budget_anchor_actionable_target"))
-			{
-				++ActionableTargetAnchorDrops;
-			}
-		}
-		AddTraceLine(FString::Printf(TEXT("[Ranker] actionable_target_anchor_drops=%d"), ActionableTargetAnchorDrops));
+		UNREALAI_GT_PERF_SCOPE("Context.BuildContextWindow.RetrievalUtilitySave");
+		RegisterPackedEntityState(SessionKey(ActiveProjectId, ActiveThreadId), Unified.Packed);
+		UpdateRetrievalUtilityCounters(ActiveProjectId, SessionKey(ActiveProjectId, ActiveThreadId), Unified.Packed, Unified.Dropped);
 	}
-	Block = Unified.ContextBlock;
-	RegisterPackedEntityState(SessionKey(ActiveProjectId, ActiveThreadId), Unified.Packed);
-	UpdateRetrievalUtilityCounters(ActiveProjectId, SessionKey(ActiveProjectId, ActiveThreadId), Unified.Packed, Unified.Dropped);
 	Result.bTruncated = Unified.bTruncated;
 	Result.Warnings.Append(Unified.Warnings);
 	AddTraceLine(TEXT("[Ranker] emission=unified"));
-	if (UnrealAiContextDecisionLogger::ShouldLogDecisions(Options.bVerboseContextBuild))
-	{
-		const FString InvocationReason = !Options.ContextBuildInvocationReason.IsEmpty()
-			? Options.ContextBuildInvocationReason
-			: TEXT("unspecified");
-		UnrealAiContextDecisionLogger::WriteDecisionLog(
-			ActiveProjectId,
-			ActiveThreadId,
-			InvocationReason,
-			EffectiveOptions,
-			Budget,
-			Unified,
-			Block);
-	}
 	const int32 RawLen = Block.Len();
 	if (bVerbose)
 	{
@@ -961,6 +974,7 @@ FAgentContextBuildResult FUnrealAiContextService::BuildContextWindow(const FAgen
 
 void FUnrealAiContextService::SaveNow(const FString& ProjectId, const FString& ThreadId)
 {
+	FlushPendingRetrievalStateSaves();
 	FlushSave(ProjectId, ThreadId);
 }
 
@@ -1035,6 +1049,7 @@ void FUnrealAiContextService::FlushSaveBySessionKey(const FString& Key)
 
 void FUnrealAiContextService::FlushAllSessionsToDisk()
 {
+	FlushPendingRetrievalStateSaves();
 	for (const auto& Pair : Sessions)
 	{
 		FlushSaveBySessionKey(Pair.Key);
@@ -1049,6 +1064,12 @@ void FUnrealAiContextService::FlushAllSessionsToDisk()
 
 void FUnrealAiContextService::WipeAllSessionsInMemory()
 {
+	if (RetrievalStateSaveTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(RetrievalStateSaveTickerHandle);
+		RetrievalStateSaveTickerHandle.Reset();
+	}
+	PendingRetrievalStateProjectIds.Reset();
 	if (SaveTickerHandle.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(SaveTickerHandle);
@@ -1133,15 +1154,32 @@ void FUnrealAiContextService::UpdateRetrievalUtilityCounters(
 			PackedEntities.AddUnique(Candidate.EntityId);
 		}
 	}
-	for (int32 i = 0; i < PackedEntities.Num(); ++i)
 	{
-		for (int32 j = 0; j < PackedEntities.Num(); ++j)
+		static constexpr int32 GMaxPairwiseEdgeEntities = 48;
+		if (PackedEntities.Num() > GMaxPairwiseEdgeEntities)
 		{
-			if (i == j)
+			PackedEntities.Sort([&HitByEntity](const FString& A, const FString& B)
 			{
-				continue;
+				const int32 Ha = HitByEntity.FindRef(A);
+				const int32 Hb = HitByEntity.FindRef(B);
+				if (Ha != Hb)
+				{
+					return Ha > Hb;
+				}
+				return A < B;
+			});
+			PackedEntities.SetNum(GMaxPairwiseEdgeEntities);
+		}
+		for (int32 i = 0; i < PackedEntities.Num(); ++i)
+		{
+			for (int32 j = 0; j < PackedEntities.Num(); ++j)
+			{
+				if (i == j)
+				{
+					continue;
+				}
+				ProjectState.EdgeWeightsByEntity.FindOrAdd(PackedEntities[i]).FindOrAdd(PackedEntities[j]) += 1;
 			}
-			ProjectState.EdgeWeightsByEntity.FindOrAdd(PackedEntities[i]).FindOrAdd(PackedEntities[j]) += 1;
 		}
 	}
 
@@ -1183,7 +1221,7 @@ void FUnrealAiContextService::UpdateRetrievalUtilityCounters(
 	}
 	RefreshHeadSetForProject(ProjectId);
 	ProjectState.UpdatedUtc = FDateTime::UtcNow();
-	SaveProjectRetrievalState(ProjectId);
+	ScheduleSaveProjectRetrievalState(ProjectId);
 }
 
 void FUnrealAiContextService::BuildRetrievalUtilityOptions(
@@ -1475,6 +1513,46 @@ void FUnrealAiContextService::SaveProjectRetrievalState(const FString& ProjectId
 	if (FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
 	{
 		FFileHelper::SaveStringToFile(Json, *GetProjectRetrievalStatePath(ProjectId), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	}
+}
+
+void FUnrealAiContextService::ScheduleSaveProjectRetrievalState(const FString& ProjectId)
+{
+	if (ProjectId.IsEmpty())
+	{
+		return;
+	}
+	PendingRetrievalStateProjectIds.Add(ProjectId);
+	if (!RetrievalStateSaveTickerHandle.IsValid())
+	{
+		RetrievalStateSaveTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateLambda([this](float) -> bool
+			{
+				TSet<FString> Copy = MoveTemp(PendingRetrievalStateProjectIds);
+				PendingRetrievalStateProjectIds.Reset();
+				for (const FString& Pid : Copy)
+				{
+					SaveProjectRetrievalState(Pid);
+				}
+				RetrievalStateSaveTickerHandle = FTSTicker::FDelegateHandle();
+				return false;
+			}),
+			2.5f);
+	}
+}
+
+void FUnrealAiContextService::FlushPendingRetrievalStateSaves()
+{
+	if (RetrievalStateSaveTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(RetrievalStateSaveTickerHandle);
+		RetrievalStateSaveTickerHandle.Reset();
+	}
+	TSet<FString> Copy = MoveTemp(PendingRetrievalStateProjectIds);
+	PendingRetrievalStateProjectIds.Reset();
+	for (const FString& Pid : Copy)
+	{
+		SaveProjectRetrievalState(Pid);
 	}
 }
 

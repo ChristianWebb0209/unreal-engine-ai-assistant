@@ -5,10 +5,12 @@
 #include "Dom/JsonObject.h"
 #include "Editor.h"
 #include "Engine/Blueprint.h"
+#include "Framework/Commands/UIAction.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "HAL/IConsoleManager.h"
 #include "Styling/AppStyle.h"
 #include "ToolMenu.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "ToolMenus.h"
 #include "ToolMenuEntry.h"
 #include "UnrealAiEditorSettings.h"
@@ -27,89 +29,107 @@ namespace UnrealAiBlueprintFormatEditorRegistrationPriv
 		MenuBuilder.BeginSection(NAME_None, LOCTEXT("FmtOptsHeading", "Blueprint formatting"));
 		{
 			MenuBuilder.AddSubMenu(
-				LOCTEXT("SpacingMenu", "Spacing density"),
-				LOCTEXT("SpacingMenuTip", "Column/row spacing for the bundled formatter (Editor Preferences)"),
-				FNewMenuDelegate::CreateLambda([](FMenuBuilder& Sub)
-				{
-					auto Set = [](EUnrealAiBlueprintFormatSpacingDensity D)
-					{
-						UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
-						St->BlueprintFormatSpacingDensity = D;
-						St->SaveConfig();
-					};
-					Sub.AddMenuEntry(
-						LOCTEXT("Sparse", "Sparse"),
-						LOCTEXT("SparseTip", "Wider grid"),
-						FSlateIcon(),
-						FUIAction(FExecuteAction::CreateLambda([Set]() { Set(EUnrealAiBlueprintFormatSpacingDensity::Sparse); })));
-					Sub.AddMenuEntry(
-						LOCTEXT("Medium", "Medium"),
-						LOCTEXT("MediumTip", "Default grid"),
-						FSlateIcon(),
-						FUIAction(FExecuteAction::CreateLambda([Set]() { Set(EUnrealAiBlueprintFormatSpacingDensity::Medium); })));
-					Sub.AddMenuEntry(
-						LOCTEXT("Dense", "Dense"),
-						LOCTEXT("DenseTip", "Tighter grid"),
-						FSlateIcon(),
-						FUIAction(FExecuteAction::CreateLambda([Set]() { Set(EUnrealAiBlueprintFormatSpacingDensity::Dense); })));
-				}));
-			MenuBuilder.AddSubMenu(
 				LOCTEXT("CommentsMenu", "Comment synthesis"),
 				LOCTEXT("CommentsMenuTip", "Auto region comments when the formatter adds boxes"),
 				FNewMenuDelegate::CreateLambda([](FMenuBuilder& Sub)
 				{
-					auto Set = [](EUnrealAiBlueprintCommentsMode M)
+					auto CommentsAction = [](EUnrealAiBlueprintCommentsMode M) -> FUIAction
 					{
-						UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
-						St->BlueprintCommentsMode = M;
-						St->SaveConfig();
+						return FUIAction(
+							FExecuteAction::CreateLambda([M]()
+							{
+								UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
+								St->BlueprintCommentsMode = M;
+								St->SaveConfig();
+							}),
+							FCanExecuteAction(),
+							FGetActionCheckState::CreateLambda([M]()
+							{
+								const UUnrealAiEditorSettings* St = GetDefault<UUnrealAiEditorSettings>();
+								return St->BlueprintCommentsMode == M ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+							}));
 					};
 					Sub.AddMenuEntry(
 						LOCTEXT("CommOff", "Off"),
-						FText::GetEmpty(),
+						LOCTEXT("CommOffTip", "No auto region comments"),
 						FSlateIcon(),
-						FUIAction(FExecuteAction::CreateLambda([Set]() { Set(EUnrealAiBlueprintCommentsMode::Off); })));
+						CommentsAction(EUnrealAiBlueprintCommentsMode::Off),
+						NAME_None,
+						EUserInterfaceActionType::RadioButton);
 					Sub.AddMenuEntry(
 						LOCTEXT("CommMin", "Minimal"),
-						FText::GetEmpty(),
+						LOCTEXT("CommMinTip", "Light comment synthesis"),
 						FSlateIcon(),
-						FUIAction(FExecuteAction::CreateLambda([Set]() { Set(EUnrealAiBlueprintCommentsMode::Minimal); })));
+						CommentsAction(EUnrealAiBlueprintCommentsMode::Minimal),
+						NAME_None,
+						EUserInterfaceActionType::RadioButton);
 					Sub.AddMenuEntry(
 						LOCTEXT("CommVerb", "Verbose"),
-						FText::GetEmpty(),
+						LOCTEXT("CommVerbTip", "More comment regions when the formatter adds boxes"),
 						FSlateIcon(),
-						FUIAction(FExecuteAction::CreateLambda([Set]() { Set(EUnrealAiBlueprintCommentsMode::Verbose); })));
+						CommentsAction(EUnrealAiBlueprintCommentsMode::Verbose),
+						NAME_None,
+						EUserInterfaceActionType::RadioButton);
 				}));
 			MenuBuilder.AddMenuEntry(
-				LOCTEXT("ToggleKnots", "Toggle wire knots"),
-				LOCTEXT("ToggleKnotsTip", "Reroute knots on long data wires (best-effort)"),
+				LOCTEXT("WireKnots", "Wire knots"),
+				LOCTEXT("WireKnotsTip", "Reroute knots on long data wires (best-effort)"),
 				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateLambda([]()
-				{
-					UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
-					St->bBlueprintFormatUseWireKnots = !St->bBlueprintFormatUseWireKnots;
-					St->SaveConfig();
-				})));
+				FUIAction(
+					FExecuteAction::CreateLambda([]()
+					{
+						UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
+						St->bBlueprintFormatUseWireKnots = !St->bBlueprintFormatUseWireKnots;
+						St->SaveConfig();
+					}),
+					FCanExecuteAction(),
+					FGetActionCheckState::CreateLambda([]()
+					{
+						return GetDefault<UUnrealAiEditorSettings>()->bBlueprintFormatUseWireKnots ? ECheckBoxState::Checked
+																									: ECheckBoxState::Unchecked;
+					})),
+				NAME_None,
+				EUserInterfaceActionType::ToggleButton);
 			MenuBuilder.AddMenuEntry(
-				LOCTEXT("TogglePreserve", "Toggle preserve existing positions"),
-				LOCTEXT("TogglePreserveTip", "Skip repositioning nodes that already have non-zero coordinates"),
+				LOCTEXT("PreservePositions", "Preserve existing positions"),
+				LOCTEXT("PreservePositionsTip", "Skip repositioning nodes that already have non-zero coordinates"),
 				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateLambda([]()
-				{
-					UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
-					St->bBlueprintFormatPreserveExistingPositions = !St->bBlueprintFormatPreserveExistingPositions;
-					St->SaveConfig();
-				})));
+				FUIAction(
+					FExecuteAction::CreateLambda([]()
+					{
+						UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
+						St->bBlueprintFormatPreserveExistingPositions = !St->bBlueprintFormatPreserveExistingPositions;
+						St->SaveConfig();
+					}),
+					FCanExecuteAction(),
+					FGetActionCheckState::CreateLambda([]()
+					{
+						return GetDefault<UUnrealAiEditorSettings>()->bBlueprintFormatPreserveExistingPositions
+							? ECheckBoxState::Checked
+							: ECheckBoxState::Unchecked;
+					})),
+				NAME_None,
+				EUserInterfaceActionType::ToggleButton);
 			MenuBuilder.AddMenuEntry(
-				LOCTEXT("ToggleReflow", "Toggle reflow comment boxes"),
-				LOCTEXT("ToggleReflowTip", "Resize comment nodes to fit members after layout"),
+				LOCTEXT("ReflowComments", "Reflow comment boxes"),
+				LOCTEXT("ReflowCommentsTip", "Resize comment nodes to fit members after layout"),
 				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateLambda([]()
-				{
-					UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
-					St->bBlueprintFormatReflowCommentsByGeometry = !St->bBlueprintFormatReflowCommentsByGeometry;
-					St->SaveConfig();
-				})));
+				FUIAction(
+					FExecuteAction::CreateLambda([]()
+					{
+						UUnrealAiEditorSettings* St = GetMutableDefault<UUnrealAiEditorSettings>();
+						St->bBlueprintFormatReflowCommentsByGeometry = !St->bBlueprintFormatReflowCommentsByGeometry;
+						St->SaveConfig();
+					}),
+					FCanExecuteAction(),
+					FGetActionCheckState::CreateLambda([]()
+					{
+						return GetDefault<UUnrealAiEditorSettings>()->bBlueprintFormatReflowCommentsByGeometry
+							? ECheckBoxState::Checked
+							: ECheckBoxState::Unchecked;
+					})),
+				NAME_None,
+				EUserInterfaceActionType::ToggleButton);
 		}
 		MenuBuilder.EndSection();
 		return MenuBuilder.MakeWidget();

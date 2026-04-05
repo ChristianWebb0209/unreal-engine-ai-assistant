@@ -349,6 +349,41 @@ bool FUnrealAiRetrievalVectorManifestCooldownRoundTripTest::RunTest(const FStrin
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiRetrievalGetOrCreateStoreCooldownSkipsOpenTest,
+	"UnrealAiEditor.Retrieval.GetOrCreateStoreCooldownSkipsOpen",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiRetrievalGetOrCreateStoreCooldownSkipsOpenTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FUnrealAiPersistenceStub Persist;
+	FUnrealAiModelProfileRegistry Profiles(&Persist);
+	TestTrue(
+		TEXT("enable retrieval settings"),
+		Persist.SaveSettingsJson(
+			TEXT("{\"retrieval\":{\"enabled\":true,\"embeddingModel\":\"text-embedding-3-small\"}}")));
+
+	const FString ProjectKey = FString::Printf(TEXT("autotest_%s"), *FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens));
+	FUnrealAiVectorIndexStore ManifestOnly(ProjectKey);
+	FUnrealAiVectorManifest CooldownManifest;
+	CooldownManifest.ProjectId = ProjectKey;
+	CooldownManifest.Status = TEXT("error");
+	CooldownManifest.VectorDbOpenRetryNotBeforeUtc = FDateTime::UtcNow() + FTimespan::FromHours(1);
+	TestTrue(TEXT("save manifest cooldown without db"), ManifestOnly.SaveManifest(CooldownManifest));
+
+	FUnrealAiRetrievalService Retrieval(&Persist, &Profiles, nullptr);
+	FUnrealAiRetrievalQuery Q;
+	Q.ProjectId = ProjectKey;
+	Q.ThreadId = TEXT("thread_cd");
+	Q.QueryText = TEXT("sample query text");
+	Q.MaxResults = 4;
+	const FUnrealAiRetrievalQueryResult R = Retrieval.Query(Q);
+	TestTrue(TEXT("query yields store warning"), R.Warnings.Num() > 0);
+	TestTrue(TEXT("cooldown fast-fail in warning"), R.Warnings[0].Contains(TEXT("cooldown")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FUnrealAiRetrievalStaleIndexingManifestRecoveryTest,
 	"UnrealAiEditor.Retrieval.StaleIndexingManifestRecovery",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

@@ -12,13 +12,19 @@ UUnrealAiEditorSettings::UUnrealAiEditorSettings(const FObjectInitializer& Objec
 	, bAutoContinuePlanSteps(true)
 	, bPlanAutoReplan(true)
 	, BlueprintCommentsMode(EUnrealAiBlueprintCommentsMode::Minimal)
-	, BlueprintFormatSpacingDensity(EUnrealAiBlueprintFormatSpacingDensity::Medium)
 	, bBlueprintFormatUseWireKnots(false)
 	, bBlueprintFormatPreserveExistingPositions(false)
 	, bBlueprintFormatReflowCommentsByGeometry(true)
 	, PlanAutoReplanMaxAttemptsPerRun(2)
 	, bLogLlmRequestsToHarnessRunFile(true)
 	, bConsoleCommandLegacyWideExec(false)
+	, bGameThreadPerfLogging(true)
+	, GameThreadPerfLogThresholdMs(0.f)
+	, GameThreadPerfHitchThresholdMs(1000.f)
+	, GameThreadPerfRingMax(256)
+	, MaxOpsPerBlueprintGraphPatch(128)
+	, bBlueprintGraphPatchInternalValidateBeforeApply(true)
+	, bBlueprintGraphPatchKeepOpsOnFailure(true)
 {
 	AgentContentPathExcludeFromPreferredInference.Add(TEXT("UnrealAiHarness"));
 }

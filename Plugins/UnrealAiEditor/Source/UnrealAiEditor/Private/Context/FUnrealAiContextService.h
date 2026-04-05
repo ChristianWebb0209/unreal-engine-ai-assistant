@@ -104,6 +104,8 @@ private:
 		FAgentContextBuildOptions& InOutOptions) const;
 	void RefreshHeadSetForProject(const FString& ProjectId);
 	void SaveProjectRetrievalState(const FString& ProjectId);
+	void ScheduleSaveProjectRetrievalState(const FString& ProjectId);
+	void FlushPendingRetrievalStateSaves();
 	void LoadProjectRetrievalState(const FString& ProjectId);
 	FString GetProjectRetrievalStatePath(const FString& ProjectId) const;
 	static void ExtractCanonicalActionRefs(const FString& Text, TSet<FString>& OutRefs);
@@ -127,4 +129,6 @@ private:
 	FString ActiveThreadId;
 	TSet<FString> PendingSaveKeys;
 	FTSTicker::FDelegateHandle SaveTickerHandle;
+	TSet<FString> PendingRetrievalStateProjectIds;
+	FTSTicker::FDelegateHandle RetrievalStateSaveTickerHandle;
 };

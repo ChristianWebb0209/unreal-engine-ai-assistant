@@ -7,6 +7,10 @@
 #include "Prompt/UnrealAiPromptAssembleParams.h"
 #include "UnrealAiEditorModule.h"
 #include "UnrealAiEditorSettings.h"
+#include "GenericPlatform/GenericPlatformFile.h"
+#include "HAL/FileManager.h"
+#include "HAL/PlatformTime.h"
+#include "HAL/CriticalSection.h"
 
 namespace UnrealAiPromptChunkUtilsPriv
 {
@@ -183,4 +187,64 @@ void UnrealAiPromptChunkUtils::ApplyTemplateTokens(
 	{
 		ReplaceAll(Doc, TEXT("{{BLUEPRINT_COMMENTS_POLICY}}"), FString());
 	}
+}
+
+uint32 UnrealAiPromptChunkUtils::GetPromptsLooseSignatureThrottled()
+{
+	static FCriticalSection Mutex;
+	static double LastWallSeconds = -1000.0;
+	static uint32 CachedSig = 1;
+	const double Now = FPlatformTime::Seconds();
+	{
+		FScopeLock Lock(&Mutex);
+		if ((Now - LastWallSeconds) < 2.5 && CachedSig != 0)
+		{
+			return CachedSig;
+		}
+	}
+
+	const FString Root = ResolvePromptSubdir(TEXT("chunks"));
+	uint32 Acc = 0xA53C9E4Du;
+	if (!Root.IsEmpty())
+	{
+		class FMdVisitor final : public IPlatformFile::FDirectoryVisitor
+		{
+		public:
+			uint32 HashAcc;
+			explicit FMdVisitor(uint32 InAcc)
+				: HashAcc(InAcc)
+			{
+			}
+			virtual bool Visit(const TCHAR* FilenameOrDirectory, bool bIsDirectory) override
+			{
+				if (bIsDirectory)
+				{
+					return true;
+				}
+				const FString Path(FilenameOrDirectory);
+				if (!Path.EndsWith(TEXT(".md"), ESearchCase::IgnoreCase))
+				{
+					return true;
+				}
+				const FDateTime Ts = IFileManager::Get().GetTimeStamp(*Path);
+				HashAcc = HashCombine(HashAcc, GetTypeHash(Ts.GetTicks()));
+				const int64 Sz = IFileManager::Get().FileSize(*Path);
+				HashAcc = HashCombine(HashAcc, static_cast<uint32>(Sz & 0xFFFFFFFFu));
+				HashAcc = HashCombine(HashAcc, GetTypeHash(Path));
+				return true;
+			}
+		};
+		FMdVisitor Visitor(Acc);
+		IFileManager::Get().IterateDirectoryRecursively(*Root, Visitor);
+		Acc = Visitor.HashAcc;
+	}
+	if (Acc == 0)
+	{
+		Acc = 1;
+	}
+
+	FScopeLock Lock(&Mutex);
+	LastWallSeconds = Now;
+	CachedSig = Acc;
+	return CachedSig;
 }

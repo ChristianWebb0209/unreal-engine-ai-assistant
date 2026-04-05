@@ -28,6 +28,7 @@
 #include "UnrealAiEditorModule.h"
 #include "Misc/CoreMisc.h"
 #include "Misc/UnrealAiRuntimeDefaults.h"
+#include "Observability/UnrealAiGameThreadPerf.h"
 
 /**
  * Tool router — one branch per catalog tool_id (plus compat below).
@@ -35,6 +36,7 @@
  * Compatibility / alias ids (same handler or thin normalizer — keep in sync with docs/tooling/tool-dispatch-inventory.md):
  * - scene_fuzzy_search.query → scene_fuzzy_search
  * - asset_destroy → asset_delete (normalized; error suggests asset_delete)
+ * - blueprint_graph_get_graph_summary → blueprint_get_graph_summary
  * - actor_destroy → UnrealAiDispatch_ActorDestroy (distinct tool; not asset_delete)
  *
  * Console: see UnrealAiToolDispatch_Console.cpp (allow-list keys; optional legacy wide exec via settings/env).
@@ -84,6 +86,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 		return UnrealAiToolJson::Error(TEXT("Tools must be invoked on the game thread"));
 	}
 
+	UNREALAI_GT_PERF_SCOPE("Tools.Dispatch.Router");
+
 	const TSharedPtr<FJsonObject>& A = Args.IsValid() ? Args : MakeShared<FJsonObject>();
 	const bool bAutoRunDestructive =
 		UnrealAiRuntimeDefaults::AutoRunDestructiveDefault && FUnrealAiEditorModule::IsAutoConfirmDestructiveEnabled();
@@ -100,6 +104,8 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return SurfaceResult;
 	}
+
+	UNREALAI_GT_PERF_SCOPE_DYNAMIC(FString::Printf(TEXT("Tools.Dispatch.Tool.%s"), *ToolId));
 
 	// --- Implemented tools (router) ---
 	if (ToolId == TEXT("editor_get_selection"))

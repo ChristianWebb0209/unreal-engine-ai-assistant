@@ -1172,60 +1172,6 @@ namespace UnrealAiChatMarkdown
 			];
 	}
 
-	static TSharedRef<SWidget> MakeBulletRow(const FString& ItemText, const TSharedRef<float>& ProseWrapWidthPx)
-	{
-		return SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-				  .AutoWidth()
-				  .VAlign(VAlign_Top)
-				  .Padding(0.f, 1.f, 6.f, 0.f)
-			[
-				UnrealAiChatMarkdownInline::MakeChatSelectableReadonlyText(
-					FString(TEXT("\x2022")),
-					BodyFont(),
-					FUnrealAiEditorStyle::ColorTextMuted(),
-					ProseWrapWidthPx)
-			]
-			+ SHorizontalBox::Slot()
-				  .FillWidth(1.f)
-			[
-				UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
-					ItemText,
-					BodyFont(),
-					FUnrealAiEditorStyle::ColorMarkdownBody(),
-					ProseWrapWidthPx)
-			];
-	}
-
-	static TSharedRef<SWidget> MakeOrderedRow(
-		const int32 OrderedN,
-		const FString& ItemText,
-		const TSharedRef<float>& ProseWrapWidthPx)
-	{
-		const int32 N = FMath::Max(1, OrderedN);
-		return SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-				  .AutoWidth()
-				  .VAlign(VAlign_Top)
-				  .Padding(0.f, 1.f, 8.f, 0.f)
-			[
-				UnrealAiChatMarkdownInline::MakeChatSelectableReadonlyText(
-					FString::Printf(TEXT("%d."), N),
-					BodyFont(),
-					FUnrealAiEditorStyle::ColorTextMuted(),
-					ProseWrapWidthPx)
-			]
-			+ SHorizontalBox::Slot()
-				  .FillWidth(1.f)
-			[
-				UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
-					ItemText,
-					BodyFont(),
-					FUnrealAiEditorStyle::ColorMarkdownBody(),
-					ProseWrapWidthPx)
-			];
-	}
-
 	struct FMarkdownChunk
 	{
 		bool bCode = false;
@@ -1336,6 +1282,54 @@ namespace UnrealAiChatMarkdown
 					];
 				continue;
 			}
+			// One selectable document per list block (was one widget per row + glyph, so drag-select could not span items).
+			if (L.Kind == ELineKind::Bullet)
+			{
+				FString Block;
+				while (i < Lines.Num() && Lines[i].Kind == ELineKind::Bullet)
+				{
+					if (!Block.IsEmpty())
+					{
+						Block += LINE_TERMINATOR;
+					}
+					Block += FString(TEXT("\x2022 "));
+					Block += Lines[i].Text;
+					++i;
+				}
+				V->AddSlot().AutoHeight().Padding(4.f, 1.f, 0.f, 0.f)
+					[
+						UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
+							Block,
+							BodyFont(),
+							FUnrealAiEditorStyle::ColorMarkdownBody(),
+							ProseWrapWidthPx)
+					];
+				continue;
+			}
+			if (L.Kind == ELineKind::OrderedBullet)
+			{
+				FString Block;
+				while (i < Lines.Num() && Lines[i].Kind == ELineKind::OrderedBullet)
+				{
+					if (!Block.IsEmpty())
+					{
+						Block += LINE_TERMINATOR;
+					}
+					const int32 N = FMath::Max(1, Lines[i].OrderedIndex);
+					Block += FString::Printf(TEXT("%d. "), N);
+					Block += Lines[i].Text;
+					++i;
+				}
+				V->AddSlot().AutoHeight().Padding(4.f, 1.f, 0.f, 0.f)
+					[
+						UnrealAiChatMarkdownInline::MakeLinkAwareBodyText(
+							Block,
+							BodyFont(),
+							FUnrealAiEditorStyle::ColorMarkdownBody(),
+							ProseWrapWidthPx)
+					];
+				continue;
+			}
 
 			switch (L.Kind)
 			{
@@ -1368,13 +1362,6 @@ namespace UnrealAiChatMarkdown
 							FUnrealAiEditorStyle::ColorMarkdownHeading(),
 							ProseWrapWidthPx)
 					];
-				break;
-			case ELineKind::Bullet:
-				V->AddSlot().AutoHeight().Padding(4.f, 1.f, 0.f, 0.f)[MakeBulletRow(L.Text, ProseWrapWidthPx)];
-				break;
-			case ELineKind::OrderedBullet:
-				V->AddSlot().AutoHeight().Padding(4.f, 1.f, 0.f, 0.f)
-					[MakeOrderedRow(L.OrderedIndex, L.Text, ProseWrapWidthPx)];
 				break;
 			case ELineKind::TodoOpen:
 				V->AddSlot().AutoHeight().Padding(2.f, 3.f, 2.f, 0.f)[MakeTodoRow(false, L.Text, ProseWrapWidthPx)];

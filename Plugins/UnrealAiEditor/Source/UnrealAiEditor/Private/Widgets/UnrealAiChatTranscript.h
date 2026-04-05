@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 
 #include "Harness/UnrealAiAgentTypes.h"
+
+class FUnrealAiToolCatalog;
 #include "Tools/Presentation/UnrealAiToolEditorPresentation.h"
 
 enum class EUnrealAiChatBlockKind : uint8
@@ -34,7 +36,10 @@ struct FUnrealAiChatBlock
 	EUnrealAiAgentMode UserAgentMode = EUnrealAiAgentMode::Agent;
 	FString ThinkingText;
 	FString AssistantText;
+	/** Canonical tool id (matches catalog / harness). */
 	FString ToolName;
+	/** User-visible title; empty means derive in UI via UnrealAiResolveToolUserFacingName. */
+	FString ToolDisplayTitle;
 	FString ToolCallId;
 	FString ToolArgsPreview;
 	FString ToolResultPreview;
@@ -72,11 +77,16 @@ bool UnrealAiStripChatNameTagsFromText(FString& InOutText, FString& OutChatName)
 bool UnrealAiIsTranscriptStyleDelimiterTrimmedLine(const FString& TrimmedLine);
 
 /**
- * Remove echoed transcript section headers (e.g. "--- User ---", "--- Tool: foo ---") from model output.
- * Bare "---" lines (markdown horizontal rules) are kept. Only labels matching the editor's export/transcript
- * vocabulary are stripped.
+ * Remove echoed transcript section headers (e.g. "--- User ---", "--- Tool: foo ---"), standalone "---"
+ * horizontal-rule lines, and full-line "[Harness] ..." logs from model-visible chat text.
  */
 void UnrealAiStripTranscriptStyleDelimiterLines(FString& InOutText);
+
+/** True for standalone "---" lines, "--- Section ---" transcript headers, and full-line "[Harness] ..." logs. */
+bool UnrealAiIsTranscriptNoiseOrHarnessDisplayLine(const FString& TrimmedLine);
+
+/** Dock/tab title from a user bubble; empty for harness-injected user rows or whitespace-only. Strips chat-name tags. */
+FString UnrealAiMakeChatTabTitleFromUserMessage(const FString& UserText);
 
 /** Mutable transcript for the chat UI; updated by FUnrealAiChatRunSink. */
 class FUnrealAiChatTranscript : public TSharedFromThis<FUnrealAiChatTranscript>
@@ -97,7 +107,11 @@ public:
 	void BeginRun(const FGuid& RunId);
 	void AppendThinkingDelta(const FString& Chunk);
 	void AppendAssistantDelta(const FString& Chunk);
-	void BeginToolCall(const FString& ToolName, const FString& CallId, const FString& ArgsPreview);
+	void BeginToolCall(
+		const FString& ToolName,
+		const FString& CallId,
+		const FString& ArgsPreview,
+		const FString& ToolDisplayTitle = FString());
 	void EndToolCall(
 		const FString& CallId,
 		bool bSuccess,
@@ -119,7 +133,9 @@ public:
 	void AddEditorBlockingDialogNotice(const FString& Summary);
 
 	/** Rebuild UI blocks from persisted harness conversation messages (conversation.json). */
-	void HydrateFromConversationMessages(const TArray<FUnrealAiConversationMessage>& Messages);
+	void HydrateFromConversationMessages(
+		const TArray<FUnrealAiConversationMessage>& Messages,
+		const FUnrealAiToolCatalog* CatalogOpt = nullptr);
 
 	/** True while the current run still has an open assistant reply segment (streaming or single-chunk). */
 	bool IsAssistantSegmentOpen() const { return bAssistantSegmentOpen; }

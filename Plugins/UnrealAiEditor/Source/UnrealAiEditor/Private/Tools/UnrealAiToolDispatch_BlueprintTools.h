@@ -25,6 +25,8 @@ UBlueprint* UnrealAiBlueprintTools_LoadBlueprintGame(
 	FString* OutFailureDetail = nullptr);
 bool UnrealAiBlueprintTools_IsGameWritableBlueprintPath(const FString& BlueprintObjectPath);
 UEdGraph* UnrealAiBlueprintTools_FindGraphByName(UBlueprint* BP, const FString& GraphName);
+/** Script graphs (uber + function + macro) that contain a node with this NodeGuid; names are graph GetName(). */
+void UnrealAiBlueprintTools_FindGraphNamesContainingNodeGuid(UBlueprint* BP, const FGuid& NodeGuid, TArray<FString>& OutGraphNames);
 /** Pin-type parsing for internal Blueprint helpers; returns false if the token is not recognized (no silent Boolean fallback). */
 bool UnrealAiBlueprintTools_TryParsePinTypeFromString(const FString& TypeStr, FEdGraphPinType& OutType);
 /** Legacy: unknown tokens map to Boolean (preserves older callers); prefer TryParse for strict validation. */

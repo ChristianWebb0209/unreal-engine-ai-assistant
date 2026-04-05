@@ -134,4 +134,10 @@ private:
 	bool bLoaded = false;
 	TSharedPtr<FJsonObject> Root;
 	TMap<FString, TSharedPtr<FJsonObject>> ToolById;
+
+	/** Bumped on each successful LoadFromPlugin to invalidate HTTP tool JSON caches. */
+	mutable uint32 CatalogContentRevision = 0;
+	mutable uint32 CachedLlmToolsJsonKey = 0;
+	mutable FString CachedLlmToolsJson;
+	mutable FString CachedDispatchNativeToolsJson;
 };

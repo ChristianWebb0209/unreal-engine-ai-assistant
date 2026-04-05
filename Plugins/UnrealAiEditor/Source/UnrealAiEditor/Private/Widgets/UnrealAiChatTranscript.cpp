@@ -1,5 +1,6 @@
 #include "Widgets/UnrealAiChatTranscript.h"
 
+#include "Widgets/UnrealAiToolDisplayName.h"
 #include "HAL/PlatformTime.h"
 
 #include "Dom/JsonObject.h"
@@ -115,6 +116,41 @@ bool UnrealAiIsTranscriptStyleDelimiterTrimmedLine(const FString& T)
 	return UnrealAiTranscriptDelimiterStrip::IsKnownSectionLabel(Inner);
 }
 
+bool UnrealAiIsTranscriptNoiseOrHarnessDisplayLine(const FString& TrimmedLine)
+{
+	if (TrimmedLine.IsEmpty())
+	{
+		return false;
+	}
+	if (UnrealAiIsTranscriptStyleDelimiterTrimmedLine(TrimmedLine))
+	{
+		return true;
+	}
+	FString C = TrimmedLine;
+	C.TrimStartAndEndInline();
+	if (C.Len() >= 3)
+	{
+		bool bAllDash = true;
+		for (int32 i = 0; i < C.Len(); ++i)
+		{
+			if (C[i] != TEXT('-'))
+			{
+				bAllDash = false;
+				break;
+			}
+		}
+		if (bAllDash)
+		{
+			return true;
+		}
+	}
+	if (C.StartsWith(TEXT("[Harness]")))
+	{
+		return true;
+	}
+	return false;
+}
+
 void UnrealAiStripTranscriptStyleDelimiterLines(FString& InOutText)
 {
 	if (InOutText.IsEmpty())
@@ -130,7 +166,7 @@ void UnrealAiStripTranscriptStyleDelimiterLines(FString& InOutText)
 	{
 		FString T = Line;
 		T.TrimStartAndEndInline();
-		if (UnrealAiIsTranscriptStyleDelimiterTrimmedLine(T))
+		if (UnrealAiIsTranscriptNoiseOrHarnessDisplayLine(T))
 		{
 			continue;
 		}
@@ -142,6 +178,36 @@ void UnrealAiStripTranscriptStyleDelimiterLines(FString& InOutText)
 	}
 	InOutText = FString::Join(Kept, TEXT("\n"));
 	InOutText.TrimStartAndEndInline();
+}
+
+FString UnrealAiMakeChatTabTitleFromUserMessage(const FString& UserText)
+{
+	if (UserText.IsEmpty())
+	{
+		return FString();
+	}
+	FString W = UserText;
+	FString UnusedName;
+	UnrealAiStripChatNameTagsFromText(W, UnusedName);
+	W.TrimStartAndEndInline();
+	if (W.StartsWith(TEXT("[Harness]")))
+	{
+		return FString();
+	}
+	W.ReplaceInline(TEXT("\r"), TEXT(""));
+	W.ReplaceInline(TEXT("\n"), TEXT(" "));
+	W.TrimStartAndEndInline();
+	if (W.IsEmpty())
+	{
+		return FString();
+	}
+	static constexpr int32 MaxChars = 56;
+	if (W.Len() > MaxChars)
+	{
+		W = W.Left(MaxChars);
+		W.TrimEndInline();
+	}
+	return W;
 }
 
 FString UnrealAiFormatStepDurationForUi(const double Sec)
@@ -195,8 +261,10 @@ namespace UnrealAiTranscriptTiming
 		}
 		const double Dur = FPlatformTime::Seconds() - B.StepMonotonicStart;
 		B.StepMonotonicStart = 0.0;
-		const FString Label =
-			B.ToolName.IsEmpty() ? FString(TEXT("Tool")) : B.ToolName.Left(56);
+		const FString Label = !B.ToolDisplayTitle.IsEmpty()
+			? B.ToolDisplayTitle.Left(56)
+			: (B.ToolName.IsEmpty() ? FString(TEXT("Tool"))
+									: UnrealAiFormatToolIdAsTitleWords(B.ToolName).Left(56));
 		B.StepTimingCaption =
 			FString::Printf(TEXT("%s · %s"), *Label, *UnrealAiFormatStepDurationForUi(Dur));
 	}
@@ -245,12 +313,17 @@ FString FUnrealAiChatTranscript::FormatPlainText() const
 			{
 				Out += B.StepTimingCaption + TEXT("\n");
 			}
-			Out += FString::Printf(
-				TEXT("--- Tool: %s ---\nArgs: %s\nResult: %s\nStatus: %s\n\n"),
-				*B.ToolName,
-				*B.ToolArgsPreview,
-				*B.ToolResultPreview,
-				B.bToolRunning ? TEXT("running") : (B.bToolOk ? TEXT("ok") : TEXT("failed")));
+			{
+				const FString ToolHeadline = !B.ToolDisplayTitle.IsEmpty()
+					? B.ToolDisplayTitle
+					: UnrealAiFormatToolIdAsTitleWords(B.ToolName);
+				Out += FString::Printf(
+					TEXT("--- Tool: %s ---\nArgs: %s\nResult: %s\nStatus: %s\n\n"),
+					*ToolHeadline,
+					*B.ToolArgsPreview,
+					*B.ToolResultPreview,
+					B.bToolRunning ? TEXT("running") : (B.bToolOk ? TEXT("ok") : TEXT("failed")));
+			}
 			break;
 		case EUnrealAiChatBlockKind::TodoPlan:
 			Out += FString::Printf(TEXT("--- Todo plan: %s ---\n%s\n\n"), *B.TodoTitle, *B.TodoJson);
@@ -556,7 +629,11 @@ void FUnrealAiChatTranscript::AppendAssistantDelta(const FString& Chunk)
 	OnAssistantStreamDelta.Broadcast(Chunk);
 }
 
-void FUnrealAiChatTranscript::BeginToolCall(const FString& ToolName, const FString& CallId, const FString& ArgsPreview)
+void FUnrealAiChatTranscript::BeginToolCall(
+	const FString& ToolName,
+	const FString& CallId,
+	const FString& ArgsPreview,
+	const FString& ToolDisplayTitle)
 {
 	if (Blocks.Num() > 0)
 	{
@@ -577,6 +654,7 @@ void FUnrealAiChatTranscript::BeginToolCall(const FString& ToolName, const FStri
 	B.RunId = ActiveRunId;
 	B.Kind = EUnrealAiChatBlockKind::ToolCall;
 	B.ToolName = ToolName;
+	B.ToolDisplayTitle = ToolDisplayTitle;
 	B.ToolCallId = CallId;
 	B.ToolArgsPreview = ArgsPreview;
 	B.ToolEditorPresentation = nullptr;
@@ -684,6 +762,14 @@ void FUnrealAiChatTranscript::AppendRunEvent(const FString& EventLine)
 	if (EventLine.IsEmpty())
 	{
 		return;
+	}
+	{
+		FString TrimEv = EventLine;
+		TrimEv.TrimStartAndEndInline();
+		if (UnrealAiIsTranscriptNoiseOrHarnessDisplayLine(TrimEv))
+		{
+			return;
+		}
 	}
 	for (int32 i = Blocks.Num() - 1; i >= 0; --i)
 	{
@@ -818,7 +904,9 @@ void FUnrealAiChatTranscript::AddEditorBlockingDialogNotice(const FString& Summa
 	OnStructuralChange.Broadcast();
 }
 
-void FUnrealAiChatTranscript::HydrateFromConversationMessages(const TArray<FUnrealAiConversationMessage>& Messages)
+void FUnrealAiChatTranscript::HydrateFromConversationMessages(
+	const TArray<FUnrealAiConversationMessage>& Messages,
+	const FUnrealAiToolCatalog* CatalogOpt)
 {
 	Blocks.Reset();
 	ActiveRunId = FGuid();
@@ -884,10 +972,11 @@ void FUnrealAiChatTranscript::HydrateFromConversationMessages(const TArray<FUnre
 				}
 				else if (Tc.Name.Equals(TEXT("unreal_ai_dispatch"), ESearchCase::IgnoreCase))
 				{
-					// Never leak the internal wrapper name to the user.
-					B.ToolName = TEXT("Tool");
+					// Keep canonical id for styling; user-facing title resolved below.
+					B.ToolName = Tc.Name;
 				}
 
+				B.ToolDisplayTitle = UnrealAiResolveToolUserFacingName(B.ToolName, CatalogOpt);
 				B.bToolRunning = true;
 				B.bToolOk = false;
 				Blocks.Add(MoveTemp(B));

@@ -15,6 +15,7 @@
 #include "HAL/PlatformTime.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/UnrealAiToolUi.h"
+#include "Widgets/UnrealAiToolDisplayName.h"
 #include "Widgets/SToolEditorNotePanel.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
@@ -43,7 +44,8 @@ EActiveTimerReturnType SToolCallCard::PulseTimerTick(double InCurrentTime, float
 FReply SToolCallCard::OnCopyClicked()
 {
 	const FString Combined = FString::Printf(
-		TEXT("Tool: %s\nArgs: %s\nResult: %s"),
+		TEXT("Tool: %s\nid: %s\nArgs: %s\nResult: %s"),
+		*ToolDisplayTitle,
 		*ToolName,
 		*ArgsPreview,
 		*ResultPreview);
@@ -62,6 +64,11 @@ void SToolCallCard::HandleExpansionChanged(const bool bIsExpanded)
 void SToolCallCard::Construct(const FArguments& InArgs)
 {
 	ToolName = InArgs._ToolName;
+	ToolDisplayTitle = InArgs._ToolDisplayTitle;
+	if (ToolDisplayTitle.IsEmpty())
+	{
+		ToolDisplayTitle = UnrealAiFormatToolIdAsTitleWords(ToolName);
+	}
 	ArgsPreview = InArgs._ArgumentsPreview;
 	ResultPreview = InArgs._ResultPreview;
 	bRunning = InArgs._bRunning;
@@ -122,7 +129,7 @@ void SToolCallCard::Construct(const FArguments& InArgs)
 							+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
 							[
 								SNew(STextBlock)
-									.Text(FText::FromString(ToolName))
+									.Text(FText::FromString(ToolDisplayTitle))
 									.Font(FUnrealAiEditorStyle::FontListRowTitle())
 									.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextPrimary())
 							]

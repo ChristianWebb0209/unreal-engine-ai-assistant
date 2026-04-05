@@ -3,8 +3,28 @@
 #include "Prompt/UnrealAiPromptChunkUtils.h"
 #include "UnrealAiBlueprintBuilderTargetKind.h"
 #include "UnrealAiEnvironmentBuilderTargetKind.h"
+#include "HAL/CriticalSection.h"
 
 #include <initializer_list>
+
+namespace UnrealAiMainAgentPromptDiskCache
+{
+	static FCriticalSection Mutex;
+	static uint32 GCachedLayoutKey = 0;
+	static uint32 GCachedDiskSig = 0;
+	static FString GCachedPreTemplate;
+
+	static uint32 MainPathLayoutKey(const FUnrealAiPromptAssembleParams& Params)
+	{
+		uint32 K = GetTypeHash(Params.Mode);
+		K = HashCombine(K, Params.bInjectBlueprintBuilderResumeChunk ? 1u : 0u);
+		K = HashCombine(K, Params.bInjectEnvironmentBuilderResumeChunk ? 1u : 0u);
+		K = HashCombine(K, Params.bIncludePlanNodeExecutionChunk ? 1u : 0u);
+		K = HashCombine(K, Params.bIncludeExecutionSubturnChunk ? 1u : 0u);
+		K = HashCombine(K, Params.bIncludePlanDagChunk ? 1u : 0u);
+		return K;
+	}
+}
 
 FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const FUnrealAiPromptAssembleParams& Params) const
 {
@@ -103,7 +123,6 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/01-deterministic-loop.md"));
 		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/02-architecture-plain-language.md"));
 		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/03-fail-safe-handoff.md"));
-		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/04-t3d-placeholders-and-import.md"));
 		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/05-verification-ladder.md"));
 		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/06-cross-tool-identity.md"));
 		AppendBlueprintBuilderChunk(TEXT("blueprint-builder/07-graph-patch-canonical.md"));
@@ -175,57 +194,80 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 		return Acc;
 	}
 
-	AppendChunk(TEXT("01-identity.md"));
-
 	{
-		FString C2;
-		if (UnrealAiPromptChunkUtils::LoadChunk(ChunkSubdir, TEXT("02-operating-modes.md"), C2))
+		const uint32 LayoutKey = UnrealAiMainAgentPromptDiskCache::MainPathLayoutKey(Params);
+		const uint32 DiskSig = UnrealAiPromptChunkUtils::GetPromptsLooseSignatureThrottled();
+		bool bFromCache = false;
 		{
-			C2 = UnrealAiPromptChunkUtils::ExtractOperatingModeSection(C2, Params.Mode);
-			if (!Acc.IsEmpty())
+			FScopeLock Lock(&UnrealAiMainAgentPromptDiskCache::Mutex);
+			if (LayoutKey == UnrealAiMainAgentPromptDiskCache::GCachedLayoutKey && DiskSig == UnrealAiMainAgentPromptDiskCache::GCachedDiskSig
+				&& !UnrealAiMainAgentPromptDiskCache::GCachedPreTemplate.IsEmpty())
 			{
-				Acc += TEXT("\n\n---\n\n");
+				Acc = UnrealAiMainAgentPromptDiskCache::GCachedPreTemplate;
+				bFromCache = true;
 			}
-			Acc += C2;
 		}
-	}
+		if (!bFromCache)
+		{
+			Acc.Reset();
+			AppendChunk(TEXT("01-identity.md"));
 
-	AppendChunk(TEXT("03-complexity-and-todo-plan.md"));
-	AppendChunk(TEXT("04-tool-calling-contract.md"));
-	AppendUnderChunksTree(TEXT("blueprint-builder/08-delegation-from-main-agent.md"));
-	if (Params.bInjectBlueprintBuilderResumeChunk)
-	{
-		AppendUnderChunksTree(TEXT("blueprint-builder/09-resume-on-main-agent.md"));
-	}
-	AppendUnderChunksTree(TEXT("environment-builder/07-delegation-from-main-agent.md"));
-	if (Params.bInjectEnvironmentBuilderResumeChunk)
-	{
-		AppendUnderChunksTree(TEXT("environment-builder/08-resume-on-main-agent.md"));
-	}
-	AppendChunk(TEXT("05-context-and-editor.md"));
-	AppendChunk(TEXT("10-mvp-gameplay-and-tooling.md"));
-	if (Params.bIncludePlanNodeExecutionChunk)
-	{
-		AppendChunkList({
-			TEXT("plan-node/01-scope-and-context.md"),
-			TEXT("plan-node/02-completion-and-tools.md"),
-			TEXT("plan-node/03-retries-blockers-budget.md"),
-		});
-	}
-	if (Params.bIncludeExecutionSubturnChunk)
-	{
-		AppendChunk(TEXT("06-execution-subturn.md"));
-	}
-	AppendChunk(TEXT("07-safety-banned.md"));
-	AppendChunk(TEXT("08-output-style.md"));
-	if (Params.bIncludePlanDagChunk)
-	{
-		AppendChunkList({
-			TEXT("plan/01-overview-shape-next.md"),
-			TEXT("plan/02-rules-and-selfchecks.md"),
-			TEXT("plan/03-automatic-replan.md"),
-			TEXT("plan/04-policies-and-canonical-shape.md"),
-		});
+			{
+				FString C2;
+				if (UnrealAiPromptChunkUtils::LoadChunk(ChunkSubdir, TEXT("02-operating-modes.md"), C2))
+				{
+					C2 = UnrealAiPromptChunkUtils::ExtractOperatingModeSection(C2, Params.Mode);
+					if (!Acc.IsEmpty())
+					{
+						Acc += TEXT("\n\n---\n\n");
+					}
+					Acc += C2;
+				}
+			}
+
+			AppendChunk(TEXT("03-complexity-and-todo-plan.md"));
+			AppendChunk(TEXT("04-tool-calling-contract.md"));
+			AppendUnderChunksTree(TEXT("blueprint-builder/08-delegation-from-main-agent.md"));
+			if (Params.bInjectBlueprintBuilderResumeChunk)
+			{
+				AppendUnderChunksTree(TEXT("blueprint-builder/09-resume-on-main-agent.md"));
+			}
+			AppendUnderChunksTree(TEXT("environment-builder/07-delegation-from-main-agent.md"));
+			if (Params.bInjectEnvironmentBuilderResumeChunk)
+			{
+				AppendUnderChunksTree(TEXT("environment-builder/08-resume-on-main-agent.md"));
+			}
+			AppendChunk(TEXT("05-context-and-editor.md"));
+			AppendChunk(TEXT("10-mvp-gameplay-and-tooling.md"));
+			if (Params.bIncludePlanNodeExecutionChunk)
+			{
+				AppendChunkList({
+					TEXT("plan-node/01-scope-and-context.md"),
+					TEXT("plan-node/02-completion-and-tools.md"),
+					TEXT("plan-node/03-retries-blockers-budget.md"),
+				});
+			}
+			if (Params.bIncludeExecutionSubturnChunk)
+			{
+				AppendChunk(TEXT("06-execution-subturn.md"));
+			}
+			AppendChunk(TEXT("07-safety-banned.md"));
+			AppendChunk(TEXT("08-output-style.md"));
+			if (Params.bIncludePlanDagChunk)
+			{
+				AppendChunkList({
+					TEXT("plan/01-overview-shape-next.md"),
+					TEXT("plan/02-rules-and-selfchecks.md"),
+					TEXT("plan/03-automatic-replan.md"),
+					TEXT("plan/04-policies-and-canonical-shape.md"),
+				});
+			}
+
+			FScopeLock Lock(&UnrealAiMainAgentPromptDiskCache::Mutex);
+			UnrealAiMainAgentPromptDiskCache::GCachedLayoutKey = LayoutKey;
+			UnrealAiMainAgentPromptDiskCache::GCachedDiskSig = DiskSig;
+			UnrealAiMainAgentPromptDiskCache::GCachedPreTemplate = Acc;
+		}
 	}
 
 	UnrealAiPromptChunkUtils::ApplyTemplateTokens(Acc, Params, B);

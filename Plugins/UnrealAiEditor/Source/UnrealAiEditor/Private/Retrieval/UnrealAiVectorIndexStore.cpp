@@ -87,7 +87,7 @@ bool FUnrealAiVectorIndexStore::OpenDb(FString& OutError)
 		if (Db->Open(*DbPath, ESQLiteDatabaseOpenMode::ReadWriteCreate))
 		{
 			// Safe defaults for mixed read/write access across harness + background indexer.
-			Db->Execute(TEXT("PRAGMA busy_timeout=5000;"));
+			Db->Execute(TEXT("PRAGMA busy_timeout=8000;"));
 			Db->Execute(TEXT("PRAGMA journal_mode=WAL;"));
 			Db->Execute(TEXT("PRAGMA synchronous=NORMAL;"));
 			return true;

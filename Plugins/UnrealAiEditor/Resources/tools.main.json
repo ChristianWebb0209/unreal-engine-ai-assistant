@@ -1056,7 +1056,7 @@
     },
     {
       "tool_id": "blueprint_graph_list_pins",
-      "summary": "Read-only: pins[] (name, direction, category, optional default_value). Needs blueprint_path and node_ref OR guid (real graph GUID). Does not resolve patch_id strings from other tool calls.",
+      "summary": "Read-only: pins[] (name, direction, category, optional default_value). node_ref/guid accepts dashed UUID, 32-hex compact, or guid: prefix (resolver-normalized). If the node is not in the requested graph but exists on exactly one other uber/function/macro graph, resolves there and sets resolved_graph_name + requested_graph_name. Does not resolve patch_id from other calls; never use validate_only transient create_node guids.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -1092,7 +1092,7 @@
           "node_ref": {
             "type": "string",
             "minLength": 1,
-            "description": "Graph node GUID as in blueprint_graph_introspect node_guid, or guid:{uuid}. Must exist on the saved graph."
+            "description": "Graph node GUID: introspect node_guid form (dashed or 32-hex compact) or guid:{uuid}. Cross-graph: if absent from graph_name but unique elsewhere, response notes resolved_graph_name."
           },
           "guid": {
             "type": "string",
@@ -1126,8 +1126,9 @@
       "threading": "game_thread",
       "failure_modes": [
         "Blueprint or graph not found.",
-        "node_ref not a valid GUID or node absent from graph.",
-        "patch_id from a prior blueprint_graph_patch cannot target this read-only tool—use node_guid from disk."
+        "node_ref not a valid GUID, node absent from Blueprint, or ambiguous across multiple graphs.",
+        "patch_id from a prior blueprint_graph_patch cannot target this read-only tool—use node_guid from disk after apply.",
+        "validate_only create_node node_guid is transient—do not pass to list_pins."
       ],
       "doc_links": [
         "https://dev.epicgames.com/documentation/en-us/unreal-engine/blueprints-visual-scripting-in-unreal-engine"
@@ -1743,7 +1744,7 @@
     },
     {
       "tool_id": "setting_query",
-      "summary": "Read one allowlisted setting using the domain/key settings envelope. Model-facing settings read; the resolver maps the envelope to the legacy internal settings backend.",
+      "summary": "Read one allowlisted setting using the domain/key settings envelope. Model-facing settings read; the resolver maps the envelope to the internal settings backend.",
       "category": "settings_properties",
       "tags": [
         "settings",
@@ -1832,8 +1833,8 @@
         ]
       },
       "routing": {
-        "strategy": "legacy_singleton",
-        "legacy_targets": [
+        "strategy": "canonical_projection",
+        "canonical_tool_refs": [
           {
             "tool_id": "setting_query"
           }
@@ -1850,7 +1851,7 @@
     },
     {
       "tool_id": "setting_apply",
-      "summary": "Write one allowlisted setting using the domain/key settings envelope. Model-facing settings write; the resolver maps the envelope to the legacy internal settings backend.",
+      "summary": "Write one allowlisted setting using the domain/key settings envelope. Model-facing settings write; the resolver maps the envelope to the internal settings backend.",
       "category": "settings_properties",
       "tags": [
         "settings",
@@ -1947,8 +1948,8 @@
         ]
       },
       "routing": {
-        "strategy": "legacy_singleton",
-        "legacy_targets": [
+        "strategy": "canonical_projection",
+        "canonical_tool_refs": [
           {
             "tool_id": "setting_apply"
           }
@@ -2402,8 +2403,8 @@
         ]
       },
       "routing": {
-        "strategy": "legacy_family",
-        "legacy_targets": [
+        "strategy": "parameterized_family",
+        "canonical_tool_refs": [
           {
             "tool_id": "material_instance_set_parameter"
           }
@@ -3264,7 +3265,7 @@
     },
     {
       "tool_id": "asset_index_fuzzy_search",
-      "summary": "Search the Asset Registry under path_prefix (default /Game). With a non-empty query, fuzzy-ranks matches (listing_mode fuzzy_ranked). With no query, returns the first max_results assets in registry enumeration order under path_prefix—no ranking (listing_mode enumeration_first_n); optional class_name_substring filters by class path substring. `{}` is valid (bounded first-N sample under /Game). Stops after max_assets_to_scan or max_wall_ms (default 12s, max 120s)—see truncated, timed_out, assets_visited. Downstream tools must use object_path from results—do not invent paths.",
+      "summary": "Search the Asset Registry under path_prefix (default /Game). With a non-empty query, fuzzy-ranks matches (listing_mode fuzzy_ranked). With no query, returns the first max_results assets in registry enumeration order under path_prefix—no ranking (listing_mode enumeration_first_n); optional class_name_substring filters by class path substring. Optional minimum_blueprint_parent_class_path: after ranking, keep only Blueprint assets whose ParentClass inherits that UClass (loads each candidate; costly if many hits). `{}` is valid (bounded first-N sample under /Game). Stops after max_assets_to_scan or max_wall_ms (default 12s, max 120s)—see truncated, timed_out, assets_visited. Downstream tools must use object_path from results—do not invent paths.",
       "category": "assets_content",
       "tags": [
         "asset",
@@ -3328,6 +3329,14 @@
           "time_budget_ms": {
             "type": "integer",
             "description": "Alias for max_wall_ms."
+          },
+          "minimum_blueprint_parent_class_path": {
+            "type": "string",
+            "description": "Optional. After ranking, keep only Blueprint assets whose loaded UBlueprint ParentClass is a subclass of this UClass path (e.g. /Script/Engine.Character). Loads each candidate Blueprint; expensive when many matches—raise max_assets_to_scan if needed. Alias: blueprint_minimum_parent_class_path."
+          },
+          "blueprint_minimum_parent_class_path": {
+            "type": "string",
+            "description": "Alias for minimum_blueprint_parent_class_path."
           }
         }
       },
@@ -3519,8 +3528,8 @@
         ]
       },
       "routing": {
-        "strategy": "legacy_family",
-        "legacy_targets": [
+        "strategy": "parameterized_family",
+        "canonical_tool_refs": [
           {
             "tool_id": "viewport_camera_control"
           }
@@ -3601,8 +3610,8 @@
         ]
       },
       "routing": {
-        "strategy": "legacy_family",
-        "legacy_targets": [
+        "strategy": "parameterized_family",
+        "canonical_tool_refs": [
           {
             "tool_id": "viewport_capture"
           }
@@ -3686,8 +3695,8 @@
         ]
       },
       "routing": {
-        "strategy": "legacy_family",
-        "legacy_targets": [
+        "strategy": "parameterized_family",
+        "canonical_tool_refs": [
           {
             "tool_id": "viewport_frame"
           }
@@ -4014,8 +4023,8 @@
         ]
       },
       "routing": {
-        "strategy": "legacy_family",
-        "legacy_targets": [
+        "strategy": "parameterized_family",
+        "canonical_tool_refs": [
           {
             "tool_id": "asset_graph_query"
           }

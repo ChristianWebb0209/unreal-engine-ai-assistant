@@ -10,6 +10,7 @@
 /**
  * Central UI tokens for the plugin: prefer these over ad-hoc FLinearColor / FCoreStyle font sizes
  * so chat, settings, and tool cards stay visually consistent.
+ * Agent Chat transcript layout rules and chrome modes: UnrealAiChatTranscriptStyle.h (accent RGB lives here).
  */
 class FUnrealAiEditorStyle
 {
@@ -118,6 +119,19 @@ public:
 	static FLinearColor LinearColorModeMenuPopoverBg();
 	/** Chat window title strip behind header text. */
 	static FLinearColor LinearColorChatHeaderStrip();
+
+	// --- Agent Chat transcript accents (left bar + role labels); see UnrealAiChatTranscriptStyle.h ---
+	static FLinearColor LinearColorChatTranscriptAccentUser();
+	static FLinearColor LinearColorChatTranscriptAccentUserSystem();
+	static FLinearColor LinearColorChatTranscriptAccentAssistant();
+	static FLinearColor LinearColorChatTranscriptAccentThinking();
+	static FLinearColor LinearColorChatTranscriptAccentTool();
+	static FLinearColor LinearColorChatTranscriptAccentTodo();
+	static FLinearColor LinearColorChatTranscriptAccentPlanDraft();
+	static FLinearColor LinearColorChatTranscriptAccentRun();
+	static FLinearColor LinearColorChatTranscriptAccentNoticeInfo();
+	static FLinearColor LinearColorChatTranscriptAccentNoticeError();
+	static FLinearColor LinearColorChatTranscriptAccentNoticeCancelled();
 
 	/**
 	 * Tool call card (SToolCallCard): inner panel behind header + body — Starship / Cursor-style charcoal

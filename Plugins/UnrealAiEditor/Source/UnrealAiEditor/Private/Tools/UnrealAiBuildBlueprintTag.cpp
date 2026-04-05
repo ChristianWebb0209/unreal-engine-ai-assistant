@@ -1,6 +1,98 @@
 #include "Tools/UnrealAiBuildBlueprintTag.h"
 #include "UnrealAiBlueprintBuilderTargetKind.h"
 
+namespace UnrealAiBuildBlueprintTagPriv
+{
+	static bool IsAllowedMisnamedHandoffWrapperTag(const FString& TagLower)
+	{
+		if (TagLower.Len() < 1 || TagLower.Len() > 48)
+		{
+			return false;
+		}
+		if (!FChar::IsLower(TagLower[0]))
+		{
+			return false;
+		}
+		if (TagLower.StartsWith(TEXT("unreal_ai_")))
+		{
+			return false;
+		}
+		for (int32 i = 0; i < TagLower.Len(); ++i)
+		{
+			const TCHAR C = TagLower[i];
+			if (!FChar::IsLower(C) && !FChar::IsDigit(C) && C != TEXT('_'))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	static bool InnerLooksLikeBuilderHandoffSpec(const FString& Inner)
+	{
+		const FString T = Inner.TrimStartAndEnd();
+		if (T.StartsWith(TEXT("---")))
+		{
+			return true;
+		}
+		return T.Contains(TEXT("target_kind:"), ESearchCase::IgnoreCase);
+	}
+
+	/**
+	 * Models sometimes copy the inner YAML/spec but wrap it in a mistaken custom tag instead of <unreal_ai_build_blueprint>.
+	 * If the inner payload matches a real handoff body, treat it like <unreal_ai_build_blueprint>.
+	 */
+	static bool TryConsumeMisnamedWrapper(const FString& Content, FString& OutInnerSpec, FString& OutVisibleWithoutTags)
+	{
+		const int32 OpenAngle = Content.Find(TEXT("<"), ESearchCase::CaseSensitive);
+		if (OpenAngle == INDEX_NONE)
+		{
+			return false;
+		}
+		const int32 AfterOpen = OpenAngle + 1;
+		const int32 CloseAngle = Content.Find(TEXT(">"), ESearchCase::CaseSensitive, ESearchDir::FromStart, AfterOpen);
+		if (CloseAngle == INDEX_NONE || CloseAngle <= AfterOpen)
+		{
+			return false;
+		}
+		const FString TagName = Content.Mid(AfterOpen, CloseAngle - AfterOpen).TrimStartAndEnd();
+		if (TagName.IsEmpty())
+		{
+			return false;
+		}
+		if (TagName.Equals(TEXT("unreal_ai_build_blueprint"), ESearchCase::IgnoreCase))
+		{
+			return false;
+		}
+		if (!IsAllowedMisnamedHandoffWrapperTag(TagName.ToLower()))
+		{
+			return false;
+		}
+		const FString CloseTag = FString::Printf(TEXT("</%s>"), *TagName);
+		const int32 InnerStart = CloseAngle + 1;
+		const int32 CloseIdx = Content.Find(CloseTag, ESearchCase::IgnoreCase, ESearchDir::FromStart, InnerStart);
+		if (CloseIdx == INDEX_NONE)
+		{
+			return false;
+		}
+		const FString Inner = Content.Mid(InnerStart, CloseIdx - InnerStart).TrimStartAndEnd();
+		if (!InnerLooksLikeBuilderHandoffSpec(Inner))
+		{
+			return false;
+		}
+		OutInnerSpec = Inner;
+		const FString Before = Content.Left(OpenAngle);
+		const FString After = Content.Mid(CloseIdx + CloseTag.Len());
+		OutVisibleWithoutTags = (Before + After).TrimStartAndEnd();
+		UE_LOG(
+			LogTemp,
+			Display,
+			TEXT("UnrealAiBuildBlueprintTag: recovered Blueprint Builder handoff from misnamed wrapper <%s>...</>"),
+			*TagName);
+		return true;
+	}
+}
+
 void UnrealAiBuildBlueprintTag::ParseAndStripHandoffMetadata(FString& InOutInner, EUnrealAiBlueprintBuilderTargetKind& OutKind)
 {
 	OutKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
@@ -66,17 +158,22 @@ bool UnrealAiBuildBlueprintTag::TryConsume(const FString& Content, FString& OutI
 
 	const int32 B = Content.Find(Begin, ESearchCase::IgnoreCase);
 	const int32 E = Content.Find(End, ESearchCase::IgnoreCase);
-	if (B == INDEX_NONE || E == INDEX_NONE || E <= B)
+	if (B != INDEX_NONE && E != INDEX_NONE && E > B)
 	{
-		return false;
+		const int32 InnerStart = B + Begin.Len();
+		OutInnerSpec = Content.Mid(InnerStart, E - InnerStart).TrimStartAndEnd();
+		const FString Before = Content.Left(B);
+		const FString After = Content.Mid(E + End.Len());
+		OutVisibleWithoutTags = (Before + After).TrimStartAndEnd();
+		return true;
 	}
 
-	const int32 InnerStart = B + Begin.Len();
-	OutInnerSpec = Content.Mid(InnerStart, E - InnerStart).TrimStartAndEnd();
-	const FString Before = Content.Left(B);
-	const FString After = Content.Mid(E + End.Len());
-	OutVisibleWithoutTags = (Before + After).TrimStartAndEnd();
-	return true;
+	if (UnrealAiBuildBlueprintTagPriv::TryConsumeMisnamedWrapper(Content, OutInnerSpec, OutVisibleWithoutTags))
+	{
+		return true;
+	}
+
+	return false;
 }
 
 void UnrealAiBuildBlueprintTag::StripProtocolMarkersForUi(FString& InOutText)

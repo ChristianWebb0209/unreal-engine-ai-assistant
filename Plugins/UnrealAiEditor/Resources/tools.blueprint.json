@@ -54,7 +54,7 @@
     },
     {
       "tool_id": "blueprint_graph_patch",
-      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Atomic: if any op fails, the transaction is cancelled (nothing persists; applied_partial is always []). Failure JSON: status patch_errors (or patch_validate_errors when validate_only), errors[], error_codes[], failed_op_index, optional failed_op or failed_op_json snippet, optional available_pins_from / available_pins_to (pin name, direction, category) on connect/connect_exec pin failures, suggested_correct_call (error-kind-specific: e.g. list_pins for bad links, Character Jump/Landed pattern for event_override / missing CallFunction — not a generic IfThenElse default), note. validate_only: create_node ops are spawned on-graph transiently then removed; connect between two batch-local nodes runs TryCreateConnection; mixed batch/graph endpoints get pin name+direction checks only. Anti-pattern: T3D placeholders __UAI_G_NNNNNN__ — use guid:UUID from blueprint_graph_introspect or patch_id from this batch. For very large op lists, use ops_json_path (project-relative UTF-8 file: root JSON array of ops) under Saved/ or harness_step/ — mutually exclusive with inline ops[]. Resolver preflight repairs create_node k2_class aliases, event_override hoisting, Character Jump/Landed call targets, connect link_from/link_to and split from_node+from_pin into from/to, add_variable type aliases; resolver_audit may list graph_patch_repairs. Primary UE 5.7 graph mutator: ops[] or ops_json_path on blueprint_path (/Game) and graph_name. create_node (UK2Node), create_comment, connect, connect_exec (sole visible exec out → sole exec in; node refs without .Pin), break_link, splice_on_link, set_pin_default, add_variable, remove_node, move_node. auto_layout defaults true with layout_scope patched_nodes; full_graph reformats entire script graph. Formatter follows Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder; not on default main Agent). Atomic apply: any op failure cancels the transaction (applied_partial always []). Returns patch_errors or patch_validate_errors with errors[], error_codes[], errors_detail[] (structured entries), failed_op_index, expected_vs_actual on blueprint_parent_class_mismatch, suggested_correct_call, optional available_pins_from/to, guid_found_in_graphs. Semantic preflight rejects create_node ops whose event_override outer or non-static call_function class is not a superclass of this Blueprint's ParentClass (e.g. Character Jump on PlayerController asset). Non-validate apply runs internal validate-only simulation first (Editor setting; skip_internal_validate_before_apply for tests). validate_only: transient create_node spawns—do not reuse those GUIDs; use patch_id in-batch or introspect after apply. Max ops per call from Editor settings (patch_batch_too_large). Node refs: patch_id, guid:…, or bare UUID (no __UAI_G_* placeholders—see prompt 07-graph-patch-canonical). Resolver preflight: k2_class aliases, gameplay UClass mistaken for k2→class_path+call_library_function, op call_function→create_node, semantic_kind call_function typo, event_override hoisting, Character Jump/Landed paths, connect/connect_exec aliases, add_variable types, layout_scope/anchor aliases. Large batches: ops_json_path under Saved/ or harness_step/. Ops: create_node, create_comment, connect, connect_exec, break_link, splice_on_link, set_pin_default, add_variable, remove_node, move_node. auto_layout + layout_scope (patched_nodes | patched_nodes_and_downstream_exec | full_graph) + layout_anchor (neighbor | below_existing). Post-patch Sugiyama-style layout; formatting prefs in Editor → Unreal AI Editor → Blueprint Formatting.",
       "category": "blueprints",
       "tags": [
         "blueprint",
@@ -102,13 +102,26 @@
             "type": "string",
             "enum": [
               "patched_nodes",
+              "patched_nodes_and_downstream_exec",
               "full_graph"
             ],
-            "description": "patched_nodes: layout only nodes created in this patch (create_node/create_comment), then translate cluster using node bounding boxes and push any overlapping non-patch script nodes right (AABB + gap). full_graph: LayoutEntireGraph on the script graph—use only when an explicit reformat is intended."
+            "description": "patched_nodes: layout only nodes created in this patch (create_node/create_comment), then translate cluster toward wired neighbors and push overlapping non-patch script nodes right (AABB + gap). patched_nodes_and_downstream_exec: same seeds plus BFS along exec outputs within the graph (max 384 nodes total); use after splice/break/interject so downstream tails reflow; per-node x/y hints from create_node are ignored for that pass (layout_hints_ignored). full_graph: LayoutEntireGraph—explicit whole-graph reformat. Aliases repaired to patched_nodes_and_downstream_exec: patched_plus_downstream, downstream, patch_and_tail."
+          },
+          "layout_anchor": {
+            "type": "string",
+            "enum": [
+              "neighbor",
+              "below_existing"
+            ],
+            "description": "neighbor (default): after local layout, translate the cluster toward exec-linked neighbors (existing behavior). below_existing: before layout, shift the laid-out node set downward so its top clears the bottom of existing script nodes plus margin (Autonomix-style free-floating subgraph placement). Ignored when layout_scope is full_graph. Alias repaired: below → below_existing."
           },
           "validate_only": {
             "type": "boolean",
             "description": "When true, validate ops[] without persisting: create_node instances are spawned on the graph then removed. connect between two batch-local nodes simulates TryCreateConnection; if either endpoint is a saved graph node, only pin resolution and output→input direction are checked (wires on saved nodes are not altered)."
+          },
+          "skip_internal_validate_before_apply": {
+            "type": "boolean",
+            "description": "When true and validate_only is false, skip the automatic validate-only dry-run before opening the edit transaction (automation only; normal agent calls should omit this)."
           },
           "ops_json_path": {
             "type": "string",
@@ -139,12 +152,12 @@
                     "k2_class": {
                       "type": "string",
                       "minLength": 1,
-                      "description": "UK2Node class object path, e.g. /Script/BlueprintGraph.K2Node_IfThenElse. Omit when using semantic_kind instead. If both are set, k2_class wins. Use K2Node_ prefix in /Script paths (not UK2Node_). Bare K2Node_* is accepted and expanded to /Script/BlueprintGraph.* (K2Node_Enhanced* → /Script/InputBlueprintNodes.*). Integer math/compare has no K2Node_IntLess/IntAdd — use K2Node_CallFunction + /Script/Engine.KismetMathLibrary + Less_IntInt / Add_IntInt / etc. Do not put node_guid on create_node (schema rejects it). Do not use __UAI_G_* in connect refs (T3D-only)."
+                      "description": "UK2Node class object path, e.g. /Script/BlueprintGraph.K2Node_IfThenElse. Omit when using semantic_kind instead. If both are set, k2_class wins. Use K2Node_ prefix in /Script paths (not UK2Node_). Bare K2Node_* expands to /Script/BlueprintGraph.* (K2Node_Enhanced* → /Script/InputBlueprintNodes.*). Integer math/compare: K2Node_CallFunction + /Script/Engine.KismetMathLibrary + Less_IntInt / Add_IntInt / etc. Do not put node_guid on create_node. Connect refs must be real GUIDs or patch_id (invalid T3D-style tokens rejected)."
                     },
                     "semantic_kind": {
                       "type": "string",
                       "minLength": 1,
-                      "description": "Preferred alternative to k2_class: branch | execution_sequence | call_library_function | variable_get | variable_set | event_override (alias event) | custom_event | dynamic_cast. Required by the graph patch implementation when k2_class is omitted. Must appear in this object for resolver schema validation (additionalProperties: false)."
+                      "description": "Closed set (do not invent): branch | execution_sequence | call_library_function | variable_get | variable_set | event_override (alias event) | custom_event | dynamic_cast. Not valid: literal_int / literal_float / call_function as semantic_kind — use call_library_function + /Script/Engine.KismetSystemLibrary + MakeLiteralInt (etc.) + set_pin_default on patch_id.Value; resolver may rewrite common literal_* mistakes and KismetMathLibrary+MakeLiteral* to SystemLibrary. Required when k2_class is omitted. Must appear in this object for resolver schema validation (additionalProperties: false)."
                     },
                     "event_name": {
                       "type": "string",
@@ -885,7 +898,7 @@
     },
     {
       "tool_id": "blueprint_format_graph",
-      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Run in-process layered layout on a Blueprint script graph (full graph or current selection). Spacing, wire knots, preserve-existing, comment synthesis, and comment reflow follow Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting (or the Blueprint editor toolbar AI format options). Returns structured layout_* metrics. Default format_scope is full_graph.",
+      "summary": "Blueprint Builder sub-turn only (agent_surfaces: blueprint_builder). Run in-process layered layout on a Blueprint script graph (full graph or current selection). Wire knots, preserve-existing, comment synthesis, and comment reflow follow Editor Preferences → Plugins → Unreal AI Editor → Blueprint Formatting (or the Blueprint editor toolbar AI format options). Returns structured layout_* metrics. Default format_scope is full_graph.",
       "category": "blueprints",
       "tags": [
         "blueprint",

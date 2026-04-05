@@ -1,5 +1,8 @@
 #include "Widgets/FUnrealAiChatRunSink.h"
 
+#include "Observability/UnrealAiGameThreadPerf.h"
+#include "Tools/UnrealAiToolCatalog.h"
+#include "Widgets/UnrealAiToolDisplayName.h"
 #include "Tools/UnrealAiBuildBlueprintTag.h"
 #include "Widgets/UnrealAiChatTranscript.h"
 #include "Widgets/UnrealAiToolUi.h"
@@ -13,13 +16,15 @@ FUnrealAiChatRunSink::FUnrealAiChatRunSink(
 	IUnrealAiPersistence* InPersistence,
 	const FString& InProjectId,
 	const FString& InThreadId,
-	const EUnrealAiAgentMode InAgentMode)
+	const EUnrealAiAgentMode InAgentMode,
+	FUnrealAiToolCatalog* InToolCatalog)
 	: Transcript(MoveTemp(InTranscript))
 	, Session(MoveTemp(InSession))
 	, Persistence(InPersistence)
 	, ProjectId(InProjectId)
 	, ThreadId(InThreadId)
 	, AgentMode(InAgentMode)
+	, ToolCatalog(InToolCatalog)
 {
 }
 
@@ -131,6 +136,7 @@ void FUnrealAiChatRunSink::OnContextUserMessages(const TArray<FString>& Messages
 
 void FUnrealAiChatRunSink::OnAssistantDelta(const FString& Chunk)
 {
+	UNREALAI_GT_PERF_SCOPE("UI.RunSink.OnAssistantDelta");
 	if (Transcript.IsValid())
 	{
 		AppendStreamChunkFilteringTranscriptEchoLines(
@@ -142,6 +148,7 @@ void FUnrealAiChatRunSink::OnAssistantDelta(const FString& Chunk)
 
 void FUnrealAiChatRunSink::OnThinkingDelta(const FString& Chunk)
 {
+	UNREALAI_GT_PERF_SCOPE("UI.RunSink.OnThinkingDelta");
 	if (Transcript.IsValid())
 	{
 		AppendStreamChunkFilteringTranscriptEchoLines(
@@ -155,7 +162,8 @@ void FUnrealAiChatRunSink::OnToolCallStarted(const FString& ToolName, const FStr
 {
 	if (Transcript.IsValid())
 	{
-		Transcript->BeginToolCall(ToolName, CallId, UnrealAiTruncateForUi(ArgumentsJson));
+		const FString DisplayTitle = UnrealAiResolveToolUserFacingName(ToolName, ToolCatalog);
+		Transcript->BeginToolCall(ToolName, CallId, UnrealAiTruncateForUi(ArgumentsJson), DisplayTitle);
 	}
 }
 
@@ -307,6 +315,12 @@ void FUnrealAiChatRunSink::OnHarnessProgressLog(const FString& Line)
 	{
 		return;
 	}
+	FString TrimLine = Line;
+	TrimLine.TrimStartAndEndInline();
+	if (UnrealAiIsTranscriptNoiseOrHarnessDisplayLine(TrimLine))
+	{
+		return;
+	}
 	const FString LowerLine = Line.ToLower();
 	if (LowerLine.Contains(TEXT("background query ran")))
 	{
@@ -340,12 +354,11 @@ void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMess
 	// Strip chat-name tokens from any user-visible block (assistant, merged thinking subline, user).
 	// Reasoning streams often carry `<chat-name: ...>` even when assistant text does not.
 	bool bModifiedAnyVisibleText = false;
-	FString ExtractedName;
 
 	for (int32 i = Transcript->Blocks.Num() - 1; i >= 0; --i)
 	{
 		FUnrealAiChatBlock& B = Transcript->Blocks[i];
-		FString LocalName;
+		FString UnusedChatNameFromTag;
 
 		if (B.Kind == EUnrealAiChatBlockKind::Assistant && !B.AssistantText.IsEmpty())
 		{
@@ -366,14 +379,10 @@ void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMess
 					bModifiedAnyVisibleText = true;
 				}
 			}
-			if (UnrealAiStripChatNameTagsFromText(B.AssistantText, LocalName))
+			if (UnrealAiStripChatNameTagsFromText(B.AssistantText, UnusedChatNameFromTag))
 			{
 				B.AssistantText.TrimStartAndEndInline();
 				bModifiedAnyVisibleText = true;
-				if (!LocalName.IsEmpty() && ExtractedName.IsEmpty())
-				{
-					ExtractedName = LocalName;
-				}
 			}
 		}
 		else if (B.Kind == EUnrealAiChatBlockKind::Thinking && !B.ThinkingText.IsEmpty())
@@ -387,28 +396,20 @@ void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMess
 				B.ThinkingText.TrimStartAndEndInline();
 				bModifiedAnyVisibleText = true;
 			}
-			if (UnrealAiStripChatNameTagsFromText(B.ThinkingText, LocalName))
+			if (UnrealAiStripChatNameTagsFromText(B.ThinkingText, UnusedChatNameFromTag))
 			{
 				B.ThinkingText.TrimStartAndEndInline();
 				bModifiedAnyVisibleText = true;
-				if (!LocalName.IsEmpty() && ExtractedName.IsEmpty())
-				{
-					ExtractedName = LocalName;
-				}
 			}
 		}
 		else if (B.Kind == EUnrealAiChatBlockKind::User && !B.UserText.IsEmpty())
 		{
 			FString LocalText = B.UserText;
-			if (UnrealAiStripChatNameTagsFromText(LocalText, LocalName))
+			if (UnrealAiStripChatNameTagsFromText(LocalText, UnusedChatNameFromTag))
 			{
 				B.UserText = LocalText;
 				B.UserText.TrimStartAndEndInline();
 				bModifiedAnyVisibleText = true;
-				if (!LocalName.IsEmpty() && ExtractedName.IsEmpty())
-				{
-					ExtractedName = LocalName;
-				}
 			}
 		}
 	}
@@ -418,31 +419,22 @@ void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMess
 		Transcript->OnStructuralChange.Broadcast();
 	}
 
-	if (!Session.IsValid() || !Session->ChatName.IsEmpty() || !bModifiedAnyVisibleText)
+	if (!Session.IsValid() || !Session->ChatName.IsEmpty())
 	{
 		return;
 	}
 
-	FString FinalName = ExtractedName;
-	if (FinalName.IsEmpty())
+	FString FinalName;
+	for (const FUnrealAiChatBlock& B : Transcript->Blocks)
 	{
-		for (int32 i = Transcript->Blocks.Num() - 1; i >= 0; --i)
+		if (B.Kind != EUnrealAiChatBlockKind::User || B.UserText.IsEmpty())
 		{
-			const FUnrealAiChatBlock& B = Transcript->Blocks[i];
-			if (B.Kind == EUnrealAiChatBlockKind::User && !B.UserText.IsEmpty())
-			{
-				FinalName = B.UserText;
-				FinalName.ReplaceInline(TEXT("\r"), TEXT(""));
-				FinalName.ReplaceInline(TEXT("\n"), TEXT(" "));
-				FinalName.TrimStartAndEndInline();
-				const int32 MaxChars = 56;
-				if (FinalName.Len() > MaxChars)
-				{
-					FinalName = FinalName.Left(MaxChars);
-					FinalName.TrimEndInline();
-				}
-				break;
-			}
+			continue;
+		}
+		FinalName = UnrealAiMakeChatTabTitleFromUserMessage(B.UserText);
+		if (!FinalName.IsEmpty())
+		{
+			break;
 		}
 	}
 

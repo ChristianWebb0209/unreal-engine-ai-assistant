@@ -1,8 +1,12 @@
 #include "Tools/UnrealAiToolDispatch_ArgRepair.h"
 
 #include "Tools/UnrealAiBlueprintFunctionResolve.h"
+#include "Tools/UnrealAiBlueprintGraphNodeGuid.h"
 #include "Tools/UnrealAiToolDispatch_BlueprintTools.h"
 #include "Engine/Blueprint.h"
+#include "K2Node.h"
+#include "Misc/Guid.h"
+#include "UObject/UObjectGlobals.h"
 #include "GameFramework/Character.h"
 
 namespace UnrealAiToolDispatchArgRepair
@@ -76,35 +80,6 @@ namespace UnrealAiToolDispatchArgRepair
 
 	namespace UnrealAiGraphPatchRepair
 	{
-		static bool IsHexDigitChar(TCHAR C)
-		{
-			return (C >= TEXT('0') && C <= TEXT('9')) || (C >= TEXT('A') && C <= TEXT('F')) || (C >= TEXT('a') && C <= TEXT('f'));
-		}
-
-		static bool LooksLikeBareUuid(const FString& S)
-		{
-			if (S.Len() != 36)
-			{
-				return false;
-			}
-			for (int32 I = 0; I < 36; ++I)
-			{
-				const TCHAR C = S[I];
-				if (I == 8 || I == 13 || I == 18 || I == 23)
-				{
-					if (C != TEXT('-'))
-					{
-						return false;
-					}
-				}
-				else if (!IsHexDigitChar(C))
-				{
-					return false;
-				}
-			}
-			return true;
-		}
-
 		static void AppendGraphPatchRepair(
 			const TSharedPtr<FJsonObject>& Audit,
 			int32 OpIndex,
@@ -138,6 +113,184 @@ namespace UnrealAiToolDispatchArgRepair
 			Audit->SetArrayField(Key, Repairs);
 		}
 
+		struct FPendingOpsInsert
+		{
+			int32 AfterOpIndex = INDEX_NONE;
+			TSharedPtr<FJsonObject> OpToInsert;
+		};
+
+		static void ApplyPendingOpsInsertsDescending(const TSharedPtr<FJsonObject>& Args, TArray<FPendingOpsInsert>& Pending)
+		{
+			if (!Args.IsValid() || Pending.Num() == 0)
+			{
+				return;
+			}
+			const TArray<TSharedPtr<FJsonValue>>* SrcOps = nullptr;
+			if (!Args->TryGetArrayField(TEXT("ops"), SrcOps) || !SrcOps)
+			{
+				return;
+			}
+			TArray<TSharedPtr<FJsonValue>> OpsCopy = *SrcOps;
+			Pending.Sort([](const FPendingOpsInsert& A, const FPendingOpsInsert& B) { return A.AfterOpIndex > B.AfterOpIndex; });
+			for (const FPendingOpsInsert& P : Pending)
+			{
+				if (!P.OpToInsert.IsValid() || P.AfterOpIndex < 0 || P.AfterOpIndex >= OpsCopy.Num())
+				{
+					continue;
+				}
+				OpsCopy.Insert(MakeShared<FJsonValueObject>(P.OpToInsert.ToSharedRef()), P.AfterOpIndex + 1);
+			}
+			Args->SetArrayField(TEXT("ops"), OpsCopy);
+			Pending.Reset();
+		}
+
+		/** Models invent semantic_kind literal_int etc.; map to KismetSystemLibrary MakeLiteral* + optional set_pin_default. */
+		static void TryRepairLiteralSemanticKindCreateNode(
+			const TSharedPtr<FJsonObject>& Op,
+			const TSharedPtr<FJsonObject>& Audit,
+			int32 OpIdx,
+			TArray<FPendingOpsInsert>& OutPending)
+		{
+			if (!Op.IsValid())
+			{
+				return;
+			}
+			FString Sem;
+			if (!Op->TryGetStringField(TEXT("semantic_kind"), Sem))
+			{
+				return;
+			}
+			Sem.TrimStartAndEndInline();
+			const FString L = Sem.ToLower();
+			const TCHAR* FuncName = nullptr;
+			if (L == TEXT("literal_int") || L == TEXT("int_literal") || L == TEXT("integer_literal") || L == TEXT("lit_int"))
+			{
+				FuncName = TEXT("MakeLiteralInt");
+			}
+			else if (L == TEXT("literal_float") || L == TEXT("float_literal"))
+			{
+				FuncName = TEXT("MakeLiteralFloat");
+			}
+			else if (L == TEXT("literal_bool") || L == TEXT("bool_literal"))
+			{
+				FuncName = TEXT("MakeLiteralBool");
+			}
+			else
+			{
+				return;
+			}
+			const FString FuncStr(FuncName);
+			FString PatchId;
+			if (!Op->TryGetStringField(TEXT("patch_id"), PatchId) || PatchId.IsEmpty())
+			{
+				return;
+			}
+			const FString OldSem = Sem;
+			Op->RemoveField(TEXT("k2_class"));
+			Op->SetStringField(TEXT("semantic_kind"), TEXT("call_library_function"));
+			Op->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.KismetSystemLibrary"));
+			Op->SetStringField(TEXT("function_name"), FuncStr);
+			AppendGraphPatchRepair(Audit, OpIdx, TEXT("semantic_kind"), OldSem, TEXT("call_library_function+KismetSystemLibrary literal"));
+
+			FString ValStr;
+			bool bEmitDefault = false;
+			if (FuncStr == TEXT("MakeLiteralBool"))
+			{
+				bool bBool = false;
+				if (Op->TryGetBoolField(TEXT("value"), bBool))
+				{
+					ValStr = bBool ? TEXT("true") : TEXT("false");
+					bEmitDefault = true;
+					Op->RemoveField(TEXT("value"));
+				}
+			}
+			if (!bEmitDefault)
+			{
+				const TSharedPtr<FJsonValue> V = Op->TryGetField(TEXT("value"));
+				if (V.IsValid())
+				{
+					if (V->Type == EJson::Number)
+					{
+						const double N = V->AsNumber();
+						if (FuncStr == TEXT("MakeLiteralInt"))
+						{
+							ValStr = FString::FromInt((int32)N);
+						}
+						else if (FuncStr == TEXT("MakeLiteralFloat"))
+						{
+							ValStr = FString::SanitizeFloat(N);
+						}
+						else
+						{
+							ValStr = (N != 0.0) ? TEXT("true") : TEXT("false");
+						}
+						bEmitDefault = true;
+					}
+					else if (V->Type == EJson::Boolean && FuncStr == TEXT("MakeLiteralBool"))
+					{
+						ValStr = V->AsBool() ? TEXT("true") : TEXT("false");
+						bEmitDefault = true;
+					}
+					else if (V->Type == EJson::String)
+					{
+						ValStr = V->AsString();
+						ValStr.TrimStartAndEndInline();
+						bEmitDefault = !ValStr.IsEmpty();
+					}
+					if (bEmitDefault)
+					{
+						Op->RemoveField(TEXT("value"));
+					}
+				}
+			}
+			if (bEmitDefault && !ValStr.IsEmpty())
+			{
+				TSharedPtr<FJsonObject> Sp = MakeShared<FJsonObject>();
+				Sp->SetStringField(TEXT("op"), TEXT("set_pin_default"));
+				Sp->SetStringField(TEXT("ref"), PatchId + TEXT(".Value"));
+				Sp->SetStringField(TEXT("value"), ValStr);
+				OutPending.Add(FPendingOpsInsert{OpIdx, Sp});
+			}
+		}
+
+		/** Older prompts used KismetMathLibrary for MakeLiteral*; those UFunctions live on UKismetSystemLibrary. */
+		static void TryRepairMakeLiteralKismetClassPath(
+			const TSharedPtr<FJsonObject>& Op,
+			const TSharedPtr<FJsonObject>& Audit,
+			int32 OpIdx)
+		{
+			if (!Op.IsValid())
+			{
+				return;
+			}
+			FString Fn;
+			if (!Op->TryGetStringField(TEXT("function_name"), Fn) || Fn.IsEmpty())
+			{
+				return;
+			}
+			if (!Fn.StartsWith(TEXT("MakeLiteral"), ESearchCase::IgnoreCase))
+			{
+				return;
+			}
+			FString Cp;
+			if (!Op->TryGetStringField(TEXT("class_path"), Cp) || Cp.IsEmpty())
+			{
+				return;
+			}
+			if (!Cp.Contains(TEXT("KismetMathLibrary"), ESearchCase::IgnoreCase))
+			{
+				return;
+			}
+			const FString Old = Cp;
+			Op->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.KismetSystemLibrary"));
+			AppendGraphPatchRepair(
+				Audit,
+				OpIdx,
+				TEXT("class_path"),
+				Old,
+				TEXT("/Script/Engine.KismetSystemLibrary (MakeLiteral* is on KismetSystemLibrary)"));
+		}
+
 		static void MaybePrefixGuidOnNodePinRef(FString& Ref, const TSharedPtr<FJsonObject>& Audit, int32 OpIdx, const TCHAR* FieldLabel)
 		{
 			Ref.TrimStartAndEndInline();
@@ -152,13 +305,65 @@ namespace UnrealAiToolDispatchArgRepair
 				return;
 			}
 			const FString Head = Ref.Left(Dot);
-			if (!LooksLikeBareUuid(Head))
+			const FString Tail = Ref.Mid(Dot);
+			FGuid G;
+			FString Canon;
+			if (!UnrealAiTryParseBlueprintGraphNodeGuid(Head, G, &Canon))
 			{
 				return;
 			}
 			const FString Old = Ref;
-			Ref = FString(TEXT("guid:")) + Ref;
+			Ref = FString(TEXT("guid:")) + Canon + Tail;
 			AppendGraphPatchRepair(Audit, OpIdx, FieldLabel, Old, Ref);
+		}
+
+		static void RepairConnectExecNodeRefs(const TSharedPtr<FJsonObject>& OpMut, const TSharedPtr<FJsonObject>& Audit, int32 OpIdx)
+		{
+			if (!OpMut.IsValid())
+			{
+				return;
+			}
+			FJsonObject* Op = OpMut.Get();
+			auto NormalizeNodeRef = [&](FString& S, const TCHAR* FieldLabel)
+			{
+				S.TrimStartAndEndInline();
+				SanitizeUnrealPathString(S);
+				if (S.StartsWith(TEXT("guid:"), ESearchCase::IgnoreCase))
+				{
+					return;
+				}
+				FGuid G;
+				FString Canon;
+				if (UnrealAiTryParseBlueprintGraphNodeGuid(S, G, &Canon))
+				{
+					const FString Old = S;
+					S = FString(TEXT("guid:")) + Canon;
+					AppendGraphPatchRepair(Audit, OpIdx, FieldLabel, Old, S);
+				}
+			};
+			FString FromN, ToN;
+			Op->TryGetStringField(TEXT("from_node"), FromN);
+			Op->TryGetStringField(TEXT("to_node"), ToN);
+			if (FromN.IsEmpty())
+			{
+				Op->TryGetStringField(TEXT("from"), FromN);
+			}
+			if (ToN.IsEmpty())
+			{
+				Op->TryGetStringField(TEXT("to"), ToN);
+			}
+			NormalizeNodeRef(FromN, TEXT("from_node"));
+			NormalizeNodeRef(ToN, TEXT("to_node"));
+			if (!FromN.IsEmpty())
+			{
+				Op->SetStringField(TEXT("from_node"), FromN);
+			}
+			if (!ToN.IsEmpty())
+			{
+				Op->SetStringField(TEXT("to_node"), ToN);
+			}
+			Op->RemoveField(TEXT("from"));
+			Op->RemoveField(TEXT("to"));
 		}
 
 		static void ApplyK2ClassAliasesForGraphPatch(FString& S)
@@ -182,6 +387,22 @@ namespace UnrealAiToolDispatchArgRepair
 			{
 				S = CallFunction;
 			}
+		}
+
+		static void RepairSemanticKindCallFunctionTypo(const TSharedPtr<FJsonObject>& Op, const TSharedPtr<FJsonObject>& Audit, int32 OpIdx)
+		{
+			FString Sem;
+			if (!Op->TryGetStringField(TEXT("semantic_kind"), Sem))
+			{
+				return;
+			}
+			Sem.TrimStartAndEndInline();
+			if (!Sem.Equals(TEXT("call_function"), ESearchCase::IgnoreCase))
+			{
+				return;
+			}
+			Op->SetStringField(TEXT("semantic_kind"), TEXT("call_library_function"));
+			AppendGraphPatchRepair(Audit, OpIdx, TEXT("semantic_kind"), TEXT("call_function"), TEXT("call_library_function"));
 		}
 
 		static void NormalizeK2ClassPathForGraphPatch(FString& S)
@@ -247,6 +468,50 @@ namespace UnrealAiToolDispatchArgRepair
 			}
 			UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *Path);
 			return BP && BP->ParentClass && BP->ParentClass->IsChildOf(ACharacter::StaticClass());
+		}
+
+		static void MaybeFillMissingCharacterJumpClassPath(
+			const TSharedPtr<FJsonObject>& Op,
+			const TSharedPtr<FJsonObject>& RootArgs,
+			const TSharedPtr<FJsonObject>& Audit,
+			int32 OpIdx)
+		{
+			FString Fn;
+			Op->TryGetStringField(TEXT("function_name"), Fn);
+			Fn.TrimStartAndEndInline();
+			if (!Fn.Equals(TEXT("Jump"), ESearchCase::IgnoreCase))
+			{
+				return;
+			}
+			FString Cp;
+			Op->TryGetStringField(TEXT("class_path"), Cp);
+			Cp.TrimStartAndEndInline();
+			if (!Cp.IsEmpty())
+			{
+				return;
+			}
+			FString Sem, K2;
+			Op->TryGetStringField(TEXT("semantic_kind"), Sem);
+			Op->TryGetStringField(TEXT("k2_class"), K2);
+			Sem.TrimStartAndEndInline();
+			K2.TrimStartAndEndInline();
+			const FString SemL = Sem.ToLower();
+			const bool bCallish = SemL == TEXT("call_library_function") || SemL == TEXT("call_function") || K2.Contains(TEXT("K2Node_CallFunction"));
+			if (!bCallish)
+			{
+				return;
+			}
+			FString BpPath;
+			if (!RootArgs.IsValid() || !RootArgs->TryGetStringField(TEXT("blueprint_path"), BpPath) || BpPath.IsEmpty())
+			{
+				return;
+			}
+			if (!BlueprintParentIsCharacter(BpPath))
+			{
+				return;
+			}
+			Op->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.Character"));
+			AppendGraphPatchRepair(Audit, OpIdx, TEXT("class_path"), TEXT("<empty Jump>"), TEXT("/Script/Engine.Character"));
 		}
 
 		static void RepairCallFunctionClassPathForCharacterApi(
@@ -325,6 +590,26 @@ namespace UnrealAiToolDispatchArgRepair
 			else if (Lf == TEXT("onlanded") || Lf == TEXT("beginland") || Lf == TEXT("landedevent"))
 			{
 				TryCanon(TEXT("Landed"));
+			}
+			if (!Outer.IsEmpty())
+			{
+				UClass* OC = LoadObject<UClass>(nullptr, *Outer);
+				if (!OC)
+				{
+					AppendGraphPatchRepair(Audit, OpIdx, TEXT("event_override.outer_class_path"), Outer, TEXT("<cleared: invalid class path>"));
+					Outer.Reset();
+					Ev->RemoveField(TEXT("outer_class_path"));
+				}
+			}
+			if (Outer.IsEmpty() && !Fn.IsEmpty())
+			{
+				FString DefOuter;
+				if (UnrealAiBlueprintFunctionResolve::TryDefaultOuterClassPathForK2Event(Fn, DefOuter) && !DefOuter.IsEmpty())
+				{
+					AppendGraphPatchRepair(Audit, OpIdx, TEXT("event_override.outer_class_path"), TEXT("<empty>"), DefOuter);
+					Outer = DefOuter;
+					Ev->SetStringField(TEXT("outer_class_path"), Outer);
+				}
 			}
 			if (Outer.StartsWith(TEXT("/Game/")) && !Fn.IsEmpty() && Ch->FindFunctionByName(FName(*Fn)))
 			{
@@ -453,6 +738,102 @@ namespace UnrealAiToolDispatchArgRepair
 				(*CfObj)->SetStringField(TEXT("class_path"), C2);
 				(*CfObj)->SetStringField(TEXT("function_name"), F2);
 			}
+		}
+
+		static bool SemanticKindBlocksGameplayClassK2Coercion(const FString& SemLower)
+		{
+			return SemLower == TEXT("event_override") || SemLower == TEXT("event") || SemLower == TEXT("custom_event")
+				|| SemLower == TEXT("branch") || SemLower == TEXT("execution_sequence") || SemLower == TEXT("variable_get")
+				|| SemLower == TEXT("variable_set") || SemLower == TEXT("dynamic_cast");
+		}
+
+		static bool FunctionNameLooksLikeCharacterEventGraphEntry(const FString& FnLower)
+		{
+			return FnLower == TEXT("landed") || FnLower == TEXT("receivebeginplay") || FnLower == TEXT("tick")
+				|| FnLower == TEXT("endplay") || FnLower == TEXT("receiveendplay") || FnLower == TEXT("receivepossessed")
+				|| FnLower == TEXT("receiveunpossessed") || FnLower == TEXT("restarted");
+		}
+
+		/** k2_class sometimes holds a gameplay UClass (e.g. /Script/Engine.Character); k2_class must be a UK2Node subclass. */
+		static void MaybePromoteNonUk2NodeK2ClassToCallFunction(
+			const TSharedPtr<FJsonObject>& Op,
+			const TSharedPtr<FJsonObject>& RootArgs,
+			const TSharedPtr<FJsonObject>& Audit,
+			int32 OpIdx)
+		{
+			const TSharedPtr<FJsonObject>* EvObj = nullptr;
+			if (Op->TryGetObjectField(TEXT("event_override"), EvObj) && EvObj && (*EvObj).IsValid())
+			{
+				return;
+			}
+			FString Sem;
+			Op->TryGetStringField(TEXT("semantic_kind"), Sem);
+			Sem.TrimStartAndEndInline();
+			const FString SemLow = Sem.ToLower();
+			if (SemanticKindBlocksGameplayClassK2Coercion(SemLow))
+			{
+				return;
+			}
+			FString K2;
+			if (!Op->TryGetStringField(TEXT("k2_class"), K2) || K2.IsEmpty())
+			{
+				return;
+			}
+			FString K2Norm = K2;
+			NormalizeK2ClassPathForGraphPatch(K2Norm);
+			if (K2Norm.Contains(TEXT("K2Node_"), ESearchCase::IgnoreCase))
+			{
+				return;
+			}
+			UClass* Cls = LoadObject<UClass>(nullptr, *K2Norm);
+			if (!Cls || Cls->IsChildOf(UK2Node::StaticClass()))
+			{
+				return;
+			}
+			FString Fn;
+			Op->TryGetStringField(TEXT("function_name"), Fn);
+			Fn.TrimStartAndEndInline();
+			const TSharedPtr<FJsonObject>* CfObj = nullptr;
+			const bool bHasCallNest = Op->TryGetObjectField(TEXT("call_function"), CfObj) && CfObj && (*CfObj).IsValid();
+			if (Fn.IsEmpty() && bHasCallNest)
+			{
+				(*CfObj)->TryGetStringField(TEXT("function_name"), Fn);
+				Fn.TrimStartAndEndInline();
+			}
+			const FString FnLow = Fn.ToLower();
+			if (!FnLow.IsEmpty() && FunctionNameLooksLikeCharacterEventGraphEntry(FnLow) && !bHasCallNest
+				&& (SemLow.IsEmpty() || SemLow == TEXT("call_library_function") || SemLow == TEXT("call_function")))
+			{
+				return;
+			}
+			FString ClassPathExisting;
+			Op->TryGetStringField(TEXT("class_path"), ClassPathExisting);
+			ClassPathExisting.TrimStartAndEndInline();
+			if (ClassPathExisting.IsEmpty())
+			{
+				if (Fn.IsEmpty() || !Cls->FindFunctionByName(FName(*Fn)))
+				{
+					return;
+				}
+				Op->SetStringField(TEXT("class_path"), K2Norm);
+			}
+			const FString OldK2 = K2;
+			Op->RemoveField(TEXT("k2_class"));
+			if (SemLow == TEXT("call_function"))
+			{
+				Op->SetStringField(TEXT("semantic_kind"), TEXT("call_library_function"));
+				AppendGraphPatchRepair(Audit, OpIdx, TEXT("semantic_kind"), TEXT("call_function"), TEXT("call_library_function"));
+			}
+			else if (SemLow.IsEmpty() || SemLow == TEXT("call_library_function"))
+			{
+				Op->SetStringField(TEXT("semantic_kind"), TEXT("call_library_function"));
+				if (SemLow.IsEmpty())
+				{
+					AppendGraphPatchRepair(Audit, OpIdx, TEXT("semantic_kind"), TEXT("<empty>"), TEXT("call_library_function"));
+				}
+			}
+			AppendGraphPatchRepair(Audit, OpIdx, TEXT("k2_class"), OldK2, TEXT("<promoted to class_path>"));
+			RepairCreateNodeCallFunctionPaths(Op, RootArgs, Audit, OpIdx);
 		}
 
 		static void NormalizeAddVariableTypeString(FString& T, const TSharedPtr<FJsonObject>& Audit, int32 OpIdx)
@@ -591,15 +972,122 @@ namespace UnrealAiToolDispatchArgRepair
 			}
 		}
 
+		/** Models sometimes emit create_node with semantic_kind set_pin_default; that is a separate op, not a node kind. */
+		static void TryPromoteCreateNodeMisusedSetPinDefaultSemanticToOp(
+			const TSharedPtr<FJsonObject>& Op,
+			const TSharedPtr<FJsonObject>& Audit,
+			int32 OpIdx,
+			FString& InOutOpName)
+		{
+			if (!Op.IsValid() || !InOutOpName.Equals(TEXT("create_node"), ESearchCase::IgnoreCase))
+			{
+				return;
+			}
+			FString Sk;
+			Op->TryGetStringField(TEXT("semantic_kind"), Sk);
+			Sk.TrimStartAndEndInline();
+			if (!Sk.Equals(TEXT("set_pin_default"), ESearchCase::IgnoreCase))
+			{
+				return;
+			}
+			Op->SetStringField(TEXT("op"), TEXT("set_pin_default"));
+			Op->RemoveField(TEXT("semantic_kind"));
+			Op->RemoveField(TEXT("k2_class"));
+			InOutOpName = TEXT("set_pin_default");
+			AppendGraphPatchRepair(
+				Audit,
+				OpIdx,
+				TEXT("op"),
+				TEXT("create_node"),
+				TEXT("set_pin_default (semantic_kind set_pin_default is not a UK2Node kind)"));
+
+			FString Ref;
+			Op->TryGetStringField(TEXT("ref"), Ref);
+			Ref.TrimStartAndEndInline();
+			if (Ref.IsEmpty())
+			{
+				Op->TryGetStringField(TEXT("node_ref"), Ref);
+				Ref.TrimStartAndEndInline();
+			}
+			if (Ref.IsEmpty())
+			{
+				FString PinName;
+				Op->TryGetStringField(TEXT("pin"), PinName);
+				if (PinName.IsEmpty())
+				{
+					Op->TryGetStringField(TEXT("pin_name"), PinName);
+				}
+				PinName.TrimStartAndEndInline();
+				FString Pid;
+				Op->TryGetStringField(TEXT("patch_id"), Pid);
+				Pid.TrimStartAndEndInline();
+				if (!Pid.IsEmpty())
+				{
+					if (PinName.IsEmpty())
+					{
+						PinName = TEXT("Value");
+						AppendGraphPatchRepair(Audit, OpIdx, TEXT("pin"), TEXT("<inferred>"), PinName);
+					}
+					Ref = Pid + TEXT(".") + PinName;
+				}
+			}
+			if (!Ref.IsEmpty())
+			{
+				Op->SetStringField(TEXT("ref"), Ref);
+			}
+			Op->RemoveField(TEXT("node_ref"));
+			Op->RemoveField(TEXT("patch_id"));
+			Op->RemoveField(TEXT("pin"));
+			Op->RemoveField(TEXT("pin_name"));
+			Op->RemoveField(TEXT("x"));
+			Op->RemoveField(TEXT("y"));
+		}
+
 		void RepairBlueprintGraphPatchToolArgsImpl(
 			const TSharedPtr<FJsonObject>& Args,
-			const TSharedPtr<FJsonObject>& Audit)
+			const TSharedPtr<FJsonObject>& Audit,
+			const bool bRecurseAfterLiteralInserts)
 		{
 			if (!Args.IsValid())
 			{
 				return;
 			}
+			TArray<FPendingOpsInsert> PendingLiteralInserts;
 			RepairBlueprintAssetPathArgs(Args);
+
+			{
+				FString Ls;
+				if (Args->TryGetStringField(TEXT("layout_scope"), Ls))
+				{
+					FString T = Ls;
+					T.TrimStartAndEndInline();
+					FString Canon;
+					if (T.Equals(TEXT("patched_plus_downstream"), ESearchCase::IgnoreCase)
+						|| T.Equals(TEXT("downstream"), ESearchCase::IgnoreCase)
+						|| T.Equals(TEXT("patch_and_tail"), ESearchCase::IgnoreCase))
+					{
+						Canon = TEXT("patched_nodes_and_downstream_exec");
+					}
+					if (!Canon.IsEmpty())
+					{
+						Args->SetStringField(TEXT("layout_scope"), Canon);
+						AppendGraphPatchRepair(Audit, -1, TEXT("layout_scope"), Ls, Canon);
+					}
+				}
+			}
+			{
+				FString La;
+				if (Args->TryGetStringField(TEXT("layout_anchor"), La))
+				{
+					FString T = La;
+					T.TrimStartAndEndInline();
+					if (T.Equals(TEXT("below"), ESearchCase::IgnoreCase))
+					{
+						Args->SetStringField(TEXT("layout_anchor"), TEXT("below_existing"));
+						AppendGraphPatchRepair(Audit, -1, TEXT("layout_anchor"), La, TEXT("below_existing"));
+					}
+				}
+			}
 			const TArray<TSharedPtr<FJsonValue>>* Ops = nullptr;
 			if (!Args->TryGetArrayField(TEXT("ops"), Ops) || !Ops)
 			{
@@ -617,6 +1105,31 @@ namespace UnrealAiToolDispatchArgRepair
 				FString OpName;
 				Op->TryGetStringField(TEXT("op"), OpName);
 				OpName.TrimStartAndEndInline();
+				TryPromoteCreateNodeMisusedSetPinDefaultSemanticToOp(Op, Audit, OpIdx, OpName);
+				if (OpName.Equals(TEXT("call_function"), ESearchCase::IgnoreCase))
+				{
+					FString PatchId;
+					if (!Op->TryGetStringField(TEXT("patch_id"), PatchId) || PatchId.IsEmpty())
+					{
+						PatchId = FString::Printf(TEXT("auto_call_%d"), OpIdx);
+						Op->SetStringField(TEXT("patch_id"), PatchId);
+						AppendGraphPatchRepair(Audit, OpIdx, TEXT("patch_id"), TEXT("<generated>"), PatchId);
+					}
+					Op->SetStringField(TEXT("op"), TEXT("create_node"));
+					OpName = TEXT("create_node");
+					FString Sk;
+					Op->TryGetStringField(TEXT("semantic_kind"), Sk);
+					Sk.TrimStartAndEndInline();
+					if (Sk.IsEmpty())
+					{
+						Op->SetStringField(TEXT("semantic_kind"), TEXT("call_library_function"));
+						AppendGraphPatchRepair(Audit, OpIdx, TEXT("op"), TEXT("call_function"), TEXT("create_node+call_library_function"));
+					}
+					else
+					{
+						AppendGraphPatchRepair(Audit, OpIdx, TEXT("op"), TEXT("call_function"), TEXT("create_node"));
+					}
+				}
 				if (OpName.Equals(TEXT("connect"), ESearchCase::IgnoreCase)
 					|| OpName.Equals(TEXT("break_link"), ESearchCase::IgnoreCase))
 				{
@@ -625,6 +1138,10 @@ namespace UnrealAiToolDispatchArgRepair
 				else if (OpName.Equals(TEXT("splice_on_link"), ESearchCase::IgnoreCase))
 				{
 					RepairGraphPatchConnectLikeOp(Op, Audit, OpIdx);
+				}
+				else if (OpName.Equals(TEXT("connect_exec"), ESearchCase::IgnoreCase))
+				{
+					RepairConnectExecNodeRefs(Op, Audit, OpIdx);
 				}
 				else if (OpName.Equals(TEXT("add_variable"), ESearchCase::IgnoreCase))
 				{
@@ -689,9 +1206,20 @@ namespace UnrealAiToolDispatchArgRepair
 					Op->RemoveField(TEXT("class_name"));
 					Op->RemoveField(TEXT("node_class"));
 					Op->RemoveField(TEXT("kind"));
+					TryRepairLiteralSemanticKindCreateNode(Op, Audit, OpIdx, PendingLiteralInserts);
+					TryRepairMakeLiteralKismetClassPath(Op, Audit, OpIdx);
+					RepairSemanticKindCallFunctionTypo(Op, Audit, OpIdx);
 					HoistAndRepairEventOverrideOnCreateNode(Op, Args, Audit, OpIdx);
+					MaybePromoteNonUk2NodeK2ClassToCallFunction(Op, Args, Audit, OpIdx);
 					RepairCreateNodeCallFunctionPaths(Op, Args, Audit, OpIdx);
+					MaybeFillMissingCharacterJumpClassPath(Op, Args, Audit, OpIdx);
 				}
+			}
+			const int32 LiteralInsertCount = PendingLiteralInserts.Num();
+			ApplyPendingOpsInsertsDescending(Args, PendingLiteralInserts);
+			if (bRecurseAfterLiteralInserts && LiteralInsertCount > 0)
+			{
+				RepairBlueprintGraphPatchToolArgsImpl(Args, Audit, false);
 			}
 		}
 	} // namespace UnrealAiGraphPatchRepair
@@ -700,6 +1228,6 @@ namespace UnrealAiToolDispatchArgRepair
 		const TSharedPtr<FJsonObject>& Args,
 		const TSharedPtr<FJsonObject>& Audit)
 	{
-		UnrealAiGraphPatchRepair::RepairBlueprintGraphPatchToolArgsImpl(Args, Audit);
+		UnrealAiGraphPatchRepair::RepairBlueprintGraphPatchToolArgsImpl(Args, Audit, true);
 	}
 } // namespace UnrealAiToolDispatchArgRepair

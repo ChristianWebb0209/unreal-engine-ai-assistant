@@ -13,15 +13,6 @@ enum class EUnrealAiBlueprintCommentsMode : uint8
 	Verbose UMETA(DisplayName = "Verbose")
 };
 
-/** Column/row spacing for the bundled Blueprint graph formatter. */
-UENUM()
-enum class EUnrealAiBlueprintFormatSpacingDensity : uint8
-{
-	Sparse UMETA(DisplayName = "Sparse"),
-	Medium UMETA(DisplayName = "Medium"),
-	Dense UMETA(DisplayName = "Dense")
-};
-
 UCLASS(Config = Editor, defaultconfig, meta = (DisplayName = "Unreal AI Editor"))
 class UUnrealAiEditorSettings : public UDeveloperSettings
 {
@@ -78,10 +69,6 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Blueprint Formatting", meta = (DisplayName = "Comment synthesis"))
 	EUnrealAiBlueprintCommentsMode BlueprintCommentsMode = EUnrealAiBlueprintCommentsMode::Minimal;
 
-	/** Horizontal/vertical spacing between laid-out nodes. */
-	UPROPERTY(EditAnywhere, Config, Category = "Blueprint Formatting", meta = (DisplayName = "Spacing density"))
-	EUnrealAiBlueprintFormatSpacingDensity BlueprintFormatSpacingDensity = EUnrealAiBlueprintFormatSpacingDensity::Medium;
-
 	/** Insert reroute knots on long or crowded data wires (best-effort). */
 	UPROPERTY(EditAnywhere, Config, Category = "Blueprint Formatting", meta = (DisplayName = "Use wire knots"))
 	bool bBlueprintFormatUseWireKnots = false;
@@ -122,4 +109,41 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Config, Category = "Agent", meta = (DisplayName = "Console command: legacy wide exec (unsafe)"))
 	bool bConsoleCommandLegacyWideExec = false;
+
+	/** When on (default), record scoped timings and log each scope — see Output Log category LogUnrealAiPerf. Override with `unrealai.GtPerf 0` (off) or `1` (on). */
+	UPROPERTY(EditAnywhere, Config, Category = "Diagnostics", meta = (DisplayName = "Game-thread perf scopes"))
+	bool bGameThreadPerfLogging = true;
+
+	/**
+	 * Reserved for future filtering; scopes are always logged when perf is enabled. Hitch tagging still uses
+	 * GameThreadPerfHitchThresholdMs.
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "Diagnostics", meta = (ClampMin = "0", ClampMax = "1000"))
+	float GameThreadPerfLogThresholdMs = 0.f;
+
+	/** At or above this duration (ms), log lines are tagged as a hitch (same channel, easy grep). */
+	UPROPERTY(EditAnywhere, Config, Category = "Diagnostics", meta = (ClampMin = "1", ClampMax = "120000"))
+	float GameThreadPerfHitchThresholdMs = 1000.f;
+
+	/** Max rows kept for `UnrealAi.GtPerf.Dump` (oldest dropped). */
+	UPROPERTY(EditAnywhere, Config, Category = "Diagnostics", meta = (ClampMin = "32", ClampMax = "4096"))
+	int32 GameThreadPerfRingMax = 256;
+
+	/** Reject blueprint_graph_patch when ops[].Num() exceeds this (split batches or use ops_json_path). */
+	UPROPERTY(EditAnywhere, Config, Category = "Blueprint Tools", meta = (ClampMin = "8", ClampMax = "2048"))
+	int32 MaxOpsPerBlueprintGraphPatch = 128;
+
+	/**
+	 * When true, blueprint_graph_patch (non-validate_only) runs the same simulation as validate_only before opening
+	 * the edit transaction. Disable only for automation that already validated the same payload.
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "Blueprint Tools", meta = (DisplayName = "Graph patch: internal validate before apply"))
+	bool bBlueprintGraphPatchInternalValidateBeforeApply = true;
+
+	/**
+	 * When true, if op i fails during a real apply, ops 0..i-1 stay committed (transaction is not cancelled).
+	 * When false, the entire batch rolls back on the first failing op (strict atomicity).
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "Blueprint Tools", meta = (DisplayName = "Graph patch: keep successful ops on failure"))
+	bool bBlueprintGraphPatchKeepOpsOnFailure = true;
 };

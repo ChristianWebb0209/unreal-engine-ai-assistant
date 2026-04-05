@@ -1,5 +1,9 @@
 #include "Transport/FOpenAiCompatibleHttpTransport.h"
 
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+#endif
+
 #include "Harness/UnrealAiConversationJson.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpBase.h"
@@ -8,10 +12,17 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Containers/StringConv.h"
 #include "Misc/DateTime.h"
 #include "Misc/UnrealAiHarnessProgressTelemetry.h"
+#include "Observability/UnrealAiGameThreadPerf.h"
 #include "Misc/UnrealAiWaitTimePolicy.h"
+#include "Misc/UnrealAiPluginHttpConcurrency.h"
 #include "Misc/DefaultValueHelper.h"
+#include "HAL/CriticalSection.h"
+#include "HAL/PlatformProcess.h"
+
+#include <atomic>
 
 namespace OpenAiTransportUtil
 {
@@ -162,133 +173,237 @@ namespace OpenAiTransportUtil
 		OnEvent.ExecuteIfBound(Fin);
 	}
 
-	static void ParseSseBody(const FString& Body, const FUnrealAiLlmStreamCallback& OnEvent)
+	struct FSseStreamParseSession
 	{
-		TArray<FString> Lines;
-		Body.ParseIntoArrayLines(Lines, false);
+		TArray<uint8> LineCarryUtf8;
+		FCriticalSection Cs;
 		FUnrealAiTokenUsage LastUsage;
 		FString LastFinishReason;
 		bool bEmittedFinish = false;
+		std::atomic<bool> bReceivedProgressBytes{false};
+		int64 LastProcessedContentLen = 0;
 
-		auto EmitFinalFinish = [&OnEvent, &LastUsage, &LastFinishReason, &bEmittedFinish]()
+		void EmitFinalFinishIfNeeded(const FUnrealAiLlmStreamCallback& OnEvent);
+		void ProcessTrimmedLine(const FString& Line, const FUnrealAiLlmStreamCallback& OnEvent);
+		void AppendResponseBytes(const uint8* Data, int32 Len, const FUnrealAiLlmStreamCallback& OnEvent);
+		void FlushCarryAsLine(const FUnrealAiLlmStreamCallback& OnEvent);
+		void ProcessNewBytesFromResponse(const FHttpResponsePtr& R, const FUnrealAiLlmStreamCallback& OnEvent);
+	};
+
+	void FSseStreamParseSession::EmitFinalFinishIfNeeded(const FUnrealAiLlmStreamCallback& OnEvent)
+	{
+		FUnrealAiLlmStreamEvent Fin;
+		Fin.Type = EUnrealAiLlmStreamEventType::Finish;
 		{
+			FScopeLock Lock(&Cs);
 			if (bEmittedFinish)
 			{
 				return;
 			}
 			bEmittedFinish = true;
-			FUnrealAiLlmStreamEvent Fin;
-			Fin.Type = EUnrealAiLlmStreamEventType::Finish;
 			Fin.FinishReason = LastFinishReason.IsEmpty() ? TEXT("stop") : LastFinishReason;
 			Fin.Usage = LastUsage;
-			OnEvent.ExecuteIfBound(Fin);
-		};
+		}
+		OnEvent.ExecuteIfBound(Fin);
+	}
 
+	void FSseStreamParseSession::ProcessTrimmedLine(const FString& Line, const FUnrealAiLlmStreamCallback& OnEvent)
+	{
+		FString Work = Line;
+		Work.TrimStartAndEndInline();
+		if (Work.IsEmpty())
+		{
+			return;
+		}
+		if (!Work.StartsWith(TEXT("data:")))
+		{
+			return;
+		}
+		FString Payload = Work.Mid(5).TrimStart();
+		if (Payload == TEXT("[DONE]"))
+		{
+			EmitFinalFinishIfNeeded(OnEvent);
+			return;
+		}
+		TSharedPtr<FJsonObject> Chunk;
+		TSharedRef<TJsonReader<>> JR = TJsonReaderFactory<>::Create(Payload);
+		if (!FJsonSerializer::Deserialize(JR, Chunk) || !Chunk.IsValid())
+		{
+			return;
+		}
+		{
+			FScopeLock Lock(&Cs);
+			ParseUsage(Chunk, LastUsage);
+		}
+		const TArray<TSharedPtr<FJsonValue>>* Choices = nullptr;
+		if (!Chunk->TryGetArrayField(TEXT("choices"), Choices) || !Choices || Choices->Num() == 0)
+		{
+			return;
+		}
+		const TSharedPtr<FJsonObject>* Choice0 = nullptr;
+		if (!(*Choices)[0]->TryGetObject(Choice0) || !Choice0->IsValid())
+		{
+			return;
+		}
+		const TSharedPtr<FJsonObject>* Delta = nullptr;
+		if (!(*Choice0)->TryGetObjectField(TEXT("delta"), Delta) || !Delta->IsValid())
+		{
+			return;
+		}
+		FString Part;
+		if ((*Delta)->TryGetStringField(TEXT("content"), Part) && !Part.IsEmpty())
+		{
+			FUnrealAiLlmStreamEvent De;
+			De.Type = EUnrealAiLlmStreamEventType::AssistantDelta;
+			De.DeltaText = Part;
+			OnEvent.ExecuteIfBound(De);
+		}
+		FString Rc;
+		if (((*Delta)->TryGetStringField(TEXT("reasoning_content"), Rc) || (*Delta)->TryGetStringField(TEXT("reasoning"), Rc))
+			&& !Rc.IsEmpty())
+		{
+			FUnrealAiLlmStreamEvent Th;
+			Th.Type = EUnrealAiLlmStreamEventType::ThinkingDelta;
+			Th.DeltaText = Rc;
+			OnEvent.ExecuteIfBound(Th);
+		}
+		const TArray<TSharedPtr<FJsonValue>>* TcArr = nullptr;
+		if ((*Delta)->TryGetArrayField(TEXT("tool_calls"), TcArr) && TcArr)
+		{
+			for (const TSharedPtr<FJsonValue>& V : *TcArr)
+			{
+				const TSharedPtr<FJsonObject>* Tco = nullptr;
+				if (!V.IsValid() || !V->TryGetObject(Tco) || !Tco->IsValid())
+				{
+					continue;
+				}
+				FUnrealAiToolCallSpec Tc;
+				(*Tco)->TryGetStringField(TEXT("id"), Tc.Id);
+				double IdxNum = 0;
+				if ((*Tco)->TryGetNumberField(TEXT("index"), IdxNum))
+				{
+					Tc.StreamMergeIndex = static_cast<int32>(IdxNum);
+				}
+				const TSharedPtr<FJsonObject>* Fn = nullptr;
+				if ((*Tco)->TryGetObjectField(TEXT("function"), Fn) && Fn->IsValid())
+				{
+					(*Fn)->TryGetStringField(TEXT("name"), Tc.Name);
+					FString Args;
+					if ((*Fn)->TryGetStringField(TEXT("arguments"), Args))
+					{
+						Tc.ArgumentsJson += Args;
+					}
+				}
+				if (Tc.StreamMergeIndex >= 0 || !Tc.Id.IsEmpty() || !Tc.Name.IsEmpty()
+					|| !Tc.ArgumentsJson.IsEmpty())
+				{
+					FUnrealAiLlmStreamEvent TcEv;
+					TcEv.Type = EUnrealAiLlmStreamEventType::ToolCalls;
+					TcEv.ToolCalls.Add(Tc);
+					OnEvent.ExecuteIfBound(TcEv);
+				}
+			}
+		}
+		FString FinishReason;
+		if ((*Choice0)->TryGetStringField(TEXT("finish_reason"), FinishReason) && !FinishReason.IsEmpty())
+		{
+			FScopeLock Lock(&Cs);
+			LastFinishReason = FinishReason;
+		}
+	}
+
+	void FSseStreamParseSession::AppendResponseBytes(const uint8* Data, int32 Len, const FUnrealAiLlmStreamCallback& OnEvent)
+	{
+		if (Len <= 0)
+		{
+			return;
+		}
+		TArray<FString> ReadyLines;
+		ReadyLines.Reserve(4);
+		{
+			FScopeLock Lock(&Cs);
+			bReceivedProgressBytes.store(true, std::memory_order_relaxed);
+			for (int32 i = 0; i < Len; ++i)
+			{
+				const uint8 B = Data[i];
+				if (B == '\n')
+				{
+					FString LineUtf16;
+					if (LineCarryUtf8.Num() > 0)
+					{
+						const FUTF8ToTCHAR Conv(reinterpret_cast<const ANSICHAR*>(LineCarryUtf8.GetData()), LineCarryUtf8.Num());
+						LineUtf16 = FString(static_cast<int32>(Conv.Length()), Conv.Get());
+						LineCarryUtf8.Reset();
+					}
+					LineUtf16.TrimEndInline();
+					ReadyLines.Add(MoveTemp(LineUtf16));
+				}
+				else if (B != '\r')
+				{
+					LineCarryUtf8.Add(B);
+				}
+			}
+		}
+		for (const FString& Ln : ReadyLines)
+		{
+			ProcessTrimmedLine(Ln, OnEvent);
+		}
+	}
+
+	void FSseStreamParseSession::FlushCarryAsLine(const FUnrealAiLlmStreamCallback& OnEvent)
+	{
+		FString LineUtf16;
+		{
+			FScopeLock Lock(&Cs);
+			if (LineCarryUtf8.Num() == 0)
+			{
+				return;
+			}
+			const FUTF8ToTCHAR Conv(reinterpret_cast<const ANSICHAR*>(LineCarryUtf8.GetData()), LineCarryUtf8.Num());
+			LineUtf16 = FString(static_cast<int32>(Conv.Length()), Conv.Get());
+			LineCarryUtf8.Reset();
+		}
+		LineUtf16.TrimEndInline();
+		ProcessTrimmedLine(LineUtf16, OnEvent);
+	}
+
+	void FSseStreamParseSession::ProcessNewBytesFromResponse(const FHttpResponsePtr& R, const FUnrealAiLlmStreamCallback& OnEvent)
+	{
+		if (!R.IsValid())
+		{
+			return;
+		}
+		const TArray<uint8>& Content = R->GetContent();
+		const int64 Total = Content.Num();
+		int32 Start = 0;
+		int32 Delta = 0;
+		{
+			FScopeLock Lock(&Cs);
+			if (Total <= LastProcessedContentLen)
+			{
+				return;
+			}
+			Start = static_cast<int32>(LastProcessedContentLen);
+			Delta = static_cast<int32>(Total - LastProcessedContentLen);
+			LastProcessedContentLen = Total;
+		}
+		AppendResponseBytes(Content.GetData() + Start, Delta, OnEvent);
+	}
+
+	static void ParseSseBody(const FString& Body, const FUnrealAiLlmStreamCallback& OnEvent)
+	{
+		FSseStreamParseSession Session;
+		TArray<FString> Lines;
+		Body.ParseIntoArrayLines(Lines, false);
 		for (FString& Line : Lines)
 		{
 			Line.TrimStartAndEndInline();
-			if (Line.IsEmpty())
+			if (!Line.IsEmpty())
 			{
-				continue;
-			}
-			if (!Line.StartsWith(TEXT("data:")))
-			{
-				continue;
-			}
-			FString Payload = Line.Mid(5).TrimStart();
-			if (Payload == TEXT("[DONE]"))
-			{
-				EmitFinalFinish();
-				continue;
-			}
-			TSharedPtr<FJsonObject> Chunk;
-			TSharedRef<TJsonReader<>> JR = TJsonReaderFactory<>::Create(Payload);
-			if (!FJsonSerializer::Deserialize(JR, Chunk) || !Chunk.IsValid())
-			{
-				continue;
-			}
-			// Usage may appear on its own chunk (e.g. stream_options.include_usage) before [DONE].
-			ParseUsage(Chunk, LastUsage);
-			const TArray<TSharedPtr<FJsonValue>>* Choices = nullptr;
-			if (!Chunk->TryGetArrayField(TEXT("choices"), Choices) || !Choices || Choices->Num() == 0)
-			{
-				continue;
-			}
-			const TSharedPtr<FJsonObject>* Choice0 = nullptr;
-			if (!(*Choices)[0]->TryGetObject(Choice0) || !Choice0->IsValid())
-			{
-				continue;
-			}
-			const TSharedPtr<FJsonObject>* Delta = nullptr;
-			if (!(*Choice0)->TryGetObjectField(TEXT("delta"), Delta) || !Delta->IsValid())
-			{
-				continue;
-			}
-			FString Part;
-			if ((*Delta)->TryGetStringField(TEXT("content"), Part) && !Part.IsEmpty())
-			{
-				FUnrealAiLlmStreamEvent De;
-				De.Type = EUnrealAiLlmStreamEventType::AssistantDelta;
-				De.DeltaText = Part;
-				OnEvent.ExecuteIfBound(De);
-			}
-			FString Rc;
-			if (((*Delta)->TryGetStringField(TEXT("reasoning_content"), Rc) || (*Delta)->TryGetStringField(TEXT("reasoning"), Rc))
-				&& !Rc.IsEmpty())
-			{
-				FUnrealAiLlmStreamEvent Th;
-				Th.Type = EUnrealAiLlmStreamEventType::ThinkingDelta;
-				Th.DeltaText = Rc;
-				OnEvent.ExecuteIfBound(Th);
-			}
-			const TArray<TSharedPtr<FJsonValue>>* TcArr = nullptr;
-			if ((*Delta)->TryGetArrayField(TEXT("tool_calls"), TcArr) && TcArr)
-			{
-				for (const TSharedPtr<FJsonValue>& V : *TcArr)
-				{
-					const TSharedPtr<FJsonObject>* Tco = nullptr;
-					if (!V.IsValid() || !V->TryGetObject(Tco) || !Tco->IsValid())
-					{
-						continue;
-					}
-					FUnrealAiToolCallSpec Tc;
-					(*Tco)->TryGetStringField(TEXT("id"), Tc.Id);
-					double IdxNum = 0;
-					if ((*Tco)->TryGetNumberField(TEXT("index"), IdxNum))
-					{
-						Tc.StreamMergeIndex = static_cast<int32>(IdxNum);
-					}
-					const TSharedPtr<FJsonObject>* Fn = nullptr;
-					if ((*Tco)->TryGetObjectField(TEXT("function"), Fn) && Fn->IsValid())
-					{
-						(*Fn)->TryGetStringField(TEXT("name"), Tc.Name);
-						FString Args;
-						if ((*Fn)->TryGetStringField(TEXT("arguments"), Args))
-						{
-							Tc.ArgumentsJson += Args;
-						}
-					}
-					if (Tc.StreamMergeIndex >= 0 || !Tc.Id.IsEmpty() || !Tc.Name.IsEmpty()
-						|| !Tc.ArgumentsJson.IsEmpty())
-					{
-						FUnrealAiLlmStreamEvent TcEv;
-						TcEv.Type = EUnrealAiLlmStreamEventType::ToolCalls;
-						TcEv.ToolCalls.Add(Tc);
-						OnEvent.ExecuteIfBound(TcEv);
-					}
-				}
-			}
-			FString FinishReason;
-			if ((*Choice0)->TryGetStringField(TEXT("finish_reason"), FinishReason) && !FinishReason.IsEmpty())
-			{
-				// Defer Finish until [DONE] so usage from stream_options.include_usage is included.
-				LastFinishReason = FinishReason;
+				Session.ProcessTrimmedLine(Line, OnEvent);
 			}
 		}
-
-		// Some proxies omit the final data: [DONE] line; EmitFinalFinish still runs once after the line loop
-		// so the harness always receives a Finish event (defensive vs missing [DONE]).
-		EmitFinalFinish();
+		Session.EmitFinalFinishIfNeeded(OnEvent);
 	}
 
 	/** Parses "Please try again in N" / "Nms" / "Ns" from a substring (e.g. full body or JSON error.message). */
@@ -432,6 +547,53 @@ namespace OpenAiTransportUtil
 		}
 		return Fallback429WaitSeconds(ZeroBasedAttemptIndex);
 	}
+
+#if WITH_DEV_AUTOMATION_TESTS
+	bool RunOpenAiSseStreamParseSelfTests(FAutomationTestBase* Test)
+	{
+		auto CollectAssistant = [](FString& Out) -> FUnrealAiLlmStreamCallback
+		{
+			return FUnrealAiLlmStreamCallback::CreateLambda([&Out](const FUnrealAiLlmStreamEvent& Ev)
+			{
+				if (Ev.Type == EUnrealAiLlmStreamEventType::AssistantDelta)
+				{
+					Out += Ev.DeltaText;
+				}
+			});
+		};
+
+		FString FullText;
+		ParseSseBody(
+			TEXT("data: {\"choices\":[{\"delta\":{\"content\":\"ab\"}}]}\n\ndata: [DONE]\n"),
+			CollectAssistant(FullText));
+
+		FString IncrText;
+		const FUnrealAiLlmStreamCallback OnIncr = CollectAssistant(IncrText);
+		FSseStreamParseSession Sess;
+		{
+			const FString Part1 = TEXT("data: {\"choices\":[{\"delta\":{\"content\":\"a");
+			FTCHARToUTF8 U8a(*Part1);
+			Sess.AppendResponseBytes(reinterpret_cast<const uint8*>(U8a.Get()), U8a.Length(), OnIncr);
+		}
+		{
+			const FString Part2 = TEXT("\"}}]}\n\ndata: [DONE]\n");
+			FTCHARToUTF8 U8b(*Part2);
+			Sess.AppendResponseBytes(reinterpret_cast<const uint8*>(U8b.Get()), U8b.Length(), OnIncr);
+		}
+		Sess.FlushCarryAsLine(OnIncr);
+		Sess.EmitFinalFinishIfNeeded(OnIncr);
+
+		if (FullText != IncrText)
+		{
+			if (Test)
+			{
+				Test->AddError(FString::Printf(TEXT("Incremental SSE assistant text mismatch: full=\"%s\" incr=\"%s\""), *FullText, *IncrText));
+			}
+			return false;
+		}
+		return true;
+	}
+#endif
 }
 
 void FOpenAiCompatibleHttpTransport::CancelActiveRequest()
@@ -508,16 +670,9 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 	}
 	Url += TEXT("chat/completions");
 
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
-	HttpRequest->SetURL(Url);
-	HttpRequest->SetVerb(TEXT("POST"));
-	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
-	HttpRequest->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *Key));
-	HttpRequest->SetContentAsString(BodyStr);
 	const float TimeoutSec = Request.HttpTimeoutOverrideSec > 0.f
 		? Request.HttpTimeoutOverrideSec
 		: UnrealAiWaitTime::HttpRequestTimeoutSec;
-	HttpRequest->SetTimeout(TimeoutSec);
 
 	UE_LOG(LogTemp, Display,
 		TEXT("UnrealAi HTTP: stream=%s timeout=%.0fs url=%s bearerLen=%d bodyChars=%d toolsChars=%d"),
@@ -532,9 +687,26 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 	const int32 MaxAttempts = UnrealAiWaitTime::Http429MaxAttempts;
 	TSharedRef<int32, ESPMode::ThreadSafe> Attempt = MakeShared<int32, ESPMode::ThreadSafe>(0);
 
-	TSharedRef<TFunction<void()>, ESPMode::ThreadSafe> SendAttempt = MakeShared<TFunction<void()>>();
-	*SendAttempt = [this, OnEvent, bStream = Request.bStream, Url, Key, BodyStr, TimeoutSec, Attempt, MaxAttempts, SendAttempt]()
+	TSharedPtr<std::atomic<bool>> bReleasedOutbound = MakeShared<std::atomic<bool>>(false);
+	auto ReleaseOutboundIfHeld = [bReleasedOutbound]()
 	{
+		if (!bReleasedOutbound->exchange(true, std::memory_order_acq_rel))
+		{
+			UnrealAiPluginHttpConcurrency::ReleaseOutboundSlot();
+		}
+	};
+
+	UnrealAiPluginHttpConcurrency::AcquireOutboundSlot();
+
+	TSharedRef<TFunction<void()>, ESPMode::ThreadSafe> SendAttempt = MakeShared<TFunction<void()>>();
+	*SendAttempt = [this, OnEvent, bStream = Request.bStream, Url, Key, BodyStr, TimeoutSec, Attempt, MaxAttempts, SendAttempt, ReleaseOutboundIfHeld]()
+	{
+		TSharedPtr<OpenAiTransportUtil::FSseStreamParseSession> SseSession;
+		if (bStream)
+		{
+			SseSession = MakeShared<OpenAiTransportUtil::FSseStreamParseSession>();
+		}
+
 		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest2 = FHttpModule::Get().CreateRequest();
 		HttpRequest2->SetURL(Url);
 		HttpRequest2->SetVerb(TEXT("POST"));
@@ -543,13 +715,28 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 		HttpRequest2->SetContentAsString(BodyStr);
 		HttpRequest2->SetTimeout(TimeoutSec);
 
+		if (bStream && SseSession.IsValid())
+		{
+			HttpRequest2->OnRequestProgress64().BindLambda(
+				[OnEvent, SseSession](FHttpRequestPtr Req, uint64 /*BytesSent*/, uint64 /*BytesReceived*/)
+				{
+					if (!SseSession.IsValid() || !Req.IsValid())
+					{
+						return;
+					}
+					SseSession->ProcessNewBytesFromResponse(Req->GetResponse(), OnEvent);
+				});
+		}
+
 		ActiveRequest = HttpRequest2;
 		HttpRequest2->OnProcessRequestComplete().BindLambda(
-			[this, OnEvent, bStream, Url, Attempt, MaxAttempts, SendAttempt, BodyStr](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bOk)
+			[this, OnEvent, bStream, Url, Attempt, MaxAttempts, SendAttempt, BodyStr, SseSession, ReleaseOutboundIfHeld](
+				FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bOk)
 			{
 				ActiveRequest.Reset();
 				if (!bOk)
 				{
+					ReleaseOutboundIfHeld();
 					FString Detail = TEXT("HTTP request failed (transport did not complete successfully)");
 					if (Req.IsValid())
 					{
@@ -571,6 +758,7 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 				}
 				if (!Resp.IsValid())
 				{
+					ReleaseOutboundIfHeld();
 					OpenAiTransportUtil::EmitError(OnEvent, TEXT("HTTP request failed: no response (check API URL, key, firewall, proxy)"));
 					return;
 				}
@@ -596,6 +784,8 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 					return;
 				}
 
+				ReleaseOutboundIfHeld();
+
 				if (Code < 200 || Code >= 300)
 				{
 					if (Code == 400)
@@ -610,12 +800,27 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 
 				if (bStream)
 				{
-					OpenAiTransportUtil::ParseSseBody(RespBody, OnEvent);
+					{
+						UNREALAI_ANYTHREAD_PERF_SCOPE("Transport.StreamParseOnHttpComplete");
+						if (SseSession.IsValid() && SseSession->bReceivedProgressBytes.load(std::memory_order_relaxed))
+						{
+							SseSession->ProcessNewBytesFromResponse(Resp, OnEvent);
+							SseSession->FlushCarryAsLine(OnEvent);
+							SseSession->EmitFinalFinishIfNeeded(OnEvent);
+						}
+						else
+						{
+							OpenAiTransportUtil::ParseSseBody(RespBody, OnEvent);
+						}
+					}
 					UnrealAiHarnessProgressTelemetry::NotifyHttpStreamParseComplete();
 				}
 				else
 				{
-					OpenAiTransportUtil::ParseNonStreamBody(RespBody, OnEvent);
+					{
+						UNREALAI_ANYTHREAD_PERF_SCOPE("Transport.ParseNonStreamOnHttpComplete");
+						OpenAiTransportUtil::ParseNonStreamBody(RespBody, OnEvent);
+					}
 					UnrealAiHarnessProgressTelemetry::NotifyHttpStreamParseComplete();
 				}
 			});
@@ -624,6 +829,7 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 		if (!bStarted2)
 		{
 			ActiveRequest.Reset();
+			ReleaseOutboundIfHeld();
 			OpenAiTransportUtil::EmitError(
 				OnEvent,
 				FString::Printf(
@@ -635,3 +841,16 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 	// Kick off initial attempt.
 	(*SendAttempt)();
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FOpenAiSseStreamParseTest,
+	"UnrealAiEditor.OpenAiTransport.SseIncrementalConsistency",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOpenAiSseStreamParseTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	return OpenAiTransportUtil::RunOpenAiSseStreamParseSelfTests(this);
+}
+#endif

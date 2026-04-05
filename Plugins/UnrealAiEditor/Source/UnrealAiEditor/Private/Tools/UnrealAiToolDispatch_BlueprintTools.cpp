@@ -9,6 +9,7 @@
 #include "BlueprintFormat/UnrealAiBlueprintGraphSelectionLayout.h"
 #include "Tools/UnrealAiToolDispatch_MoreAssets.h"
 #include "Tools/UnrealAiToolJson.h"
+#include "UnrealAiEditorModule.h"
 #include "Tools/Presentation/UnrealAiToolEditorNoteBuilders.h"
 
 #include "Animation/AnimBlueprint.h"
@@ -321,24 +322,9 @@ FUnrealBlueprintGraphFormatOptions UnrealAiBlueprintTools_MakeFormatOptionsFromS
 	O.CommentsMode = S->BlueprintCommentsMode;
 	O.bPreserveExistingPositions = S->bBlueprintFormatPreserveExistingPositions;
 	O.bReflowCommentsByGeometry = S->bBlueprintFormatReflowCommentsByGeometry;
-	switch (S->BlueprintFormatSpacingDensity)
-	{
-	case EUnrealAiBlueprintFormatSpacingDensity::Sparse:
-		O.SpacingX = 480;
-		O.SpacingY = 240;
-		O.BranchVerticalGap = 64;
-		break;
-	case EUnrealAiBlueprintFormatSpacingDensity::Dense:
-		O.SpacingX = 320;
-		O.SpacingY = 160;
-		O.BranchVerticalGap = 32;
-		break;
-	default:
-		O.SpacingX = 400;
-		O.SpacingY = 200;
-		O.BranchVerticalGap = 48;
-		break;
-	}
+	O.SpacingX = 400;
+	O.SpacingY = 200;
+	O.BranchVerticalGap = 48;
 	if (S->bBlueprintFormatUseWireKnots)
 	{
 		O.WireKnotAggression = EUnrealBlueprintWireKnotAggression::Light;
@@ -787,7 +773,12 @@ static FUnrealAiToolInvocationResult DispatchBlueprintFormatLayout(
 	{
 		TArray<UEdGraphNode*> Sel;
 		FString SelErr;
-		if (!UnrealAiTryGetBlueprintGraphSelectedNodes(BP, Graph, Sel, &SelErr))
+		if (!UnrealAiTryGetBlueprintGraphSelectedNodes(
+				BP,
+				Graph,
+				Sel,
+				&SelErr,
+				FUnrealAiEditorModule::IsEditorFocusEnabled()))
 		{
 			return UnrealAiToolJson::Error(SelErr);
 		}
@@ -980,6 +971,40 @@ bool UnrealAiBlueprintTools_IsGameWritableBlueprintPath(const FString& Blueprint
 UEdGraph* UnrealAiBlueprintTools_FindGraphByName(UBlueprint* BP, const FString& GraphName)
 {
 	return UnrealAiBlueprintToolsPriv::FindGraphByName(BP, GraphName);
+}
+
+void UnrealAiBlueprintTools_FindGraphNamesContainingNodeGuid(UBlueprint* BP, const FGuid& NodeGuid, TArray<FString>& OutGraphNames)
+{
+	OutGraphNames.Reset();
+	if (!BP || NodeGuid == FGuid())
+	{
+		return;
+	}
+	auto ScanList = [&OutGraphNames, &NodeGuid](const TArray<UEdGraph*>& List)
+	{
+		for (UEdGraph* G : List)
+		{
+			if (!G)
+			{
+				continue;
+			}
+			for (UEdGraphNode* N : G->Nodes)
+			{
+				if (N && N->NodeGuid == NodeGuid)
+				{
+					const FString Name = G->GetName();
+					if (!OutGraphNames.Contains(Name))
+					{
+						OutGraphNames.Add(Name);
+					}
+					break;
+				}
+			}
+		}
+	};
+	ScanList(BP->UbergraphPages);
+	ScanList(BP->FunctionGraphs);
+	ScanList(BP->MacroGraphs);
 }
 
 bool UnrealAiBlueprintTools_TryParsePinTypeFromString(const FString& TypeStr, FEdGraphPinType& OutType)

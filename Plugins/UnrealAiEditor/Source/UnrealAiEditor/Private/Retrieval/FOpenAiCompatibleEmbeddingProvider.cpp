@@ -15,7 +15,10 @@
 #include "HAL/Event.h"
 #include "HAL/PlatformProcess.h"
 #include "Misc/UnrealAiWaitTimePolicy.h"
+#include "Misc/UnrealAiPluginHttpConcurrency.h"
 #include "Misc/ScopeLock.h"
+
+#include <atomic>
 
 namespace
 {
@@ -322,6 +325,7 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedTexts_OnGameThread(
 	}
 
 	const FString Url = BaseUrl + TEXT("/embeddings");
+
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
 	HttpRequest->SetURL(Url);
 	HttpRequest->SetVerb(TEXT("POST"));
@@ -353,10 +357,22 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedTexts_OnGameThread(
 		OutError = TEXT("Failed to allocate sync event for embeddings request.");
 		return false;
 	}
+
+	TSharedPtr<std::atomic<bool>> bReleasedOutbound = MakeShared<std::atomic<bool>>(false);
+	auto ReleaseOutboundIfHeld = [bReleasedOutbound]()
+	{
+		if (!bReleasedOutbound->exchange(true, std::memory_order_acq_rel))
+		{
+			UnrealAiPluginHttpConcurrency::ReleaseOutboundSlot();
+		}
+	};
+	UnrealAiPluginHttpConcurrency::AcquireOutboundSlot();
+
 	State->DoneEvent = DoneEvent;
 	HttpRequest->OnProcessRequestComplete().BindLambda(
-		[State](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedOk)
+		[State, ReleaseOutboundIfHeld](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedOk)
 		{
+			ReleaseOutboundIfHeld();
 			const int32 Status = Response.IsValid() ? Response->GetResponseCode() : 0;
 			FEvent* EventToTrigger = nullptr;
 			{
@@ -378,6 +394,7 @@ bool FOpenAiCompatibleEmbeddingProvider::EmbedTexts_OnGameThread(
 
 	if (!HttpRequest->ProcessRequest())
 	{
+		ReleaseOutboundIfHeld();
 		OutError = TEXT("Failed to start embeddings request.");
 		FPlatformProcess::ReturnSynchEventToPool(DoneEvent);
 		return false;

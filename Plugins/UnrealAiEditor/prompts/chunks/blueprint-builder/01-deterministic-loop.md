@@ -15,6 +15,6 @@ Typical order:
 
 Avoid empty `{}` tool calls; honor **`suggested_correct_call`** and **`validation_errors`** from resolver failures; on **`blueprint_graph_patch`** runtime failures (`status: patch_errors`), use **`errors[]`**, **`error_codes[]`**, and **`suggested_correct_call`** (and remember **`applied_partial` is always empty**—the patch did not commit). Do not invent object paths that never appeared in discovery or introspect.
 
-**Schema vs graph:** **`arguments failed schema validation`** is decided in the **tool resolver** against the catalog—**before** Unreal reads the graph. Wrong **`ops[]`** shapes (e.g. **`connect`** without **`from`/`to`** strings, or extra unknown keys) are the usual cause—not Blueprint layout or formatting.
+**Schema vs graph:** **`arguments failed schema validation`** is decided in the **tool resolver** against the catalog—**before** Unreal reads the graph. Wrong **`ops[]`** shapes (e.g. **`connect`** without **`from`/`to`** strings, or extra unknown keys) are the usual cause—not Blueprint layout or formatting. Unknown **`layout_scope`** / **`layout_anchor`** on **`blueprint_graph_patch`** also fail here (not as **`patch_errors`**).
 
 **On failure, do not** pivot to long **manual “click in the editor…”** instructions unless the **user asked** for that or mutators are unavailable. **Do** fix JSON using **`validation_errors`**, introspect, smaller patches, and retry.

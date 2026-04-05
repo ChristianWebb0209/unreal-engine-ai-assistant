@@ -13,6 +13,8 @@ public:
 	SLATE_BEGIN_ARGS(SToolCallCard)
 		{}
 	SLATE_ARGUMENT(FString, ToolName)
+	/** User-visible title; when empty, Construct uses UnrealAiFormatToolIdAsTitleWords(ToolName). */
+	SLATE_ARGUMENT(FString, ToolDisplayTitle)
 	SLATE_ARGUMENT(FString, ArgumentsPreview)
 	SLATE_ARGUMENT(FString, ResultPreview)
 	SLATE_ARGUMENT(bool, bRunning)
@@ -33,6 +35,7 @@ private:
 	FReply OnCopyClicked();
 
 	FString ToolName;
+	FString ToolDisplayTitle;
 	FString ArgsPreview;
 	FString ResultPreview;
 	bool bRunning = true;

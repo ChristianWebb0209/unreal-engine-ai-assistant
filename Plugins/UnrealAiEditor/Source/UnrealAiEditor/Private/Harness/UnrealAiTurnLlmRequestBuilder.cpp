@@ -15,6 +15,7 @@
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Tools/UnrealAiToolSurfacePipeline.h"
 #include "UnrealAiEditorSettings.h"
+#include "Observability/UnrealAiGameThreadPerf.h"
 
 namespace UnrealAiTurnLlmRequestBuilderPriv
 {
@@ -112,6 +113,8 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 		return false;
 	}
 
+	UNREALAI_GT_PERF_SCOPE("Harness.TurnLlmRequestBuilder.Build");
+
 	FUnrealAiModelCapabilities Caps;
 	Profiles->GetEffectiveCapabilities(Request.ModelProfileId, Caps);
 
@@ -161,7 +164,11 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	P.bInjectEnvironmentBuilderResumeChunk =
 		bEnvResumeChunk && !Request.bEnvironmentBuilderTurn && Request.Mode == EUnrealAiAgentMode::Agent;
 
-	const FString SystemContent = UnrealAiPromptBuilder::BuildSystemDeveloperContent(P);
+	FString SystemContent;
+	{
+		UNREALAI_GT_PERF_SCOPE("Harness.TurnLlmRequestBuilder.Prompt");
+		SystemContent = UnrealAiPromptBuilder::BuildSystemDeveloperContent(P);
+	}
 	FString SystemAugmented = SystemContent;
 	{
 		const FString UProjectBase = FPaths::GetCleanFilename(FPaths::GetProjectFilePath());
@@ -210,8 +217,10 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	FString ToolsJson;
 	const bool bWantDispatchSurface = UnrealAiRuntimeDefaults::ToolSurfaceUseDispatch && !Request.bForceNativeToolSurface;
 	bool bUsingDispatchSurface = false;
-	if (Request.Mode != EUnrealAiAgentMode::Plan && Caps.bSupportsNativeTools && bWantDispatchSurface)
 	{
+		UNREALAI_GT_PERF_SCOPE("Harness.TurnLlmRequestBuilder.ToolSurface");
+		if (Request.Mode != EUnrealAiAgentMode::Plan && Caps.bSupportsNativeTools && bWantDispatchSurface)
+		{
 		int32 BlueprintBuilderAppendixBudgetChars = 0;
 		if (Request.bBlueprintBuilderTurn && Request.Mode == EUnrealAiAgentMode::Agent)
 		{
@@ -273,10 +282,11 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 			SystemAugmented += TEXT("Enabled tools for this session:\n\n");
 			SystemAugmented += ToolIndexMd;
 		}
-	}
-	if (!bUsingDispatchSurface)
-	{
-		Catalog->BuildLlmToolsJsonArrayForMode(Request.Mode, Caps, PackPtr, ToolSurfaceFilter, ToolsJson);
+		}
+		if (!bUsingDispatchSurface)
+		{
+			Catalog->BuildLlmToolsJsonArrayForMode(Request.Mode, Caps, PackPtr, ToolSurfaceFilter, ToolsJson);
+		}
 	}
 
 	TArray<FUnrealAiConversationMessage> ApiMsgs;
