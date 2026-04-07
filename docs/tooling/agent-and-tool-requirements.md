@@ -40,7 +40,7 @@ Aligned with the MVP architecture, local-first mandate, and persistence model.
 |------|--------|
 | **Shipping unit** | **Unreal editor plugin only.** Chat UI, tool execution, persistence, and the agent harness run **inside the editor process** (optional local helpers are fine; **not** a separate *product* server). |
 | **No product backend** | **No** hosted REST API, account service, chat relay, job queue, RAG host, or telemetry backend **for MVP**. Anything labeled â€œserverâ€ in integration docs means **localhost inside the plugin** (e.g. MCP) or **third-party** APIs. |
-| **Outbound network** | **Only** what the user configures: **HTTPS** (or provider SDKs) to **third-party** LLM vendors (OpenRouter, Anthropic, OpenAI, etc.). No requirement to call **our** infrastructure. |
+| **Outbound network** | **Only** what the user configures: **HTTPS** (or provider SDKs) to **third-party** LLM vendors (Anthropic, OpenAI, other OpenAI-compatible endpoints, etc.). No requirement to call **our** infrastructure. |
 | **Inbound** | Optional **localhost** endpoints for MCP / external CLI toolsâ€”served by the **editor**, not the public internet. |
 | **Data** | Chats, settings, logs: **local disk** under the user profile (see PRD Â§2.5). |
 | **Future** | A **product** cloud backend (sync, team features, hosted retrieval) is **out of scope for MVP** and would be explicitly versioned and opt-in. Optional **local-only** vector stores remain consistent with â€œno backendâ€ as long as they stay on disk inside the pluginâ€™s data root. |

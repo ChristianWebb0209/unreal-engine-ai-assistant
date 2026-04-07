@@ -31,6 +31,14 @@ public:
 	static void SetEditorFocusEnabled(bool bEnabled);
 	static void HydrateEditorFocusFromJsonRoot(const TSharedPtr<FJsonObject>& Root);
 	static FSimpleMulticastDelegate& OnEditorFocusPolicyChanged();
+	/**
+	 * Editor follow / navigation: true only when Editor focus is enabled and the active harness turn is the primary
+	 * chat surface (not plan-mode passes, plan DAG worker threads, or Blueprint/Environment builder sub-turns).
+	 */
+	static bool ShouldApplyHarnessEditorNavigation();
+	static void SetHarnessEditorFollowEligible(bool bEligible);
+	static void ClearHarnessEditorFollowEligibility();
+	static bool IsHarnessEditorFollowEligible();
 	/** Global: allow plan execution to use subagent wave policy. Persisted in plugin_settings.json under agent.useSubagents. */
 	static bool IsSubagentsEnabled();
 	static void SetSubagentsEnabled(bool bEnabled);
@@ -78,6 +86,9 @@ public:
 	/** Open Agent Chat dock tabs, in registration order (for debug UI / highlighting). */
 	static void GetOpenAgentChatThreadIds(TArray<FGuid>& OutOrdered);
 
+	/** Opens Project Settings on the Unreal AI Editor page (plugin LLM UI + UObject options). */
+	static void OpenUnrealAiPluginSettings();
+
 private:
 	void RegisterMenus();
 	void RegisterTabs(const TSharedPtr<FUnrealAiBackendRegistry>& Reg);
@@ -121,6 +132,8 @@ private:
 	bool bAgentChatRestoreChainBusy = false;
 
 	bool bEditorFocusEnabled = false;
+	/** When a harness turn is active, only primary chat lanes may trigger post-tool editor navigation (see SetHarnessEditorFollowEligible). */
+	bool bHarnessEditorFollowEligible = false;
 	bool bSubagentsEnabled = true;
 	bool bPieToolsEnabled = false;
 	FString AgentCodeTypePreference = TEXT("auto");

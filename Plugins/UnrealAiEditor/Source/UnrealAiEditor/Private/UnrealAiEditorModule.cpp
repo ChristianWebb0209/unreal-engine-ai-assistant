@@ -20,8 +20,9 @@
 #include "Framework/Docking/SDockingTabStack.h"
 #include "Tabs/SUnrealAiEditorHelpTab.h"
 #include "Tabs/SUnrealAiEditorQuickStartTab.h"
-#include "Tabs/SUnrealAiEditorSettingsTab.h"
+#include "Settings/FUnrealAiEditorSettingsCustomization.h"
 #include "UnrealAiEditorSettings.h"
+#include "PropertyEditorModule.h"
 #include "UnrealAiEditorTabIds.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "AssetRegistry/AssetData.h"
@@ -117,7 +118,7 @@ static void RegisterUnrealAiEditorKeyBindings()
 		C.OpenSettingsTab,
 		FExecuteAction::CreateLambda([]()
 		{
-			FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::SettingsTab);
+			FUnrealAiEditorModule::OpenUnrealAiPluginSettings();
 		}));
 	Cmd->MapAction(
 		C.OpenQuickStartTab,
@@ -1750,6 +1751,7 @@ void FUnrealAiEditorModule::ShutdownModule()
 
 	BackendRegistry.Reset();
 
+	FUnrealAiEditorModule::ClearHarnessEditorFollowEligibility();
 	GUnrealAiModule = nullptr;
 }
 
@@ -1762,6 +1764,12 @@ FUnrealAiEditorModule& FUnrealAiEditorModule::Get()
 TSharedPtr<FUnrealAiBackendRegistry> FUnrealAiEditorModule::GetBackendRegistry()
 {
 	return GUnrealAiModule ? GUnrealAiModule->BackendRegistry : nullptr;
+}
+
+void FUnrealAiEditorModule::OpenUnrealAiPluginSettings()
+{
+	ISettingsModule& SettingsModule = FModuleManager::LoadModuleChecked<ISettingsModule>("Settings");
+	SettingsModule.ShowViewer(FName(TEXT("Project")), FName(TEXT("Plugins")), FName(TEXT("UnrealAiEditor")));
 }
 
 void FUnrealAiEditorModule::SetActiveChatSession(TSharedPtr<FUnrealAiChatUiSession> Session)
@@ -1823,6 +1831,29 @@ namespace UnrealAiEditorModulePriv
 bool FUnrealAiEditorModule::IsEditorFocusEnabled()
 {
 	return GUnrealAiModule ? GUnrealAiModule->bEditorFocusEnabled : false;
+}
+
+bool FUnrealAiEditorModule::ShouldApplyHarnessEditorNavigation()
+{
+	return IsEditorFocusEnabled() && IsHarnessEditorFollowEligible();
+}
+
+void FUnrealAiEditorModule::SetHarnessEditorFollowEligible(bool bEligible)
+{
+	if (GUnrealAiModule)
+	{
+		GUnrealAiModule->bHarnessEditorFollowEligible = bEligible;
+	}
+}
+
+void FUnrealAiEditorModule::ClearHarnessEditorFollowEligibility()
+{
+	SetHarnessEditorFollowEligible(false);
+}
+
+bool FUnrealAiEditorModule::IsHarnessEditorFollowEligible()
+{
+	return GUnrealAiModule && GUnrealAiModule->bHarnessEditorFollowEligible;
 }
 
 bool FUnrealAiEditorModule::IsSubagentsEnabled()
@@ -2507,16 +2538,6 @@ void FUnrealAiEditorModule::RegisterTabs(const TSharedPtr<FUnrealAiBackendRegist
 		return SpawnAgentChatDockTab(Reg, Args, nullptr);
 	};
 
-	const auto SpawnSettings = [Reg](const FSpawnTabArgs& Args)
-	{
-		return SNew(SDockTab)
-			.TabRole(ETabRole::NomadTab)
-			.Label(LOCTEXT("SettingsTabLabel", "AI Settings"))
-			[
-				SNew(SUnrealAiEditorSettingsTab).BackendRegistry(Reg)
-			];
-	};
-
 	const auto SpawnQuick = [](const FSpawnTabArgs& Args)
 	{
 		return SNew(SDockTab)
@@ -2545,13 +2566,6 @@ void FUnrealAiEditorModule::RegisterTabs(const TSharedPtr<FUnrealAiBackendRegist
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-							 UnrealAiEditorTabIds::SettingsTab,
-							 FOnSpawnTab::CreateLambda(SpawnSettings))
-		.SetDisplayName(LOCTEXT("SettingsTab", "AI Settings"))
-		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Settings")))
-		.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
-
-	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 							 UnrealAiEditorTabIds::QuickStartTab,
 							 FOnSpawnTab::CreateLambda(SpawnQuick))
 		.SetDisplayName(LOCTEXT("QuickStartTab", "Quick Start"))
@@ -2568,7 +2582,6 @@ void FUnrealAiEditorModule::RegisterTabs(const TSharedPtr<FUnrealAiBackendRegist
 void FUnrealAiEditorModule::UnregisterTabs()
 {
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::ChatTab);
-	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::SettingsTab);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::QuickStartTab);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(UnrealAiEditorTabIds::HelpTab);
 }
@@ -2607,12 +2620,12 @@ void FUnrealAiEditorModule::RegisterMenus()
 								})));
 							S.AddMenuEntry(
 								"UnrealAiTopSettings",
-								LOCTEXT("MenuTopSettings", "AI Settings"),
-								LOCTEXT("MenuTopSettingsTip", "Open AI Settings"),
+								LOCTEXT("MenuTopSettings", "Plugin settings"),
+								LOCTEXT("MenuTopSettingsTip", "Open Project Settings for Unreal AI Editor"),
 								FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Settings")),
 								FUIAction(FExecuteAction::CreateLambda([]()
 								{
-									FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::SettingsTab);
+									FUnrealAiEditorModule::OpenUnrealAiPluginSettings();
 								})));
 						}));
 			}
@@ -2638,12 +2651,12 @@ void FUnrealAiEditorModule::RegisterMenus()
 							})));
 						S.AddMenuEntry(
 							"UnrealAiSettings",
-							LOCTEXT("MenuSettings", "AI Settings"),
-							LOCTEXT("MenuSettingsTip", ""),
+							LOCTEXT("MenuSettings", "Plugin settings"),
+							LOCTEXT("MenuSettingsTip", "Open Project Settings for Unreal AI Editor"),
 							FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Settings")),
 							FUIAction(FExecuteAction::CreateLambda([]()
 							{
-								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::SettingsTab);
+								FUnrealAiEditorModule::OpenUnrealAiPluginSettings();
 							})));
 						S.AddMenuEntry(
 							"UnrealAiQuick",
@@ -2686,12 +2699,12 @@ void FUnrealAiEditorModule::RegisterMenus()
 							})));
 						S.AddMenuEntry(
 							"UnrealAiSettingsT",
-							LOCTEXT("MenuSettingsT", "AI Settings"),
-							LOCTEXT("MenuSettingsTipT", ""),
+							LOCTEXT("MenuSettingsT", "Plugin settings"),
+							LOCTEXT("MenuSettingsTipT", "Open Project Settings for Unreal AI Editor"),
 							FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Settings")),
 							FUIAction(FExecuteAction::CreateLambda([]()
 							{
-								FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::SettingsTab);
+								FUnrealAiEditorModule::OpenUnrealAiPluginSettings();
 							})));
 						S.AddMenuEntry(
 							"UnrealAiQuickT",
@@ -2754,10 +2767,19 @@ void FUnrealAiEditorModule::RegisterSettings()
 			LOCTEXT("UnrealAiSettingsDesc", "Local-first AI plugin settings"),
 			GetMutableDefault<UUnrealAiEditorSettings>());
 	}
+	FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
+	PropertyEditor.RegisterCustomClassLayout(
+		UUnrealAiEditorSettings::StaticClass()->GetFName(),
+		FOnGetDetailCustomizationInstance::CreateStatic(&FUnrealAiEditorSettingsCustomization::MakeInstance));
 }
 
 void FUnrealAiEditorModule::UnregisterSettings()
 {
+	if (FModuleManager::Get().IsModuleLoaded("PropertyEditor"))
+	{
+		FPropertyEditorModule& PropertyEditor = FModuleManager::GetModuleChecked<FPropertyEditorModule>("PropertyEditor");
+		PropertyEditor.UnregisterCustomClassLayout(UUnrealAiEditorSettings::StaticClass()->GetFName());
+	}
 	if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
 	{
 		SettingsModule->UnregisterSettings("Project", "Plugins", "UnrealAiEditor");

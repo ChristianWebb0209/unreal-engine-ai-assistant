@@ -2,7 +2,7 @@
 
 UUnrealAiEditorSettings::UUnrealAiEditorSettings(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
-	, DefaultAgentId(TEXT("stub-openrouter"))
+	, DefaultAgentId(TEXT("stub-agent"))
 	, bAutoConnect(false)
 	, bVerboseLogging(false)
 	, bOpenAgentChatOnStartup(true)

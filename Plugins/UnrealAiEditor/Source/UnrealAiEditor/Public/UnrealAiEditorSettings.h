@@ -32,12 +32,6 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Agent")
 	bool bVerboseLogging;
 
-	UPROPERTY(EditAnywhere, Config, Category = "OpenRouter")
-	FString OpenRouterApiKey;
-
-	UPROPERTY(EditAnywhere, Config, Category = "OpenRouter")
-	FString DefaultModelId;
-
 	/** Open Agent Chat automatically when the Level Editor finishes loading (Nomad tab). */
 	UPROPERTY(EditAnywhere, Config, Category = "UI", meta = (DisplayName = "Open Agent Chat on editor startup"))
 	bool bOpenAgentChatOnStartup;

@@ -7,7 +7,7 @@
       "tags": [
         "foliage"
       ],
-      "tier": "future",
+      "tier": "implemented",
       "modes": {
         "ask": false,
         "agent": true,
@@ -44,7 +44,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "future"
+      "status": "implemented"
     },
     {
       "tool_id": "landscape_import_heightmap",
@@ -53,7 +53,7 @@
       "tags": [
         "landscape"
       ],
-      "tier": "future",
+      "tier": "implemented",
       "modes": {
         "ask": false,
         "agent": true,
@@ -86,7 +86,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "future"
+      "status": "implemented"
     },
     {
       "tool_id": "pcg_generate",
@@ -95,7 +95,7 @@
       "tags": [
         "pcg"
       ],
-      "tier": "future",
+      "tier": "implemented",
       "modes": {
         "ask": false,
         "agent": true,
@@ -128,7 +128,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "future"
+      "status": "implemented"
     }
   ]
 }
