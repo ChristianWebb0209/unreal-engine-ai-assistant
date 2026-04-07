@@ -299,7 +299,7 @@ In chat tab/composer area:
   - warning if stale/error.
 
 ### 11.2 Settings
-Add retrieval settings in `SUnrealAiEditorSettingsTab`:
+Add retrieval settings in the LLM/API settings surface (Project Settings → Plugins → Unreal AI Editor; `plugin_settings.json`):
 - `retrieval.enabled`
 - `retrieval.embeddingModel`
 - `retrieval.maxSnippetsPerTurn`
@@ -322,7 +322,7 @@ Primary integration points to update:
   - `Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Memory/UnrealAiMemoryTypes.h`
 - UI surfaces:
   - `Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tabs/SUnrealAiEditorChatTab.*`
-  - `Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Tabs/SUnrealAiEditorSettingsTab.*`
+  - `Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Settings/SUnrealAiLlmPluginSettingsPanel.*` (or whichever module owns retrieval UI when reintroduced)
 
 New module area (recommended):
 - `Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Retrieval/`
@@ -465,7 +465,7 @@ This checklist is designed for a single implementation agent to execute in order
 
 ### 20.3 Phase 1.5: UI and settings
 - [ ] Add bottom-of-chat index status row in `SUnrealAiEditorChatTab.*`.
-- [ ] Add settings controls in `SUnrealAiEditorSettingsTab.*`:
+- [ ] Add settings controls in the Project Settings LLM panel (or direct JSON workflow):
   - enabled, model, per-turn snippet count/tokens, auto-index, scrub cadence, rebuild now.
 - [ ] Ensure settings update retrieval behavior without requiring editor restart where feasible.
 

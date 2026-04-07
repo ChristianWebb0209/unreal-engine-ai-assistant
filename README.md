@@ -1,24 +1,43 @@
 # Unreal AI Editor
 
-**Unreal AI Editor** is a **free, open-source** Unreal Engine plugin that brings a full **agentic AI assistant** into the editor: streaming chat, a large **tool catalog** for assets and levels, Blueprint graph authoring via a compact **IR format**, local persistence, and bring-your-own API keys (OpenRouter, Anthropic, OpenAI, and similar). You pay **only** for whichever LLM provider you choose—**no** subscription to us, **no** lock-in, and **no** separate product server. The goal is **feature depth comparable to commercial Unreal AI assistants** that often sell for **$100+** on marketplaces—while staying **local-first**, auditable, and under your control.
+`Unreal AI Editor` is an Unreal Engine 5.7 plugin that brings an in-editor AI copilot to real project workflows: chat, tool execution, Blueprint authoring assistance, and context-aware planning.
 
-## Competitive analysis
+This repository is intentionally framed as an engineering portfolio project:
 
-On **[Fab](https://www.fab.com/channels/unreal-engine)** and the broader Unreal ecosystem, most “AI in the editor” products follow the same economics: you buy a **plugin license** (often about **$50–$150** one-time for serious copilots—**check each listing**) and you still use **bring-your-own API keys** for OpenAI, Anthropic, Google, local Ollama, etc. In other words, **you pay the marketplace for the integration**, then **you pay the model vendor for tokens**—same pattern as this project, except **here the plugin itself is $0**.
+- Build a complex plugin with clear subsystem boundaries.
+- Show practical UX and reliability tradeoffs in an ambitious codebase.
+- Document architecture, known limitations, and hardening priorities.
 
-| | **Unreal AI Editor** (this repo) | Paid Fab / marketplace peers (examples) |
-|---|-----------------------------------|----------------------------------------|
-| **Plugin license** | **Free** (open source) | Typically **paid**; many copilots land around **~$100** one-time (varies by title, sale, region—verify on Fab). |
-| **LLM / inference cost** | **BYOK** (and/or local endpoints you configure) | Essentially always **BYOK** or local models—you still fund API usage yourself. |
-| **In-editor assistant** | Agent **chat**, streaming, attachments | Comparable products advertise **chat**, prompts from the editor, assistants. |
-| **Tooling & workflows** | Large **tool catalog**, Blueprint **IR** apply/export on the **Blueprint Builder** sub-turn (default main Agent uses **handoff** + `agent_surfaces` gating for graph mutators), persistence | Peers emphasize **Blueprint generation**, **MCP/tools**, **multi-asset** workflows, etc.—same problem space, different implementation/breadth. |
-| **Lock-in** | **No** product backend; code you can audit | Depends on vendor; usually **no** token markup, but **yes** license fee for the plugin. |
+## Demo-first overview
 
-**Examples on Fab** (illustrative, not exhaustive—search Fab for “AI”, “Blueprint”, “GPT”, “assistant”): [Blueprint Generator AI (Kibibyte Labs)](https://www.fab.com/listings/6aa00d98-0db0-4f13-8950-e21f0a0eda2c), [AI Integration Toolkit (AIITK)](https://www.fab.com/listings/9de23ba0-e210-402d-9d76-441904e46f47), [HttpGPT](https://www.fab.com/listings/3edf406f-6a87-4f2f-bfdb-b0039f285541), [Offline AI Assistant](https://www.fab.com/listings/191b86f7-650d-4af8-a6dc-88f753e05968), [Universal Offline LLM](https://www.fab.com/listings/c5981158-7add-4977-9e08-440831058e5d). [UnrealAI](https://unrealai.studio/) (also positions as Fab-distributed) markets the same **BYOK / one-time plugin** idea with optional paid cloud credits—same dual cost structure minus **our $0** license.
+The fastest way to evaluate this project is a short demo that shows:
 
-For **tooling breadth** and known gaps, see [`docs/asset-type-coverage-matrix.md`](docs/asset-type-coverage-matrix.md). Narrative tool list: [`docs/tooling/tool-registry.md`](docs/tooling/tool-registry.md).
+1. A user request inside the editor.
+2. Tool-assisted execution across project assets/world context.
+3. A visible end result plus transcript/tool cards.
 
-**Plugin implementation** (what ships today): [`Plugins/UnrealAiEditor/README.md`](Plugins/UnrealAiEditor/README.md). **Docs index:** [`docs/README.md`](docs/README.md).
+Recommended format:
+
+- 2-4 minute highlight reel.
+- 2-3 reliable scenarios.
+- Captions for constraints, guardrails, and outcomes.
+
+## Why this is a strong resume piece
+
+- **Ambitious scope:** multi-system plugin (UI, harness, context, tooling, retrieval, persistence).
+- **Real constraints:** no product backend, BYOK model providers, local-first data handling.
+- **Engineering judgment:** explicit guardrails, staged execution paths, observability, and fallback behavior.
+- **Professional communication:** architecture maps, implementation docs, and roadmap.
+
+## What currently works best
+
+- Streaming in-editor chat with per-thread persistence.
+- Broad tool catalog and tool dispatch path for editor operations.
+- Context assembly pipeline with deterministic editor/project signals.
+- Optional retrieval and memory integrations for richer context.
+- Blueprint-oriented flows routed through dedicated builder/handoff paths.
+
+For plugin feature and folder details, see [`Plugins/UnrealAiEditor/README.md`](Plugins/UnrealAiEditor/README.md).
 
 <!-- ARCHITECTURE_MAPS_START -->
 ## Architecture Maps
@@ -263,74 +282,95 @@ Described in [`docs/context/vector-db-implementation-plan.md`](docs/context/vect
 
 ## Build and run (Windows, UE 5.7)
 
-1. **Prerequisites:** Visual Studio 2022 **Desktop development with C++** (or Build Tools + MSVC), and the [.NET Framework 4.8 Developer Pack](https://learn.microsoft.com/en-us/dotnet/framework/install/guide-for-developers) (needed for Unreal Build Tool on some machines).
-2. From the repo root, use the helper script. **Optional:** copy `.env.example` to `.env` and set only **`UE_ENGINE_ROOT`** and the three **`OPENAI_*`** keys; `build-editor.ps1` and harness scripts load `.env` before running. Harness/tool timing and feature toggles live in **`UnrealAiRuntimeDefaults.h`**, not `.env`. After editing `OPENAI_*`, run `.\scripts\sync-unreal-ai-from-dotenv.ps1` to refresh `%LOCALAPPDATA%\UnrealAiEditor\settings\plugin_settings.json`.
+1. **Prerequisites**
+   - Visual Studio 2022 with **Desktop development with C++**.
+   - [.NET Framework 4.8 Developer Pack](https://learn.microsoft.com/en-us/dotnet/framework/install/guide-for-developers) (required on some UBT setups).
+2. From repo root, run a headless build:
 
    ```powershell
    .\build-editor.ps1 -Headless
    ```
 
-   Or with options:
+   Useful options:
+   - Generate project files: `.\build-editor.ps1 -GenerateProjectFiles`
+   - Custom engine root: `$env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\build-editor.ps1 -Headless`
+   - Clean rebuild (close editor first): `.\build-editor.ps1 -Restart -Headless`
 
-   - **Generate project files:** `.\build-editor.ps1 -GenerateProjectFiles`
-   - **Custom engine:** `$env:UE_ENGINE_ROOT = 'D:\Epic\UE_5.7'; .\build-editor.ps1 -Headless`
-   - **Clean rebuild (close editor first):** `.\build-editor.ps1 -Restart -Headless`
-
-   **Agent tools vs. rebuilds:** Unreal will still run its own compile if game/plugin binaries are missing or incompatible with the target receipt—nothing in the plugin can remove that. The `cpp_project_compile` tool is **blocked** inside a normal interactive editor session unless the model passes `confirm_external_rebuild:true` (or the editor is `-unattended` / under automation), because spawning `Build.bat` beside a live editor commonly desynchronizes Live Coding and loaded modules. Prefer closing the editor and using `build-editor.ps1`. File writes from the agent default to **`Saved/UnrealAiEditorAgent/`**; touching `Config/`, `Source/`, or the `.uproject` requires **`confirm_project_critical:true`** in addition to `confirm:true`.
-
-3. **Launch Unreal Editor** (after a successful build):
+3. Launch Unreal Editor after a successful build:
 
    `"<Engine>\Engine\Binaries\Win64\UnrealEditor.exe" "%CD%\<YourProject>.uproject"`
 
-   (`build-editor.ps1` finds the single `*.uproject` at the repo root; set `UE_REPO_UPROJECT` in `.env` if you have more than one or use a custom manifest path—see `scripts/Resolve-RepoUProject.ps1`.)
+   `build-editor.ps1` auto-detects a single repo-root `*.uproject`. If multiple projects exist, set `UE_REPO_UPROJECT`.
 
-From **Cursor** or VS Code, use the integrated terminal for the same commands.
+## Quickstart for evaluators
+
+If you are reviewing this project for hiring or technical evaluation:
+
+1. Build with `.\build-editor.ps1 -Headless`.
+2. Open the project and launch **Window -> Unreal AI**.
+3. Run one short workflow (chat + tool call + visible editor result).
+4. Skim the architecture maps and reliability notes below.
+
+## Reliability notes
+
+This project is intentionally ambitious and still under active hardening. The main focus areas are:
+
+- Tool call reliability and deterministic guardrails.
+- Better failure messaging and recoverable retry paths.
+- Faster context assembly under larger projects.
+- Clearer separation of "works now" versus "planned".
+
+Current known gaps and work backlog are tracked in project docs and issues.
 
 ## Bundled plugin distribution
 
-For end users, distribute the plugin folder:
+For distribution, package:
 
 - `Plugins/UnrealAiEditor`
 
-From a clean copy, omit `Binaries`, `Intermediate`, and `.git`. To build a zip from repo root:
+From a clean copy, omit `Binaries`, `Intermediate`, and `.git`. To create a zip:
 
 ```powershell
 New-Item -ItemType Directory -Force -Path dist | Out-Null
 Compress-Archive -Path 'Plugins\UnrealAiEditor' -DestinationPath 'dist\UnrealAiEditor.zip' -Force
 ```
 
-**Agent / harness iteration (prompts, tools, tests):** read [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](docs/tooling/AGENT_HARNESS_HANDOFF.md) — one file for scripts, file map, and when to report bigger issues or tool catalog changes.
+## Feature snapshot
 
-The repo includes the UE **First Person BP** sample (Blueprint-only game, copied from the engine `Templates/TP_FirstPersonBP` folder—the same files the New Project wizard uses). The **UnrealAiEditor** plugin remains C++; `build-editor.ps1` builds **`<ProjectName>Editor`** for whatever `*.uproject` lives at the repo root so native plugins compile. Open that `.uproject` normally—the plugin lives in `Plugins/UnrealAiEditor/` beside the project (no copy step).
-
-## What you get (high level)
-
-- **In-editor UI:** **Window → Unreal AI** and **Tools → Unreal AI** (Agent Chat, AI Settings, Quick Start, Help, **Debug**). Toolbar button and **Ctrl+K** for Agent Chat.
-- **Agent Chat:** Streaming replies, tool call cards, todo plans, context attachments, per-thread persistence under `%LOCALAPPDATA%\UnrealAiEditor\` (Windows).
-- **Tools:** Broad catalog in `Plugins/UnrealAiEditor/Resources/tools.main.json`—scene/asset/source search, editor snapshots, Blueprint **compile** / **export IR** / **apply IR**, generic **asset** create/export/apply properties, packaging helpers, and more (see catalog and dispatch modules under `Plugins/UnrealAiEditor/Source/.../Tools/`).
-- **Settings:** API keys, models, usage stats, presets—persisted locally; optional OpenRouter and other providers.
-- **No product backend:** networking is **only** to LLM APIs you configure (plus optional local tooling such as MCP on localhost, if you wire it).
+- In-editor chat UI with streaming output.
+- Tool execution host and dispatch modules for editor actions.
+- Context service integrating project/editor signals.
+- Plan and harness paths for multi-step execution.
+- Local persistence under `%LOCALAPPDATA%\UnrealAiEditor`.
+- Optional retrieval and memory systems.
 
 ## Repository layout
 
-- **Unreal project at repo root:** one `*.uproject`, `Config/`, `Content/`, minimal **`Source/*.Target.cs`** (UBT/VS only; no game C++ module), **`Plugins/UnrealAiEditor/`** — open the root `.uproject` to develop and test the plugin (upstream sample is `TP_FirstPerson.uproject`; rename or replace it for your fork if you like, or set `UE_REPO_UPROJECT`).
+- Unreal project at repo root (`*.uproject`, `Config/`, `Content/`).
+- Plugin source in `Plugins/UnrealAiEditor`.
+- Long-form technical docs under `docs/`.
+- Test and harness support under `tests/` and tooling docs.
 
-## MVP architecture (summary)
+## Interview discussion guide
 
-- **No server and no product backend** — core functionality ships in the **Unreal editor plugin** (UI, tools, persistence, orchestration).
-- **Network:** user-configured **HTTPS to third-party LLM APIs** only (e.g. OpenRouter, Anthropic, OpenAI). Optional **localhost** tooling (e.g. MCP) runs **inside or beside the editor**, not a remote product API.
-- **Optional local vector retrieval** (off by default): when enabled, project/Memory text can be embedded into a local SQLite-backed index and surfaced as `retrieval_snippet` candidates alongside deterministic context. When disabled, behavior matches pre-retrieval assembly (tools, Asset Registry, deterministic search). See [`docs/context/context-management.md`](docs/context/context-management.md) and [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md).
+If you are presenting this project in interviews, focus on:
 
-## Maintainer docs
+- **System design:** why the plugin is decomposed into context, harness, tooling, retrieval, and UI.
+- **Tradeoffs:** ambition vs reliability, and where guardrails are enforced.
+- **Product thinking:** what users can do today and how the UX communicates uncertainty.
+- **Execution:** demo workflow quality, reproducibility, and iteration plan.
 
-**Automated tests, harness scripts, and `tests/` scenarios** exist to **tune** prompts, catalog, and dispatch—they are **not** a supported end-user workflow. See [`tests/README.md`](tests/README.md).
-
-## Canonical docs (in repo)
+## Canonical docs
 
 | Document | Purpose |
 |----------|---------|
-| [`docs/README.md`](docs/README.md) | Index of all `docs/` files |
-| [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](docs/tooling/AGENT_HARNESS_HANDOFF.md) | Harness iteration, scripts, tiers, escalation |
-| [`docs/context/context-management.md`](docs/context/context-management.md) | Per-chat context assembly, `context.json`, budgets, planning artifacts |
-| [`docs/api/timeout-handling.md`](docs/api/timeout-handling.md) | HTTP / harness sync / streaming / tool wall-clock limits |
-| [`Plugins/UnrealAiEditor/README.md`](Plugins/UnrealAiEditor/README.md) | Plugin features and layout |
+| [`docs/README.md`](docs/README.md) | Entry point to project docs |
+| [`Plugins/UnrealAiEditor/README.md`](Plugins/UnrealAiEditor/README.md) | Plugin-level implementation guide |
+| [`docs/tooling/AGENT_HARNESS_HANDOFF.md`](docs/tooling/AGENT_HARNESS_HANDOFF.md) | Harness/tooling iteration details |
+| [`docs/context/context-management.md`](docs/context/context-management.md) | Context lifecycle and assembly |
+| [`docs/context/vector-db-implementation-plan.md`](docs/context/vector-db-implementation-plan.md) | Retrieval architecture and rollout |
+| [`tests/README.md`](tests/README.md) | Test strategy and scenarios |
+
+## License
+
+See [`LICENSE`](LICENSE).
