@@ -1,4 +1,4 @@
-﻿// C4 workspace for architecture maps (exported to SVG via scripts/export-architecture-maps.ps1).
+// C4 workspace for architecture maps (exported to SVG via scripts/export-architecture-maps.ps1).
 // Diagram readability: very long single-line descriptions render as one stretched horizontal line in SVGs
 // (no automatic wrap). Prefer splitting description strings with \n at clause boundaries or ~60-80 characters.
 // Keep relationship labels short; put narrative detail in the readme prose block (see file tail) or docs/.
@@ -9,14 +9,14 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
         dev = person "Unreal Developer" "Uses the in-editor assistant to plan, inspect, edit,\nand automate Unreal workflows."
 
         unrealEditor = softwareSystem "Unreal Editor Runtime" "Engine/editor surfaces: selection, Asset Registry, Content Browser,\nopen editor tabs, world state, PIE, and command interfaces." "External"
-        llmProvider = softwareSystem "Third-Party LLM APIs (BYOK)" "User-configured model endpoints (OpenRouter/OpenAI/Anthropic-compatible)." "External"
+        llmProvider = softwareSystem "Third-Party LLM APIs (BYOK)" "User-configured model endpoints (OpenAI-compatible / vendor SDKs)." "External"
         localhostBridge = softwareSystem "Localhost Integrations (Optional)" "Optional MCP/CLI local bridge endpoints and local child-process integrations." "External"
 
         plugin = softwareSystem "UnrealAiEditor Plugin" "Single in-editor, local-first runtime with no required product backend." {
             ui = container "UI Layer (Slate)" "Chat/settings/debug tabs and composer UX." "C++ / Slate" "UI" {
                 chatTab = component "Chat Tab Shell" "Dockable chat tab and high-level UI state." "SUnrealAiEditorChatTab" "UI"
                 composer = component "Composer + Send Pipeline" "Send handling, typed input, mode state, and run kick-off." "SChatComposer" "UI"
-                settingsTab = component "Settings Surfaces" "Provider/model/profile/retrieval/memory settings." "SUnrealAiEditorSettingsTab" "UI"
+                settingsTab = component "Settings Surfaces" "Provider/model/profile settings (Project Settings + plugin_settings.json)." "SUnrealAiLlmPluginSettingsPanel" "UI"
                 chatTranscript = component "Transcript Widgets" "Message rendering, tool call panels, user-visible warnings." "Slate Widgets" "UI"
                 quickStart = component "Quick Start + Debug Tabs" "Onboarding and diagnostics controls." "Slate Widgets" "UI"
             }
@@ -28,7 +28,7 @@ workspace "Unreal AI Editor Plugin Architecture" "Detailed C4 architecture with 
                 settingsLoader = component "Settings Loader" "Loads providers/models/defaults from settings JSON." "FUnrealAiModelProfileRegistry" "Core"
                 capResolver = component "Capability Resolver" "Resolves effective caps for requested model profile." "FUnrealAiModelProfileRegistry" "Core"
                 apiResolver = component "API Endpoint Resolver" "Resolves base URL/API key by model/provider." "FUnrealAiModelProfileRegistry" "Core"
-                curatedModelCatalog = component "Curated Model Catalog" "Built-in provider -> known OpenAI-compatible model id list used by settings pickers." "SUnrealAiEditorSettingsTab" "Core"
+                curatedModelCatalog = component "Curated Model Catalog" "Built-in provider -> known OpenAI-compatible model id list used by settings pickers." "SUnrealAiLlmPluginSettingsPanel" "Core"
             }
 
             promptLibrary = container "Prompt Chunk Library" "Prompt chunk templates and token replacement contracts." "Markdown + C++" "Core"
