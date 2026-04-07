@@ -143,7 +143,7 @@ FString UnrealAiEnvironmentBuilderToolSurface::BuildAutomatedSubturnHarnessPream
 		TEXT("[Environment Builder — automated sub-turn]\n")
 		TEXT("The main agent delegated work using `<unreal_ai_build_environment>` with **target_kind: %s**. ")
 		TEXT("Use discovery tools to resolve real `/Game/...` asset paths and world actor paths before mutating. ")
-		TEXT("Catalog tools `pcg_generate`, `foliage_paint_instances`, and `landscape_import_heightmap` are **staged** (`status: future`); expect structured errors until dispatch is fully implemented.\n")
+		TEXT("Catalog tools `pcg_generate`, `foliage_paint_instances`, and `landscape_import_heightmap` are **implemented** in-editor; they may still return structured errors when prerequisites are missing (e.g. no PCG component, missing foliage type, heightmap file path).\n")
 		TEXT("\n")
 		TEXT("When finished or blocked, emit `<unreal_ai_environment_builder_result>...</unreal_ai_environment_builder_result>` for the main agent.\n")
 		TEXT("\n")

@@ -40,12 +40,6 @@ public:
 	/** @deprecated Prefer AddUserMessage; kept for call sites. */
 	void ResetAssistant();
 
-	/** Called when the user message entry animation finishes. */
-	void ClearUserAnimId();
-
-	/** While following the bottom, request a scroll after layout (e.g. user bubble animation). */
-	void NotifyFollowingScrollToBottom();
-
 private:
 	/** Coalesces rapid OnStructuralChange bursts (e.g. tool start/end) to one rebuild tick. */
 	void ScheduleRebuildTranscript();
@@ -56,7 +50,6 @@ private:
 	void OnAssistantRevealTick();
 	void ScheduleScrollToEndIfFollowing();
 	void ForceScrollToBottomAndFollow();
-	EActiveTimerReturnType TickSmoothFollowScroll(double InCurrentTime, float InDeltaTime);
 	EVisibility GetJumpToBottomVisibility() const;
 	FReply OnJumpToBottomClicked();
 
@@ -77,9 +70,6 @@ private:
 	TSharedPtr<SAssistantStreamBlock> ActiveAssistantWidget;
 	TSharedPtr<SThinkingSubline> ActiveThinkingWidget;
 
-	/** User message that plays the slide-in animation on next rebuild. */
-	FGuid PendingUserAnimId;
-
 	/** Tool call blocks the user left expanded; preserved across transcript rebuilds. */
 	TSet<FGuid> ExpandedToolCallBlockIds;
 	/** Run-progress rows that are expanded to show detailed timeline lines. */
@@ -93,11 +83,6 @@ private:
 
 	/** Slate units: treat as "at bottom" if this close to max scroll. */
 	static constexpr float StickToBottomThresholdPx = 48.f;
-
-	/** True while actively interpolating scroll offset toward the bottom. */
-	bool bSmoothFollowScrollActive = false;
-	/** Larger = snappier follow; smaller = smoother drift. */
-	static constexpr float FollowScrollInterpSpeed = 11.f;
 
 	bool bTranscriptRebuildPending = false;
 	bool bTranscriptRebuildTickerActive = false;

@@ -784,6 +784,11 @@ void FUnrealAiPlanExecutor::BeginNextReadyNode()
 			*ChildReq.ThreadId));
 	}
 	UE_LOG(LogTemp, Display, TEXT("UnrealAi plan: RunTurn plan_node=%s thread=%s"), *NodeId, *ChildReq.ThreadId);
+	if (ParentSink.IsValid())
+	{
+		const FString NodeTitle = Node->Title.IsEmpty() ? Node->Id : Node->Title;
+		ParentSink->OnPlanWorkerSpanOpened(NodeId, FText::FromString(NodeTitle));
+	}
 	Harness->RunTurn(ChildReq, Sink);
 }
 
@@ -829,6 +834,10 @@ void FUnrealAiPlanExecutor::OnNodeFinished(const FString& NodeId, bool bSuccess,
 	else
 	{
 		Summary = AssistantText.Left(300);
+	}
+	if (ParentSink.IsValid())
+	{
+		ParentSink->OnPlanWorkerSpanClosed(NodeId, bSuccess, Summary);
 	}
 	if (!bSuccess)
 	{

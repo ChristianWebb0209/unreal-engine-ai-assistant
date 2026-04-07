@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Internationalization/Text.h"
 #include "Harness/ILlmTransport.h"
 #include "Harness/UnrealAiAgentTypes.h"
 
@@ -52,6 +53,15 @@ public:
 	 * Chat UI may show a short user-style line; default is no-op.
 	 */
 	virtual void OnSubagentBuilderHandoff(const FString& BuilderDisplayName) {}
+	/** Plan executor: a DAG node worker turn is about to stream to the parent sink (before Harness->RunTurn). */
+	virtual void OnPlanWorkerSpanOpened(const FString& NodeId, const FText& TitleOrEmpty) { (void)NodeId; (void)TitleOrEmpty; }
+	/** Plan executor: worker turn finished; SummaryOneLine matches plan node status summary (truncated). */
+	virtual void OnPlanWorkerSpanClosed(const FString& NodeId, bool bSuccess, const FString& SummaryOneLine)
+	{
+		(void)NodeId;
+		(void)bSuccess;
+		(void)SummaryOneLine;
+	}
 	/** Per-turn enforcement signal for action/mutation execution policy observability. */
 	virtual void OnEnforcementEvent(const FString& EventType, const FString& Detail) {}
 	/** Run-level aggregate counters for action/mutation policy auditing. */

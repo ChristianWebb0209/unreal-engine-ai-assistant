@@ -1,5 +1,10 @@
 #include "Widgets/FUnrealAiChatRunSink.h"
 
+#include "UnrealAiEditorModule.h"
+#include "Backend/UnrealAiBackendRegistry.h"
+#include "Harness/FUnrealAiModelProfileRegistry.h"
+#include "Harness/ILlmTransport.h"
+#include "Harness/UnrealAiHarnessTpmThrottle.h"
 #include "Observability/UnrealAiGameThreadPerf.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Widgets/UnrealAiToolDisplayName.h"
@@ -269,6 +274,22 @@ void FUnrealAiChatRunSink::OnSubagentBuilderHandoff(const FString& BuilderDispla
 		FString::Printf(TEXT("[Harness] Delegated to %s."), *BuilderDisplayName));
 }
 
+void FUnrealAiChatRunSink::OnPlanWorkerSpanOpened(const FString& NodeId, const FText& TitleOrEmpty)
+{
+	if (Transcript.IsValid())
+	{
+		Transcript->BeginPlanWorkerSpan(NodeId, TitleOrEmpty);
+	}
+}
+
+void FUnrealAiChatRunSink::OnPlanWorkerSpanClosed(const FString& NodeId, bool bSuccess, const FString& SummaryOneLine)
+{
+	if (Transcript.IsValid())
+	{
+		Transcript->EndPlanWorkerSpan(NodeId, bSuccess, SummaryOneLine);
+	}
+}
+
 void FUnrealAiChatRunSink::OnEnforcementEvent(const FString& EventType, const FString& Detail)
 {
 	if (Transcript.IsValid())
@@ -328,6 +349,40 @@ void FUnrealAiChatRunSink::OnHarnessProgressLog(const FString& Line)
 		return;
 	}
 	Transcript->AppendRunEvent(Line);
+}
+
+void FUnrealAiChatRunSink::OnLlmRequestPreparedForHttp(
+	const FUnrealAiAgentTurnRequest& TurnRequest,
+	const FGuid& RunId,
+	const int32 LlmRound,
+	const int32 EffectiveMaxLlmRounds,
+	const FUnrealAiLlmRequest& LlmRequest)
+{
+	(void)RunId;
+	(void)LlmRound;
+	(void)EffectiveMaxLlmRounds;
+	if (!Transcript.IsValid() || !Transcript->HasActivePlanWorkerSpan())
+	{
+		return;
+	}
+	const int32 Footprint = UnrealAiHarnessTpmThrottle::EstimateChatFootprintTokens(LlmRequest, 4);
+	const int32 PromptApprox = FMath::Max(1, Footprint - FMath::Max(0, LlmRequest.MaxOutputTokens));
+	FString ProfileId = TurnRequest.ModelProfileId;
+	if (ProfileId.IsEmpty() && Session.IsValid())
+	{
+		ProfileId = Session->ModelProfileId;
+	}
+	int32 MaxCtx = 0;
+	if (const TSharedPtr<FUnrealAiBackendRegistry> Reg = FUnrealAiEditorModule::GetBackendRegistry())
+	{
+		if (FUnrealAiModelProfileRegistry* Profiles = Reg->GetModelProfileRegistry())
+		{
+			FUnrealAiModelCapabilities Caps;
+			Profiles->GetEffectiveCapabilities(ProfileId, Caps);
+			MaxCtx = FMath::Max(0, Caps.MaxContextTokens);
+		}
+	}
+	Transcript->UpdateActivePlanWorkerLaneContextEstimate(PromptApprox, MaxCtx);
 }
 
 void FUnrealAiChatRunSink::OnRunFinished(bool bSuccess, const FString& ErrorMessage)

@@ -413,7 +413,7 @@ void SUnrealAiEditorChatTab::OnUnifiedNewChat()
 
 void SUnrealAiEditorChatTab::OpenSettingsTab() const
 {
-	FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::SettingsTab);
+	FUnrealAiEditorModule::OpenUnrealAiPluginSettings();
 }
 
 void SUnrealAiEditorChatTab::MenuNewChat()

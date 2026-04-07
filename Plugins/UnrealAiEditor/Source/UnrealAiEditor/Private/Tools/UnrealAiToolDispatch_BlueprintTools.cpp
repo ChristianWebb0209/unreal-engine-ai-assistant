@@ -778,7 +778,7 @@ static FUnrealAiToolInvocationResult DispatchBlueprintFormatLayout(
 				Graph,
 				Sel,
 				&SelErr,
-				FUnrealAiEditorModule::IsEditorFocusEnabled()))
+				FUnrealAiEditorModule::ShouldApplyHarnessEditorNavigation()))
 		{
 			return UnrealAiToolJson::Error(SelErr);
 		}

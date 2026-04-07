@@ -278,6 +278,7 @@ void FUnrealAiChatTranscript::Clear()
 	bAssistantSegmentOpen = false;
 	bThinkingOpen = false;
 	LastAssistantStreamChunkMonotonicTime = 0.0;
+	ActivePlanWorkerNodeId.Reset();
 	OnStructuralChange.Broadcast();
 }
 
@@ -299,14 +300,28 @@ FString FUnrealAiChatTranscript::FormatPlainText() const
 			{
 				Out += B.StepTimingCaption + TEXT("\n");
 			}
-			Out += FString::Printf(TEXT("--- Thinking ---\n%s\n\n"), *B.ThinkingText);
+			if (!B.PlanWorkerNodeId.IsEmpty())
+			{
+				Out += FString::Printf(TEXT("--- Thinking (plan node: %s) ---\n%s\n\n"), *B.PlanWorkerNodeId, *B.ThinkingText);
+			}
+			else
+			{
+				Out += FString::Printf(TEXT("--- Thinking ---\n%s\n\n"), *B.ThinkingText);
+			}
 			break;
 		case EUnrealAiChatBlockKind::Assistant:
 			if (!B.StepTimingCaption.IsEmpty())
 			{
 				Out += B.StepTimingCaption + TEXT("\n");
 			}
-			Out += FString::Printf(TEXT("--- Assistant ---\n%s\n\n"), *B.AssistantText);
+			if (!B.PlanWorkerNodeId.IsEmpty())
+			{
+				Out += FString::Printf(TEXT("--- Assistant (plan node: %s) ---\n%s\n\n"), *B.PlanWorkerNodeId, *B.AssistantText);
+			}
+			else
+			{
+				Out += FString::Printf(TEXT("--- Assistant ---\n%s\n\n"), *B.AssistantText);
+			}
 			break;
 		case EUnrealAiChatBlockKind::ToolCall:
 			if (!B.StepTimingCaption.IsEmpty())
@@ -317,12 +332,25 @@ FString FUnrealAiChatTranscript::FormatPlainText() const
 				const FString ToolHeadline = !B.ToolDisplayTitle.IsEmpty()
 					? B.ToolDisplayTitle
 					: UnrealAiFormatToolIdAsTitleWords(B.ToolName);
-				Out += FString::Printf(
-					TEXT("--- Tool: %s ---\nArgs: %s\nResult: %s\nStatus: %s\n\n"),
-					*ToolHeadline,
-					*B.ToolArgsPreview,
-					*B.ToolResultPreview,
-					B.bToolRunning ? TEXT("running") : (B.bToolOk ? TEXT("ok") : TEXT("failed")));
+				if (!B.PlanWorkerNodeId.IsEmpty())
+				{
+					Out += FString::Printf(
+						TEXT("--- Tool (plan node: %s): %s ---\nArgs: %s\nResult: %s\nStatus: %s\n\n"),
+						*B.PlanWorkerNodeId,
+						*ToolHeadline,
+						*B.ToolArgsPreview,
+						*B.ToolResultPreview,
+						B.bToolRunning ? TEXT("running") : (B.bToolOk ? TEXT("ok") : TEXT("failed")));
+				}
+				else
+				{
+					Out += FString::Printf(
+						TEXT("--- Tool: %s ---\nArgs: %s\nResult: %s\nStatus: %s\n\n"),
+						*ToolHeadline,
+						*B.ToolArgsPreview,
+						*B.ToolResultPreview,
+						B.bToolRunning ? TEXT("running") : (B.bToolOk ? TEXT("ok") : TEXT("failed")));
+				}
 			}
 			break;
 		case EUnrealAiChatBlockKind::TodoPlan:
@@ -342,6 +370,36 @@ FString FUnrealAiChatTranscript::FormatPlainText() const
 		case EUnrealAiChatBlockKind::Notice:
 			Out += FString::Printf(TEXT("--- Notice ---\n%s\n\n"), *B.NoticeText);
 			break;
+		case EUnrealAiChatBlockKind::PlanWorkerLane:
+		{
+			const TCHAR* StatusStr = TEXT("running");
+			if (B.PlanWorkerLaneStatus == EUnrealAiPlanWorkerLaneStatus::Succeeded)
+			{
+				StatusStr = TEXT("done");
+			}
+			else if (B.PlanWorkerLaneStatus == EUnrealAiPlanWorkerLaneStatus::Failed)
+			{
+				StatusStr = TEXT("failed");
+			}
+			Out += FString::Printf(
+				TEXT("--- Plan worker lane ---\nNode: %s\nTitle: %s\nStatus: %s\n"),
+				*B.PlanWorkerNodeId,
+				*B.PlanWorkerTitleDisplay,
+				StatusStr);
+			if (!B.PlanWorkerSummaryLine.IsEmpty())
+			{
+				Out += FString::Printf(TEXT("Summary: %s\n"), *B.PlanWorkerSummaryLine);
+			}
+			if (B.PlanWorkerContextMaxTokens > 0)
+			{
+				Out += FString::Printf(
+					TEXT("Context (est.): ~%d / %d tokens\n"),
+					B.PlanWorkerPromptTokensEst,
+					B.PlanWorkerContextMaxTokens);
+			}
+			Out += TEXT("\n");
+			break;
+		}
 		default:
 			break;
 		}
@@ -498,10 +556,72 @@ FGuid FUnrealAiChatTranscript::AddUserMessage(const FString& Text, FGuid Desired
 void FUnrealAiChatTranscript::BeginRun(const FGuid& RunId)
 {
 	ActiveRunId = RunId;
+	ActivePlanWorkerNodeId.Reset();
 	bHasActiveRun = true;
 	bAssistantSegmentOpen = false;
 	bThinkingOpen = false;
 	LastAssistantStreamChunkMonotonicTime = 0.0;
+}
+
+void FUnrealAiChatTranscript::ApplyActivePlanWorkerTag(FUnrealAiChatBlock& Block) const
+{
+	if (!ActivePlanWorkerNodeId.IsEmpty())
+	{
+		Block.PlanWorkerNodeId = ActivePlanWorkerNodeId;
+	}
+}
+
+void FUnrealAiChatTranscript::BeginPlanWorkerSpan(const FString& NodeId, const FText& TitleOrEmpty)
+{
+	if (NodeId.IsEmpty() || !bHasActiveRun)
+	{
+		return;
+	}
+	ActivePlanWorkerNodeId = NodeId;
+	FUnrealAiChatBlock B;
+	B.Id = FGuid::NewGuid();
+	B.RunId = ActiveRunId;
+	B.Kind = EUnrealAiChatBlockKind::PlanWorkerLane;
+	B.PlanWorkerNodeId = NodeId;
+	B.PlanWorkerTitleDisplay = TitleOrEmpty.IsEmpty() ? NodeId : TitleOrEmpty.ToString();
+	B.PlanWorkerLaneStatus = EUnrealAiPlanWorkerLaneStatus::Running;
+	Blocks.Add(MoveTemp(B));
+	OnStructuralChange.Broadcast();
+}
+
+void FUnrealAiChatTranscript::EndPlanWorkerSpan(const FString& NodeId, bool bSuccess, const FString& SummaryOneLine)
+{
+	(void)NodeId;
+	ActivePlanWorkerNodeId.Reset();
+	for (int32 Idx = Blocks.Num() - 1; Idx >= 0; --Idx)
+	{
+		if (Blocks[Idx].Kind == EUnrealAiChatBlockKind::PlanWorkerLane && Blocks[Idx].PlanWorkerNodeId == NodeId)
+		{
+			Blocks[Idx].PlanWorkerLaneStatus =
+				bSuccess ? EUnrealAiPlanWorkerLaneStatus::Succeeded : EUnrealAiPlanWorkerLaneStatus::Failed;
+			Blocks[Idx].PlanWorkerSummaryLine = SummaryOneLine;
+			break;
+		}
+	}
+	OnStructuralChange.Broadcast();
+}
+
+void FUnrealAiChatTranscript::UpdateActivePlanWorkerLaneContextEstimate(const int32 PromptTokensEst, const int32 MaxContextTokens)
+{
+	if (ActivePlanWorkerNodeId.IsEmpty())
+	{
+		return;
+	}
+	for (int32 Idx = Blocks.Num() - 1; Idx >= 0; --Idx)
+	{
+		if (Blocks[Idx].Kind == EUnrealAiChatBlockKind::PlanWorkerLane && Blocks[Idx].PlanWorkerNodeId == ActivePlanWorkerNodeId)
+		{
+			Blocks[Idx].PlanWorkerPromptTokensEst = FMath::Max(0, PromptTokensEst);
+			Blocks[Idx].PlanWorkerContextMaxTokens = FMath::Max(0, MaxContextTokens);
+			OnStructuralChange.Broadcast();
+			return;
+		}
+	}
 }
 
 void FUnrealAiChatTranscript::TouchAssistantStreamChunkTime()
@@ -542,6 +662,7 @@ void FUnrealAiChatTranscript::AppendThinkingDelta(const FString& Chunk)
 		B.Kind = EUnrealAiChatBlockKind::Thinking;
 		B.ThinkingText = Chunk;
 		B.StepMonotonicStart = FPlatformTime::Seconds();
+		ApplyActivePlanWorkerTag(B);
 		Blocks.Add(MoveTemp(B));
 		bThinkingOpen = true;
 		OnStructuralChange.Broadcast();
@@ -617,6 +738,7 @@ void FUnrealAiChatTranscript::AppendAssistantDelta(const FString& Chunk)
 		B.Kind = EUnrealAiChatBlockKind::Assistant;
 		B.AssistantText = Chunk;
 		B.StepMonotonicStart = FPlatformTime::Seconds();
+		ApplyActivePlanWorkerTag(B);
 		Blocks.Add(MoveTemp(B));
 		bAssistantSegmentOpen = true;
 		TouchAssistantStreamChunkTime();
@@ -661,6 +783,7 @@ void FUnrealAiChatTranscript::BeginToolCall(
 	B.bToolRunning = true;
 	B.bToolOk = false;
 	B.StepMonotonicStart = FPlatformTime::Seconds();
+	ApplyActivePlanWorkerTag(B);
 	Blocks.Add(MoveTemp(B));
 	OnStructuralChange.Broadcast();
 }
@@ -691,6 +814,7 @@ void FUnrealAiChatTranscript::AddTodoPlan(const FString& Title, const FString& P
 	B.Kind = EUnrealAiChatBlockKind::TodoPlan;
 	B.TodoTitle = Title;
 	B.TodoJson = PlanJson;
+	ApplyActivePlanWorkerTag(B);
 	Blocks.Add(MoveTemp(B));
 	OnStructuralChange.Broadcast();
 }
@@ -914,6 +1038,7 @@ void FUnrealAiChatTranscript::HydrateFromConversationMessages(
 	bAssistantSegmentOpen = false;
 	bThinkingOpen = false;
 	LastAssistantStreamChunkMonotonicTime = 0.0;
+	ActivePlanWorkerNodeId.Reset();
 
 	for (const FUnrealAiConversationMessage& M : Messages)
 	{

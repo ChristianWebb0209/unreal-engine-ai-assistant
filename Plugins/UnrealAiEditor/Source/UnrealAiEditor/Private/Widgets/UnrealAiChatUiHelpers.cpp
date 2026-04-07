@@ -226,7 +226,7 @@ void UnrealAiChatUi_MaybeInjectLlmSetupNotice(
 	const FText NoticeText = NSLOCTEXT(
 		"UnrealAiEditor",
 		"ChatLlmSetupNotice",
-		"Welcome! Open AI Settings (Window → Unreal AI → AI Settings, or Tools → Unreal AI → AI Settings), enter your API key, "
+		"Welcome! Open Project Settings → Plugins → Unreal AI Editor (Window → Unreal AI → Plugin settings, or Tools → Unreal AI → Plugin settings), enter your API key, "
 		"then click Save and apply. Chat and vector indexing require a working provider connection.");
 	Tr->AddInformationalNotice(NoticeText.ToString());
 }

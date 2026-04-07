@@ -18,7 +18,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ContentBrowserNavigateFolder(cons
 		return UnrealAiToolJson::Error(TEXT("folder_path is required"));
 	}
 	bool bUiSuppressed = false;
-	if (FUnrealAiEditorModule::IsEditorFocusEnabled())
+	if (FUnrealAiEditorModule::ShouldApplyHarnessEditorNavigation())
 	{
 		FContentBrowserModule& CBM = FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser"));
 		CBM.Get().SyncBrowserToFolders({FolderPath});

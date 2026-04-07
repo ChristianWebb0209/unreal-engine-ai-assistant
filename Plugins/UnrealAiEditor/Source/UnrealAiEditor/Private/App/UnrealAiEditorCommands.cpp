@@ -22,7 +22,7 @@ void FUnrealAiEditorCommands::RegisterCommands()
 		"Open the Agent Chat window.",
 		EUserInterfaceActionType::Button,
 		FInputChord(EKeys::K, EModifierKey::Control));
-	UI_COMMAND(OpenSettingsTab, "AI Settings", "Open full AI settings.", EUserInterfaceActionType::Button, FInputChord());
+	UI_COMMAND(OpenSettingsTab, "Plugin settings", "Open Project Settings for Unreal AI Editor.", EUserInterfaceActionType::Button, FInputChord());
 	UI_COMMAND(OpenQuickStartTab, "Quick Start", "Open Quick Start guide.", EUserInterfaceActionType::Button, FInputChord());
 	UI_COMMAND(OpenHelpTab, "Help", "Open help.", EUserInterfaceActionType::Button, FInputChord());
 }

@@ -10,6 +10,7 @@
 #include "Widgets/SNullWidget.h"
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Widgets/Plan/UnrealAiPlanUiTokens.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
@@ -100,6 +101,8 @@ const FSlateBrush* UnrealAiChatTranscriptStyle::GetRoleIconBrush(const FUnrealAi
 		return AppIcon(TEXT("Icons.Info"));
 	case EUnrealAiChatBlockKind::RunProgress:
 		return AppIcon(TEXT("Icons.Recent"));
+	case EUnrealAiChatBlockKind::PlanWorkerLane:
+		return AppIcon(TEXT("Icons.Edit"));
 	default:
 		return AppIcon(TEXT("Icons.Help"));
 	}
@@ -134,6 +137,8 @@ FLinearColor UnrealAiChatTranscriptStyle::GetRoleAccentLinear(const FUnrealAiCha
 		return FUnrealAiEditorStyle::LinearColorChatTranscriptAccentNoticeInfo();
 	case EUnrealAiChatBlockKind::RunProgress:
 		return FUnrealAiEditorStyle::LinearColorChatTranscriptAccentRun();
+	case EUnrealAiChatBlockKind::PlanWorkerLane:
+		return FUnrealAiPlanUiTokens::PlanAccent();
 	default:
 		return FUnrealAiEditorStyle::LinearColorChatTranscriptAccentAssistant();
 	}
@@ -168,6 +173,8 @@ FText UnrealAiChatTranscriptStyle::GetRoleLabelText(const FUnrealAiChatBlock& Bl
 		return LOCTEXT("ChatRoleNote", "Note");
 	case EUnrealAiChatBlockKind::RunProgress:
 		return LOCTEXT("ChatRoleRun", "Run");
+	case EUnrealAiChatBlockKind::PlanWorkerLane:
+		return LOCTEXT("ChatRolePlanWorker", "Plan node");
 	default:
 		return FText::GetEmpty();
 	}

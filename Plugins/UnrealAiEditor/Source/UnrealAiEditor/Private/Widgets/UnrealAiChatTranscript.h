@@ -18,6 +18,16 @@ enum class EUnrealAiChatBlockKind : uint8
 	PlanDraftPending,
 	Notice,
 	RunProgress,
+	/** Plan node worker lane header (followed by tagged thinking/assistant/tool rows). */
+	PlanWorkerLane,
+};
+
+/** Status chip for PlanWorkerLane header rows. */
+enum class EUnrealAiPlanWorkerLaneStatus : uint8
+{
+	Running,
+	Succeeded,
+	Failed,
 };
 
 /** One row in the chat transcript (game-thread model). */
@@ -53,6 +63,17 @@ struct FUnrealAiChatBlock
 	FString ProgressLabel;
 	FString ProgressDetails;
 	bool bRunCancelled = false;
+
+	/** Non-empty when this block belongs to a plan-node worker lane (matches lane header PlanWorkerNodeId). */
+	FString PlanWorkerNodeId;
+	/** Display title for Kind==PlanWorkerLane; may match PlanWorkerNodeId if no DAG title. */
+	FString PlanWorkerTitleDisplay;
+	EUnrealAiPlanWorkerLaneStatus PlanWorkerLaneStatus = EUnrealAiPlanWorkerLaneStatus::Running;
+	FString PlanWorkerSummaryLine;
+	/** Last outbound LLM request estimate for this lane (prompt-ish; excludes max-output cap in display ratio). */
+	int32 PlanWorkerPromptTokensEst = 0;
+	/** Model profile MaxContextTokens when estimate was recorded (0 = unknown). */
+	int32 PlanWorkerContextMaxTokens = 0;
 
 	/** FPlatformTime::Seconds() when this step started; 0 if not tracking. */
 	double StepMonotonicStart = 0.0;
@@ -105,6 +126,14 @@ public:
 	/** @param SentMode If non-null, show a mode badge on the user bubble (ignored for harness user lines). */
 	FGuid AddUserMessage(const FString& Text, FGuid DesiredId = FGuid(), const EUnrealAiAgentMode* SentMode = nullptr);
 	void BeginRun(const FGuid& RunId);
+	/** Plan executor: opens a lane before worker streams are appended (tags following blocks). */
+	void BeginPlanWorkerSpan(const FString& NodeId, const FText& TitleOrEmpty);
+	/** Plan executor: finalizes lane header status/summary; clears active worker tag for subsequent blocks. */
+	void EndPlanWorkerSpan(const FString& NodeId, bool bSuccess, const FString& SummaryOneLine);
+	/** True while a plan-node worker span is tagging streamed blocks (between Begin/End). */
+	bool HasActivePlanWorkerSpan() const { return !ActivePlanWorkerNodeId.IsEmpty(); }
+	/** Updates the active plan worker lane header with latest context estimate (from preflight LLM request). */
+	void UpdateActivePlanWorkerLaneContextEstimate(int32 PromptTokensEst, int32 MaxContextTokens);
 	void AppendThinkingDelta(const FString& Chunk);
 	void AppendAssistantDelta(const FString& Chunk);
 	void BeginToolCall(
@@ -147,8 +176,11 @@ public:
 	bool IsAssistantStreamRecentlyActive(float QuietSeconds = 0.28f) const;
 
 private:
+	void ApplyActivePlanWorkerTag(FUnrealAiChatBlock& Block) const;
+
 	FGuid ActiveRunId;
 	bool bHasActiveRun = false;
+	FString ActivePlanWorkerNodeId;
 	bool bAssistantSegmentOpen = false;
 	bool bThinkingOpen = false;
 	double LastAssistantStreamChunkMonotonicTime = 0.0;

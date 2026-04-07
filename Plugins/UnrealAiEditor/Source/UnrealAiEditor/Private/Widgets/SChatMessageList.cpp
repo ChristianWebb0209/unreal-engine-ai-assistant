@@ -2,6 +2,7 @@
 
 #include "Widgets/SAssistantStreamBlock.h"
 #include "Widgets/SThinkingSubline.h"
+#include "Widgets/SPlanWorkerLanePanel.h"
 #include "Widgets/STodoPlanPanel.h"
 #include "Widgets/SPlanDraftBuildPanel.h"
 #include "Context/UnrealAiProjectId.h"
@@ -30,7 +31,6 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/SPanel.h"
 #include "Layout/Geometry.h"
-#include "Rendering/SlateRenderTransform.h"
 #include "Containers/Ticker.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
@@ -93,76 +93,6 @@ namespace UnrealAiChatListUi
 		}
 		return true;
 	}
-}
-
-/** Slides user message up + fades in (one-shot). */
-class SChatUserMessageAnimated final : public SCompoundWidget
-{
-public:
-	SLATE_BEGIN_ARGS(SChatUserMessageAnimated) {}
-	SLATE_DEFAULT_SLOT(FArguments, Content)
-	SLATE_ARGUMENT(TWeakPtr<SChatMessageList>, OwnerList)
-	SLATE_END_ARGS()
-
-	void Construct(const FArguments& InArgs);
-
-private:
-	EActiveTimerReturnType TickSlideIn(double, float DeltaTime);
-
-	TWeakPtr<SChatMessageList> OwnerList;
-	float SlideProgress = 0.f;
-	float TimeSinceFollowScrollNotify = 0.f;
-	static constexpr float SlideDurationSec = 0.48f;
-	static constexpr float SlidePixels = 52.f;
-	static constexpr float FollowScrollNotifyMinIntervalSec = 0.12f;
-};
-
-void SChatUserMessageAnimated::Construct(const FArguments& InArgs)
-{
-	OwnerList = InArgs._OwnerList;
-	ChildSlot
-		[
-			InArgs._Content.Widget
-		];
-	SlideProgress = 0.f;
-	TimeSinceFollowScrollNotify = FollowScrollNotifyMinIntervalSec;
-	SetRenderOpacity(0.02f);
-	SetRenderTransform(TOptional<FSlateRenderTransform>(FSlateRenderTransform(FVector2D(0.f, SlidePixels))));
-	RegisterActiveTimer(
-		1.f / 60.f,
-		FWidgetActiveTimerDelegate::CreateSP(this, &SChatUserMessageAnimated::TickSlideIn));
-}
-
-EActiveTimerReturnType SChatUserMessageAnimated::TickSlideIn(double, float DeltaTime)
-{
-	SlideProgress += DeltaTime / SlideDurationSec;
-	const float T = FMath::Clamp(SlideProgress, 0.f, 1.f);
-	// Smoothstep: ease in and out for a single smooth glide.
-	const float S = T * T * (3.f - 2.f * T);
-	SetRenderOpacity(S);
-	SetRenderTransform(TOptional<FSlateRenderTransform>(
-		FSlateRenderTransform(FVector2D(0.f, SlidePixels * (1.f - S)))));
-	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-	TimeSinceFollowScrollNotify += DeltaTime;
-	if (const TSharedPtr<SChatMessageList> L = OwnerList.Pin())
-	{
-		if (TimeSinceFollowScrollNotify >= FollowScrollNotifyMinIntervalSec)
-		{
-			TimeSinceFollowScrollNotify = 0.f;
-			L->NotifyFollowingScrollToBottom();
-		}
-	}
-	if (T >= 1.f - KINDA_SMALL_NUMBER)
-	{
-		SetRenderOpacity(1.f);
-		SetRenderTransform(TOptional<FSlateRenderTransform>(FSlateRenderTransform(FVector2D::ZeroVector)));
-		if (const TSharedPtr<SChatMessageList> L = OwnerList.Pin())
-		{
-			L->ClearUserAnimId();
-		}
-		return EActiveTimerReturnType::Stop;
-	}
-	return EActiveTimerReturnType::Continue;
 }
 
 void SChatMessageList::Construct(const FArguments& InArgs)
@@ -277,18 +207,11 @@ FGuid SChatMessageList::AddUserMessage(const FString& Text, const EUnrealAiAgent
 		return FGuid();
 	}
 	const FGuid Id = FGuid::NewGuid();
-	PendingUserAnimId = Id;
 	return Transcript->AddUserMessage(Text, Id, &SentMode);
-}
-
-void SChatMessageList::ClearUserAnimId()
-{
-	PendingUserAnimId = FGuid();
 }
 
 void SChatMessageList::ClearTranscript()
 {
-	PendingUserAnimId = FGuid();
 	ExpandedToolCallBlockIds.Reset();
 	ExpandedRunProgressBlockIds.Reset();
 	bStickToBottom = true;
@@ -300,7 +223,6 @@ void SChatMessageList::ClearTranscript()
 
 void SChatMessageList::HydrateTranscriptFromPersistedConversation(const TArray<FUnrealAiConversationMessage>& Messages)
 {
-	PendingUserAnimId = FGuid();
 	bStickToBottom = true;
 	if (Transcript.IsValid())
 	{
@@ -310,11 +232,6 @@ void SChatMessageList::HydrateTranscriptFromPersistedConversation(const TArray<F
 	}
 	RebuildTranscript();
 	ForceScrollToBottomAndFollow();
-}
-
-void SChatMessageList::NotifyFollowingScrollToBottom()
-{
-	ScheduleScrollToEndIfFollowing();
 }
 
 void SChatMessageList::ResetAssistant()
@@ -369,15 +286,205 @@ void SChatMessageList::RebuildTranscript()
 	const bool bTw = Set->bAssistantTypewriter;
 	const float Cps = Set->AssistantTypewriterCps;
 
-	const TWeakPtr<SChatMessageList> WeakList(StaticCastSharedRef<SChatMessageList>(AsShared()));
-
-	for (int32 i = 0; i < Transcript->Blocks.Num(); ++i)
+	const int32 NumBlocks = Transcript->Blocks.Num();
+	for (int32 i = 0; i < NumBlocks; ++i)
 	{
 		const FUnrealAiChatBlock& B = Transcript->Blocks[i];
 		// Reasoning is shown as a subline under the following assistant bubble.
-		if (B.Kind == EUnrealAiChatBlockKind::Thinking && i + 1 < Transcript->Blocks.Num()
+		if (B.Kind == EUnrealAiChatBlockKind::Thinking && i + 1 < NumBlocks
 			&& Transcript->Blocks[i + 1].Kind == EUnrealAiChatBlockKind::Assistant)
 		{
+			continue;
+		}
+		if (B.Kind == EUnrealAiChatBlockKind::PlanWorkerLane)
+		{
+			const FString LaneId = B.PlanWorkerNodeId;
+			TSharedRef<SVerticalBox> LaneInner = SNew(SVerticalBox);
+			int32 j = i + 1;
+			while (j < NumBlocks)
+			{
+				const FUnrealAiChatBlock& Cb = Transcript->Blocks[j];
+				if (Cb.Kind == EUnrealAiChatBlockKind::PlanWorkerLane)
+				{
+					break;
+				}
+				if (Cb.PlanWorkerNodeId != LaneId)
+				{
+					break;
+				}
+				if (Cb.Kind == EUnrealAiChatBlockKind::Thinking && j + 1 < NumBlocks
+					&& Transcript->Blocks[j + 1].Kind == EUnrealAiChatBlockKind::Assistant
+					&& Transcript->Blocks[j + 1].PlanWorkerNodeId == LaneId)
+				{
+					const FUnrealAiChatBlock& Th = Cb;
+					const FUnrealAiChatBlock& Asst = Transcript->Blocks[j + 1];
+					const int32 Ai = j + 1;
+					const bool bInstantReveal =
+						!(Transcript->IsAssistantSegmentOpen()
+						  && UnrealAiChatListUi::IsLastAssistantBlock(Transcript->Blocks, Ai));
+					const FString MergedThinkingCaption = Th.StepTimingCaption;
+					TSharedPtr<SAssistantStreamBlock> As;
+					TSharedPtr<SThinkingSubline> ThinkLine;
+					const TSharedRef<SWidget> AssistantBubble =
+						SNew(SBorder)
+							.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.AssistantBubble")))
+							.Padding(FMargin(10.f, 9.f))
+							[
+								SNew(SBox)
+									.HAlign(HAlign_Fill)
+									.Clipping(EWidgetClipping::ClipToBounds)
+									.Padding(FMargin(4.f, 3.f, 4.f, 3.f))
+									[
+										SAssignNew(As, SAssistantStreamBlock)
+											.bEnableTypewriter(bTw)
+											.TypewriterCps(Cps)
+											.OnRevealTick(FSimpleDelegate::CreateSP(this, &SChatMessageList::OnAssistantRevealTick))
+									]
+							];
+					const TSharedRef<SWidget> MergedCaptionWidget = MergedThinkingCaption.IsEmpty()
+						? StaticCastSharedRef<SWidget>(SNullWidget::NullWidget)
+						: ::UnrealAiChatTranscriptStyle::MakeStepTimingCaptionRow(MergedThinkingCaption);
+					const TSharedRef<SWidget> MergedColumn = SNew(SVerticalBox)
+						+ SVerticalBox::Slot()
+							  .AutoHeight()
+							  .Padding(0.f, 0.f, 0.f, MergedThinkingCaption.IsEmpty() ? 0.f : 3.f)
+						[
+							MergedCaptionWidget
+						]
+						+ SVerticalBox::Slot().AutoHeight()
+						[
+							AssistantBubble
+						]
+						+ SVerticalBox::Slot().AutoHeight()
+						[
+							SAssignNew(ThinkLine, SThinkingSubline)
+						];
+					LaneInner->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
+						[
+							::UnrealAiChatTranscriptStyle::WrapTranscriptBlockBody(
+								Asst,
+								MergedColumn,
+								::EUnrealAiChatTranscriptChromeMode::Full)
+						];
+					ThinkLine->SetFullText(Th.ThinkingText);
+					ActiveThinkingWidget = ThinkLine;
+					As->SetFullText(Asst.AssistantText, bInstantReveal);
+					ActiveAssistantWidget = As;
+					j += 2;
+					continue;
+				}
+				if (Cb.Kind == EUnrealAiChatBlockKind::Thinking)
+				{
+					TSharedPtr<SThinkingSubline> Th;
+					const TSharedRef<SWidget> ThinkingCol = UnrealAiChatListUi::WrapWithStepCaption(
+						Cb.StepTimingCaption,
+						SAssignNew(Th, SThinkingSubline));
+					LaneInner->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
+						[
+							::UnrealAiChatTranscriptStyle::WrapTranscriptBlockBody(
+								Cb,
+								ThinkingCol,
+								::EUnrealAiChatTranscriptChromeMode::Full)
+						];
+					Th->SetFullText(Cb.ThinkingText);
+					ActiveThinkingWidget = Th;
+					j++;
+					continue;
+				}
+				if (Cb.Kind == EUnrealAiChatBlockKind::Assistant)
+				{
+					const bool bInstantReveal =
+						!(Transcript->IsAssistantSegmentOpen()
+						  && UnrealAiChatListUi::IsLastAssistantBlock(Transcript->Blocks, j));
+					TSharedPtr<SAssistantStreamBlock> As;
+					const TSharedRef<SWidget> AssistantBubble =
+						SNew(SBorder)
+							.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.AssistantBubble")))
+							.Padding(FMargin(10.f, 9.f))
+							[
+								SNew(SBox)
+									.HAlign(HAlign_Fill)
+									.Clipping(EWidgetClipping::ClipToBounds)
+									.Padding(FMargin(4.f, 3.f, 4.f, 3.f))
+									[
+										SAssignNew(As, SAssistantStreamBlock)
+											.bEnableTypewriter(bTw)
+											.TypewriterCps(Cps)
+											.OnRevealTick(FSimpleDelegate::CreateSP(this, &SChatMessageList::OnAssistantRevealTick))
+									]
+							];
+					LaneInner->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
+						[
+							::UnrealAiChatTranscriptStyle::WrapTranscriptBlockBody(
+								Cb,
+								AssistantBubble,
+								::EUnrealAiChatTranscriptChromeMode::Full)
+						];
+					As->SetFullText(Cb.AssistantText, bInstantReveal);
+					ActiveAssistantWidget = As;
+					j++;
+					continue;
+				}
+				if (Cb.Kind == EUnrealAiChatBlockKind::ToolCall)
+				{
+					const FUnrealAiToolCatalog* Cat = BackendRegistry.IsValid() ? BackendRegistry->GetToolCatalog() : nullptr;
+					const FString ToolTitle = !Cb.ToolDisplayTitle.IsEmpty()
+						? Cb.ToolDisplayTitle
+						: UnrealAiResolveToolUserFacingName(Cb.ToolName, Cat);
+					const TSharedRef<SWidget> ToolBody = UnrealAiChatListUi::WrapWithStepCaption(
+						Cb.StepTimingCaption,
+						SNew(SToolCallCard)
+							.ToolName(Cb.ToolName)
+							.ToolDisplayTitle(ToolTitle)
+							.ArgumentsPreview(Cb.ToolArgsPreview)
+							.ResultPreview(Cb.ToolResultPreview)
+							.bRunning(Cb.bToolRunning)
+							.bSuccess(Cb.bToolOk)
+							.EditorPresentation(Cb.ToolEditorPresentation)
+							.bInitiallyCollapsed(!ExpandedToolCallBlockIds.Contains(Cb.Id))
+							.OnExpansionChanged(FOnBooleanValueChanged::CreateLambda(
+								[this, BlockId = Cb.Id](bool bExpanded)
+								{
+									if (bSuppressToolExpansionCallbacks)
+									{
+										return;
+									}
+									if (bExpanded)
+									{
+										ExpandedToolCallBlockIds.Add(BlockId);
+									}
+									else
+									{
+										ExpandedToolCallBlockIds.Remove(BlockId);
+									}
+								})));
+					LaneInner->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
+						[
+							::UnrealAiChatTranscriptStyle::WrapTranscriptBlockBody(
+								Cb,
+								ToolBody,
+								::EUnrealAiChatTranscriptChromeMode::AccentBarOnly)
+						];
+					j++;
+					continue;
+				}
+				j++;
+			}
+			MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListAgentRowMargin)
+				[
+					SNew(SPlanWorkerLanePanel)
+						.NodeId(B.PlanWorkerNodeId)
+						.TitleDisplay(B.PlanWorkerTitleDisplay)
+						.LaneStatus(B.PlanWorkerLaneStatus)
+						.SummaryLine(B.PlanWorkerSummaryLine)
+						.bShowWorkingIndicator(B.PlanWorkerLaneStatus == EUnrealAiPlanWorkerLaneStatus::Running)
+						.ContextPromptTokensEst(B.PlanWorkerPromptTokensEst)
+						.ContextMaxTokens(B.PlanWorkerContextMaxTokens)
+						[
+							LaneInner
+						]
+				];
+			i = j - 1;
 			continue;
 		}
 		switch (B.Kind)
@@ -418,24 +525,10 @@ void SChatMessageList::RebuildTranscript()
 					B,
 					UserBubble,
 					::EUnrealAiChatTranscriptChromeMode::Full);
-				if (B.Id == PendingUserAnimId)
-				{
-					MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListRowMargin)
-						[
-							SNew(SChatUserMessageAnimated)
-								.OwnerList(WeakList)
-								[
-									UserChrome
-								]
-						];
-				}
-				else
-				{
-					MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListRowMargin)
-						[
-							UserChrome
-						];
-				}
+				MessageBox->AddSlot().AutoHeight().Padding(GChatMessageListRowMargin)
+					[
+						UserChrome
+					];
 			}
 			break;
 		case EUnrealAiChatBlockKind::Thinking:
@@ -477,7 +570,6 @@ void SChatMessageList::RebuildTranscript()
 						[
 							SNew(SBox)
 								.HAlign(HAlign_Fill)
-								.RenderOpacity(0.92f)
 								.Clipping(EWidgetClipping::ClipToBounds)
 								.Padding(FMargin(4.f, 3.f, 4.f, 3.f))
 								[
@@ -705,10 +797,6 @@ void SChatMessageList::RebuildTranscript()
 		}
 	}
 
-	// Only the rebuild that immediately follows AddUserMessage should match PendingUserAnimId; clear so
-	// later structural updates do not replay the slide-in.
-	PendingUserAnimId = FGuid();
-
 	bSuppressToolExpansionCallbacks = false;
 	ScheduleScrollToEndIfFollowing();
 }
@@ -758,42 +846,12 @@ void SChatMessageList::ScheduleScrollToEndIfFollowing()
 	{
 		return;
 	}
-	if (bSmoothFollowScrollActive)
-	{
-		return;
-	}
-	bSmoothFollowScrollActive = true;
-	RegisterActiveTimer(
-		0.f,
-		FWidgetActiveTimerDelegate::CreateSP(this, &SChatMessageList::TickSmoothFollowScroll));
-}
-
-EActiveTimerReturnType SChatMessageList::TickSmoothFollowScroll(double, float DeltaTime)
-{
-	if (!bStickToBottom || !ScrollBox.IsValid())
-	{
-		bSmoothFollowScrollActive = false;
-		return EActiveTimerReturnType::Stop;
-	}
-
-	const float EndOffset = ScrollBox->GetScrollOffsetOfEnd();
-	const float Current = ScrollBox->GetScrollOffset();
-	const float Next = FMath::FInterpTo(Current, EndOffset, DeltaTime, FollowScrollInterpSpeed);
-	ScrollBox->SetScrollOffset(Next);
-
-	if (FMath::IsNearlyEqual(Next, EndOffset, 0.85f))
-	{
-		ScrollBox->SetScrollOffset(EndOffset);
-		bSmoothFollowScrollActive = false;
-		return EActiveTimerReturnType::Stop;
-	}
-	return EActiveTimerReturnType::Continue;
+	ScrollBox->ScrollToEnd();
 }
 
 void SChatMessageList::ForceScrollToBottomAndFollow()
 {
 	bStickToBottom = true;
-	bSmoothFollowScrollActive = false;
 	if (ScrollBox.IsValid())
 	{
 		ScrollBox->ScrollToEnd();

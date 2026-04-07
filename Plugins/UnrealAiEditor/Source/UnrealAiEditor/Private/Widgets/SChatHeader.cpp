@@ -40,6 +40,9 @@ void SChatHeader::Construct(const FArguments& InArgs)
 					[
 						SNew(SButton)
 							.Text(LOCTEXT("SettingsBtn", "Settings"))
+							.ToolTipText(LOCTEXT(
+								"SettingsBtnTip",
+								"Open Project Settings → Plugins → Unreal AI Editor (LLM/API and agent options saved with the project)."))
 							.OnClicked_Lambda(
 								[this]()
 								{

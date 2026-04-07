@@ -26,7 +26,7 @@ public:
 
 	/**
 	 * Replace buffer (e.g. after transcript rebuild).
-	 * @param bInstantReveal If false, reveal with typewriter (for live assistant text). If true, show immediately (history / scroll-back).
+	 * @param bInstantReveal If false and typewriter is enabled, reveal character-by-character. If true (or typewriter off), show immediately.
 	 */
 	void SetFullText(const FString& Full, bool bInstantReveal);
 
@@ -36,11 +36,11 @@ private:
 
 	bool bEnableTypewriter = true;
 	float TypewriterCps = 400.f;
-	/** When true (history / scroll-back), skip subtle fade and use full opacity. */
-	bool bSkipTextFade = false;
 	FSimpleDelegate OnRevealTick;
 	FString PendingBuffer;
 	FString VisibleText;
+	/** Fractional carry for time-based CPS (one reveal step = one UTF-16 code unit). */
+	float RevealCarry = 0.f;
 	TSharedPtr<SBox> BodyBox;
 	bool bTimerActive = false;
 };

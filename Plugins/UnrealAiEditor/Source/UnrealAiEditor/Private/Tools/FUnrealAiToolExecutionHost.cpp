@@ -10,6 +10,11 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
+namespace UnrealAiToolExecPriv
+{
+thread_local int32 GInvokeToolNestingDepth = 0;
+}
+
 void FUnrealAiToolExecutionHost::ReloadCatalog()
 {
 	Catalog.LoadFromPlugin();
@@ -35,6 +40,16 @@ FUnrealAiToolInvocationResult FUnrealAiToolExecutionHost::InvokeTool(
 	const FString& ArgumentsJson,
 	const FString& ToolCallId)
 {
+	struct FDepthPop
+	{
+		~FDepthPop()
+		{
+			--UnrealAiToolExecPriv::GInvokeToolNestingDepth;
+		}
+	};
+	++UnrealAiToolExecPriv::GInvokeToolNestingDepth;
+	const FDepthPop DepthPop;
+
 	(void)ToolCallId;
 	TSharedPtr<FJsonObject> Args;
 	{
@@ -71,9 +86,9 @@ FUnrealAiToolInvocationResult FUnrealAiToolExecutionHost::InvokeTool(
 		SessionProjectId,
 		SessionThreadId);
 	FUnrealAiToolResolver::AttachAuditToResult(Resolved.Audit, Result);
-	// When Editor focus is enabled, automatically open/foreground relevant editors after successful
-	// blueprint/asset/content tools (models rarely pass focused:true). Explicit focused:false opts out.
-	if (Result.bOk && FUnrealAiEditorModule::IsEditorFocusEnabled() && !bSuppressEditorFollow)
+	// Primary harness lane only (excludes plan workers / builder subagents). Nested InvokeTool: outermost applies.
+	if (Result.bOk && FUnrealAiEditorModule::ShouldApplyHarnessEditorNavigation() && !bSuppressEditorFollow
+		&& UnrealAiToolExecPriv::GInvokeToolNestingDepth == 1)
 	{
 		UnrealAiApplyPostToolEditorFocus(Resolved.LegacyToolId, Resolved.ResolvedArguments, Result);
 	}

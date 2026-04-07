@@ -15,7 +15,7 @@ All plugin-specific colors and typography must come from:
 
 - `Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Style/UnrealAiEditorStyle.h/.cpp` (`FUnrealAiEditorStyle`)
 
-Do **not** hardcode `FLinearColor(...)`, custom font sizes, or bespoke brushes inside `Tabs/` (including `SUnrealAiEditorSettingsTab`).
+Do **not** hardcode `FLinearColor(...)`, custom font sizes, or bespoke brushes inside `Tabs/` (including large settings surfaces).
 
 If a new color/token is needed:
 
@@ -31,10 +31,7 @@ Engine style can be used ad-hoc when it’s clearly structural (layout grouping)
 
 ## Shared UI building blocks
 
-Prefer using existing shared widgets:
-
-- `SUnrealAiLocalJsonInspectorPanel` for “capped file loading + pretty JSON inspection + copy”
-- Existing editor list patterns (`SScrollBox` + `SVerticalBox` children, buttons for actions)
+Prefer using existing shared widgets and editor list patterns (`SScrollBox` + `SVerticalBox` children, buttons for actions).
 
 If you need a new reusable widget, place it under:
 
@@ -56,7 +53,7 @@ Use these tokens for common UI roles:
 When editing settings UI under `Private/Tabs/`:
 
 - Do you use `FUnrealAiEditorStyle` for fonts/colors instead of inline values?
-- Do you reuse `SUnrealAiLocalJsonInspectorPanel` for JSON inspection instead of duplicating inspector UI?
+- For JSON-heavy inspectors, reuse a shared widget under `Private/Widgets/` instead of duplicating inspector UI.
 - Do “help” texts and list items use consistent “muted/heading” typography?
 
 ## Rationale

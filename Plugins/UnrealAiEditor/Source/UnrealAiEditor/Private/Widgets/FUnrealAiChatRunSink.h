@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Templates/Function.h"
 #include "Harness/IAgentRunSink.h"
+#include "Harness/ILlmTransport.h"
 #include "Harness/UnrealAiAgentTypes.h"
 
 class FUnrealAiChatTranscript;
@@ -41,6 +42,8 @@ public:
 	virtual void OnPlanHarnessSubTurnComplete() override;
 	virtual void OnPlanningDecision(const FString& ModeUsed, const TArray<FString>& TriggerReasons, int32 ReplanCount, int32 QueueStepsPending) override;
 	virtual void OnSubagentBuilderHandoff(const FString& BuilderDisplayName) override;
+	virtual void OnPlanWorkerSpanOpened(const FString& NodeId, const FText& TitleOrEmpty) override;
+	virtual void OnPlanWorkerSpanClosed(const FString& NodeId, bool bSuccess, const FString& SummaryOneLine) override;
 	virtual void OnEnforcementEvent(const FString& EventType, const FString& Detail) override;
 	virtual void OnEnforcementSummary(
 		int32 ActionIntentTurns,
@@ -50,6 +53,12 @@ public:
 		int32 MutationIntentTurns,
 		int32 MutationReadOnlyNudges) override;
 	virtual void OnHarnessProgressLog(const FString& Line) override;
+	virtual void OnLlmRequestPreparedForHttp(
+		const FUnrealAiAgentTurnRequest& TurnRequest,
+		const FGuid& RunId,
+		int32 LlmRound,
+		int32 EffectiveMaxLlmRounds,
+		const FUnrealAiLlmRequest& LlmRequest) override;
 	virtual void OnRunFinished(bool bSuccess, const FString& ErrorMessage) override;
 
 private:

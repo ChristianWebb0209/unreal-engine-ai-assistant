@@ -27,7 +27,6 @@
 #include "Composer/UnrealAiComposerPromptResolver.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
-#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -50,7 +49,6 @@
 #include "Tools/UnrealAiToolViewportHelpers.h"
 #include "EditorViewportClient.h"
 #include "Framework/Docking/TabManager.h"
-#include "UnrealAiEditorTabIds.h"
 
 #if WITH_EDITOR
 static FIntRect UnrealAiComputeCappedViewportRect(FViewport* VP, int32 MaxDim = 1280)
@@ -698,51 +696,12 @@ void SChatComposer::Construct(const FArguments& InArgs)
 							"Capture the active level viewport to PNG (max ~1280px on the long side for speed) and attach it to context."))
 						.OnClicked(this, &SChatComposer::OnAttachScreenshotClicked)
 				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(10.f, 0.f, 2.f, 0.f))
-				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(0.f, 0.f, 6.f, 0.f))
-					[
-						SNew(SCheckBox).Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
-							.IsChecked_Lambda([]()
-							{
-								return FUnrealAiEditorModule::IsEditorFocusEnabled()
-									? ECheckBoxState::Checked
-									: ECheckBoxState::Unchecked;
-							})
-							.OnCheckStateChanged_Lambda([](ECheckBoxState S)
-							{
-								FUnrealAiEditorModule::SetEditorFocusEnabled(S == ECheckBoxState::Checked);
-							})
-							.ToolTipText(LOCTEXT(
-								"EditorFocusComposerTip",
-								"When on, successful blueprint and asset tools automatically open or bring forward the relevant editor (graphs, Content Browser sync). Pass focused:false on a tool to skip once. Stored in plugin settings."))
-					]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-					[
-						SNew(STextBlock)
-							.Font(FUnrealAiEditorStyle::FontCaption())
-							.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
-							.Text(LOCTEXT("EditorFocusComposerLbl", "Editor focus"))
-					]
-				]
 			]
 		];
 
 	ContextAttachmentsChangedHandle = FUnrealAiEditorModule::OnContextAttachmentsChanged().AddSP(
 		this,
 		&SChatComposer::SyncAttachmentChipsUi);
-
-	{
-		const TWeakPtr<SChatComposer> WeakComposer = StaticCastSharedRef<SChatComposer>(AsShared()).ToWeakPtr();
-		EditorFocusPolicyHandle = FUnrealAiEditorModule::OnEditorFocusPolicyChanged().AddLambda([WeakComposer]()
-		{
-			if (const TSharedPtr<SChatComposer> C = WeakComposer.Pin())
-			{
-				C->Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-			}
-		});
-	}
 
 	RefreshAttachmentChips();
 
@@ -781,11 +740,6 @@ SChatComposer::~SChatComposer()
 		FUnrealAiEditorModule::OnContextAttachmentsChanged().Remove(ContextAttachmentsChangedHandle);
 		ContextAttachmentsChangedHandle.Reset();
 	}
-	if (EditorFocusPolicyHandle.IsValid())
-	{
-		FUnrealAiEditorModule::OnEditorFocusPolicyChanged().Remove(EditorFocusPolicyHandle);
-		EditorFocusPolicyHandle.Reset();
-	}
 	UnbindViewportScreenshotProcessed();
 	PendingViewportScreenshotPath.Empty();
 }
@@ -800,7 +754,7 @@ void SChatComposer::OnModelSelectionChanged(TSharedPtr<FString> NewSelection, ES
 
 	if (*NewSelection == UnrealAiChatComposerModelUi::GAddNewModelToken)
 	{
-		FGlobalTabmanager::Get()->TryInvokeTab(UnrealAiEditorTabIds::SettingsTab);
+		FUnrealAiEditorModule::OpenUnrealAiPluginSettings();
 		RestoreModelComboSelection();
 		return;
 	}

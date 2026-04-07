@@ -292,7 +292,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameActors(const TShared
 			SuggestedArgs);
 	}
 	bool bUiSuppressed = false;
-	if (FUnrealAiEditorModule::IsEditorFocusEnabled())
+	if (FUnrealAiEditorModule::ShouldApplyHarnessEditorNavigation())
 	{
 		VC->FocusViewportOnBox(Bounds, true);
 	}
@@ -338,7 +338,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportFrameSelection(const TSha
 				 "For camera position/FOV or dolly/orbit tasks, use viewport_camera_control (operation get_transform, dolly, or orbit) instead of framing."));
 	}
 	bool bUiSuppressed = false;
-	if (FUnrealAiEditorModule::IsEditorFocusEnabled())
+	if (FUnrealAiEditorModule::ShouldApplyHarnessEditorNavigation())
 	{
 		VC->FocusViewportOnBox(Bounds, true);
 	}

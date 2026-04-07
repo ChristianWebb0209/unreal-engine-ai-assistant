@@ -37,6 +37,7 @@
 #include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Observability/UnrealAiBackgroundOpsLog.h"
 #include "Observability/UnrealAiGameThreadPerf.h"
+#include "UnrealAiEditorModule.h"
 #include "Widgets/UnrealAiToolUi.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -1150,6 +1151,7 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
+		FUnrealAiEditorModule::ClearHarnessEditorFollowEligibility();
 		UnrealAiGameThreadPerf::SetLlmRoundCorrelation(-1);
 		ThrottleAdmissionSerial.fetch_add(1, std::memory_order_relaxed);
 		if (LlmStreamCoalescer.IsValid())
@@ -1177,6 +1179,7 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			return;
 		}
+		FUnrealAiEditorModule::ClearHarnessEditorFollowEligibility();
 		UnrealAiGameThreadPerf::SetLlmRoundCorrelation(-1);
 		if (LlmStreamCoalescer.IsValid())
 		{
@@ -3194,6 +3197,7 @@ void FUnrealAiAgentHarness::FailInProgressTurnForScenarioIdleAbort()
 
 void FUnrealAiAgentHarness::CancelTurn()
 {
+	FUnrealAiEditorModule::ClearHarnessEditorFollowEligibility();
 	UnrealAiGameThreadPerf::SetLlmRoundCorrelation(-1);
 	if (Context && ActiveRunner.IsValid())
 	{
@@ -3295,6 +3299,11 @@ void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TS
 
 	Context->LoadOrCreate(Request.ProjectId, Request.ThreadId);
 	ToolHost->SetToolSession(Request.ProjectId, Request.ThreadId);
+
+	const bool bPlanWorker = Request.Mode == EUnrealAiAgentMode::Agent && Request.ThreadId.Contains(TEXT("_plan_"));
+	const bool bEligibleEditorFollow = !Request.bBlueprintBuilderTurn && !Request.bEnvironmentBuilderTurn && !bPlanWorker
+		&& Request.Mode != EUnrealAiAgentMode::Plan;
+	FUnrealAiEditorModule::SetHarnessEditorFollowEligible(bEligibleEditorFollow);
 
 	Runner->RunId = FGuid::NewGuid();
 	FUnrealAiRunIds Ids;

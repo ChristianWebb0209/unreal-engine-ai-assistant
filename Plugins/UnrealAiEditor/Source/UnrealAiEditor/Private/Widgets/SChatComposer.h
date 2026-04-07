@@ -99,7 +99,6 @@ private:
 	EUnrealAiAgentMode AgentMode = EUnrealAiAgentMode::Agent;
 
 	FDelegateHandle ContextAttachmentsChangedHandle;
-	FDelegateHandle EditorFocusPolicyHandle;
 
 	/** Minimum height of the input area (stable when hint hides; grows with content up to InputMaxHeight). */
 	static constexpr float InputMinHeight = 72.f;

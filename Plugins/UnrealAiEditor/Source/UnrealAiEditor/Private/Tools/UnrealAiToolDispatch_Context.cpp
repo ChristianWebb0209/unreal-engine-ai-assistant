@@ -249,7 +249,7 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ContentBrowserSyncAsset(const TSh
 	}
 
 	bool bUiSuppressed = false;
-	if (FUnrealAiEditorModule::IsEditorFocusEnabled())
+	if (FUnrealAiEditorModule::ShouldApplyHarnessEditorNavigation())
 	{
 		FContentBrowserModule& CBM = FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser"));
 		TArray<FAssetData> List;

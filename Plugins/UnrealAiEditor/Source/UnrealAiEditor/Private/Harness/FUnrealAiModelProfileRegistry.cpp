@@ -71,7 +71,7 @@ void FUnrealAiModelProfileRegistry::Reload()
 {
 	ModelMap.Reset();
 	ProvidersById.Reset();
-	ApiBaseUrl = TEXT("https://openrouter.ai/api/v1");
+	ApiBaseUrl = TEXT("https://api.openai.com/v1");
 	ApiKey.Reset();
 	DefaultModelId = TEXT("openai/gpt-4o-mini");
 	DefaultProviderId.Reset();
