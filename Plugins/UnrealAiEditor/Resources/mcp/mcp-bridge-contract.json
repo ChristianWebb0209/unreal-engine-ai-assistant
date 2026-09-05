@@ -1,0 +1,63 @@
+{
+  "contract_version": "1.0.0",
+  "base_url": "http://127.0.0.1:{port}",
+  "auth": {
+    "scheme": "Bearer",
+    "header": "Authorization",
+    "token_file_relative": "mcp/bridge.token",
+    "token_file_root": "%LOCALAPPDATA%/UnrealAiEditor on Windows"
+  },
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "auth_required": true,
+      "response": {
+        "ok": true,
+        "bridge_version": "1.0.0",
+        "project_name": "string",
+        "pack_version": "string",
+        "catalog_version_pin": "string",
+        "tool_count": "number"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tools",
+      "auth_required": true,
+      "description": "Allowlisted tools with parameters JSON Schema sliced from merged tool catalog.",
+      "response": {
+        "ok": true,
+        "pack_version": "string",
+        "catalog_version_pin": "string",
+        "tools": [
+          {
+            "tool_id": "string",
+            "summary": "string",
+            "parameters": "object (JSON Schema)",
+            "permission": "string",
+            "side_effects": "string",
+            "status": "string"
+          }
+        ]
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tools/invoke",
+      "auth_required": true,
+      "request_body": {
+        "tool_id": "string (catalog snake_case)",
+        "arguments": "object"
+      },
+      "response": {
+        "ok": "boolean (bridge-level)",
+        "tool_id": "string",
+        "duration_ms": "number",
+        "error": "string (bridge-level, when ok is false)",
+        "error_code": "string (auth_failed | tool_not_in_mcp_pack | bridge_timeout | invalid_request | editor_shutting_down)",
+        "result": "object (parsed tool JSON from ContentForModel; includes tool-level ok)"
+      }
+    }
+  ]
+}

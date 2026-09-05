@@ -166,7 +166,7 @@ namespace UnrealAiModeUi
 		case EUnrealAiAgentMode::Plan:
 			return FLinearColor(0.86f, 0.56f, 0.20f, 1.f);
 		default:
-			return FLinearColor(0.45f, 0.55f, 0.72f, 1.f);
+			return FLinearColor(0.58f, 0.36f, 0.95f, 1.f);
 		}
 	}
 
@@ -181,7 +181,7 @@ namespace UnrealAiModeUi
 		case EUnrealAiAgentMode::Plan:
 			return FAppStyle::GetBrush(TEXT("Icons.Blueprint"));
 		default:
-			return FAppStyle::GetBrush(TEXT("Icons.Help"));
+			return FUnrealAiEditorStyle::GetAgentChatTabIconBrush();
 		}
 	}
 }
@@ -421,6 +421,7 @@ void SChatComposer::Construct(const FArguments& InArgs)
 {
 	static const FMargin PadChipsSlot(4.f, 2.f);
 	static const FMargin PadMentionSlot(4.f, 0.f);
+	AgentMode = EUnrealAiAgentMode::Agent;
 	BackendRegistry = InArgs._BackendRegistry;
 	MessageList = InArgs._MessageList;
 	Session = InArgs._Session;
@@ -1794,6 +1795,13 @@ FReply SChatComposer::OnSendClicked()
 		return FReply::Handled();
 	}
 
+	if (!PendingViewportScreenshotPath.IsEmpty())
+	{
+		MessageList->GetTranscript()->AddInformationalNotice(
+			TEXT("Viewport screenshot is still saving — wait for the attachment chip to appear, then send."));
+		return FReply::Handled();
+	}
+
 	const FString RawPrompt = InputBox->GetText().ToString();
 	const FUnrealAiComposerResolveResult Resolved = UnrealAiComposerPromptResolver::ResolveBeforeSend(RawPrompt);
 
@@ -1987,7 +1995,7 @@ FText SChatComposer::GetModeLabelShort() const
 	case EUnrealAiAgentMode::Plan:
 		return LOCTEXT("ModePlanShort", "Plan");
 	default:
-		return LOCTEXT("ModeAskShort", "Ask");
+		return LOCTEXT("ModeAgentShort", "Agent");
 	}
 }
 

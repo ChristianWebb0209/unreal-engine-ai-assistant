@@ -597,7 +597,15 @@ void FUnrealAiPlanExecutor::OnPlannerFinished(bool bSuccess, const FString& Erro
 		{
 			bPlannerDagRepairConsumed = true;
 			PendingPlannerUserTextOverride = UnrealAiPlanExecutorPriv::MakePlannerDagRepairUserText(OriginalPlannerUserText, ParseError);
-			BeginPlannerTurn();
+			const TWeakPtr<FUnrealAiPlanExecutor> WeakExec = AsShared();
+			AsyncTask(ENamedThreads::GameThread,
+				[WeakExec]()
+				{
+					if (const TSharedPtr<FUnrealAiPlanExecutor> Self = WeakExec.Pin())
+					{
+						Self->BeginPlannerTurn();
+					}
+				});
 			return;
 		}
 		Finish(false,
@@ -612,7 +620,15 @@ void FUnrealAiPlanExecutor::OnPlannerFinished(bool bSuccess, const FString& Erro
 		{
 			bPlannerDagRepairConsumed = true;
 			PendingPlannerUserTextOverride = UnrealAiPlanExecutorPriv::MakePlannerDagRepairUserText(OriginalPlannerUserText, ParseError);
-			BeginPlannerTurn();
+			const TWeakPtr<FUnrealAiPlanExecutor> WeakExec = AsShared();
+			AsyncTask(ENamedThreads::GameThread,
+				[WeakExec]()
+				{
+					if (const TSharedPtr<FUnrealAiPlanExecutor> Self = WeakExec.Pin())
+					{
+						Self->BeginPlannerTurn();
+					}
+				});
 			return;
 		}
 		Finish(false,

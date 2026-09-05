@@ -22,6 +22,10 @@
     {
       "type": "agent",
       "request": "Give me a tight recap: which assets we touched, whether anything still looks unhappy in the compiler, and one thing you'd test in PIE if you were me."
+    },
+    {
+      "type": "agent",
+      "request": "Now do an animation pass: find the player AnimBlueprint and speed up all animations. If Blueprint writes are gated, discover first and delegate with the correct target_kind instead of retrying blocked main-agent graph tools."
     }
   ]
 }

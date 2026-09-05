@@ -2,7 +2,6 @@
 
 #include "Prompt/UnrealAiPromptChunkUtils.h"
 #include "UnrealAiBlueprintBuilderTargetKind.h"
-#include "UnrealAiEnvironmentBuilderTargetKind.h"
 #include "UnrealAiProductSpecialistId.h"
 #include "HAL/CriticalSection.h"
 
@@ -19,7 +18,6 @@ namespace UnrealAiMainAgentPromptDiskCache
 	{
 		uint32 K = GetTypeHash(Params.Mode);
 		K = HashCombine(K, Params.bInjectBlueprintBuilderResumeChunk ? 1u : 0u);
-		K = HashCombine(K, Params.bInjectEnvironmentBuilderResumeChunk ? 1u : 0u);
 		K = HashCombine(K, Params.bIncludePlanNodeExecutionChunk ? 1u : 0u);
 		K = HashCombine(K, Params.bIncludeExecutionSubturnChunk ? 1u : 0u);
 		K = HashCombine(K, Params.bIncludePlanDagChunk ? 1u : 0u);
@@ -56,19 +54,6 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 	{
 		FString C;
 		if (UnrealAiPromptChunkUtils::LoadChunk(TEXT("chunks"), FileUnderBlueprintBuilder, C))
-		{
-			if (!Acc.IsEmpty())
-			{
-				Acc += TEXT("\n\n---\n\n");
-			}
-			Acc += C;
-		}
-	};
-
-	auto AppendEnvironmentBuilderChunk = [&Acc](const TCHAR* FileUnderEnvironmentBuilder)
-	{
-		FString C;
-		if (UnrealAiPromptChunkUtils::LoadChunk(TEXT("chunks"), FileUnderEnvironmentBuilder, C))
 		{
 			if (!Acc.IsEmpty())
 			{
@@ -227,51 +212,6 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 		return Acc;
 	}
 
-	if (Params.bEnvironmentBuilderMode)
-	{
-		AppendChunk(TEXT("01-identity.md"));
-		{
-			FString C2;
-			if (UnrealAiPromptChunkUtils::LoadChunk(ChunkSubdir, TEXT("02-operating-modes.md"), C2))
-			{
-				C2 = UnrealAiPromptChunkUtils::ExtractOperatingModeSection(C2, Params.Mode);
-				if (!Acc.IsEmpty())
-				{
-					Acc += TEXT("\n\n---\n\n");
-				}
-				Acc += C2;
-			}
-		}
-		AppendEnvironmentBuilderChunk(TEXT("environment-builder/00-overview.md"));
-		AppendEnvironmentBuilderChunk(TEXT("environment-builder/01-deterministic-loop.md"));
-		AppendEnvironmentBuilderChunk(TEXT("environment-builder/02-unreal-pcg-model.md"));
-		AppendEnvironmentBuilderChunk(TEXT("environment-builder/03-landscape-and-height.md"));
-		AppendEnvironmentBuilderChunk(TEXT("environment-builder/04-foliage-and-instances.md"));
-		AppendEnvironmentBuilderChunk(TEXT("environment-builder/05-scene-safety.md"));
-		AppendEnvironmentBuilderChunk(TEXT("environment-builder/06-verification-ladder.md"));
-		{
-			const FString KindRel = UnrealAiEnvironmentBuilderTargetKind::KindChunkFileName(Params.EnvironmentBuilderTargetKind);
-			FString KindChunk;
-			if (UnrealAiPromptChunkUtils::LoadChunk(TEXT("chunks"), *KindRel, KindChunk) && !KindChunk.IsEmpty())
-			{
-				if (!Acc.IsEmpty())
-				{
-					Acc += TEXT("\n\n---\n\n");
-				}
-				Acc += KindChunk;
-			}
-		}
-		AppendChunk(TEXT("05-context-and-editor.md"));
-		AppendChunk(TEXT("07-safety-banned.md"));
-		AppendChunk(TEXT("08-output-style.md"));
-		UnrealAiPromptChunkUtils::ApplyTemplateTokens(Acc, Params, B);
-		if (!B.SystemOrDeveloperBlock.IsEmpty())
-		{
-			Acc = B.SystemOrDeveloperBlock + TEXT("\n\n---\n\n") + Acc;
-		}
-		return Acc;
-	}
-
 	if (Params.bOrchestratorAgentTurn)
 	{
 		Acc.Reset();
@@ -295,11 +235,6 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 		if (Params.bInjectBlueprintBuilderResumeChunk)
 		{
 			AppendUnderChunksTree(TEXT("blueprint-builder/09-resume-on-main-agent.md"));
-		}
-		AppendUnderChunksTree(TEXT("environment-builder/07-delegation-from-main-agent.md"));
-		if (Params.bInjectEnvironmentBuilderResumeChunk)
-		{
-			AppendUnderChunksTree(TEXT("environment-builder/08-resume-on-main-agent.md"));
 		}
 		if (Params.bInjectProductSpecialistResumeChunk)
 		{
@@ -347,11 +282,6 @@ FString FUnrealAiLinearPromptAssemblyStrategy::BuildSystemDeveloperContent(const
 			if (Params.bInjectBlueprintBuilderResumeChunk)
 			{
 				AppendUnderChunksTree(TEXT("blueprint-builder/09-resume-on-main-agent.md"));
-			}
-			AppendUnderChunksTree(TEXT("environment-builder/07-delegation-from-main-agent.md"));
-			if (Params.bInjectEnvironmentBuilderResumeChunk)
-			{
-				AppendUnderChunksTree(TEXT("environment-builder/08-resume-on-main-agent.md"));
 			}
 			AppendChunk(TEXT("05-context-and-editor.md"));
 			AppendChunk(TEXT("10-mvp-gameplay-and-tooling.md"));

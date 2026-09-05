@@ -42,6 +42,7 @@ public:
 private:
 	void OpenSettingsTab() const;
 	void OnUnifiedNewChat();
+	void OnCloseChatTab();
 	void RefreshChatChrome();
 
 	TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry;

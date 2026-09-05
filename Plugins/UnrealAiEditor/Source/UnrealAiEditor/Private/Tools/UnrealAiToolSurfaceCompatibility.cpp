@@ -8,7 +8,6 @@ namespace UnrealAiToolSurfaceCompatibility
 	const FString GAgentSurfaceToken_All = TEXT("all");
 	const FString GAgentSurfaceToken_MainAgent = TEXT("main_agent");
 	const FString GAgentSurfaceToken_BlueprintBuilder = TEXT("blueprint_builder");
-	const FString GAgentSurfaceToken_EnvironmentBuilder = TEXT("environment_builder");
 
 	void ParseAgentSurfaces(const FJsonObject& ToolDef, TSet<FString>& OutTokens, bool& bOutAll)
 	{
@@ -66,8 +65,6 @@ namespace UnrealAiToolSurfaceCompatibility
 			return Tokens.Contains(GAgentSurfaceToken_MainAgent);
 		case EUnrealAiToolSurfaceKind::BlueprintBuilder:
 			return Tokens.Contains(GAgentSurfaceToken_BlueprintBuilder);
-		case EUnrealAiToolSurfaceKind::EnvironmentBuilder:
-			return Tokens.Contains(GAgentSurfaceToken_EnvironmentBuilder);
 		default:
 			return false;
 		}

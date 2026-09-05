@@ -66,6 +66,10 @@ struct FUnrealAiChatBlock
 
 	/** Non-empty when this block belongs to a plan-node worker lane (matches lane header PlanWorkerNodeId). */
 	FString PlanWorkerNodeId;
+	/** Optional normalized display type key for per-agent colors (display-only). */
+	FString AgentDisplayTypeKey;
+	/** Optional display label override for this block's agent type. */
+	FString AgentDisplayLabel;
 	/** Display title for Kind==PlanWorkerLane; may match PlanWorkerNodeId if no DAG title. */
 	FString PlanWorkerTitleDisplay;
 	EUnrealAiPlanWorkerLaneStatus PlanWorkerLaneStatus = EUnrealAiPlanWorkerLaneStatus::Running;
@@ -125,9 +129,13 @@ public:
 	/** @return Id of the new user block (for attaching async metadata). Pass a valid DesiredId to control the block id (e.g. UI animation coordination). */
 	/** @param SentMode If non-null, show a mode badge on the user bubble (ignored for harness user lines). */
 	FGuid AddUserMessage(const FString& Text, FGuid DesiredId = FGuid(), const EUnrealAiAgentMode* SentMode = nullptr);
-	void BeginRun(const FGuid& RunId);
+	void BeginRun(const FGuid& RunId, const FString& RunTypeKey = FString(), const FString& RunTypeLabel = FString());
 	/** Plan executor: opens a lane before worker streams are appended (tags following blocks). */
-	void BeginPlanWorkerSpan(const FString& NodeId, const FText& TitleOrEmpty);
+	void BeginPlanWorkerSpan(
+		const FString& NodeId,
+		const FText& TitleOrEmpty,
+		const FString& WorkerTypeKey = FString(),
+		const FString& WorkerTypeLabel = FString());
 	/** Plan executor: finalizes lane header status/summary; clears active worker tag for subsequent blocks. */
 	void EndPlanWorkerSpan(const FString& NodeId, bool bSuccess, const FString& SummaryOneLine);
 	/** True while a plan-node worker span is tagging streamed blocks (between Begin/End). */
@@ -181,6 +189,10 @@ private:
 	FGuid ActiveRunId;
 	bool bHasActiveRun = false;
 	FString ActivePlanWorkerNodeId;
+	FString ActiveRunTypeKey;
+	FString ActiveRunTypeLabel;
+	FString ActivePlanWorkerTypeKey;
+	FString ActivePlanWorkerTypeLabel;
 	bool bAssistantSegmentOpen = false;
 	bool bThinkingOpen = false;
 	double LastAssistantStreamChunkMonotonicTime = 0.0;

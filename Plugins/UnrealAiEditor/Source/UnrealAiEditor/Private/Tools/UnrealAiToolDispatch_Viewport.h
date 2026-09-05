@@ -16,3 +16,4 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportCapturePng(const TSharedP
 FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportCaptureDelayed(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportGetViewMode(const TSharedPtr<FJsonObject>& Args);
 FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportSetViewMode(const TSharedPtr<FJsonObject>& Args);
+FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportListVisibleActors(const TSharedPtr<FJsonObject>& Args);

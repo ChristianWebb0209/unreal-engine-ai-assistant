@@ -603,6 +603,7 @@ void FOpenAiCompatibleHttpTransport::CancelActiveRequest()
 		ActiveRequest->CancelRequest();
 		ActiveRequest.Reset();
 	}
+	++ActiveRequestEpoch;
 }
 
 bool FOpenAiCompatibleHttpTransport::HasActiveRequest() const
@@ -729,11 +730,20 @@ void FOpenAiCompatibleHttpTransport::StreamChatCompletion(const FUnrealAiLlmRequ
 		}
 
 		ActiveRequest = HttpRequest2;
+		const uint64 BoundRequestEpoch = ActiveRequestEpoch;
 		HttpRequest2->OnProcessRequestComplete().BindLambda(
-			[this, OnEvent, bStream, Url, Attempt, MaxAttempts, SendAttempt, BodyStr, SseSession, ReleaseOutboundIfHeld](
+			[this, OnEvent, bStream, Url, Attempt, MaxAttempts, SendAttempt, BodyStr, SseSession, ReleaseOutboundIfHeld, BoundRequestEpoch](
 				FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bOk)
 			{
-				ActiveRequest.Reset();
+				if (BoundRequestEpoch != ActiveRequestEpoch)
+				{
+					ReleaseOutboundIfHeld();
+					return;
+				}
+				if (ActiveRequest.Get() == Req.Get())
+				{
+					ActiveRequest.Reset();
+				}
 				if (!bOk)
 				{
 					ReleaseOutboundIfHeld();

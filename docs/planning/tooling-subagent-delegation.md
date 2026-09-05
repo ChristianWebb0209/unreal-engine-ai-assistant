@@ -11,8 +11,8 @@ This document proposes **replacing the wide single-agent tool path** with **mand
 **Related (current architecture — reference only):**
 
 - Tool registry narrative + dispatch / tiered eligibility: [`docs/tooling/tool-registry.md`](../tooling/tool-registry.md), [`docs/tooling/tools-expansion.md`](../tooling/tools-expansion.md).
-- Catalog sources: `Plugins/UnrealAiEditor/Resources/tools.main.json` (+ `tools.blueprint.json`, `tools.environment.json`).
-- Builder handoffs: `<unreal_ai_build_blueprint>` / `<unreal_ai_build_environment>` in harness (`FUnrealAiAgentHarness.cpp`) and tag parsers (`UnrealAiBuildBlueprintTag`, `UnrealAiBuildEnvironmentTag`).
+- Catalog sources: `Plugins/UnrealAiEditor/Resources/tools.main.json` (+ `tools.blueprint.json`).
+- Builder handoffs: `<unreal_ai_build_blueprint>` in harness (`FUnrealAiAgentHarness.cpp`) and tag parser (`UnrealAiBuildBlueprintTag`).
 - Blueprint builder domain enum: `Plugins/UnrealAiEditor/Source/UnrealAiEditor/Public/UnrealAiBlueprintBuilderTargetKind.h`.
 - Surface gating: `tools[].agent_surfaces`, `UnrealAiAgentToolGate`, `UnrealAiToolSurfaceCompatibility`.
 - Plan-mode parallelism (separate axis): `agent.useSubagents` — plan **wave** workers, not the product “builder” sub-turns described here.
@@ -65,7 +65,7 @@ Scout → Mutator → Verifier can be **three LLM rounds** for high-risk graphs;
 
 ### 3.2 Catalog alignment
 
-Specialists map to existing **`meta.categories`** in `tools.main.json` (e.g. `world_actors`, `assets_content`, `blueprints`, `materials_rendering`, `viewport_camera`, …) and to **`agent_surfaces` tokens** (`main_agent`, `blueprint_builder`, `environment_builder`, `all`).
+Specialists map to existing **`meta.categories`** in `tools.main.json` (e.g. `world_actors`, `assets_content`, `blueprints`, `materials_rendering`, `viewport_camera`, …) and to **`agent_surfaces` tokens** (`main_agent`, `blueprint_builder`, `blueprint_builder`, `all`).
 
 **New surfaces (proposed):** add tokens only when a specialist needs a **distinct allow-list** that would pollute `main_agent` or existing builders — e.g. `scene_specialist`, `asset_specialist`, `viewport_specialist`, `playtest_specialist`, `diagnostics_specialist`, `project_intel_specialist`, `router_only`. Exact names are implementation decisions; keep them **few and composable**.
 
@@ -102,7 +102,7 @@ The orchestrator **does not** pass wall-of-text tool docs; those live in **speci
 |-------|--------|
 | **Role** | Everything **in-world** for the loaded editor level: find actors, spawn/destroy, transforms, attachment, visibility, outliner folders. |
 | **Primary categories** | `world_actors`, parts of `selection_framing` when tied to actor paths. |
-| **Representative tools** | `scene_fuzzy_search`, `actor_find_by_label`, `actor_spawn_from_class`, `actor_destroy`, `actor_set_transform`, `actor_get_transform`, `actor_attach_to`, `actor_set_visibility`, `actor_blueprint_toggle_visibility`, `outliner_folder_move`, `entity_get_property`, `entity_set_property` (when actor-focused). |
+| **Representative tools** | `scene_fuzzy_search`, `actor_find_by_label`, `actor_get_transform`, `actor_get_visibility`, `editor_get_selection`, `editor_set_selection`, `entity_get_property` (read-only scene inspection). |
 | **Scout vs mutator** | Scout: search/find/read transforms. Mutator: spawn, destroy, transform, hierarchy. |
 | **Delegation from** | Orchestrator when the user asks about “in the level”, “actor”, “scene”, placement. |
 
@@ -222,14 +222,9 @@ Each row is a **separate sub-turn profile** sharing the same harness hook but di
 
 ---
 
-### 4.12 L1/L2 — Environment & PCG builder (existing surface)
+### 4.12 L1/L2 — Environment & PCG builder (removed)
 
-| Field | Detail |
-|-------|--------|
-| **Role** | Landscape, foliage, PCG, and other tools marked **`environment_builder`** (see `tools.environment.json` pattern). |
-| **Handoff** | `<unreal_ai_build_environment>` (existing). |
-| **Representative tools** | e.g. `landscape_import_heightmap`, `foliage_paint_instances`, `pcg_generate` — plus any world/scene tools you choose to restrict to this surface. |
-| **Future split** | If the roster grows: **landscape**, **foliage**, **PCG** as three specialist profiles under the same surface with pinned tool lists. |
+Procedural environment building (PCG, landscape, foliage) and the Environment Builder sub-turn were **removed** from the product. World actor placement is also out of scope — use the Unreal Editor for level layout.
 
 ---
 
@@ -294,12 +289,12 @@ This section ties **delegation** to **concrete repo layout**: smaller files, cle
 
 ### 6.2 Tool catalog files (separation of concerns)
 
-**Today:** `tools.main.json` + `tools.blueprint.json` + `tools.environment.json` merged in `FUnrealAiToolCatalog::LoadFromPlugin`; `meta.tool_catalog_fragments` lists fragments.
+**Today:** `tools.main.json` + `tools.blueprint.json` merged in `FUnrealAiToolCatalog::LoadFromPlugin`; `meta.tool_catalog_fragments` lists fragments.
 
 **Direction for specialists:**
 
 1. **Add domain fragments** using the same merge mechanism — e.g. `tools.scene.json`, `tools.assets.json`, `tools.viewport.json`, `tools.diagnostics.json` — each owned by one team/concern. Keep **`meta`** (version, categories legend, optimization caps) in **`tools.main.json` only** or in a tiny `tools.meta.json` if you ever split meta out.
-2. **Per-tool metadata** continues to drive surfaces: `agent_surfaces`, `retrieval_bundle`, `context_selector` (`blueprint_builder_core`, `environment_builder_core`, and future `specialist_core` flags). Avoid duplicating prose in JSON; link long narrative to `docs/tooling/` or `prompts/tools/specialists/`.
+2. **Per-tool metadata** continues to drive surfaces: `agent_surfaces`, `retrieval_bundle`, `context_selector` (`blueprint_builder_core`, `blueprint_builder_core`, and future `specialist_core` flags). Avoid duplicating prose in JSON; link long narrative to `docs/tooling/` or `prompts/tools/specialists/`.
 3. **Generated, not hand-curated at scale** — extend scripting (alongside `scripts/Validate-UnrealAiToolCatalog.ps1`) to emit:
    - per-specialist **allow-list** headers for C++ or JSON manifests;
    - `prompts/tools/catalog-snapshot.tsv` **slices** (e.g. `catalog-snapshot.scene.tsv`);
@@ -322,7 +317,7 @@ Large single-file pain in **`tools.main.json`** is addressed by **moving new too
 
 - **`prompts/chunks/common/`** — identity, modes, tool-calling contract, context, safety, output style (shared across all agents).
 - **`prompts/chunks/blueprint-builder/`** + **`kinds/`** — builder sub-turn (already split by `target_kind`).
-- **`prompts/chunks/environment-builder/`** + **`kinds/`** — environment sub-turn.
+- **`prompts/chunks/`** + **`kinds/`** — environment sub-turn.
 - **`prompts/chunks/plan/`** and **`plan-node/`** — DAG modes (orthogonal to product specialists).
 
 **Add** parallel trees for new product specialists (mirror blueprint-builder structure):
@@ -426,7 +421,7 @@ Two different systems must stay aligned:
 ### Phase 3 — Blueprint & environment refinements
 
 1. **Pin tool lists per `EUnrealAiBlueprintBuilderTargetKind`** so `material_graph_*` never appears on K2-only turns and vice versa.
-2. Split **Environment builder** profiles if `tools.environment.json` grows (landscape / foliage / PCG).
+2. ~~Split Environment builder profiles~~ — removed from product (see README **Scope**).
 
 ### Phase 4 — Micro-agents (product scope)
 

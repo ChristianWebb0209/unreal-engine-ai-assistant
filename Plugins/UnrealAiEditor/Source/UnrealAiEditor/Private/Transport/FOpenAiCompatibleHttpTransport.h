@@ -19,4 +19,6 @@ public:
 
 private:
 	TSharedPtr<IHttpRequest> ActiveRequest;
+	/** Monotonic id; completion handlers for older requests are ignored (superseded / cancelled). */
+	uint64 ActiveRequestEpoch = 0;
 };

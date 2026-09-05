@@ -80,4 +80,6 @@ private:
 	FString AssistantStreamLineCarry;
 	FString ThinkingStreamLineCarry;
 	FUnrealAiToolCatalog* ToolCatalog = nullptr;
+	FString PendingWorkerTypeKey;
+	FString PendingWorkerTypeLabel;
 };

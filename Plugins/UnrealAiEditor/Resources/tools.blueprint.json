@@ -22,6 +22,11 @@
         "embedding_hint": null,
         "blueprint_builder_core": true
       },
+      "builder_domains": [
+        "script_blueprint",
+        "anim_blueprint",
+        "widget_blueprint"
+      ],
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -77,6 +82,11 @@
         "embedding_hint": null,
         "blueprint_builder_core": true
       },
+      "builder_domains": [
+        "script_blueprint",
+        "anim_blueprint",
+        "widget_blueprint"
+      ],
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -858,6 +868,11 @@
         "embedding_hint": null,
         "blueprint_builder_core": true
       },
+      "builder_domains": [
+        "script_blueprint",
+        "anim_blueprint",
+        "widget_blueprint"
+      ],
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -920,6 +935,11 @@
         "embedding_hint": null,
         "blueprint_builder_core": true
       },
+      "builder_domains": [
+        "script_blueprint",
+        "anim_blueprint",
+        "widget_blueprint"
+      ],
       "parameters": {
         "type": "object",
         "additionalProperties": false,

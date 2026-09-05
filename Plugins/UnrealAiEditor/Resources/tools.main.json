@@ -1,6 +1,6 @@
 {
   "meta": {
-    "catalog_version": "1.1.0",
+    "catalog_version": "1.1.1",
     "ue_target": "5.7+",
     "schema_ref": "plugins/UnrealAiEditor/Resources/tools.main.json validated by scripts/Validate-UnrealAiToolCatalog.ps1; agent contracts: docs/planning/deterministic-tool-contracts.md",
     "generated_at": "2026-03-20T23:38:27+00:00",
@@ -14,7 +14,6 @@
       "console_exec",
       "diagnostics_logs",
       "editor_ui_navigation",
-      "landscape_foliage_pcg",
       "materials_rendering",
       "physics_collision",
       "pie_play",
@@ -25,7 +24,7 @@
       "exec",
       "settings_properties"
     ],
-    "tool_count": 84,
+    "tool_count": 67,
     "retrieval_index": {
       "bm25_document_formula": "tool_id + summary + category + tags + tool_surface.domain_tags",
       "indexed_fields": [
@@ -70,19 +69,18 @@
       "runtime_defaults_header": "Plugins/UnrealAiEditor/Source/UnrealAiEditor/Private/Misc/UnrealAiRuntimeDefaults.h"
     },
     "agent_surfaces": {
-      "description": "Optional per-tool array tools[].agent_surfaces lists which agent pipelines may surface or invoke the tool. Orthogonal to modes (ask/agent/plan) and to builder_domains / blueprint_builder_core / environment_builder_core. Parsed in UnrealAiToolSurfaceCompatibility; enforced in UnrealAiAgentToolGate when Agent mode and bOmitMainAgentBlueprintMutationTools is true.",
+      "description": "Optional per-tool array tools[].agent_surfaces lists which agent pipelines may surface or invoke the tool. Orthogonal to modes (ask/agent/plan) and to builder_domains blueprint_builder_core. Parsed in UnrealAiToolSurfaceCompatibility; enforced in UnrealAiAgentToolGate when Agent mode and bOmitMainAgentBlueprintMutationTools is true.",
       "tokens": {
         "all": "Single entry [\"all\"] (any case) or missing/empty field: no surface restriction (same eligibility as pre-tag catalogs).",
-        "main_agent": "Main agent turn (not a Blueprint or Environment Builder sub-turn).",
-        "blueprint_builder": "Blueprint Builder sub-turn after build-blueprint handoff.",
-        "environment_builder": "Environment / PCG Builder sub-turn after build-environment handoff."
+        "main_agent": "Main agent turn (not a Blueprint Builder sub-turn).",
+        "blueprint_builder": "Blueprint Builder sub-turn after build-blueprint handoff."
       },
       "escape_hatch": "When bOmitMainAgentBlueprintMutationTools is false, surface gating is bypassed for power users."
     },
     "resolver_contract": {
       "version": "2.2.0",
       "architecture_doc": "docs/planning/new-tools-schema/resolver-architecture.md",
-      "notes": "Catalog tools may declare tools[].agent_surfaces for surface compatibility (main_agent / blueprint_builder / environment_builder / all); omit_from_main_agent_surface removed. No resolver inference for operation/capture_kind/target/value_kind; explicit catalog required fields only. No Levenshtein tool_id autocorrect (suggestions only). Alias table + path canonicalization only. Validates before dispatch; resolver_audit on results."
+      "notes": "Catalog tools may declare tools[].agent_surfaces for surface compatibility (main_agent / blueprint_builder / all); omit_from_main_agent_surface removed. No resolver inference for operation/capture_kind/target/value_kind; explicit catalog required fields only. No Levenshtein tool_id autocorrect (suggestions only). Alias table + path canonicalization only. Validates before dispatch; resolver_audit on results."
     },
     "invocation": {
       "focused_flag": "Optional JSON field \"focused\": true on supported tools. Stripped before handlers; after a successful run the editor opens or foregrounds the related Blueprint, asset, Content Browser selection, or project source file in the IDE. Tools list this property explicitly where the catalog schema is strict (additionalProperties: false)."
@@ -91,115 +89,11 @@
       {
         "path": "tools.blueprint.json",
         "retrieval_bundle": "blueprint_builder"
-      },
-      {
-        "path": "tools.environment.json",
-        "retrieval_bundle": "environment_builder"
       }
     ],
-    "tool_catalog_fragments_notes": "Optional array: each entry is a string (path under Resources/) or object { path, retrieval_bundle }. Fragment files must be { \"tools\": [ ... ] }. Merged tools may receive retrieval_bundle; main Agent tiered BM25 omits retrieval_bundle=blueprint_builder and =environment_builder (builder sub-turns still see the full merged catalog). Primary catalog file is tools.main.json (meta + main roster tools). Additional fragments: tools.blueprint.json, tools.environment.json."
+    "tool_catalog_fragments_notes": "Optional array: each entry is a string (path under Resources/) or object { path, retrieval_bundle }. Fragment files must be { \"tools\": [ ... ] }. Merged tools may receive retrieval_bundle; main Agent tiered BM25 omits retrieval_bundle=blueprint_builder and  (builder sub-turns still see the full merged catalog). Primary catalog file is tools.main.json (meta + main roster tools). Additional fragments: tools.blueprint.json, ."
   },
   "tools": [
-    {
-      "tool_id": "actor_attach_to",
-      "summary": "Attach child actor to parent.",
-      "category": "world_actors",
-      "tags": [
-        "actor"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 50,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "child_path": {
-            "type": "string",
-            "description": "World path of the child actor (same as child_actor_path)."
-          },
-          "parent_path": {
-            "type": "string",
-            "description": "World path of the parent actor (same as parent_actor_path)."
-          },
-          "child_actor_path": {
-            "type": "string",
-            "description": "Alias for child_path."
-          },
-          "parent_actor_path": {
-            "type": "string",
-            "description": "Alias for parent_path."
-          },
-          "actor_path": {
-            "type": "string",
-            "description": "When paired with parent_path or parent_actor_path, treated as the child actor path."
-          },
-          "socket": {
-            "type": "string"
-          }
-        }
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "AActor::AttachToActor",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "implemented"
-    },
-    {
-      "tool_id": "actor_destroy",
-      "summary": "Destroy an actor in the editor world. Refused for engine streaming/HLOD/WorldPartition infrastructure actors (class/path heuristics)—only delete user-authored props/meshes you can justify.",
-      "category": "world_actors",
-      "tags": [
-        "actor",
-        "destructive"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 42,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "actor_path": {
-            "type": "string"
-          },
-          "confirm": {
-            "type": "string",
-            "description": "Assent to delete: DELETE, yes, y, true, confirm, or 1 (case-insensitive)."
-          }
-        },
-        "required": [
-          "actor_path"
-        ]
-      },
-      "side_effects": "scene",
-      "permission": "destructive",
-      "ue_entry_points": "UWorld::DestroyActor",
-      "threading": "game_thread",
-      "failure_modes": [
-        "ok:false when actor_path matches built-in protected types (HLOD / WorldPartition helpers): choose a different actor or fix the user's mesh instead."
-      ],
-      "doc_links": [],
-      "status": "implemented"
-    },
     {
       "tool_id": "actor_find_by_label",
       "summary": "Find actors by outliner label, internal actor name, full object path substring, or exact actor_path match.",
@@ -280,68 +174,47 @@
       "status": "implemented"
     },
     {
-      "tool_id": "actor_set_transform",
-      "summary": "Mutate/set actor transform in the loaded level. Use this after scene_fuzzy_search when you need a concrete position/rotation/scale change; do not use for discovery or status-only checks (use scene_fuzzy_search or actor_get_transform). Omit `transform` and top-level location/rotation/scale to keep the current pose (useful with `teleport_physics` only). Use `transform` object, or top-level `location`/`rotation`/`scale` number arrays [x,y,z]. `actor_path` accepts full path or a unique suffix (e.g. PersistentLevel.Actor_UAID_...).",
+      "tool_id": "actor_get_material_slots",
+      "summary": "List material slot assignments on an actor's primitive components (material_path, slot_index, parameter names on Material Instances). Use after editor_get_selection when the user refers to a selected actor's material/color.",
       "category": "world_actors",
       "tags": [
-        "actor"
+        "actor",
+        "material",
+        "read",
+        "selection"
       ],
-      "tier": "standard",
+      "tier": "tier1_mvp",
       "modes": {
-        "ask": false,
+        "ask": true,
         "agent": true,
         "plan": true
       },
       "context_selector": {
-        "priority": 60,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
+        "priority": 72,
+        "always_include_in_core_pack": true,
+        "embedding_hint": "selected actor material slot color material_path"
       },
       "parameters": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "actor_path": {
-            "type": "string"
-          },
-          "transform": {
-            "type": "object",
-            "description": "Optional if using top-level location[]/rotation[]/scale[] instead. Arrays inside transform also accepted ([x,y,z] form)."
-          },
-          "location": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            },
-            "description": "Optional when transform omitted: [x,y,z] applied with current rotation/scale."
-          },
-          "rotation": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            },
-            "description": "Optional when transform omitted: [pitch,yaw,roll] with current location/scale."
-          },
-          "scale": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            },
-            "description": "Optional when transform omitted: [x,y,z] scale with current location/rotation."
-          },
-          "teleport_physics": {
-            "type": "boolean"
+            "type": "string",
+            "description": "Full world actor path (from editor_get_selection or scene_fuzzy_search)."
           }
         },
         "required": [
           "actor_path"
         ]
       },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "AActor::SetActorTransform",
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "UPrimitiveComponent::GetMaterial; UMaterialInstanceConstant parameter enumeration",
       "threading": "game_thread",
-      "failure_modes": [],
+      "failure_modes": [
+        "Empty slots: actor has no primitive mesh component or no materials assigned.",
+        "Base Material only: duplicate to Material Instance before material_instance_set_parameter."
+      ],
       "doc_links": [],
       "status": "implemented"
     },
@@ -396,167 +269,13 @@
       "status": "implemented"
     },
     {
-      "tool_id": "actor_set_visibility",
-      "summary": "Toggle actor visibility.",
-      "category": "world_actors",
-      "tags": [
-        "actor",
-        "visibility",
-        "property",
-        "write"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 48,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "actor_path": {
-            "type": "string"
-          },
-          "hidden": {
-            "type": "boolean"
-          },
-          "affect_children": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "actor_path",
-          "hidden"
-        ]
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "AActor visibility APIs",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "tool_surface": {
-        "domain_tags": [
-          "actor",
-          "property",
-          "visibility",
-          "hidden"
-        ]
-      },
-      "status": "implemented"
-    },
-    {
-      "tool_id": "actor_blueprint_toggle_visibility",
-      "summary": "Toggle whether the actor is temporarily hidden in the editor (flips current state). Prefer actor_set_visibility when you need an explicit hidden true/false.",
-      "category": "world_actors",
-      "tags": [
-        "actor",
-        "visibility"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 47,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "actor_path": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "actor_path"
-        ]
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "AActor::SetIsTemporarilyHiddenInEditor",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "implemented"
-    },
-    {
-      "tool_id": "actor_spawn_from_class",
-      "summary": "Spawn an actor in the editor world. Requires class_path + location[3] + rotation[3]. If exact transform is unknown, use explicit safe defaults (e.g. location [0,0,100], rotation [0,0,0]) instead of omitting fields.",
-      "category": "world_actors",
-      "tags": [
-        "actor",
-        "level"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 62,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "class_path": {
-            "type": "string",
-            "description": "Must be a subclass of AActor (e.g. /Game/MyActor.MyActor_C or /Script/Engine.StaticMeshActor). Components (USceneComponent, etc.) cannot be spawned as actors."
-          },
-          "location": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            }
-          },
-          "rotation": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            }
-          },
-          "folder_path": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "class_path",
-          "location",
-          "rotation"
-        ]
-      },
-      "side_effects": "scene",
-      "permission": "write",
-      "ue_entry_points": "UWorld::SpawnActor; FScopedTransaction",
-      "threading": "game_thread",
-      "failure_modes": [
-        "Missing required args: class_path, location, and rotation are mandatory; `{}` is invalid."
-      ],
-      "doc_links": [],
-      "status": "implemented"
-    },
-    {
       "tool_id": "animation_blueprint_get_graph_summary",
       "summary": "Summarize AnimBlueprint graphs.",
       "category": "animation_sequencer",
       "tags": [
         "animation"
       ],
-      "tier": "future",
+      "tier": "standard",
       "modes": {
         "ask": true,
         "agent": true,
@@ -589,7 +308,7 @@
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
-      "status": "future"
+      "status": "implemented"
     },
     {
       "tool_id": "asset_delete",
@@ -1076,6 +795,11 @@
         "embedding_hint": null,
         "blueprint_builder_core": true
       },
+      "builder_domains": [
+        "script_blueprint",
+        "anim_blueprint",
+        "widget_blueprint"
+      ],
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -1155,6 +879,11 @@
         "embedding_hint": null,
         "blueprint_builder_core": true
       },
+      "builder_domains": [
+        "script_blueprint",
+        "anim_blueprint",
+        "widget_blueprint"
+      ],
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -2336,7 +2065,7 @@
     },
     {
       "tool_id": "material_instance_set_parameter",
-      "summary": "Set a scalar or vector parameter on a Material Instance (main Agent and builder; not a Blueprint graph mutator). Pass value_kind (scalar|vector) with material_path and parameter_name; include value or linear_color per branch. No silent value_kind inference.",
+      "summary": "Set a scalar or vector parameter on a Material Instance (main Agent and builder; not a Blueprint graph mutator). Pass value_kind (scalar|vector) with material_path and parameter_name. Scalar: value (number). Vector/color: linear_color [r,g,b] or [r,g,b,a] in 0–1 — NOT value:{r,g,b,a} and NOT value_kind scalar for colors. Example blue: {\"value_kind\":\"vector\",\"material_path\":\"/Game/.../MI.MI\",\"parameter_name\":\"Color\",\"linear_color\":[0,0,1,1]}.",
       "category": "materials_rendering",
       "tags": [
         "material",
@@ -2416,7 +2145,9 @@
       "ue_entry_points": "UMaterialInstance editing APIs",
       "threading": "game_thread",
       "failure_modes": [
-        "Base Material path: use asset_open_editor on the Material, duplicate to MI, then pass the MI path."
+        "Base Material path: use asset_open_editor on the Material, duplicate to MI, then pass the MI path.",
+        "Schema: colors require value_kind vector + linear_color [r,g,b,a]; scalar value must be a number.",
+        "Wrong parameter_name: use actor_get_material_slots vector_parameter_names or material_instance_get_vector_parameter to discover."
       ],
       "doc_links": [],
       "status": "implemented",
@@ -2545,51 +2276,6 @@
       "status": "future"
     },
     {
-      "tool_id": "outliner_folder_move",
-      "summary": "Move actors to an outliner folder.",
-      "category": "world_actors",
-      "tags": [
-        "outliner"
-      ],
-      "tier": "standard",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 44,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "actor_paths": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "folder_name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "actor_paths",
-          "folder_name"
-        ]
-      },
-      "side_effects": "asset",
-      "permission": "write",
-      "ue_entry_points": "FActorFolders / world outliner",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "implemented"
-    },
-    {
       "tool_id": "package_project",
       "summary": "Full package build.",
       "category": "build_packaging",
@@ -2620,51 +2306,6 @@
       "side_effects": "exec",
       "permission": "exec",
       "ue_entry_points": "UAT package",
-      "threading": "game_thread",
-      "failure_modes": [],
-      "doc_links": [],
-      "status": "future"
-    },
-    {
-      "tool_id": "physics_impulse_actor",
-      "summary": "Apply impulse (PIE-oriented).",
-      "category": "physics_collision",
-      "tags": [
-        "physics"
-      ],
-      "tier": "future",
-      "modes": {
-        "ask": false,
-        "agent": true,
-        "plan": true
-      },
-      "context_selector": {
-        "priority": 15,
-        "always_include_in_core_pack": false,
-        "embedding_hint": null
-      },
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "actor_path": {
-            "type": "string"
-          },
-          "impulse": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            }
-          }
-        },
-        "required": [
-          "actor_path",
-          "impulse"
-        ]
-      },
-      "side_effects": "play",
-      "permission": "write",
-      "ue_entry_points": "Physics in PIE",
       "threading": "game_thread",
       "failure_modes": [],
       "doc_links": [],
@@ -3714,6 +3355,67 @@
       "status": "implemented"
     },
     {
+      "tool_id": "viewport_list_visible_actors",
+      "summary": "List level actors whose bounds intersect the active editor viewport camera frustum (approximate visibility). Sorted nearest-first. Use for “what’s in my viewport?” / demo scene intros. For outliner selection use editor_get_selection; for whole-level search use scene_fuzzy_search.",
+      "category": "viewport_camera",
+      "tags": [
+        "viewport",
+        "visible",
+        "actors",
+        "scene",
+        "frustum",
+        "read"
+      ],
+      "tier": "tier1_mvp",
+      "modes": {
+        "ask": true,
+        "agent": true,
+        "plan": true
+      },
+      "context_selector": {
+        "priority": 88,
+        "always_include_in_core_pack": true,
+        "embedding_hint": "viewport visible actors in view frustum what do I see"
+      },
+      "tool_surface": {
+        "domain_tags": [
+          "viewport",
+          "visible",
+          "actors",
+          "frustum",
+          "scene"
+        ]
+      },
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "max_results": {
+            "type": "integer",
+            "description": "Cap on returned rows (default 40, max 200). Nearest actors first."
+          },
+          "include_hidden": {
+            "type": "boolean",
+            "description": "If true, include actors hidden in the editor."
+          },
+          "include_engine_internals": {
+            "type": "boolean",
+            "description": "If true, include HLOD/streaming helper actors excluded by default policy."
+          }
+        }
+      },
+      "side_effects": "none",
+      "permission": "read",
+      "ue_entry_points": "FEditorViewportClient view/projection matrices; GetViewFrustumBounds; TActorIterator",
+      "threading": "game_thread",
+      "failure_modes": [
+        "Bounds/frustum culling is approximate—tiny or off-screen actors may be omitted.",
+        "Empty matches: level may be empty, camera may not face geometry, or actors are hidden."
+      ],
+      "doc_links": [],
+      "status": "implemented"
+    },
+    {
       "tool_id": "viewport_get_view_mode",
       "summary": "Read the current editor viewport rendering mode.",
       "category": "viewport_camera",
@@ -4103,6 +3805,11 @@
         "embedding_hint": null,
         "blueprint_builder_core": true
       },
+      "builder_domains": [
+        "script_blueprint",
+        "anim_blueprint",
+        "widget_blueprint"
+      ],
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -4150,6 +3857,11 @@
         "embedding_hint": null,
         "blueprint_builder_core": true
       },
+      "builder_domains": [
+        "script_blueprint",
+        "anim_blueprint",
+        "widget_blueprint"
+      ],
       "parameters": {
         "type": "object",
         "additionalProperties": false,

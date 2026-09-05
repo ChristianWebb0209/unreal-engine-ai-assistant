@@ -85,9 +85,6 @@ if ($py) {
     Write-Host "Running audit_tool_agent_surfaces.py..." -ForegroundColor Cyan
     & $pythonExe (Join-Path $PSScriptRoot 'audit_tool_agent_surfaces.py')
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "Running audit_tool_environment_surfaces.py..." -ForegroundColor Cyan
-    & $pythonExe (Join-Path $PSScriptRoot 'audit_tool_environment_surfaces.py')
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Write-Host "Running audit_subagent_exclusive_fragments.py..." -ForegroundColor Cyan
     & $pythonExe (Join-Path $PSScriptRoot 'audit_subagent_exclusive_fragments.py')
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -21,6 +21,9 @@ enum class EUnrealAiBlueprintBuilderTargetKind : uint8
 
 namespace UnrealAiBlueprintBuilderTargetKind
 {
+	/** Strict parse; returns false when value is unknown. */
+	bool TryParseFromString(const FString& In, EUnrealAiBlueprintBuilderTargetKind& OutKind);
+
 	/** Parse from YAML value or JSON string (snake_case). */
 	EUnrealAiBlueprintBuilderTargetKind ParseFromString(const FString& In);
 

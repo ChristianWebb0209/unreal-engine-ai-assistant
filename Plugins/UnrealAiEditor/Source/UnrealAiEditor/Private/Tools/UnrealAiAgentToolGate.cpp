@@ -2,7 +2,6 @@
 
 #include "Context/AgentContextTypes.h"
 #include "Harness/UnrealAiAgentTypes.h"
-#include "Tools/UnrealAiOrchestratorToolPolicy.h"
 #include "Tools/UnrealAiProductSpecialistToolPolicy.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Tools/UnrealAiToolSurfaceCompatibility.h"
@@ -36,14 +35,6 @@ bool UnrealAiAgentToolGate::PassesToolSurfaceFilter(
 		return true;
 	}
 
-	if (Request.bEnvironmentBuilderTurn)
-	{
-		TSet<FString> SurfaceTokens;
-		bool bAllSurfaces = false;
-		UnrealAiToolSurfaceCompatibility::ParseAgentSurfaces(*Def, SurfaceTokens, bAllSurfaces);
-		return UnrealAiToolSurfaceCompatibility::ToolAllowedOnSurface(
-			SurfaceTokens, bAllSurfaces, EUnrealAiToolSurfaceKind::EnvironmentBuilder);
-	}
 	if (Request.bBlueprintBuilderTurn)
 	{
 		TSet<FString> SurfaceTokens;
@@ -57,6 +48,11 @@ bool UnrealAiAgentToolGate::PassesToolSurfaceFilter(
 		return UnrealAiProductSpecialistToolPolicy::PassesSpecialistToolFilter(Request.ActiveProductSpecialistId, ToolId, *Def);
 	}
 
-	// Orchestrator lane: fixed allow-list (delegation tags carry substantive work).
-	return UnrealAiOrchestratorToolPolicy::IsOrchestratorTool(ToolId);
+	// Default main-agent turns should follow catalog-declared agent_surfaces.
+	// This keeps builder-only mutators gated while allowing main-surface discovery tools.
+	TSet<FString> SurfaceTokens;
+	bool bAllSurfaces = false;
+	UnrealAiToolSurfaceCompatibility::ParseAgentSurfaces(*Def, SurfaceTokens, bAllSurfaces);
+	return UnrealAiToolSurfaceCompatibility::ToolAllowedOnSurface(
+		SurfaceTokens, bAllSurfaces, EUnrealAiToolSurfaceKind::MainAgent);
 }

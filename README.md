@@ -2,7 +2,13 @@
 
 This is a learning project I am building to explore tooling, orchestration, and context management systems. My inspiration for this project was seeing how other Unreal Engine AI assistants fail constantly at actually modifying blueprints. A lot of Unreal Engine work is done in C++, and tools like claude code or Cursor already handle these better than I could, but a lot of Unreal Engine work also has to do with building blueprints. These blueprints come in all different types, from animation blueprints, AI decision trees (for things like enemy behaviors), material blueprints, and countless more.
 
-My main takeaway has been that the existing AI asisstants try to do too much in single calls. They have individual tools for modifying blueprints, and send these tools to the LLM. I changed my approach to have countless subagents for specific areas wihtin this massive concept of building blueprints. (Plugins\UnrealAiEditor\prompts\chunks\blueprint-builder\kinds) There are 6 different kinds of blueprint builder for now (some only partially implemented). The downside to this is longer orchestration times, since the agent needs to do multiple back and forth calls to build different blueprints of different types. This downside is well worth it, however, since the gain in accuracy is huge. 
+My main takeaway has been that the existing AI asisstants try to do too much in single calls. They have individual tools for modifying blueprints, and send these tools to the LLM. I changed my approach to have countless subagents for specific areas wihtin this massive concept of building blueprints. (Plugins\UnrealAiEditor\prompts\chunks\blueprint-builder\kinds) There are 6 different kinds of blueprint builder for now (some only partially implemented). The downside to this is longer orchestration times, since the agent needs to do multiple back and forth calls to build different blueprints of different types. This downside is well worth it, however, since the gain in accuracy is huge.
+
+## Scope
+
+**World and level placement:** This project does **not** place, move, spawn, or delete actors in loaded Unreal Editor worlds/levels. Procedural environment building (PCG, landscape, foliage) and scene composition are out of scope — they are too complex and brittle for reliable agent workflows. The assistant focuses on **assets, Blueprint graphs, materials, editor UI, and read-only inspection** of the open level (search actors, read transforms). For level layout and world building, use the Unreal Editor directly.
+
+See also [Plugins/UnrealAiEditor/README.md](Plugins/UnrealAiEditor/README.md) and [docs/tooling/agent-and-tool-requirements.md](docs/tooling/agent-and-tool-requirements.md).
 
 ## Architecture Maps
 

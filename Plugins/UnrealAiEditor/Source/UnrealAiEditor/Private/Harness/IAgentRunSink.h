@@ -49,7 +49,7 @@ public:
 	/** Planning-policy runtime signal for observability (agent mode heuristics/escalation). */
 	virtual void OnPlanningDecision(const FString& ModeUsed, const TArray<FString>& TriggerReasons, int32 ReplanCount, int32 QueueStepsPending) {}
 	/**
-	 * Main agent handed off to an automated builder sub-turn (Blueprint Builder or Environment Builder).
+	 * Main agent handed off to an automated builder sub-turn (Blueprint Builder) or product specialist.
 	 * Chat UI may show a short user-style line; default is no-op.
 	 */
 	virtual void OnSubagentBuilderHandoff(const FString& BuilderDisplayName) {}

@@ -6,11 +6,9 @@
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Harness/FUnrealAiConversationStore.h"
 #include "Tools/UnrealAiBuildBlueprintTag.h"
-#include "Tools/UnrealAiBuildEnvironmentTag.h"
 #include "Tools/UnrealAiDelegateSpecialistTag.h"
 #include "Tools/UnrealAiProductSpecialistHandoff.h"
 #include "Tools/UnrealAiBlueprintBuilderToolSurface.h"
-#include "Tools/UnrealAiEnvironmentBuilderToolSurface.h"
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Harness/IAgentRunSink.h"
 #include "Planning/FUnrealAiPlanExecutor.h"
@@ -1218,12 +1216,9 @@ namespace UnrealAiAgentHarnessPriv
 				ContextService->SaveNow(Request.ProjectId, Request.ThreadId);
 			}
 		}
-		if (Sink.IsValid())
-		{
-			EmitEnforcementSummary();
-			Sink->OnRunFinished(true, FString());
-		}
-		if (MemoryService && Conv.IsValid())
+		// Finish runner-local work before OnRunFinished — plan executor may synchronously start another RunTurn
+		// (e.g. DAG repair replanner), which CancelTurn()s this runner and must not run while we still touch Conv.
+		if (MemoryService && Conv.IsValid() && !UnrealAiPlanPlannerHarness::IsPlanPlannerPass(Request.Mode))
 		{
 			const TArray<FUnrealAiConversationMessage>& Ms = Conv->GetMessages();
 			const int32 UserTurns = CountConversationUserTurnsForMemory(Ms);
@@ -1322,6 +1317,11 @@ namespace UnrealAiAgentHarnessPriv
 					Sink->OnEnforcementEvent(TEXT("background_op"), Detail);
 				}
 			}
+		}
+		if (Sink.IsValid())
+		{
+			EmitEnforcementSummary();
+			Sink->OnRunFinished(true, FString());
 		}
 		FUnrealAiEditorModalMonitor::NotifyAgentTurnEndedForSink(Sink);
 	}
@@ -1847,7 +1847,11 @@ namespace UnrealAiAgentHarnessPriv
 
 	int32 FAgentTurnRunner::GetMaxTransientTransportRetriesPerRound() const
 	{
-		return IsPlanNodeAgentThread() ? FMath::Max(0, UnrealAiWaitTime::PlanNodeTransientHttpMaxRetries) : 0;
+		if (IsPlanNodeAgentThread())
+		{
+			return FMath::Max(0, UnrealAiWaitTime::PlanNodeTransientHttpMaxRetries);
+		}
+		return FMath::Max(0, UnrealAiWaitTime::AgentTransientHttpMaxRetries);
 	}
 
 	int32 FAgentTurnRunner::GetMaxStreamNoFinishRetriesPerRound() const
@@ -2301,8 +2305,8 @@ namespace UnrealAiAgentHarnessPriv
 			&& !UnrealAiAgentToolGate::PassesToolSurfaceFilter(Request, InvokeName, Catalog))
 		{
 			const FString BlockMsg = FString::Printf(
-				TEXT("[Harness][reason=agent_surface_tool_withheld] Blocked: tool \"%s\" is reserved for a Builder sub-turn (Blueprint or Environment/PCG). ")
-				TEXT("Delegate via <unreal_ai_build_blueprint> or <unreal_ai_build_environment> per the system prompt, or use read-only tools on the main agent."),
+				TEXT("[Harness][reason=agent_surface_tool_withheld] Blocked: tool \"%s\" is reserved for a Blueprint Builder sub-turn. ")
+				TEXT("Do not retry this tool on the main agent. Resolve targets with read-only discovery, then delegate via <unreal_ai_build_blueprint>."),
 				*InvokeName);
 			if (Sink.IsValid())
 			{
@@ -2776,7 +2780,7 @@ namespace UnrealAiAgentHarnessPriv
 			BpNudge.Role = TEXT("user");
 			BpNudge.Content = TEXT(
 				"[Harness][reason=multi_tool_failure_round] Multiple tool failures this round. From the orchestrator, delegate with `<unreal_ai_delegate specialist=\"...\">...</unreal_ai_delegate>` "
-				"(see `prompts/chunks/orchestrator/01-delegation-protocol.md`) or use `<unreal_ai_build_blueprint>` / `<unreal_ai_build_environment>` as appropriate. "
+				"(see `prompts/chunks/orchestrator/01-delegation-protocol.md`) or use `<unreal_ai_build_blueprint>` for Blueprint graph work. "
 				"Use only tool_id values from the current tool appendix—never invent names. If still blocked, summarize the exact error text and stop.");
 			Conv->GetMessagesMutable().Add(BpNudge);
 			EmitEnforcementEvent(TEXT("blueprint_mutation_handoff_nudge"), FString::Printf(TEXT("tool_fail_count=%d"), ToolFailCount));
@@ -2828,7 +2832,7 @@ namespace UnrealAiAgentHarnessPriv
 		}
 		{
 			const FString LastRealUser = GetLastRealUserMessage(Conv->GetMessages());
-			const bool bHandoffBuilderTurn = Request.bBlueprintBuilderTurn || Request.bEnvironmentBuilderTurn;
+			const bool bHandoffBuilderTurn = Request.bBlueprintBuilderTurn;
 			const bool bMutationFromText = UserLikelyRequestsMutation(LastRealUser);
 			// Main user text often says "make …"; the automated `<unreal_ai_build_blueprint>` / environment handoff user
 			// line is usually a YAML/spec ("Goal: Add …") that omits those verbs. Still treat non-empty handoff text as
@@ -2863,13 +2867,6 @@ namespace UnrealAiAgentHarnessPriv
 							"Implement the handoff using blueprint_graph_patch, then blueprint_compile or blueprint_verify_graph as needed, "
 							"or return <unreal_ai_blueprint_builder_result> with a concise blocker if you cannot proceed.");
 					}
-					else if (Request.bEnvironmentBuilderTurn)
-					{
-						NudgeBody = TEXT(
-							"[Harness][reason=environment_builder_mutation_followthrough] This Environment Builder sub-turn only used read-only tools. "
-							"Do not repeat identical discovery calls; use mutation tools from your appendix for this handoff, "
-							"or return <unreal_ai_environment_builder_result> with a concise blocker.");
-					}
 					else if (Request.ActiveProductSpecialistId != EUnrealAiProductSpecialistId::None)
 					{
 						NudgeBody = TEXT(
@@ -2881,7 +2878,8 @@ namespace UnrealAiAgentHarnessPriv
 						NudgeBody = TEXT(
 							"[Harness][reason=orchestrator_mutation_followthrough] The user request implies edits, but this orchestrator turn only used read-only tools. "
 							"Do not loop on the same discovery tool. Delegate with `<unreal_ai_delegate specialist=\"<scene|assets|viewport|...>\">...</unreal_ai_delegate>` (see orchestrator delegation protocol), "
-							"or emit `<unreal_ai_build_blueprint>` / `<unreal_ai_build_environment>` for graph/environment builders as appropriate.");
+							"or emit `<unreal_ai_build_blueprint>` for Blueprint graph work. "
+							"Main-agent turns must not call builder-only mutators like `blueprint_graph_patch` or `blueprint_compile`.");
 					}
 					else
 					{
@@ -2938,11 +2936,6 @@ namespace UnrealAiAgentHarnessPriv
 		const bool bBbResultParsed =
 			Request.bBlueprintBuilderTurn && UnrealAiBlueprintBuilderResultTag::TryConsume(OrigAssist, BbResultInner, BbResultVisible);
 
-		FString EnvResultInner;
-		FString EnvResultVisible;
-		const bool bEnvResultParsed =
-			Request.bEnvironmentBuilderTurn && UnrealAiEnvironmentBuilderResultTag::TryConsume(OrigAssist, EnvResultInner, EnvResultVisible);
-
 		FString SpecResultInner;
 		FString SpecResultVisible;
 		const bool bSpecResultParsed = Request.ActiveProductSpecialistId != EUnrealAiProductSpecialistId::None
@@ -2959,36 +2952,23 @@ namespace UnrealAiAgentHarnessPriv
 
 		FString BpInner;
 		FString BpVisible;
-		const bool bBpParsed = !Request.bBlueprintBuilderTurn && !Request.bEnvironmentBuilderTurn
+		const bool bBpParsed = !Request.bBlueprintBuilderTurn
 			&& Request.ActiveProductSpecialistId == EUnrealAiProductSpecialistId::None
 			&& UnrealAiBuildBlueprintTag::TryConsume(OrigAssist, BpInner, BpVisible);
 
-		FString EnvInner;
-		FString EnvVisibleFromTag;
-		const bool bEnvParsed = !Request.bBlueprintBuilderTurn && !Request.bEnvironmentBuilderTurn
-			&& Request.ActiveProductSpecialistId == EUnrealAiProductSpecialistId::None
-			&& UnrealAiBuildEnvironmentTag::TryConsume(OrigAssist, EnvInner, EnvVisibleFromTag);
-
 		const bool bSpecDelegateHandoff = bSpecDelegateParsed && (Request.Mode == EUnrealAiAgentMode::Agent)
-			&& !Request.bBlueprintBuilderTurn && !Request.bEnvironmentBuilderTurn
+			&& !Request.bBlueprintBuilderTurn
 			&& Request.ActiveProductSpecialistId == EUnrealAiProductSpecialistId::None
 			&& !Request.ThreadId.Contains(TEXT("_plan_")) && !SpecDelegateInner.TrimStartAndEnd().IsEmpty();
 
 		const bool bBpHandoff = bBpParsed && (Request.Mode == EUnrealAiAgentMode::Agent) && !Request.bBlueprintBuilderTurn
-			&& !Request.bEnvironmentBuilderTurn && !Request.ThreadId.Contains(TEXT("_plan_")) && !BpInner.TrimStartAndEnd().IsEmpty();
-
-		const bool bEnvHandoff = bEnvParsed && (Request.Mode == EUnrealAiAgentMode::Agent) && !Request.bBlueprintBuilderTurn
-			&& !Request.bEnvironmentBuilderTurn && !Request.ThreadId.Contains(TEXT("_plan_")) && !EnvInner.TrimStartAndEnd().IsEmpty();
+			&& !Request.ThreadId.Contains(TEXT("_plan_")) && !BpInner.TrimStartAndEnd().IsEmpty();
 
 		FUnrealAiConversationMessage Am;
 		Am.Role = TEXT("assistant");
 		if (bBpHandoff)
 		{
 			Am.Content = BpVisible;
-		}
-		else if (bEnvHandoff)
-		{
-			Am.Content = EnvVisibleFromTag;
 		}
 		else if (bSpecDelegateHandoff)
 		{
@@ -3010,21 +2990,12 @@ namespace UnrealAiAgentHarnessPriv
 				Am.Content = TEXT("Blueprint Builder finished (structured result follows for the main agent).");
 			}
 		}
-		else if (bEnvResultParsed)
-		{
-			Am.Content = EnvResultVisible;
-			if (Am.Content.TrimStartAndEnd().IsEmpty())
-			{
-				Am.Content = TEXT("Environment Builder finished (structured result follows for the main agent).");
-			}
-		}
 		else
 		{
 			Am.Content = OrigAssist;
 		}
 		// Models sometimes emit malformed tag junctions (e.g. closing handoff + opening result) that TryConsume skips.
 		UnrealAiBuildBlueprintTag::StripProtocolMarkersForUi(Am.Content);
-		UnrealAiBuildEnvironmentTag::StripProtocolMarkersForUi(Am.Content);
 		UnrealAiDelegateSpecialistTag::StripProtocolMarkersForUi(Am.Content);
 		UnrealAiProductSpecialistResultTag::StripProtocolMarkersForUi(Am.Content);
 		Conv->GetMessagesMutable().Add(Am);
@@ -3057,7 +3028,7 @@ namespace UnrealAiAgentHarnessPriv
 		// Interactive Agent mode retries empty assistant deltas with a harness nudge. Plan DAG node threads
 		// (`*_plan_*`) run in series; burning multiple LLM rounds here blocks the plan executor and looks
 		// like a hang. Finish the node so the parent plan can advance.
-		if (!bBpHandoff && !bEnvHandoff && !bSpecDelegateHandoff && !bSpecResultParsed && !bBbResultParsed && !bEnvResultParsed
+		if (!bBpHandoff && !bSpecDelegateHandoff && !bSpecResultParsed && !bBbResultParsed
 			&& bAgentModeWantsToolExecution
 			&& Am.Content.TrimStartAndEnd().IsEmpty() && LlmRound < EffectiveMaxLlmRounds)
 		{
@@ -3115,9 +3086,33 @@ namespace UnrealAiAgentHarnessPriv
 				EmitEnforcementEvent(TEXT("ask_answer_repair_gave_up"), TEXT("still_incomplete_after_nudge"));
 			}
 		}
-		// Lax policy: do not require tool_calls on every agent round. Text-only wrap-ups after work (or when no tool
-		// applies) are allowed; qualitative review judges task success. Still emit a note when the user prompt looked
-		// action-oriented and this round had no tools, for batch metrics / grep.
+		// Action-intent in Agent mode should default to discovery->mutation, not clarification-only text.
+		if (bAgentModeWantsToolExecution
+			&& bActionIntent
+			&& !bHasExplicitBlocker
+			&& !bBpHandoff
+			&& !bSpecDelegateHandoff
+			&& !bSpecResultParsed
+			&& !bBbResultParsed
+			&& LlmRound < EffectiveMaxLlmRounds
+			&& ActionNoToolNudgeCount < 1
+			&& !Request.ThreadId.Contains(TEXT("_plan_")))
+		{
+			++ActionNoToolNudgeCount;
+			FUnrealAiConversationMessage Nudge;
+			Nudge.Role = TEXT("user");
+			Nudge.Content = TEXT(
+				"[Harness][reason=action_requires_tools] The user asked for concrete changes. Do not ask the user for discoverable paths or IDs. "
+				"First run discovery tools (for example asset/scene search, selection, registry query) to resolve targets, then perform mutation tools in this run. "
+				"Only ask a clarifying question when required data is genuinely unavailable after discovery.");
+			Conv->GetMessagesMutable().Add(Nudge);
+			EmitEnforcementEvent(TEXT("action_no_tool_nudge"), TEXT("injected_discover_then_mutate_guidance"));
+			AssistantBuffer.Reset();
+			DispatchLlm();
+			return;
+		}
+
+		// Fallback metrics/log when an action-intent round still ended text-only.
 		if (bAgentModeWantsToolExecution && bActionIntent && !bHasExplicitBlocker)
 		{
 			EmitEnforcementEvent(
@@ -3129,7 +3124,6 @@ namespace UnrealAiAgentHarnessPriv
 		{
 			Request.ActiveProductSpecialistId = DelegateSpecId;
 			Request.bBlueprintBuilderTurn = false;
-			Request.bEnvironmentBuilderTurn = false;
 			{
 				static constexpr int32 GMaxDelegationBriefChars = 16000;
 				FString Brief = SpecDelegateInner.TrimStartAndEnd();
@@ -3145,7 +3139,7 @@ namespace UnrealAiAgentHarnessPriv
 				Sink->OnSubagentBuilderHandoff(UnrealAiProductSpecialistHandoff::SpecialistDisplayName(DelegateSpecId));
 			}
 			FUnrealAiConversationMessage SubSpec;
-			SubSpec.Role = TEXT("user");
+			SubSpec.Role = TEXT("system");
 			SubSpec.Content = UnrealAiProductSpecialistHandoff::BuildAutomatedSubturnPreamble(DelegateSpecId) + SpecDelegateInner;
 			Conv->GetMessagesMutable().Add(SubSpec);
 			AssistantBuffer.Reset();
@@ -3156,10 +3150,23 @@ namespace UnrealAiAgentHarnessPriv
 		if (bBpHandoff)
 		{
 			EUnrealAiBlueprintBuilderTargetKind ParsedKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
-			UnrealAiBuildBlueprintTag::ParseAndStripHandoffMetadata(BpInner, ParsedKind);
+			bool bTargetKindValid = true;
+			UnrealAiBuildBlueprintTag::ParseAndStripHandoffMetadata(BpInner, ParsedKind, &bTargetKindValid);
+			if (!bTargetKindValid)
+			{
+				FUnrealAiConversationMessage InvalidKind;
+				InvalidKind.Role = TEXT("user");
+				InvalidKind.Content = TEXT(
+					"[Harness][reason=invalid_blueprint_builder_target_kind] `<unreal_ai_build_blueprint>` included an unknown `target_kind`. "
+					"Use one of: script_blueprint, anim_blueprint, material_instance, material_graph, niagara, widget_blueprint.");
+				Conv->GetMessagesMutable().Add(InvalidKind);
+				EmitEnforcementEvent(TEXT("blueprint_builder_invalid_target_kind"), TEXT("prompted_for_valid_target_kind"));
+				AssistantBuffer.Reset();
+				DispatchLlm();
+				return;
+			}
 			Request.BlueprintBuilderTargetKind = ParsedKind;
 			Request.bBlueprintBuilderTurn = true;
-			Request.bEnvironmentBuilderTurn = false;
 			Request.ActiveProductSpecialistId = EUnrealAiProductSpecialistId::None;
 			Request.LastProductSpecialistDelegationBrief.Reset();
 			EmitEnforcementEvent(TEXT("blueprint_builder_chain"), TEXT("chained_subturn_from_build_blueprint_tag"));
@@ -3168,32 +3175,9 @@ namespace UnrealAiAgentHarnessPriv
 				Sink->OnSubagentBuilderHandoff(TEXT("Blueprint Builder"));
 			}
 			FUnrealAiConversationMessage Sub;
-			Sub.Role = TEXT("user");
+			Sub.Role = TEXT("system");
 			Sub.Content = UnrealAiBlueprintBuilderToolSurface::BuildAutomatedSubturnHarnessPreamble(ParsedKind) + BpInner;
 			Conv->GetMessagesMutable().Add(Sub);
-			AssistantBuffer.Reset();
-			DispatchLlm();
-			return;
-		}
-
-		if (bEnvHandoff)
-		{
-			EUnrealAiEnvironmentBuilderTargetKind ParsedEnvKind = EUnrealAiEnvironmentBuilderTargetKind::PcgScene;
-			UnrealAiBuildEnvironmentTag::ParseAndStripHandoffMetadata(EnvInner, ParsedEnvKind);
-			Request.EnvironmentBuilderTargetKind = ParsedEnvKind;
-			Request.bEnvironmentBuilderTurn = true;
-			Request.bBlueprintBuilderTurn = false;
-			Request.ActiveProductSpecialistId = EUnrealAiProductSpecialistId::None;
-			Request.LastProductSpecialistDelegationBrief.Reset();
-			EmitEnforcementEvent(TEXT("environment_builder_chain"), TEXT("chained_subturn_from_build_environment_tag"));
-			if (Sink.IsValid())
-			{
-				Sink->OnSubagentBuilderHandoff(TEXT("Environment Builder"));
-			}
-			FUnrealAiConversationMessage SubEnv;
-			SubEnv.Role = TEXT("user");
-			SubEnv.Content = UnrealAiEnvironmentBuilderToolSurface::BuildAutomatedSubturnHarnessPreamble(ParsedEnvKind) + EnvInner;
-			Conv->GetMessagesMutable().Add(SubEnv);
 			AssistantBuffer.Reset();
 			DispatchLlm();
 			return;
@@ -3206,7 +3190,7 @@ namespace UnrealAiAgentHarnessPriv
 			Request.bInjectProductSpecialistResumeChunk = true;
 			EmitEnforcementEvent(TEXT("product_specialist_result"), TEXT("return_to_orchestrator"));
 			FUnrealAiConversationMessage RetSpec;
-			RetSpec.Role = TEXT("user");
+			RetSpec.Role = TEXT("system");
 			RetSpec.Content = FString::Printf(TEXT("[Product specialist — result for orchestrator]\n%s"), *SpecResultInner);
 			Conv->GetMessagesMutable().Add(RetSpec);
 			AssistantBuffer.Reset();
@@ -3221,28 +3205,11 @@ namespace UnrealAiAgentHarnessPriv
 			Request.bInjectBlueprintBuilderResumeChunk = true;
 			EmitEnforcementEvent(TEXT("blueprint_builder_result"), TEXT("return_to_main_agent"));
 			FUnrealAiConversationMessage Ret;
-			Ret.Role = TEXT("user");
+			Ret.Role = TEXT("system");
 			Ret.Content = FString::Printf(
 				TEXT("[Blueprint Builder — result for main agent]\n%s"),
 				*BbResultInner);
 			Conv->GetMessagesMutable().Add(Ret);
-			AssistantBuffer.Reset();
-			DispatchLlm();
-			return;
-		}
-
-		if (bEnvResultParsed)
-		{
-			Request.bEnvironmentBuilderTurn = false;
-			Request.EnvironmentBuilderTargetKind = EUnrealAiEnvironmentBuilderTargetKind::PcgScene;
-			Request.bInjectEnvironmentBuilderResumeChunk = true;
-			EmitEnforcementEvent(TEXT("environment_builder_result"), TEXT("return_to_main_agent"));
-			FUnrealAiConversationMessage RetEnv;
-			RetEnv.Role = TEXT("user");
-			RetEnv.Content = FString::Printf(
-				TEXT("[Environment Builder — result for main agent]\n%s"),
-				*EnvResultInner);
-			Conv->GetMessagesMutable().Add(RetEnv);
 			AssistantBuffer.Reset();
 			DispatchLlm();
 			return;
@@ -3394,7 +3361,7 @@ void FUnrealAiAgentHarness::RunTurn(const FUnrealAiAgentTurnRequest& Request, TS
 	ToolHost->SetToolSession(Request.ProjectId, Request.ThreadId);
 
 	const bool bPlanWorker = Request.Mode == EUnrealAiAgentMode::Agent && Request.ThreadId.Contains(TEXT("_plan_"));
-	const bool bEligibleEditorFollow = !Request.bBlueprintBuilderTurn && !Request.bEnvironmentBuilderTurn && !bPlanWorker
+	const bool bEligibleEditorFollow = !Request.bBlueprintBuilderTurn && !bPlanWorker
 		&& Request.Mode != EUnrealAiAgentMode::Plan;
 	FUnrealAiEditorModule::SetHarnessEditorFollowEligible(bEligibleEditorFollow);
 

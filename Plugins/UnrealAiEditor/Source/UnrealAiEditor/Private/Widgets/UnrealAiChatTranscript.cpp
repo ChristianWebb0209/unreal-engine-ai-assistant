@@ -275,6 +275,10 @@ void FUnrealAiChatTranscript::Clear()
 	Blocks.Reset();
 	ActiveRunId = FGuid();
 	bHasActiveRun = false;
+	ActiveRunTypeKey.Reset();
+	ActiveRunTypeLabel.Reset();
+	ActivePlanWorkerTypeKey.Reset();
+	ActivePlanWorkerTypeLabel.Reset();
 	bAssistantSegmentOpen = false;
 	bThinkingOpen = false;
 	LastAssistantStreamChunkMonotonicTime = 0.0;
@@ -529,6 +533,41 @@ namespace
 		T.TrimStartInline();
 		return T.StartsWith(TEXT("[Harness]"), ESearchCase::IgnoreCase);
 	}
+
+	static bool TryParseAutomatedSubturnUserText(
+		const FString& Text,
+		FString& OutLabel,
+		FString& OutDetails)
+	{
+		OutLabel.Reset();
+		OutDetails.Reset();
+		FString Trimmed = Text;
+		Trimmed.TrimStartAndEndInline();
+		if (Trimmed.IsEmpty())
+		{
+			return false;
+		}
+
+		const int32 NewlineIdx = Trimmed.Find(TEXT("\n"));
+		const FString FirstLine = (NewlineIdx == INDEX_NONE) ? Trimmed : Trimmed.Left(NewlineIdx);
+		if (!FirstLine.Contains(TEXT("automated sub-turn"), ESearchCase::IgnoreCase))
+		{
+			return false;
+		}
+		if (!FirstLine.StartsWith(TEXT("[")))
+		{
+			return false;
+		}
+
+		OutLabel = FirstLine;
+		OutLabel.TrimStartAndEndInline();
+		if (NewlineIdx != INDEX_NONE)
+		{
+			OutDetails = Trimmed.Mid(NewlineIdx + 1);
+			OutDetails.TrimStartAndEndInline();
+		}
+		return !OutLabel.IsEmpty();
+	}
 }
 
 FGuid FUnrealAiChatTranscript::AddUserMessage(const FString& Text, FGuid DesiredId, const EUnrealAiAgentMode* SentMode)
@@ -553,10 +592,14 @@ FGuid FUnrealAiChatTranscript::AddUserMessage(const FString& Text, FGuid Desired
 	return NewId;
 }
 
-void FUnrealAiChatTranscript::BeginRun(const FGuid& RunId)
+void FUnrealAiChatTranscript::BeginRun(const FGuid& RunId, const FString& RunTypeKey, const FString& RunTypeLabel)
 {
 	ActiveRunId = RunId;
 	ActivePlanWorkerNodeId.Reset();
+	ActiveRunTypeKey = RunTypeKey;
+	ActiveRunTypeLabel = RunTypeLabel;
+	ActivePlanWorkerTypeKey.Reset();
+	ActivePlanWorkerTypeLabel.Reset();
 	bHasActiveRun = true;
 	bAssistantSegmentOpen = false;
 	bThinkingOpen = false;
@@ -568,21 +611,31 @@ void FUnrealAiChatTranscript::ApplyActivePlanWorkerTag(FUnrealAiChatBlock& Block
 	if (!ActivePlanWorkerNodeId.IsEmpty())
 	{
 		Block.PlanWorkerNodeId = ActivePlanWorkerNodeId;
+		Block.AgentDisplayTypeKey = ActivePlanWorkerTypeKey;
+		Block.AgentDisplayLabel = ActivePlanWorkerTypeLabel;
 	}
 }
 
-void FUnrealAiChatTranscript::BeginPlanWorkerSpan(const FString& NodeId, const FText& TitleOrEmpty)
+void FUnrealAiChatTranscript::BeginPlanWorkerSpan(
+	const FString& NodeId,
+	const FText& TitleOrEmpty,
+	const FString& WorkerTypeKey,
+	const FString& WorkerTypeLabel)
 {
 	if (NodeId.IsEmpty() || !bHasActiveRun)
 	{
 		return;
 	}
 	ActivePlanWorkerNodeId = NodeId;
+	ActivePlanWorkerTypeKey = WorkerTypeKey;
+	ActivePlanWorkerTypeLabel = WorkerTypeLabel;
 	FUnrealAiChatBlock B;
 	B.Id = FGuid::NewGuid();
 	B.RunId = ActiveRunId;
 	B.Kind = EUnrealAiChatBlockKind::PlanWorkerLane;
 	B.PlanWorkerNodeId = NodeId;
+	B.AgentDisplayTypeKey = WorkerTypeKey;
+	B.AgentDisplayLabel = WorkerTypeLabel;
 	B.PlanWorkerTitleDisplay = TitleOrEmpty.IsEmpty() ? NodeId : TitleOrEmpty.ToString();
 	B.PlanWorkerLaneStatus = EUnrealAiPlanWorkerLaneStatus::Running;
 	Blocks.Add(MoveTemp(B));
@@ -593,6 +646,8 @@ void FUnrealAiChatTranscript::EndPlanWorkerSpan(const FString& NodeId, bool bSuc
 {
 	(void)NodeId;
 	ActivePlanWorkerNodeId.Reset();
+	ActivePlanWorkerTypeKey.Reset();
+	ActivePlanWorkerTypeLabel.Reset();
 	for (int32 Idx = Blocks.Num() - 1; Idx >= 0; --Idx)
 	{
 		if (Blocks[Idx].Kind == EUnrealAiChatBlockKind::PlanWorkerLane && Blocks[Idx].PlanWorkerNodeId == NodeId)
@@ -868,6 +923,11 @@ void FUnrealAiChatTranscript::SetRunProgress(const FString& Label)
 		if (Existing.Kind == EUnrealAiChatBlockKind::RunProgress && Existing.RunId == ActiveRunId)
 		{
 			Existing.ProgressLabel = Label;
+			if (!ActiveRunTypeKey.IsEmpty())
+			{
+				Existing.AgentDisplayTypeKey = ActiveRunTypeKey;
+				Existing.AgentDisplayLabel = ActiveRunTypeLabel;
+			}
 			OnStructuralChange.Broadcast();
 			return;
 		}
@@ -877,6 +937,8 @@ void FUnrealAiChatTranscript::SetRunProgress(const FString& Label)
 	NewBlock.RunId = ActiveRunId;
 	NewBlock.Kind = EUnrealAiChatBlockKind::RunProgress;
 	NewBlock.ProgressLabel = Label;
+	NewBlock.AgentDisplayTypeKey = ActiveRunTypeKey;
+	NewBlock.AgentDisplayLabel = ActiveRunTypeLabel;
 	Blocks.Add(MoveTemp(NewBlock));
 	OnStructuralChange.Broadcast();
 }
@@ -960,6 +1022,10 @@ void FUnrealAiChatTranscript::EndRun(bool bSuccess, const FString& ErrorMessage)
 		}
 	}
 	bHasActiveRun = false;
+	ActiveRunTypeKey.Reset();
+	ActiveRunTypeLabel.Reset();
+	ActivePlanWorkerTypeKey.Reset();
+	ActivePlanWorkerTypeLabel.Reset();
 	bAssistantSegmentOpen = false;
 	bThinkingOpen = false;
 	if (!bSuccess)
@@ -1039,6 +1105,10 @@ void FUnrealAiChatTranscript::HydrateFromConversationMessages(
 	bThinkingOpen = false;
 	LastAssistantStreamChunkMonotonicTime = 0.0;
 	ActivePlanWorkerNodeId.Reset();
+	ActiveRunTypeKey.Reset();
+	ActiveRunTypeLabel.Reset();
+	ActivePlanWorkerTypeKey.Reset();
+	ActivePlanWorkerTypeLabel.Reset();
 
 	for (const FUnrealAiConversationMessage& M : Messages)
 	{
@@ -1048,6 +1118,18 @@ void FUnrealAiChatTranscript::HydrateFromConversationMessages(
 		}
 		if (M.Role == TEXT("user"))
 		{
+			FString AutomatedLabel;
+			FString AutomatedDetails;
+			if (TryParseAutomatedSubturnUserText(M.Content, AutomatedLabel, AutomatedDetails))
+			{
+				FUnrealAiChatBlock B;
+				B.Id = FGuid::NewGuid();
+				B.Kind = EUnrealAiChatBlockKind::RunProgress;
+				B.ProgressLabel = MoveTemp(AutomatedLabel);
+				B.ProgressDetails = MoveTemp(AutomatedDetails);
+				Blocks.Add(MoveTemp(B));
+				continue;
+			}
 			if (M.bHasUserAgentMode)
 			{
 				AddUserMessage(M.Content, FGuid(), &M.UserAgentMode);

@@ -5,6 +5,7 @@
 #include "Harness/FUnrealAiModelProfileRegistry.h"
 #include "Harness/ILlmTransport.h"
 #include "Harness/UnrealAiAgentTypes.h"
+#include "Harness/UnrealAiVisionMessageContent.h"
 #include "UnrealAiProductSpecialistId.h"
 #include "Misc/Paths.h"
 #include "Misc/UnrealAiRuntimeDefaults.h"
@@ -12,7 +13,6 @@
 #include "Prompt/UnrealAiPromptBuilder.h"
 #include "Tools/UnrealAiAgentToolGate.h"
 #include "Tools/UnrealAiBlueprintBuilderToolSurface.h"
-#include "Tools/UnrealAiEnvironmentBuilderToolSurface.h"
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Tools/UnrealAiToolSurfacePipeline.h"
 #include "UnrealAiEditorSettings.h"
@@ -29,6 +29,10 @@ namespace UnrealAiTurnLlmRequestBuilderPriv
 			for (const FUnrealAiToolCallSpec& T : M.ToolCalls)
 			{
 				N += T.ArgumentsJson.Len() + T.Name.Len();
+			}
+			for (const FString& DataUrl : M.VisionImageDataUrls)
+			{
+				N += DataUrl.Len() / 4;
 			}
 		}
 		return N;
@@ -152,8 +156,6 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	P.bIncludePlanDagChunk = (Request.Mode == EUnrealAiAgentMode::Plan);
 	P.bBlueprintBuilderMode = Request.bBlueprintBuilderTurn;
 	P.BlueprintBuilderTargetKind = Request.BlueprintBuilderTargetKind;
-	P.bEnvironmentBuilderMode = Request.bEnvironmentBuilderTurn;
-	P.EnvironmentBuilderTargetKind = Request.EnvironmentBuilderTargetKind;
 
 	P.ActiveProductSpecialistId = Request.ActiveProductSpecialistId;
 	P.bOrchestratorAgentTurn = Request.IsOrchestratorAgentToolSurface();
@@ -162,11 +164,6 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	Request.bInjectBlueprintBuilderResumeChunk = false;
 	P.bInjectBlueprintBuilderResumeChunk =
 		bResumeChunk && !Request.bBlueprintBuilderTurn && Request.Mode == EUnrealAiAgentMode::Agent;
-
-	const bool bEnvResumeChunk = Request.bInjectEnvironmentBuilderResumeChunk;
-	Request.bInjectEnvironmentBuilderResumeChunk = false;
-	P.bInjectEnvironmentBuilderResumeChunk =
-		bEnvResumeChunk && !Request.bEnvironmentBuilderTurn && Request.Mode == EUnrealAiAgentMode::Agent;
 
 	const bool bSpecResumeChunk = Request.bInjectProductSpecialistResumeChunk;
 	Request.bInjectProductSpecialistResumeChunk = false;
@@ -246,20 +243,6 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 				return false;
 			}
 		}
-		int32 EnvironmentBuilderAppendixBudgetChars = 0;
-		if (Request.bEnvironmentBuilderTurn && Request.Mode == EUnrealAiAgentMode::Agent)
-		{
-			FString EnvBudgetErr;
-			if (!UnrealAiEnvironmentBuilderToolSurface::TryComputeAppendixBudgetFromModelContext(
-					Caps.MaxContextTokens,
-					CharPerTokenApprox,
-					EnvironmentBuilderAppendixBudgetChars,
-					&EnvBudgetErr))
-			{
-				OutError = EnvBudgetErr;
-				return false;
-			}
-		}
 		FString ToolIndexMd;
 		FUnrealAiToolSurfaceTelemetry Tel;
 		const bool bTiered = UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
@@ -272,8 +255,7 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 			true,
 			ToolIndexMd,
 			Tel,
-			BlueprintBuilderAppendixBudgetChars,
-			EnvironmentBuilderAppendixBudgetChars);
+			BlueprintBuilderAppendixBudgetChars);
 		if (!bTiered)
 		{
 			Catalog->BuildCompactToolIndexAppendix(Request.Mode, Caps, PackPtr, ToolSurfaceFilter, ToolIndexMd);
@@ -307,6 +289,23 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 	ApiMsgs.Add(Sys);
 	ApiMsgs.Append(Conv->GetMessages());
 
+	if (Caps.bSupportsImages)
+	{
+		if (const FAgentContextState* St = ContextService->GetState(Request.ProjectId, Request.ThreadId))
+		{
+			TArray<FString> VisionWarnings;
+			UnrealAiVisionMessageContent::ApplyContextImageAttachmentsToApiMessages(
+				ApiMsgs,
+				St->Attachments,
+				Caps.bSupportsImages,
+				VisionWarnings);
+			for (const FString& W : VisionWarnings)
+			{
+				OutContextUserMessages.Add(W);
+			}
+		}
+	}
+
 	const int32 MaxChars = FMath::Max(4096, Caps.MaxContextTokens * CharPerTokenApprox);
 	UnrealAiTurnLlmRequestBuilderPriv::TrimApiMessagesForContextBudget(ApiMsgs, MaxChars);
 
@@ -316,22 +315,23 @@ bool UnrealAiTurnLlmRequestBuilder::Build(
 		ToolsJson = TEXT("[]");
 		OutRequest.HttpTimeoutOverrideSec = UnrealAiWaitTime::PlannerHttpRequestTimeoutSec;
 	}
+	else if (Request.Mode == EUnrealAiAgentMode::Ask)
+	{
+		// Ask mode: catalog `modes.ask` exposes read-only discovery tools only (see 02-operating-modes.md).
+		// Do not wipe ToolsJson — the model must be able to call scene_fuzzy_search, editor_get_selection, etc.
+		if (ToolsJson.TrimStartAndEnd() == TEXT("[]") && Catalog)
+		{
+			Catalog->BuildLlmToolsJsonArrayForMode(Request.Mode, Caps, PackPtr, ToolSurfaceFilter, ToolsJson);
+		}
+	}
 	else
 	{
-		// Wiring / latency checks only: full tool array is often 50k+ chars and dominates upload + server time vs. curl smoke tests.
-		bool bExplicitOmitTools = false;
-		if (UnrealAiRuntimeDefaults::HarnessOmitTools)
+		// Never hard-fail a non-ask turn for an empty surface: recover by widening pack options,
+		// while preserving surface gating so main turns cannot see builder-only mutators.
+		if (Request.Mode != EUnrealAiAgentMode::Ask && ToolsJson.TrimStartAndEnd() == TEXT("[]"))
 		{
-			ToolsJson = TEXT("[]");
-			bExplicitOmitTools = true;
-		}
-		// Guardrail: in normal agent turns we should expose at least one callable tool.
-		if (!bExplicitOmitTools
-			&& Request.Mode != EUnrealAiAgentMode::Ask
-			&& ToolsJson.TrimStartAndEnd() == TEXT("[]"))
-		{
-			OutError = TEXT("Turn builder: empty tool surface in non-ask mode (enable HarnessOmitTools in UnrealAiRuntimeDefaults only for transport smoke tests).");
-			return false;
+			Catalog->BuildLlmToolsJsonArrayForMode(Request.Mode, Caps, nullptr, ToolSurfaceFilter, ToolsJson);
+			// If still empty, continue: downstream harness logic can still answer text-only when appropriate.
 		}
 	}
 

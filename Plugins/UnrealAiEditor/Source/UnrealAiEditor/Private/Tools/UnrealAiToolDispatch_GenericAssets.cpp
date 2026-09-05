@@ -55,7 +55,7 @@ namespace UnrealAiGenericAssets
 		O->SetStringField(
 			TEXT("message"),
 			TEXT("asset_apply_properties: property name(s) look like Text/UMG widget fields, not Material/MaterialInstance properties. ")
-			TEXT("Use a TextRenderActor (or UMG) in the level for visible text; use asset_apply_properties only for material parameters (e.g. BaseColor, Roughness, scalar/vector params)."));
+			TEXT("Place a TextRenderActor or UMG widget in the level manually in the editor; use asset_apply_properties only for material parameters (e.g. BaseColor, Roughness, scalar/vector params). World actor placement is not available via agent tools."));
 		TArray<TSharedPtr<FJsonValue>> Arr;
 		for (const FString& K : BadKeys)
 		{
@@ -64,12 +64,6 @@ namespace UnrealAiGenericAssets
 		O->SetArrayField(TEXT("invalid_keys_for_material"), Arr);
 		O->SetStringField(TEXT("object_path"), Obj->GetPathName());
 		O->SetStringField(TEXT("object_class"), Obj->GetClass()->GetName());
-		TSharedPtr<FJsonObject> SuggestedCall = MakeShared<FJsonObject>();
-		SuggestedCall->SetStringField(TEXT("tool"), TEXT("actor_spawn_from_class"));
-		TSharedPtr<FJsonObject> SuggestedArgs = MakeShared<FJsonObject>();
-		SuggestedArgs->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.TextRenderActor"));
-		SuggestedCall->SetObjectField(TEXT("args"), SuggestedArgs);
-		O->SetObjectField(TEXT("suggested_correct_call"), SuggestedCall);
 		FUnrealAiToolInvocationResult R;
 		R.bOk = false;
 		R.ErrorMessage = UnrealAiToolJson::SerializeObject(O);

@@ -4,7 +4,7 @@
 
 /**
  * Product specialist sub-turn (delegation from the orchestrator).
- * Orthogonal to Blueprint Builder / Environment Builder graph builders.
+ * Orthogonal to Blueprint Builder graph work.
  */
 enum class EUnrealAiProductSpecialistId : uint8
 {

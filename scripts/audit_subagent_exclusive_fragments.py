@@ -2,7 +2,6 @@
 """
 Ensure exclusive agent_surfaces are stored in the correct catalog file:
   - blueprint_builder-only -> tools.blueprint.json (fragment)
-  - environment_builder-only -> tools.environment.json (fragment)
   - main_agent-only -> tools.main.json primary tools[] (not in fragment files)
 
 Primary document: tools.main.json (meta + main roster; same merge rules as C++ loader).
@@ -22,7 +21,6 @@ from unreal_ai_tool_catalog_merge import load_merged_catalog  # noqa: E402
 
 PRIMARY_CATALOG_REL = "tools.main.json"
 EXPECTED_FRAGMENT_PATH_BY_BUNDLE = {
-    "environment_builder": "tools.environment.json",
     "blueprint_builder": "tools.blueprint.json",
 }
 FRAGMENT_EXCLUSIVE_BUNDLES = frozenset(EXPECTED_FRAGMENT_PATH_BY_BUNDLE.keys())
@@ -110,11 +108,9 @@ def main() -> int:
             continue
         surf = norm_surfaces(t.get("agent_surfaces"))
         if surf == ["environment_builder"]:
-            if tid not in bundle_to_ids.get("environment_builder", set()):
-                errors.append(
-                    f"{tid}: agent_surfaces=['environment_builder'] but tool_id not listed in "
-                    f"{EXPECTED_FRAGMENT_PATH_BY_BUNDLE['environment_builder']}."
-                )
+            errors.append(
+                f"{tid}: agent_surfaces=['environment_builder'] is removed; environment building is out of product scope."
+            )
         elif surf == ["blueprint_builder"]:
             if tid not in bundle_to_ids.get("blueprint_builder", set()):
                 errors.append(
@@ -165,8 +161,7 @@ def main() -> int:
 
     print(
         f"audit_subagent_exclusive_fragments: OK ({len(tools_merged)} merged tools; "
-        f"blueprint={len(bundle_to_ids.get('blueprint_builder', ()))}, "
-        f"environment={len(bundle_to_ids.get('environment_builder', ()))}; "
+        f"blueprint={len(bundle_to_ids.get('blueprint_builder', ()))}; "
         f"primary roster={len(primary_tool_ids)})."
     )
     return 0

@@ -140,4 +140,20 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Config, Category = "Blueprint Tools", meta = (DisplayName = "Graph patch: keep successful ops on failure"))
 	bool bBlueprintGraphPatchKeepOpsOnFailure = true;
+
+	/** Enable localhost HTTP bridge for external MCP clients (Cursor, Claude Code). Default off. */
+	UPROPERTY(EditAnywhere, Config, Category = "MCP Bridge", meta = (DisplayName = "Enable MCP Bridge"))
+	bool bMcpBridgeEnabled = false;
+
+	/** TCP port for MCP bridge (127.0.0.1). Default 17777. */
+	UPROPERTY(EditAnywhere, Config, Category = "MCP Bridge", meta = (ClampMin = "1024", ClampMax = "65535"))
+	int32 McpBridgePort = 17777;
+
+	/** Max seconds to wait for a tool invoke on the game thread. */
+	UPROPERTY(EditAnywhere, Config, Category = "MCP Bridge", meta = (ClampMin = "5", ClampMax = "600"))
+	int32 McpBridgeInvokeTimeoutSeconds = 120;
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 };

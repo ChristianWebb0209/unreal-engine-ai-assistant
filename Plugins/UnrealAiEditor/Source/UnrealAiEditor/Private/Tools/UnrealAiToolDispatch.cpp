@@ -17,7 +17,6 @@
 #include "Tools/UnrealAiToolDispatch_EditorMore.h"
 #include "Tools/UnrealAiToolDispatch_BuildPackaging.h"
 #include "Tools/UnrealAiToolDispatch_ExtraFeatures.h"
-#include "Tools/UnrealAiToolDispatch_Environment.h"
 #include "Tools/UnrealAiToolDispatch_BlueprintBuilder.h"
 #include "Tools/UnrealAiToolDispatch_GenericAssets.h"
 #include "Tools/UnrealAiToolDispatch_SettingsProperties.h"
@@ -96,10 +95,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	const FString ThreadId = ResolveThreadId(SessionThreadId);
 
 	FUnrealAiToolInvocationResult SurfaceResult;
-	if (UnrealAiTryDispatchEnvironmentBuilderTool(ToolId, A, SurfaceResult))
-	{
-		return SurfaceResult;
-	}
 	if (UnrealAiTryDispatchBlueprintBuilderSurfaceTool(ToolId, A, SurfaceResult))
 	{
 		return SurfaceResult;
@@ -125,34 +120,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 		return UnrealAiDispatch_EditorGetMode(A);
 	}
 
-	if (ToolId == TEXT("actor_destroy"))
-	{
-		if (bAutoRunDestructive)
-		{
-			// Tool contract uses a "loose confirm" string (DELETE/yes/true/1/etc).
-			// When auto-run is enabled, fill missing/invalid confirm so the agent
-			// doesn't need an extra retry just to set intent.
-			FString Confirm;
-			const bool bHasConfirm = A->TryGetStringField(TEXT("confirm"), Confirm);
-			if (!bHasConfirm || Confirm.IsEmpty())
-			{
-				A->SetStringField(TEXT("confirm"), TEXT("DELETE"));
-			}
-			else
-			{
-				FString C = Confirm;
-				C.TrimStartAndEndInline();
-				C = C.ToLower();
-				const bool bOk = C.Equals(TEXT("delete")) || C.Equals(TEXT("yes")) || C.Equals(TEXT("y")) || C.Equals(TEXT("true"))
-					|| C.Equals(TEXT("confirm")) || C.Equals(TEXT("1"));
-				if (!bOk)
-				{
-					A->SetStringField(TEXT("confirm"), TEXT("DELETE"));
-				}
-			}
-		}
-		return UnrealAiDispatch_ActorDestroy(A);
-	}
 	if (ToolId == TEXT("actor_find_by_label"))
 	{
 		return UnrealAiDispatch_ActorFindByLabel(A);
@@ -161,17 +128,13 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_ActorGetTransform(A);
 	}
-	if (ToolId == TEXT("actor_set_transform"))
-	{
-		return UnrealAiDispatch_ActorSetTransform(A);
-	}
 	if (ToolId == TEXT("actor_get_visibility"))
 	{
 		return UnrealAiDispatch_ActorGetVisibility(A);
 	}
-	if (ToolId == TEXT("actor_set_visibility"))
+	if (ToolId == TEXT("actor_get_material_slots"))
 	{
-		return UnrealAiDispatch_ActorSetVisibility(A);
+		return UnrealAiDispatch_ActorGetMaterialSlots(A);
 	}
 	if (ToolId == TEXT("entity_get_property"))
 	{
@@ -181,19 +144,6 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_EntitySetProperty(A);
 	}
-	if (ToolId == TEXT("actor_blueprint_toggle_visibility"))
-	{
-		return UnrealAiDispatch_ActorBlueprintToggleVisibility(A);
-	}
-	if (ToolId == TEXT("actor_attach_to"))
-	{
-		return UnrealAiDispatch_ActorAttachTo(A);
-	}
-	if (ToolId == TEXT("actor_spawn_from_class"))
-	{
-		return UnrealAiDispatch_ActorSpawnFromClass(A);
-	}
-
 	if (ToolId == TEXT("setting_query"))
 	{
 		return UnrealAiDispatch_SettingsGet(A);
@@ -276,6 +226,10 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	{
 		return UnrealAiDispatch_ViewportGetViewMode(A);
 	}
+	if (ToolId == TEXT("viewport_list_visible_actors"))
+	{
+		return UnrealAiDispatch_ViewportListVisibleActors(A);
+	}
 
 	if (ToolId == TEXT("project_file_read_text"))
 	{
@@ -345,6 +299,22 @@ FUnrealAiToolInvocationResult UnrealAiDispatchTool(
 	if (ToolId == TEXT("material_get_usage_summary"))
 	{
 		return UnrealAiDispatch_MaterialGetUsageSummary(A);
+	}
+	if (ToolId == TEXT("material_instance_set_parameter"))
+	{
+		FString ValueKind;
+		A->TryGetStringField(TEXT("value_kind"), ValueKind);
+		ValueKind.TrimStartAndEndInline();
+		ValueKind.ToLowerInline();
+		if (ValueKind == TEXT("scalar"))
+		{
+			return UnrealAiDispatch_MaterialInstanceSetScalarParameter(A);
+		}
+		if (ValueKind == TEXT("vector"))
+		{
+			return UnrealAiDispatch_MaterialInstanceSetVectorParameter(A);
+		}
+		return UnrealAiToolJson::Error(TEXT("material_instance_set_parameter requires value_kind: scalar or vector."));
 	}
 	if (ToolId == TEXT("material_instance_set_scalar_parameter"))
 	{

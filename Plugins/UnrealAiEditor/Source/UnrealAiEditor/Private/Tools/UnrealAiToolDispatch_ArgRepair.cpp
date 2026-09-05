@@ -1230,4 +1230,124 @@ namespace UnrealAiToolDispatchArgRepair
 	{
 		UnrealAiGraphPatchRepair::RepairBlueprintGraphPatchToolArgsImpl(Args, Audit, true);
 	}
+
+	static TArray<TSharedPtr<FJsonValue>> LinearColorArrayFromComponents(
+		const double R,
+		const double G,
+		const double B,
+		const double A)
+	{
+		TArray<TSharedPtr<FJsonValue>> Arr;
+		Arr.Add(MakeShared<FJsonValueNumber>(R));
+		Arr.Add(MakeShared<FJsonValueNumber>(G));
+		Arr.Add(MakeShared<FJsonValueNumber>(B));
+		if (A != 1.0)
+		{
+			Arr.Add(MakeShared<FJsonValueNumber>(A));
+		}
+		return Arr;
+	}
+
+	void RepairMaterialInstanceSetParameterArgs(
+		const TSharedPtr<FJsonObject>& Args,
+		const TSharedPtr<FJsonObject>& Audit)
+	{
+		if (!Args.IsValid())
+		{
+			return;
+		}
+
+		FString ParamName;
+		if (!Args->TryGetStringField(TEXT("parameter_name"), ParamName) || ParamName.IsEmpty())
+		{
+			FString Alias;
+			if (Args->TryGetStringField(TEXT("param"), Alias) && !Alias.IsEmpty())
+			{
+				Args->SetStringField(TEXT("parameter_name"), Alias);
+			}
+		}
+
+		auto PromoteVectorColor = [&](const TArray<TSharedPtr<FJsonValue>>& Components, const TCHAR* Reason)
+		{
+			Args->SetStringField(TEXT("value_kind"), TEXT("vector"));
+			Args->SetArrayField(TEXT("linear_color"), Components);
+			Args->RemoveField(TEXT("value"));
+			if (Audit.IsValid() && Reason)
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Existing = nullptr;
+				TArray<TSharedPtr<FJsonValue>> Repairs;
+				if (Audit->TryGetArrayField(TEXT("material_param_repairs"), Existing) && Existing)
+				{
+					Repairs = *Existing;
+				}
+				TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+				Row->SetStringField(TEXT("reason"), Reason);
+				Repairs.Add(MakeShareable(new FJsonValueObject(Row.ToSharedRef())));
+				Audit->SetArrayField(TEXT("material_param_repairs"), Repairs);
+			}
+		};
+
+		const TSharedPtr<FJsonObject>* ValueObj = nullptr;
+		if (Args->TryGetObjectField(TEXT("value"), ValueObj) && ValueObj && (*ValueObj).IsValid())
+		{
+			double R = 0.0, G = 0.0, B = 0.0, A = 1.0;
+			const bool bHasR = (*ValueObj)->TryGetNumberField(TEXT("r"), R);
+			const bool bHasG = (*ValueObj)->TryGetNumberField(TEXT("g"), G);
+			const bool bHasB = (*ValueObj)->TryGetNumberField(TEXT("b"), B);
+			(*ValueObj)->TryGetNumberField(TEXT("a"), A);
+			if (bHasR || bHasG || bHasB)
+			{
+				PromoteVectorColor(
+					LinearColorArrayFromComponents(R, G, B, A),
+					TEXT("value object {r,g,b,a} -> value_kind vector + linear_color"));
+				return;
+			}
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* ValueArr = nullptr;
+		if (Args->TryGetArrayField(TEXT("value"), ValueArr) && ValueArr && ValueArr->Num() >= 3)
+		{
+			double R = 0.0, G = 0.0, B = 0.0, A = 1.0;
+			(*ValueArr)[0]->TryGetNumber(R);
+			(*ValueArr)[1]->TryGetNumber(G);
+			(*ValueArr)[2]->TryGetNumber(B);
+			if (ValueArr->Num() >= 4)
+			{
+				(*ValueArr)[3]->TryGetNumber(A);
+			}
+			PromoteVectorColor(
+				LinearColorArrayFromComponents(R, G, B, A),
+				TEXT("value RGB array -> value_kind vector + linear_color"));
+			return;
+		}
+
+		FString ValueKind;
+		Args->TryGetStringField(TEXT("value_kind"), ValueKind);
+		ValueKind = ValueKind.ToLower();
+		if (ValueKind == TEXT("scalar"))
+		{
+			const TArray<TSharedPtr<FJsonValue>>* LinearArr = nullptr;
+			if (Args->TryGetArrayField(TEXT("linear_color"), LinearArr) && LinearArr && LinearArr->Num() >= 3)
+			{
+				Args->SetStringField(TEXT("value_kind"), TEXT("vector"));
+				Args->RemoveField(TEXT("value"));
+			}
+		}
+		else if (ValueKind.IsEmpty())
+		{
+			const TArray<TSharedPtr<FJsonValue>>* LinearArr = nullptr;
+			if (Args->TryGetArrayField(TEXT("linear_color"), LinearArr) && LinearArr && LinearArr->Num() >= 3)
+			{
+				Args->SetStringField(TEXT("value_kind"), TEXT("vector"));
+			}
+			else
+			{
+				double ScalarVal = 0.0;
+				if (Args->TryGetNumberField(TEXT("value"), ScalarVal))
+				{
+					Args->SetStringField(TEXT("value_kind"), TEXT("scalar"));
+				}
+			}
+		}
+	}
 } // namespace UnrealAiToolDispatchArgRepair

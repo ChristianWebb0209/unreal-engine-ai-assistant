@@ -1179,6 +1179,7 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 	}
 	else if (Result.CanonicalToolId == TEXT("material_instance_set_parameter"))
 	{
+		UnrealAiToolDispatchArgRepair::RepairMaterialInstanceSetParameterArgs(Result.ResolvedArguments, Result.Audit);
 		CanonicalizeAliasKeys(Result.ResolvedArguments, Result.Audit, TEXT("material_path"), {TEXT("path"), TEXT("object_path")});
 		// Global CanonicalizeToolArguments maps path -> object_path; composite schema uses material_path only (additionalProperties: false).
 		Result.ResolvedArguments->RemoveField(TEXT("path"));
@@ -1210,13 +1211,17 @@ FUnrealAiResolvedToolInvocation FUnrealAiToolResolver::Resolve(const FString& To
 		else
 		{
 			TSharedPtr<FJsonObject> Suggested = MakeShared<FJsonObject>();
-			Suggested->SetStringField(TEXT("value_kind"), TEXT("scalar"));
-			Suggested->SetStringField(TEXT("material_path"), TEXT("<required>"));
-			Suggested->SetStringField(TEXT("parameter_name"), TEXT("<required>"));
-			Suggested->SetNumberField(TEXT("value"), 0.0);
+			Suggested->SetStringField(TEXT("value_kind"), TEXT("vector"));
+			Suggested->SetStringField(TEXT("material_path"), TEXT("<MaterialInstance object path>"));
+			Suggested->SetStringField(TEXT("parameter_name"), TEXT("Color"));
+			TArray<TSharedPtr<FJsonValue>> Blue;
+			Blue.Add(MakeShared<FJsonValueNumber>(0.0));
+			Blue.Add(MakeShared<FJsonValueNumber>(0.0));
+			Blue.Add(MakeShared<FJsonValueNumber>(1.0));
+			Suggested->SetArrayField(TEXT("linear_color"), Blue);
 			Result.FailureResult = BuildResolverError(
 				Result.Audit,
-				TEXT("material_instance_set_parameter requires value_kind: scalar or vector."),
+				TEXT("material_instance_set_parameter requires value_kind: scalar or vector. For colors use value_kind vector with linear_color [r,g,b] or [r,g,b,a] — not value:{r,g,b,a} or a scalar value_kind."),
 				TEXT("material_instance_set_parameter"),
 				Suggested);
 			Result.Audit->SetNumberField(TEXT("latency_ms"), (FPlatformTime::Seconds() - ResolveStartSeconds) * 1000.0);

@@ -43,7 +43,7 @@ namespace UnrealAiRuntimeDefaults
 		TEXT("asset_create,asset_registry_query,blueprint_compile,blueprint_verify_graph,blueprint_set_component_default,blueprint_graph_patch,blueprint_graph_list_pins,"
 			 "blueprint_graph_introspect,blueprint_get_graph_summary,blueprint_format_graph,"
 			 "audio_component_preview,project_file_read_text,project_file_write_text,project_file_move,"
-			 "cpp_project_compile,actor_spawn_from_class,console_command");
+			 "cpp_project_compile,console_command");
 	inline constexpr bool ToolSurfaceUseDispatch = true; // false = native full schema per tool in tools[]
 	inline constexpr bool HarnessOmitTools = false;
 

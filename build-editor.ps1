@@ -122,6 +122,58 @@ if (-not (Test-Path $BuildBat)) {
     Write-Error "Unreal Build.bat not found: $BuildBat`nSet UE_ENGINE_ROOT or pass -EngineRoot."
 }
 
+function Get-NetFxSdkRoot {
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:NETFXSDKDir)) {
+        $candidates += $env:NETFXSDKDir
+    }
+
+    $regBase = 'HKLM:\SOFTWARE\Microsoft\Microsoft SDKs\NETFXSDK'
+    if (Test-Path $regBase) {
+        $versions = Get-ChildItem -Path $regBase -ErrorAction SilentlyContinue | Sort-Object -Property PSChildName -Descending
+        foreach ($v in $versions) {
+            try {
+                $installFolder = (Get-ItemProperty -Path $v.PSPath -Name InstallationFolder -ErrorAction Stop).InstallationFolder
+                if (-not [string]::IsNullOrWhiteSpace($installFolder)) {
+                    $candidates += $installFolder
+                }
+            } catch {
+            }
+        }
+    }
+
+    $defaultRoot = 'C:\Program Files (x86)\Windows Kits\NETFXSDK'
+    if (Test-Path $defaultRoot) {
+        $defaultVersions = Get-ChildItem -Path $defaultRoot -Directory -ErrorAction SilentlyContinue | Sort-Object -Property Name -Descending
+        foreach ($dv in $defaultVersions) {
+            $candidates += $dv.FullName
+        }
+    }
+
+    foreach ($candidate in $candidates) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path $candidate)) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+$NetFxSdkRoot = Get-NetFxSdkRoot
+if ([string]::IsNullOrWhiteSpace($NetFxSdkRoot)) {
+    Write-Error @"
+Missing .NET Framework SDK (NetFxSDK).
+
+UnrealBuildTool requires NetFxSDK 4.6+ to instantiate SwarmInterface/UnrealEd module dependencies.
+
+Fix:
+  - Open Visual Studio Installer -> Modify Build Tools
+  - Install:
+      Individual components -> '.NET Framework 4.8 SDK'
+      (or any .NET Framework SDK 4.6+)
+  - Then rerun: .\build-editor.ps1
+"@
+}
+
 if ($GenerateProjectFiles) {
     Write-Host "Generating Visual Studio project files..." -ForegroundColor Cyan
     & $BuildBat -projectfiles "-project=$UProject" -game -rocket -progress

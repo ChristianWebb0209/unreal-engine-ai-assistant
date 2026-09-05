@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "HAL/PlatformProcess.h"
 #include "IContentBrowserSingleton.h"
+#include "LevelEditor.h"
 #include "Modules/ModuleManager.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "UObject/UObjectGlobals.h"
@@ -71,6 +72,25 @@ void UnrealAiEditorNavigation::OpenAssetEditorPreferDocked(UObject* Asset)
 	{
 		return;
 	}
+
+	// Avoid opening workflow-centric editors when the level editor tab manager is not valid.
+	// In that state, OpenEditorForAsset can assert in TabManager/SharedPointer.
+	if (!FModuleManager::Get().IsModuleLoaded(TEXT("LevelEditor")))
+	{
+		TArray<UObject*> ToSync;
+		ToSync.Add(Asset);
+		GEditor->SyncBrowserToObjects(ToSync);
+		return;
+	}
+	FLevelEditorModule& LevelEditor = FModuleManager::LoadModuleChecked<FLevelEditorModule>(TEXT("LevelEditor"));
+	if (!LevelEditor.GetLevelEditorTabManager().IsValid())
+	{
+		TArray<UObject*> ToSync;
+		ToSync.Add(Asset);
+		GEditor->SyncBrowserToObjects(ToSync);
+		return;
+	}
+
 	UAssetEditorSubsystem* Sub = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
 	if (!Sub)
 	{
@@ -112,7 +132,7 @@ bool UnrealAiEditorNavigation::NavigateToAssetObjectPath(const FString& ObjectPa
 		ToSync.Add(Obj);
 		GEditor->SyncBrowserToObjects(ToSync);
 	}
-	Sub->OpenEditorForAsset(Obj);
+	OpenAssetEditorPreferDocked(Obj);
 	return true;
 }
 

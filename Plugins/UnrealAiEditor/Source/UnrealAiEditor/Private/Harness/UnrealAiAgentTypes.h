@@ -4,7 +4,6 @@
 #include "Context/AgentContextTypes.h"
 #include "Misc/UnrealAiWaitTimePolicy.h"
 #include "UnrealAiBlueprintBuilderTargetKind.h"
-#include "UnrealAiEnvironmentBuilderTargetKind.h"
 #include "UnrealAiProductSpecialistId.h"
 
 /** Stable run identifiers for observability (parent/child workers). */
@@ -62,6 +61,8 @@ struct FUnrealAiConversationMessage
 	 */
 	bool bHasUserAgentMode = false;
 	EUnrealAiAgentMode UserAgentMode = EUnrealAiAgentMode::Agent;
+	/** HTTP API only (not persisted): OpenAI-style image_url data URLs for multimodal user turns. */
+	TArray<FString> VisionImageDataUrls;
 };
 
 enum class EUnrealAiLlmStreamEventType : uint8
@@ -170,8 +171,8 @@ struct FUnrealAiAgentTurnRequest
 	EUnrealAiBlueprintBuilderTargetKind BlueprintBuilderTargetKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
 
 	/**
-	 * When true (default) on Agent turns that are NOT a Builder sub-turn, catalog-gated tools
-	 * (Blueprint graph mutators, Environment PCG/landscape/foliage mutators) are omitted from the tiered tool index — use the matching handoff tag instead.
+	 * When true (default) on Agent turns that are NOT a Builder sub-turn, catalog-gated Blueprint graph mutators
+	 * are omitted from the tiered tool index — use `<unreal_ai_build_blueprint>` instead.
 	 */
 	bool bOmitMainAgentBlueprintMutationTools = true;
 
@@ -180,17 +181,6 @@ struct FUnrealAiAgentTurnRequest
 	 * Cleared when UnrealAiTurnLlmRequestBuilder::Build consumes it.
 	 */
 	bool bInjectBlueprintBuilderResumeChunk = false;
-
-	/**
-	 * When true, this turn uses Environment / PCG Builder prompts and the environment-scoped tool surface
-	 * (`agent_surfaces` includes environment_builder). Chained after `<unreal_ai_build_environment>` from the main agent.
-	 */
-	bool bEnvironmentBuilderTurn = false;
-
-	EUnrealAiEnvironmentBuilderTargetKind EnvironmentBuilderTargetKind = EUnrealAiEnvironmentBuilderTargetKind::PcgScene;
-
-	/** One-shot resume chunk after `<unreal_ai_environment_builder_result>` (`environment-builder/08-resume-on-main-agent.md`). */
-	bool bInjectEnvironmentBuilderResumeChunk = false;
 
 	/**
 	 * Product specialist sub-turn (e.g. Scene) after `<unreal_ai_delegate specialist="...">` from the orchestrator.
@@ -213,7 +203,7 @@ struct FUnrealAiAgentTurnRequest
 	 */
 	bool IsOrchestratorAgentToolSurface() const
 	{
-		return Mode == EUnrealAiAgentMode::Agent && !bBlueprintBuilderTurn && !bEnvironmentBuilderTurn
+		return Mode == EUnrealAiAgentMode::Agent && !bBlueprintBuilderTurn
 			&& ActiveProductSpecialistId == EUnrealAiProductSpecialistId::None && !ThreadId.Contains(TEXT("_plan_"));
 	}
 };

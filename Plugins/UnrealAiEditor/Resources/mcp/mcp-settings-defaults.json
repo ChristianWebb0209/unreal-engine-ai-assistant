@@ -1,0 +1,9 @@
+{
+  "defaults": {
+    "enabled": false,
+    "port": 17777,
+    "bind_address": "127.0.0.1",
+    "token_relative_path": "mcp/bridge.token",
+    "invoke_timeout_seconds": 120
+  }
+}

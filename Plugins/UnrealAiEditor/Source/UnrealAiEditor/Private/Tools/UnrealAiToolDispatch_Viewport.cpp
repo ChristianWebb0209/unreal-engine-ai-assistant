@@ -1,6 +1,7 @@
 #include "Tools/UnrealAiToolDispatch_Viewport.h"
 
 #include "UnrealAiEditorModule.h"
+#include "Tools/UnrealAiActorEditorPolicy.h"
 #include "Tools/UnrealAiToolActorLookup.h"
 #include "Tools/UnrealAiToolJson.h"
 #include "Tools/UnrealAiToolViewportHelpers.h"
@@ -10,6 +11,7 @@
 #include "EditorViewportClient.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
@@ -19,6 +21,8 @@
 #include "HttpModule.h"
 #include "HttpManager.h"
 #include "HAL/PlatformProcess.h"
+#include "ConvexVolume.h"
+#include "SceneView.h"
 
 static FEditorViewportClient* GetVc()
 {
@@ -80,6 +84,29 @@ namespace UnrealAiViewportFrameInternal
 		{
 			Bounds += Piece;
 		}
+	}
+}
+
+namespace UnrealAiViewportVisibleInternal
+{
+	static bool BuildActiveViewportFrustum(FEditorViewportClient* VC, FConvexVolume& OutFrustum)
+	{
+		if (!VC || !VC->Viewport)
+		{
+			return false;
+		}
+		FSceneViewFamilyContext ViewFamily(FSceneViewFamily::ConstructionValues(
+			VC->Viewport,
+			VC->GetScene(),
+			VC->EngineShowFlags)
+			.SetRealtimeUpdate(VC->IsRealtime()));
+		FSceneView* SceneView = VC->CalcSceneView(&ViewFamily);
+		if (!SceneView)
+		{
+			return false;
+		}
+		GetViewFrustumBounds(OutFrustum, SceneView->ViewMatrices.GetViewProjectionMatrix(), true);
+		return true;
 	}
 }
 
@@ -484,5 +511,133 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportSetViewMode(const TShared
 	O->SetBoolField(TEXT("ok"), true);
 	O->SetStringField(TEXT("view_mode"), Mode);
 	O->SetStringField(TEXT("setting_key"), TEXT("view_mode"));
+	return UnrealAiToolJson::Ok(O);
+}
+
+FUnrealAiToolInvocationResult UnrealAiDispatch_ViewportListVisibleActors(const TSharedPtr<FJsonObject>& Args)
+{
+	FEditorViewportClient* VC = GetVc();
+	if (!VC)
+	{
+		return UnrealAiToolJson::Error(TEXT("viewport_list_visible_actors: no active editor viewport."));
+	}
+	if (!GEditor)
+	{
+		return UnrealAiToolJson::Error(TEXT("viewport_list_visible_actors: Unreal Editor API unavailable (GEditor is null)."));
+	}
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	if (!World)
+	{
+		return UnrealAiToolJson::Error(TEXT("viewport_list_visible_actors: no editor world loaded; open a level in the editor."));
+	}
+
+	int32 MaxResults = 40;
+	double MR = 0.0;
+	if (Args.IsValid() && Args->TryGetNumberField(TEXT("max_results"), MR))
+	{
+		MaxResults = FMath::Clamp(static_cast<int32>(MR), 1, 200);
+	}
+	bool bIncludeHidden = false;
+	if (Args.IsValid())
+	{
+		Args->TryGetBoolField(TEXT("include_hidden"), bIncludeHidden);
+	}
+	bool bIncludeEngineInternals = false;
+	if (Args.IsValid())
+	{
+		Args->TryGetBoolField(TEXT("include_engine_internals"), bIncludeEngineInternals);
+	}
+
+	FConvexVolume ViewFrustum;
+	if (!UnrealAiViewportVisibleInternal::BuildActiveViewportFrustum(VC, ViewFrustum))
+	{
+		return UnrealAiToolJson::Error(TEXT("viewport_list_visible_actors: failed to compute viewport frustum."));
+	}
+
+	const FVector CameraLoc = VC->GetViewLocation();
+	FIntPoint ViewportSize = GEditor->GetActiveViewport() ? GEditor->GetActiveViewport()->GetSizeXY() : FIntPoint::ZeroValue;
+
+	struct FHit
+	{
+		float DistSq = 0.f;
+		FString ActorPath;
+		FString Label;
+		FString ClassName;
+	};
+	TArray<FHit> Hits;
+	Hits.Reserve(128);
+
+	int32 ActorsVisited = 0;
+	int32 ActorsExcludedByPolicy = 0;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		++ActorsVisited;
+		AActor* A = *It;
+		if (!A)
+		{
+			continue;
+		}
+		if (UnrealAiActorEditorPolicy::ShouldExcludeFromSceneFuzzySearch(A, bIncludeEngineInternals, {}))
+		{
+			++ActorsExcludedByPolicy;
+			continue;
+		}
+		if (!bIncludeHidden && A->IsHiddenEd())
+		{
+			continue;
+		}
+
+		FBox Bounds = A->GetComponentsBoundingBox(true);
+		if (!Bounds.IsValid || Bounds.GetExtent().IsNearlyZero(1.f))
+		{
+			Bounds = FBox::BuildAABB(A->GetActorLocation(), FVector(UnrealAiViewportFrameInternal::MinFallbackExtentUU * 0.5f));
+		}
+		if (!ViewFrustum.IntersectBox(Bounds.GetCenter(), Bounds.GetExtent()))
+		{
+			continue;
+		}
+
+		FHit H;
+		H.DistSq = FVector::DistSquared(CameraLoc, Bounds.GetCenter());
+		H.ActorPath = A->GetPathName();
+		H.Label = A->GetActorLabel();
+		H.ClassName = A->GetClass()->GetName();
+		Hits.Add(MoveTemp(H));
+	}
+
+	Hits.Sort([](const FHit& A, const FHit& B) { return A.DistSq < B.DistSq; });
+	if (Hits.Num() > MaxResults)
+	{
+		Hits.SetNum(MaxResults);
+	}
+
+	TArray<TSharedPtr<FJsonValue>> Arr;
+	for (const FHit& H : Hits)
+	{
+		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+		Row->SetStringField(TEXT("actor_path"), H.ActorPath);
+		Row->SetStringField(TEXT("label"), H.Label);
+		Row->SetStringField(TEXT("class"), H.ClassName);
+		Row->SetNumberField(TEXT("distance_uu"), FMath::Sqrt(H.DistSq));
+		Arr.Add(MakeShareable(new FJsonValueObject(Row.ToSharedRef())));
+	}
+
+	TSharedPtr<FJsonObject> CamLocO = MakeShared<FJsonObject>();
+	CamLocO->SetNumberField(TEXT("x"), CameraLoc.X);
+	CamLocO->SetNumberField(TEXT("y"), CameraLoc.Y);
+	CamLocO->SetNumberField(TEXT("z"), CameraLoc.Z);
+
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetBoolField(TEXT("ok"), true);
+	O->SetStringField(TEXT("tool"), TEXT("viewport_list_visible_actors"));
+	O->SetStringField(TEXT("listing_mode"), TEXT("viewport_frustum_bounds"));
+	O->SetObjectField(TEXT("camera_location"), CamLocO);
+	O->SetNumberField(TEXT("viewport_width"), static_cast<double>(ViewportSize.X));
+	O->SetNumberField(TEXT("viewport_height"), static_cast<double>(ViewportSize.Y));
+	O->SetNumberField(TEXT("actors_visited"), static_cast<double>(ActorsVisited));
+	O->SetNumberField(TEXT("actors_excluded_by_policy"), static_cast<double>(ActorsExcludedByPolicy));
+	O->SetBoolField(TEXT("engine_internals_included"), bIncludeEngineInternals);
+	O->SetArrayField(TEXT("matches"), Arr);
+	O->SetNumberField(TEXT("count"), static_cast<double>(Arr.Num()));
 	return UnrealAiToolJson::Ok(O);
 }

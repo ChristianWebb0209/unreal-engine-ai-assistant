@@ -74,6 +74,7 @@
 #include "Serialization/JsonWriter.h"
 
 #include "Harness/IToolExecutionHost.h"
+#include "Bridge/UnrealAiMcpBridge.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
@@ -177,6 +178,9 @@ void FUnrealAiEditorModule::StartupModule()
 			BackendRegistry->GetPersistence(),
 			UnrealAiProjectId::GetCurrentProjectId());
 	}
+
+	McpBridge = MakeUnique<FUnrealAiMcpBridge>();
+	RefreshMcpBridge();
 
 	GUnrealAiCatalogMatrixConsole = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("UnrealAi.RunCatalogMatrix"),
@@ -1749,6 +1753,12 @@ void FUnrealAiEditorModule::ShutdownModule()
 
 	FUnrealAiEditorStyle::Shutdown();
 
+	if (McpBridge.IsValid())
+	{
+		McpBridge->Stop();
+		McpBridge.Reset();
+	}
+
 	BackendRegistry.Reset();
 
 	FUnrealAiEditorModule::ClearHarnessEditorFollowEligibility();
@@ -1770,6 +1780,26 @@ void FUnrealAiEditorModule::OpenUnrealAiPluginSettings()
 {
 	ISettingsModule& SettingsModule = FModuleManager::LoadModuleChecked<ISettingsModule>("Settings");
 	SettingsModule.ShowViewer(FName(TEXT("Project")), FName(TEXT("Plugins")), FName(TEXT("UnrealAiEditor")));
+}
+
+void FUnrealAiEditorModule::RefreshMcpBridge()
+{
+	if (!McpBridge.IsValid())
+	{
+		return;
+	}
+	const UUnrealAiEditorSettings* Settings = GetDefault<UUnrealAiEditorSettings>();
+	if (!Settings || !Settings->bMcpBridgeEnabled)
+	{
+		McpBridge->Stop();
+		return;
+	}
+	if (!BackendRegistry.IsValid())
+	{
+		McpBridge->Stop();
+		return;
+	}
+	McpBridge->Start(BackendRegistry.Get(), Settings);
 }
 
 void FUnrealAiEditorModule::SetActiveChatSession(TSharedPtr<FUnrealAiChatUiSession> Session)
@@ -2351,20 +2381,6 @@ static TSharedPtr<SDockTab> FindParentDockTabForWidget(const TSharedRef<const SW
 	return nullptr;
 }
 
-static TSharedPtr<SDockingTabStack> FindParentDockingTabStackForWidget(const TSharedRef<const SWidget>& Widget)
-{
-	TSharedPtr<SWidget> Current = Widget->GetParentWidget();
-	while (Current.IsValid())
-	{
-		if (Current->GetType() == FName(TEXT("SDockingTabStack")))
-		{
-			return StaticCastSharedPtr<SDockingTabStack>(Current);
-		}
-		Current = Current->GetParentWidget();
-	}
-	return nullptr;
-}
-
 static TSharedRef<SDockTab> SpawnAgentChatDockTab(
 	const TSharedPtr<FUnrealAiBackendRegistry>& Reg,
 	const FSpawnTabArgs& Args,
@@ -2377,6 +2393,7 @@ static TSharedRef<SDockTab> SpawnAgentChatDockTab(
 	TSharedPtr<SUnrealAiEditorChatTab> ChatTab;
 	TSharedRef<SDockTab> Tab = SNew(SDockTab)
 		.TabRole(ETabRole::NomadTab)
+		.CanEverClose(true)
 		.Label(LOCTEXT("ChatTabLabel", "Agent Chat"))
 		.OnExtendContextMenu(SDockTab::FExtendContextMenu::CreateLambda(
 			[Box](FMenuBuilder& MenuBuilder)
@@ -2480,13 +2497,6 @@ TSharedPtr<SUnrealAiEditorChatTab> FUnrealAiEditorModule::OpenNewAgentChatTabBes
 		return nullptr;
 	}
 	TSharedPtr<SDockTab> ParentDock = FindParentDockTabForWidget(FromWidget.ToSharedRef());
-	TSharedPtr<SDockingTabStack> ParentStack = ParentDock.IsValid() ? ParentDock->GetParentDockTabStack() : nullptr;
-	if (!ParentStack.IsValid())
-	{
-		// Some Slate hierarchies (during rebuild / startup) may not surface a working GetParentDockTabStack(),
-		// but the docking stack still exists in the parent chain.
-		ParentStack = FindParentDockingTabStackForWidget(FromWidget.ToSharedRef());
-	}
 	TSharedPtr<SWindow> OwnerWindow;
 	if (ParentDock.IsValid())
 	{
@@ -2500,34 +2510,12 @@ TSharedPtr<SUnrealAiEditorChatTab> FUnrealAiEditorModule::OpenNewAgentChatTabBes
 	TSharedPtr<SUnrealAiEditorChatTab> NewChatTab;
 	TSharedRef<SDockTab> NewTab = SpawnAgentChatDockTab(Reg, Args, &NewChatTab);
 	NewTab->SetTabIcon(FUnrealAiEditorStyle::GetAgentChatTabIconBrush());
-	// Note: SDockTab::SetLayoutIdentifier is protected (friend FTabManager only). Extra Agent Chat tabs
-	// are spawned manually so FTabManager::SpawnTab is not used (nomad spawner tracks a single SpawnedTabPtr).
-
-	if (ParentStack.IsValid())
-	{
-		int32 InsertIdx = INDEX_NONE;
-		const TSlotlessChildren<SDockTab>& Tabs = ParentStack->GetTabs();
-		if (ParentDock.IsValid())
-		{
-			const FTabId CurrentId = ParentDock->GetLayoutIdentifier();
-			for (int32 i = 0; i < Tabs.Num(); ++i)
-			{
-				if (Tabs[i]->GetLayoutIdentifier() == CurrentId)
-				{
-					InsertIdx = i + 1;
-					break;
-				}
-			}
-		}
-		ParentStack->OpenTab(NewTab, InsertIdx, false);
-	}
-	else
-	{
-		FGlobalTabmanager::Get()->InsertNewDocumentTab(
-			UnrealAiEditorTabIds::ChatTab,
-			FTabManager::ESearchPreference::PreferLiveTab,
-			NewTab);
-	}
+	// Assign a unique document layout id (required for dock-tab close buttons) and open beside an
+	// existing Agent Chat tab when possible. Raw SDockingTabStack::OpenTab skips SetLayoutIdentifier.
+	FGlobalTabmanager::Get()->InsertNewDocumentTab(
+		UnrealAiEditorTabIds::ChatTab,
+		FTabManager::ESearchPreference::PreferLiveTab,
+		NewTab);
 	return NewChatTab;
 }
 

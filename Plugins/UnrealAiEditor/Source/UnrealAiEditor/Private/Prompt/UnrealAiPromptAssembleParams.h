@@ -3,7 +3,6 @@
 #include "CoreMinimal.h"
 #include "Context/AgentContextTypes.h"
 #include "UnrealAiBlueprintBuilderTargetKind.h"
-#include "UnrealAiEnvironmentBuilderTargetKind.h"
 #include "UnrealAiProductSpecialistId.h"
 
 /** Parameters for assembling static prompt chunks + transcript tokens (see `prompts/README.md`). */
@@ -27,13 +26,6 @@ struct FUnrealAiPromptAssembleParams
 
 	/** Main agent: one-shot resume guidance after builder result (`blueprint-builder/09-resume-on-main-agent.md`). */
 	bool bInjectBlueprintBuilderResumeChunk = false;
-
-	/** Environment Builder sub-turn: `prompts/chunks/common/*` prefix + `prompts/chunks/environment-builder/*` domain stack. */
-	bool bEnvironmentBuilderMode = false;
-
-	EUnrealAiEnvironmentBuilderTargetKind EnvironmentBuilderTargetKind = EUnrealAiEnvironmentBuilderTargetKind::PcgScene;
-
-	bool bInjectEnvironmentBuilderResumeChunk = false;
 
 	/** Scene / future specialists: dedicated prompt stack + pinned tools. */
 	EUnrealAiProductSpecialistId ActiveProductSpecialistId = EUnrealAiProductSpecialistId::None;

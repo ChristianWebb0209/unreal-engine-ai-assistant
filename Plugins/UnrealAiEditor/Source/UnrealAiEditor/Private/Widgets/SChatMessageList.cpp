@@ -12,6 +12,7 @@
 #include "Tools/UnrealAiToolCatalog.h"
 #include "Widgets/UnrealAiChatTranscript.h"
 #include "Widgets/UnrealAiChatTranscriptStyle.h"
+#include "Widgets/UnrealAiAgentTypeDisplay.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Harness/UnrealAiAgentTypes.h"
 #include "Style/UnrealAiEditorStyle.h"
@@ -42,6 +43,94 @@ static const FMargin GChatMessageListAgentRowMargin(12.f, 6.f, 12.f, 6.f);
 
 namespace UnrealAiChatListUi
 {
+	struct FActiveTypeCount
+	{
+		FString TypeKey;
+		FString LabelOverride;
+		int32 Count = 0;
+	};
+
+	static TArray<FActiveTypeCount> GatherActiveTypeCountsForRun(const TArray<FUnrealAiChatBlock>& Blocks, const FGuid& RunId)
+	{
+		TMap<FString, FActiveTypeCount> ByType;
+		for (const FUnrealAiChatBlock& Block : Blocks)
+		{
+			if (Block.RunId != RunId)
+			{
+				continue;
+			}
+			if (Block.Kind == EUnrealAiChatBlockKind::RunProgress && !Block.AgentDisplayTypeKey.IsEmpty())
+			{
+				FActiveTypeCount& Slot = ByType.FindOrAdd(Block.AgentDisplayTypeKey);
+				Slot.TypeKey = Block.AgentDisplayTypeKey;
+				Slot.LabelOverride = Block.AgentDisplayLabel;
+				Slot.Count += 1;
+			}
+			else if (Block.Kind == EUnrealAiChatBlockKind::PlanWorkerLane
+				&& Block.PlanWorkerLaneStatus == EUnrealAiPlanWorkerLaneStatus::Running)
+			{
+				const FString TypeKey = Block.AgentDisplayTypeKey.IsEmpty()
+					? FString(UnrealAiAgentTypeDisplay::Keys::ExecutionPlanWorker)
+					: Block.AgentDisplayTypeKey;
+				FActiveTypeCount& Slot = ByType.FindOrAdd(TypeKey);
+				Slot.TypeKey = TypeKey;
+				if (Slot.LabelOverride.IsEmpty())
+				{
+					Slot.LabelOverride = Block.AgentDisplayLabel;
+				}
+				Slot.Count += 1;
+			}
+		}
+		TArray<FActiveTypeCount> Result;
+		ByType.GenerateValueArray(Result);
+		Result.Sort([](const FActiveTypeCount& A, const FActiveTypeCount& B)
+		{
+			return A.TypeKey < B.TypeKey;
+		});
+		return Result;
+	}
+
+	static TSharedRef<SWidget> BuildActiveAgentTypeStrip(const TArray<FActiveTypeCount>& Counts)
+	{
+		TSharedRef<SHorizontalBox> Row = SNew(SHorizontalBox);
+		int32 ActiveTotal = 0;
+		for (const FActiveTypeCount& C : Counts)
+		{
+			ActiveTotal += C.Count;
+		}
+		Row->AddSlot().AutoWidth().Padding(0.f, 0.f, 8.f, 0.f)
+		[
+			SNew(STextBlock)
+				.Font(FUnrealAiEditorStyle::FontCaption())
+				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
+				.Text(FText::Format(
+					LOCTEXT("RunProgressActiveAgentsFmt", "{0} active"),
+					FText::AsNumber(ActiveTotal)))
+		];
+
+		for (const FActiveTypeCount& C : Counts)
+		{
+			const FUnrealAiAgentTypeDisplayInfo TypeInfo = UnrealAiAgentTypeDisplay::Resolve(C.TypeKey, C.LabelOverride);
+			Row->AddSlot().AutoWidth().Padding(0.f, 0.f, 6.f, 0.f)
+			[
+				SNew(SBorder)
+					.BorderImage(FUnrealAiEditorStyle::GetBrush(TEXT("UnrealAiEditor.Elevated")))
+					.BorderBackgroundColor(FSlateColor(TypeInfo.Color))
+					.Padding(FMargin(6.f, 2.f))
+					[
+						SNew(STextBlock)
+							.Font(FUnrealAiEditorStyle::FontCaption())
+							.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextPrimary())
+							.Text(FText::Format(
+								LOCTEXT("RunProgressTypeCountFmt", "{0} ({1})"),
+								TypeInfo.Label,
+								FText::AsNumber(C.Count)))
+					]
+			];
+		}
+		return Row;
+	}
+
 	static TSharedRef<SMultiLineEditableText> MakeUserBubbleSelectableText(
 		const FString& Body,
 		const FSlateFontInfo& Font,
@@ -477,6 +566,8 @@ void SChatMessageList::RebuildTranscript()
 						.TitleDisplay(B.PlanWorkerTitleDisplay)
 						.LaneStatus(B.PlanWorkerLaneStatus)
 						.SummaryLine(B.PlanWorkerSummaryLine)
+						.AgentTypeKey(B.AgentDisplayTypeKey)
+						.AgentTypeLabel(B.AgentDisplayLabel)
 						.bShowWorkingIndicator(B.PlanWorkerLaneStatus == EUnrealAiPlanWorkerLaneStatus::Running)
 						.ContextPromptTokensEst(B.PlanWorkerPromptTokensEst)
 						.ContextMaxTokens(B.PlanWorkerContextMaxTokens)
@@ -703,6 +794,8 @@ void SChatMessageList::RebuildTranscript()
 		case EUnrealAiChatBlockKind::RunProgress:
 			{
 				const bool bExpanded = ExpandedRunProgressBlockIds.Contains(B.Id);
+				const TArray<UnrealAiChatListUi::FActiveTypeCount> ActiveTypeCounts =
+					UnrealAiChatListUi::GatherActiveTypeCountsForRun(Transcript->Blocks, B.RunId);
 				const FTextBlockStyle& TranscriptBodyStyle =
 					::UnrealAiChatTranscriptStyle::TranscriptReadOnlyBodyTextStyle();
 				const TSharedRef<SWidget> RunBody =
@@ -720,6 +813,10 @@ void SChatMessageList::RebuildTranscript()
 									.SelectAllTextWhenFocused(false)
 									.TextStyle(&TranscriptBodyStyle)
 									.Text(FText::FromString(B.ProgressLabel))
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 6.f, 0.f, 0.f)
+							[
+								UnrealAiChatListUi::BuildActiveAgentTypeStrip(ActiveTypeCounts)
 							]
 							+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 6.f, 0.f, 0.f)
 							[

@@ -13,6 +13,8 @@ public:
 	SLATE_ARGUMENT(FString, TitleDisplay)
 	SLATE_ARGUMENT(EUnrealAiPlanWorkerLaneStatus, LaneStatus)
 	SLATE_ARGUMENT(FString, SummaryLine)
+	SLATE_ARGUMENT(FString, AgentTypeKey)
+	SLATE_ARGUMENT(FString, AgentTypeLabel)
 	/** Activity spinner while the worker LLM round is in flight. */
 	SLATE_ARGUMENT(bool, bShowWorkingIndicator)
 	/** Estimated prompt footprint vs model profile context (0 = hide bar). */

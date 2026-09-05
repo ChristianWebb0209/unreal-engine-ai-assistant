@@ -14,6 +14,69 @@
 
 namespace UnrealAiToolCatalogPriv
 {
+	static void SanitizeSchemaNode(const TSharedPtr<FJsonObject>& Node, const bool bIsRoot)
+	{
+		if (!Node.IsValid())
+		{
+			return;
+		}
+
+		if (bIsRoot)
+		{
+			// OpenAI tools validator currently rejects top-level combinators and non-object roots.
+			Node->SetStringField(TEXT("type"), TEXT("object"));
+			Node->RemoveField(TEXT("oneOf"));
+			Node->RemoveField(TEXT("anyOf"));
+			Node->RemoveField(TEXT("allOf"));
+			Node->RemoveField(TEXT("enum"));
+			Node->RemoveField(TEXT("not"));
+		}
+
+		FString TypeValue;
+		const bool bHasType = Node->TryGetStringField(TEXT("type"), TypeValue);
+		if (bHasType && TypeValue.Equals(TEXT("array"), ESearchCase::IgnoreCase) && !Node->HasField(TEXT("items")))
+		{
+			// Some catalog tools intentionally keep array item schema loose. OpenAI requires an `items` schema.
+			TSharedPtr<FJsonObject> DefaultItems = MakeShared<FJsonObject>();
+			DefaultItems->SetStringField(TEXT("type"), TEXT("object"));
+			DefaultItems->SetBoolField(TEXT("additionalProperties"), true);
+			Node->SetObjectField(TEXT("items"), DefaultItems);
+		}
+
+		const TMap<FString, TSharedPtr<FJsonValue>>& Values = Node->Values;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Values)
+		{
+			const TSharedPtr<FJsonValue>& Val = Pair.Value;
+			if (!Val.IsValid())
+			{
+				continue;
+			}
+			if (Val->Type == EJson::Object)
+			{
+				SanitizeSchemaNode(Val->AsObject(), false);
+				continue;
+			}
+			if (Val->Type == EJson::Array)
+			{
+				const TArray<TSharedPtr<FJsonValue>>& Arr = Val->AsArray();
+				for (const TSharedPtr<FJsonValue>& Elem : Arr)
+				{
+					if (Elem.IsValid() && Elem->Type == EJson::Object)
+					{
+						SanitizeSchemaNode(Elem->AsObject(), false);
+					}
+				}
+			}
+		}
+	}
+
+	static TSharedPtr<FJsonObject> MakeOpenAiToolParametersSchemaSafe(const TSharedPtr<FJsonObject>& InParams)
+	{
+		TSharedPtr<FJsonObject> Safe = InParams.IsValid() ? MakeShared<FJsonObject>(*InParams) : MakeShared<FJsonObject>();
+		SanitizeSchemaNode(Safe, true);
+		return Safe;
+	}
+
 	static uint32 HashCapsFingerprint(const FUnrealAiModelCapabilities& Caps)
 	{
 		uint32 H = GetTypeHash(Caps.bSupportsNativeTools);
@@ -431,7 +494,7 @@ void FUnrealAiToolCatalog::BuildLlmToolsJsonArrayForMode(
 			TSharedPtr<FJsonObject> ParamsToUse;
 			if (Obj->TryGetObjectField(TEXT("parameters"), Params) && Params->IsValid())
 			{
-				ParamsToUse = *Params;
+				ParamsToUse = UnrealAiToolCatalogPriv::MakeOpenAiToolParametersSchemaSafe(*Params);
 			}
 			else
 			{

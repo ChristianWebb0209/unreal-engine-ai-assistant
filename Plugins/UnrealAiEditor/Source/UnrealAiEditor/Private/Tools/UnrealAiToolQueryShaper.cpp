@@ -66,6 +66,78 @@ void UnrealAiToolQueryShaper::ShapeForRetrieval(const FString& RawUserText, FStr
 		return;
 	}
 
+	TArray<const TCHAR*> ObjViewportVisible = {
+		TEXT("in my viewport"),
+		TEXT("in the viewport"),
+		TEXT("in view"),
+		TEXT("visible in"),
+		TEXT("what's in view"),
+		TEXT("what is in view"),
+		TEXT("what do i see"),
+		TEXT("scene objects in"),
+		TEXT("objects in my"),
+		TEXT("something cool about my project"),
+		TEXT("something cool about my level"),
+		TEXT("something cool about my scene"),
+	};
+	if (UnrealAiToolQueryShaperPriv::ContainsAny(L, ObjViewportVisible))
+	{
+		OutShapeUsed = EUnrealAiToolQueryShape::Heuristic;
+		OutShaped = FString::Printf(TEXT("query viewport_visible_actors %s"), *RawUserText);
+		OutShaped.TrimStartAndEndInline();
+		return;
+	}
+
+	TArray<const TCHAR*> ObjSelectedMaterial = {
+		TEXT("i have selected"),
+		TEXT("i've selected"),
+		TEXT("what i selected"),
+		TEXT("the selected"),
+		TEXT("my selection"),
+		TEXT("this floor"),
+		TEXT("that floor"),
+	};
+	TArray<const TCHAR*> ObjMaterialEdit = {
+		TEXT("material"),
+		TEXT("color"),
+		TEXT("colour"),
+		TEXT("blue"),
+		TEXT("red"),
+		TEXT("green"),
+		TEXT("tint"),
+		TEXT("roughness"),
+	};
+	if (UnrealAiToolQueryShaperPriv::ContainsAny(L, ObjSelectedMaterial)
+		&& UnrealAiToolQueryShaperPriv::ContainsAny(L, ObjMaterialEdit))
+	{
+		OutShapeUsed = EUnrealAiToolQueryShape::Heuristic;
+		OutShaped = FString::Printf(
+			TEXT("modify selected_actor_material editor_get_selection actor_get_material_slots material_instance_set_parameter %s"),
+			*RawUserText);
+		OutShaped.TrimStartAndEndInline();
+		return;
+	}
+
+	TArray<const TCHAR*> ObjSceneCount = {
+		TEXT("how many"),
+		TEXT("count of"),
+		TEXT("number of"),
+	};
+	TArray<const TCHAR*> ObjStaticMesh = {
+		TEXT("static mesh"),
+		TEXT("staticmesh"),
+	};
+	if (UnrealAiToolQueryShaperPriv::ContainsAny(L, ObjSceneCount)
+		&& UnrealAiToolQueryShaperPriv::ContainsAny(L, ObjStaticMesh))
+	{
+		OutShapeUsed = EUnrealAiToolQueryShape::Heuristic;
+		OutShaped = FString::Printf(
+			TEXT("query scene_fuzzy_search class_name_substring StaticMeshActor %s"),
+			*RawUserText);
+		OutShaped.TrimStartAndEndInline();
+		return;
+	}
+
 	TArray<const TCHAR*> VerbsCreate = {TEXT("create"), TEXT("add"), TEXT("spawn"), TEXT("new "), TEXT("make ")};
 	TArray<const TCHAR*> VerbsModify = {TEXT("modify"), TEXT("change"), TEXT("edit"), TEXT("update"), TEXT("set "), TEXT("apply")};
 	TArray<const TCHAR*> VerbsFind = {TEXT("find"), TEXT("search"), TEXT("locate"), TEXT("where is"), TEXT("list ")};

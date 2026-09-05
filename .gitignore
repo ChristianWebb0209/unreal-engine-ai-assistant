@@ -16,6 +16,8 @@
 /Source/
 /Build/
 
+scratch/
+
 # Visual Studio / Xcode
 *.sln
 *.opensdf
@@ -95,6 +97,17 @@ Thumbs.db
 # Python
 **/__pycache__/
 
+# --- MCP server (Node) at repo root ---
+/unreal-mcp/node_modules/
+/unreal-mcp/dist/
+
+# Track MCP package, integrations, and integration docs
+!/unreal-mcp/
+!/unreal-mcp/**
+!/integrations/
+!/integrations/**
+!/docs/integrations/
+!/docs/integrations/**
 
 /tools/
 /reference/

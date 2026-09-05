@@ -20,9 +20,9 @@
 - (Consider) We should redo the entire tools catalog. I think we can implement some basic semantic patterns like get_ tools where the model knows that each get_ tool has a corresponding set_ tool, we could also make a unified set_setting tool that has a specific schema to indicate which type of setting it is (based on UEs literal schemea), like viewport (change from lit to unlit), project settings, editor settings. 
 - - We should analyze how unreal exposes functions to set and get all different types of settings to build this tool, and try to find similar patterns to reduce the complexity of other bunches of tools.
 
-## PCG / World Building
+## PCG / World Building (removed from product)
 
-This is an optional expansion (not core MVP) that enables the agent to build and iteratively modify open-world-ish environments using Unreal’s Procedural Content Generation (PCG) framework.
+**Status:** Intentionally **not** supported. The assistant does not place actors in loaded worlds or run PCG/landscape/foliage automation — see repo README **Scope**. The notes below are archival design ideas only.
 
 The goals are:
 - Translate a natural-language “world brief” into a layered distribution plan (biomes, layers, densities, constraints).

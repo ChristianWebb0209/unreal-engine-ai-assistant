@@ -11,6 +11,7 @@
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Plan/UnrealAiPlanUiTokens.h"
+#include "Widgets/UnrealAiAgentTypeDisplay.h"
 
 #define LOCTEXT_NAMESPACE "UnrealAiEditor"
 
@@ -138,7 +139,9 @@ FLinearColor UnrealAiChatTranscriptStyle::GetRoleAccentLinear(const FUnrealAiCha
 	case EUnrealAiChatBlockKind::RunProgress:
 		return FUnrealAiEditorStyle::LinearColorChatTranscriptAccentRun();
 	case EUnrealAiChatBlockKind::PlanWorkerLane:
-		return FUnrealAiPlanUiTokens::PlanAccent();
+		return Block.AgentDisplayTypeKey.IsEmpty()
+			? FUnrealAiPlanUiTokens::PlanAccent()
+			: UnrealAiAgentTypeDisplay::ColorFor(Block.AgentDisplayTypeKey);
 	default:
 		return FUnrealAiEditorStyle::LinearColorChatTranscriptAccentAssistant();
 	}

@@ -600,8 +600,23 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetVectorParamete
 	}
 	UnrealAiToolDispatchArgRepair::NormalizeAssetLikeObjectPath(MaterialPath);
 	FLinearColor C(1.f, 1.f, 1.f, 1.f);
+	bool bParsedColor = false;
+	const TArray<TSharedPtr<FJsonValue>>* LinearArr = nullptr;
+	if (Args->TryGetArrayField(TEXT("linear_color"), LinearArr) && LinearArr && LinearArr->Num() >= 3)
+	{
+		double R = 1.0, G = 1.0, B = 1.0, A = 1.0;
+		(*LinearArr)[0]->TryGetNumber(R);
+		(*LinearArr)[1]->TryGetNumber(G);
+		(*LinearArr)[2]->TryGetNumber(B);
+		if (LinearArr->Num() >= 4)
+		{
+			(*LinearArr)[3]->TryGetNumber(A);
+		}
+		C = FLinearColor(static_cast<float>(R), static_cast<float>(G), static_cast<float>(B), static_cast<float>(A));
+		bParsedColor = true;
+	}
 	const TSharedPtr<FJsonObject>* Vo = nullptr;
-	if (Args->TryGetObjectField(TEXT("value"), Vo) && Vo->IsValid())
+	if (!bParsedColor && Args->TryGetObjectField(TEXT("value"), Vo) && Vo->IsValid())
 	{
 		double R = 1.0, G = 1.0, B = 1.0, A = 1.0;
 		(*Vo)->TryGetNumberField(TEXT("r"), R);
@@ -609,6 +624,12 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_MaterialInstanceSetVectorParamete
 		(*Vo)->TryGetNumberField(TEXT("b"), B);
 		(*Vo)->TryGetNumberField(TEXT("a"), A);
 		C = FLinearColor(static_cast<float>(R), static_cast<float>(G), static_cast<float>(B), static_cast<float>(A));
+		bParsedColor = true;
+	}
+	if (!bParsedColor)
+	{
+		return UnrealAiToolJson::Error(
+			TEXT("vector parameter requires linear_color [r,g,b] or [r,g,b,a], or legacy value {r,g,b,a} object."));
 	}
 	UMaterialInstanceConstant* MI = LoadObject<UMaterialInstanceConstant>(nullptr, *MaterialPath);
 	if (!MI)

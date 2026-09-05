@@ -26,7 +26,7 @@ The project targets **gameplay Blueprint** workflows on **UE 5.7**. **Before fol
 - **Common Blueprint patch mistakes to avoid:** do not invent `k2_class` paths or pin names—ground them in **`blueprint_graph_introspect`**. For callable gameplay actions, use **`create_node`** with **`semantic_kind`** **`call_library_function`** or **`K2Node_CallFunction`** with native `/Script/...` `class_path` + `function_name`.
 - **Generic `/Game` assets:** **`asset_create`** (class path + package) → **`asset_export_properties`** / **`asset_apply_properties`** for reflection-driven edits on that **asset UObject** when there is no specialized tool. **Actor Blueprint component defaults:** **`blueprint_set_component_default`** when listed in the appendix; otherwise note the need for a handoff or blocker.
 - **`asset_create` argument contract:** always provide `package_path`, `asset_name`, and `asset_class` (`class_path` alias allowed). Keep `package_path` under `/Game/...`; do not pass `{}`.
-- **Scene:** **`actor_spawn_from_class`**, **`actor_set_transform`**, **`actor_destroy`**, **`scene_fuzzy_search`** when listed.
+- **Scene (read-only):** **`scene_fuzzy_search`**, **`actor_find_by_label`**, **`actor_get_transform`** when listed — no spawn/move/delete in loaded worlds.
 - **Runtime check:** after gameplay changes, **`pie_start`** / **`pie_stop`** when those tools appear in the appendix.
 - **No fake execution:** for playtest requests, emit actual PIE tool calls when available; do not claim test results without matching tool results.
 - **Mutation progression rule:** after discovery confirms a concrete target, execute at least one mutation/exec tool **from this request’s appendix** in the same run unless blocked. If only graph mutations are missing from the appendix, **hand off** with **`12`** instead of stopping silently.
@@ -38,13 +38,13 @@ Use the **Notes** column: where it says **handoff**, use **`<unreal_ai_build_blu
 
 | Goal (from tool-goals) | Primary tools | Notes |
 |------------------------|---------------|------|
-| Collectible / interaction / overlap | `asset_create`, `actor_spawn_from_class`, `pie_start`; graph: `blueprint_graph_patch` **or handoff** | EventGraph logic often **handoff** on default Agent. |
+| Collectible / interaction / overlap | `asset_create`, `pie_start`, `scene_fuzzy_search`; graph: `blueprint_graph_patch` **or handoff** | Place props in-level manually; EventGraph logic often **handoff** on default Agent. |
 | Third-person character | `asset_create` (Blueprint asset class); graph: `blueprint_graph_patch` **or handoff** | Set parent class via factory params on create, then hand off or patch when tools are listed. |
-| Doors, triggers, spawners, AI chase | `actor_spawn_from_class`, `scene_fuzzy_search`; graph **or handoff** | Same split. |
+| Doors, triggers, spawners, AI chase | `scene_fuzzy_search`; graph **or handoff** | Spawn triggers/actors in editor; logic via handoff. |
 | Health, UI bar, pickups | `asset_create` (Widget Blueprint), `asset_apply_properties`; widget/graph **or handoff** | **UMG layout** weakly automated. |
-| Day/night, audio, footsteps | `actor_set_transform`, `audio_component_preview`, `asset_create` (SoundCue); graph **or handoff** | |
+| Day/night, audio, footsteps | `audio_component_preview`, `asset_create` (SoundCue); graph **or handoff** | |
 | Save/load position | `asset_create` (SaveGame class); graph **or handoff** | |
-| Projectile, minimap, physics | `actor_spawn_from_class`, `physics_impulse_actor`, `render_target_readback_editor`; graph **or handoff** | Minimap: high manual surface. |
+| Projectile, minimap, physics | `render_target_readback_editor`; graph **or handoff** | Minimap: high manual surface; place actors manually. |
 
 **When stuck or scope explodes:** **stop with handoff** (**03**) or suggest **Plan mode** for large multi-file / multi-subsystem work—do not rely on a persisted Agent todo tool.
 

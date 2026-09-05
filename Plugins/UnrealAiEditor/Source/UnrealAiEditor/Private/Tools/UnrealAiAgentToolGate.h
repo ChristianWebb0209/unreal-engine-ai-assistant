@@ -7,7 +7,7 @@ class FUnrealAiToolCatalog;
 
 /**
  * Tiered tool index + harness invoke filter using catalog tools[].agent_surfaces.
- * Selects MainAgent vs BlueprintBuilder vs EnvironmentBuilder from the active turn request.
+ * Selects MainAgent vs BlueprintBuilder vs product specialist from the active turn request.
  */
 namespace UnrealAiAgentToolGate
 {

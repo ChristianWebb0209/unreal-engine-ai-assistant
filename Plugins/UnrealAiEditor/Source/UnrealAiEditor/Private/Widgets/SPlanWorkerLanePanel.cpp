@@ -2,6 +2,7 @@
 
 #include "Style/UnrealAiEditorStyle.h"
 #include "Widgets/Plan/UnrealAiPlanUiTokens.h"
+#include "Widgets/UnrealAiAgentTypeDisplay.h"
 #include "Widgets/Images/SThrobber.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Notifications/SProgressBar.h"
@@ -17,7 +18,10 @@
 
 void SPlanWorkerLanePanel::Construct(const FArguments& InArgs)
 {
-	const FLinearColor Accent = FUnrealAiPlanUiTokens::PlanAccent();
+	const FLinearColor Accent = InArgs._AgentTypeKey.IsEmpty()
+		? FUnrealAiPlanUiTokens::PlanAccent()
+		: UnrealAiAgentTypeDisplay::ColorFor(InArgs._AgentTypeKey);
+	const FText TypeLabel = UnrealAiAgentTypeDisplay::LabelFor(InArgs._AgentTypeKey, InArgs._AgentTypeLabel);
 	FText StatusText;
 	switch (InArgs._LaneStatus)
 	{
@@ -141,6 +145,13 @@ void SPlanWorkerLanePanel::Construct(const FArguments& InArgs)
 										.Font(FUnrealAiEditorStyle::FontLabelBold())
 										.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextPrimary())
 										.Text(FText::FromString(InArgs._TitleDisplay))
+								]
+								+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 2.f, 0.f, 0.f)
+								[
+									SNew(STextBlock)
+										.Font(FUnrealAiEditorStyle::FontCaption())
+										.ColorAndOpacity(FSlateColor(Accent))
+										.Text(TypeLabel)
 								]
 								+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 2.f, 0.f, 0.f)
 								[

@@ -10,6 +10,7 @@
 #include "Widgets/UnrealAiToolDisplayName.h"
 #include "Tools/UnrealAiBuildBlueprintTag.h"
 #include "Widgets/UnrealAiChatTranscript.h"
+#include "Widgets/UnrealAiAgentTypeDisplay.h"
 #include "Widgets/UnrealAiToolUi.h"
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Backend/IUnrealAiPersistence.h"
@@ -99,7 +100,22 @@ void FUnrealAiChatRunSink::OnRunStarted(const FUnrealAiRunIds& Ids)
 	{
 		if (!Ids.ParentRunId.IsValid())
 		{
-			Transcript->BeginRun(Ids.RunId);
+			FString ModeType = UnrealAiAgentTypeDisplay::Keys::ExecutionMainRun;
+			switch (AgentMode)
+			{
+			case EUnrealAiAgentMode::Ask:
+				ModeType = UnrealAiAgentTypeDisplay::Keys::ModeAsk;
+				break;
+			case EUnrealAiAgentMode::Agent:
+				ModeType = UnrealAiAgentTypeDisplay::Keys::ModeAgent;
+				break;
+			case EUnrealAiAgentMode::Plan:
+				ModeType = UnrealAiAgentTypeDisplay::Keys::ModePlan;
+				break;
+			default:
+				break;
+			}
+			Transcript->BeginRun(Ids.RunId, ModeType);
 			Transcript->SetRunProgress(TEXT("Run started"));
 		}
 		else
@@ -269,6 +285,15 @@ void FUnrealAiChatRunSink::OnSubagentBuilderHandoff(const FString& BuilderDispla
 	{
 		return;
 	}
+	PendingWorkerTypeLabel = BuilderDisplayName;
+	if (BuilderDisplayName.Contains(TEXT("Blueprint Builder"), ESearchCase::IgnoreCase))
+	{
+		PendingWorkerTypeKey = UnrealAiAgentTypeDisplay::Keys::ExecutionBuilderSubturn;
+	}
+	else
+	{
+		PendingWorkerTypeKey = UnrealAiAgentTypeDisplay::SpecialistDisplayNameToKey(BuilderDisplayName);
+	}
 	// Prefix marks harness-injected user rows (muted bubble + "--- Harness ---" in plain-text export).
 	Transcript->AddUserMessage(
 		FString::Printf(TEXT("[Harness] Delegated to %s."), *BuilderDisplayName));
@@ -278,8 +303,13 @@ void FUnrealAiChatRunSink::OnPlanWorkerSpanOpened(const FString& NodeId, const F
 {
 	if (Transcript.IsValid())
 	{
-		Transcript->BeginPlanWorkerSpan(NodeId, TitleOrEmpty);
+		const FString WorkerTypeKey = PendingWorkerTypeKey.IsEmpty()
+			? FString(UnrealAiAgentTypeDisplay::Keys::ExecutionPlanWorker)
+			: PendingWorkerTypeKey;
+		Transcript->BeginPlanWorkerSpan(NodeId, TitleOrEmpty, WorkerTypeKey, PendingWorkerTypeLabel);
 	}
+	PendingWorkerTypeKey.Reset();
+	PendingWorkerTypeLabel.Reset();
 }
 
 void FUnrealAiChatRunSink::OnPlanWorkerSpanClosed(const FString& NodeId, bool bSuccess, const FString& SummaryOneLine)
@@ -292,14 +322,24 @@ void FUnrealAiChatRunSink::OnPlanWorkerSpanClosed(const FString& NodeId, bool bS
 
 void FUnrealAiChatRunSink::OnEnforcementEvent(const FString& EventType, const FString& Detail)
 {
+	if (EventType.Equals(TEXT("blueprint_builder_chain"), ESearchCase::IgnoreCase))
+	{
+		PendingWorkerTypeKey = UnrealAiAgentTypeDisplay::Keys::ExecutionBuilderSubturn;
+		PendingWorkerTypeLabel = TEXT("Blueprint Builder");
+	}
+	else if (EventType.Equals(TEXT("product_specialist_chain"), ESearchCase::IgnoreCase))
+	{
+		PendingWorkerTypeKey = UnrealAiAgentTypeDisplay::Keys::ExecutionSpecialistSubturn;
+		PendingWorkerTypeLabel = TEXT("Product specialist");
+	}
+
 	if (Transcript.IsValid())
 	{
 		const bool bHideInternalBackgroundOps =
 			EventType.Equals(TEXT("background_op"), ESearchCase::IgnoreCase)
 			|| EventType.Equals(TEXT("tool_selector_ranks"), ESearchCase::IgnoreCase)
 			|| EventType.StartsWith(TEXT("tool_surface_"), ESearchCase::IgnoreCase)
-			|| EventType.Equals(TEXT("blueprint_builder_chain"), ESearchCase::IgnoreCase)
-			|| EventType.Equals(TEXT("environment_builder_chain"), ESearchCase::IgnoreCase);
+			|| EventType.Equals(TEXT("blueprint_builder_chain"), ESearchCase::IgnoreCase);
 
 		if (!bHideInternalBackgroundOps)
 		{

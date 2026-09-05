@@ -12,6 +12,8 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
+#include "Materials/MaterialInstanceConstant.h"
+#include "Materials/MaterialInterface.h"
 #include "ScopedTransaction.h"
 #include "UnrealEdGlobals.h"
 #include "UObject/SoftObjectPath.h"
@@ -513,6 +515,97 @@ FUnrealAiToolInvocationResult UnrealAiDispatch_ActorGetVisibility(const TSharedP
 	O->SetBoolField(TEXT("hidden"), bHidden);
 	O->SetBoolField(TEXT("visible"), !bHidden);
 	O->SetStringField(TEXT("property_key"), TEXT("hidden_in_editor"));
+	return UnrealAiToolJson::Ok(O);
+}
+
+FUnrealAiToolInvocationResult UnrealAiDispatch_ActorGetMaterialSlots(const TSharedPtr<FJsonObject>& Args)
+{
+	FString ActorPath;
+	if (!Args->TryGetStringField(TEXT("actor_path"), ActorPath) || ActorPath.IsEmpty())
+	{
+		return UnrealAiToolJson::Error(TEXT("actor_get_material_slots: actor_path is required"));
+	}
+	UWorld* World = UnrealAiGetEditorWorld();
+	AActor* A = UnrealAiResolveActorInWorld(World, ActorPath);
+	if (!A)
+	{
+		return UnrealAiToolJson::Error(TEXT("actor_get_material_slots: actor not found"));
+	}
+
+	TArray<TSharedPtr<FJsonValue>> Slots;
+	TSet<FString> SeenMaterialPaths;
+	for (UPrimitiveComponent* Prim : TInlineComponentArray<UPrimitiveComponent*>(A))
+	{
+		if (!Prim)
+		{
+			continue;
+		}
+		const int32 SlotCount = Prim->GetNumMaterials();
+		for (int32 SlotIdx = 0; SlotIdx < SlotCount; ++SlotIdx)
+		{
+			UMaterialInterface* Mat = Prim->GetMaterial(SlotIdx);
+			if (!Mat)
+			{
+				continue;
+			}
+			TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+			Row->SetNumberField(TEXT("slot_index"), static_cast<double>(SlotIdx));
+			Row->SetStringField(TEXT("component_name"), Prim->GetName());
+			Row->SetStringField(TEXT("component_class"), Prim->GetClass()->GetName());
+			const FString MatPath = Mat->GetPathName();
+			Row->SetStringField(TEXT("material_path"), MatPath);
+			Row->SetStringField(TEXT("material_name"), Mat->GetName());
+			Row->SetStringField(TEXT("material_class"), Mat->GetClass()->GetName());
+			SeenMaterialPaths.Add(MatPath);
+
+			if (UMaterialInstanceConstant* MI = Cast<UMaterialInstanceConstant>(Mat))
+			{
+				Row->SetBoolField(TEXT("is_material_instance"), true);
+				TArray<FMaterialParameterInfo> ScalarInfos;
+				TArray<FGuid> ScalarIds;
+				MI->GetAllScalarParameterInfo(ScalarInfos, ScalarIds);
+				TArray<TSharedPtr<FJsonValue>> ScalarNames;
+				for (const FMaterialParameterInfo& Info : ScalarInfos)
+				{
+					ScalarNames.Add(MakeShareable(new FJsonValueString(Info.Name.ToString())));
+				}
+				Row->SetArrayField(TEXT("scalar_parameter_names"), ScalarNames);
+
+				TArray<FMaterialParameterInfo> VectorInfos;
+				TArray<FGuid> VectorIds;
+				MI->GetAllVectorParameterInfo(VectorInfos, VectorIds);
+				TArray<TSharedPtr<FJsonValue>> VectorNames;
+				for (const FMaterialParameterInfo& Info : VectorInfos)
+				{
+					VectorNames.Add(MakeShareable(new FJsonValueString(Info.Name.ToString())));
+				}
+				Row->SetArrayField(TEXT("vector_parameter_names"), VectorNames);
+			}
+			else
+			{
+				Row->SetBoolField(TEXT("is_material_instance"), false);
+				Row->SetStringField(
+					TEXT("note"),
+					TEXT("Base Material assigned on component; duplicate/create a Material Instance before material_instance_set_parameter."));
+			}
+			Slots.Add(MakeShareable(new FJsonValueObject(Row.ToSharedRef())));
+		}
+	}
+
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetBoolField(TEXT("ok"), true);
+	O->SetStringField(TEXT("tool"), TEXT("actor_get_material_slots"));
+	O->SetStringField(TEXT("actor_path"), A->GetPathName());
+	O->SetStringField(TEXT("actor_label"), A->GetActorLabel());
+	O->SetArrayField(TEXT("slots"), Slots);
+	O->SetNumberField(TEXT("count"), static_cast<double>(Slots.Num()));
+	O->SetNumberField(TEXT("unique_material_count"), static_cast<double>(SeenMaterialPaths.Num()));
+	if (Slots.Num() == 0)
+	{
+		O->SetStringField(
+			TEXT("hint"),
+			TEXT("No material slots on primitive components; actor may lack a mesh or use a non-primitive root."));
+	}
 	return UnrealAiToolJson::Ok(O);
 }
 

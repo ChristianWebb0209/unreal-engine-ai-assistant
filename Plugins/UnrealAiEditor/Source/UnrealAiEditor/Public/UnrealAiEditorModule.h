@@ -6,6 +6,7 @@
 #include "Modules/ModuleManager.h"
 
 class FUnrealAiBackendRegistry;
+class FUnrealAiMcpBridge;
 struct FUnrealAiChatUiSession;
 class SUnrealAiEditorChatTab;
 class SWidget;
@@ -89,6 +90,9 @@ public:
 	/** Opens Project Settings on the Unreal AI Editor page (plugin LLM UI + UObject options). */
 	static void OpenUnrealAiPluginSettings();
 
+	/** Start or stop the localhost MCP bridge from current UUnrealAiEditorSettings. */
+	void RefreshMcpBridge();
+
 private:
 	void RegisterMenus();
 	void RegisterTabs(const TSharedPtr<FUnrealAiBackendRegistry>& Reg);
@@ -114,6 +118,7 @@ private:
 	bool ConsumePendingExplicitChatThreadId_Impl(FGuid& Out);
 
 	TSharedPtr<FUnrealAiBackendRegistry> BackendRegistry;
+	TUniquePtr<FUnrealAiMcpBridge> McpBridge;
 	FDelegateHandle OpenChatOnStartupHandle;
 	FDelegateHandle SaveOpenChatsOnExitHandle;
 	FTSTicker::FDelegateHandle DeferredAgentChatInsertTickerHandle;

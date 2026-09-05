@@ -40,6 +40,14 @@ namespace UnrealAiToolDispatchArgRepair
 		const TSharedPtr<FJsonObject>& Args,
 		const TSharedPtr<FJsonObject>& Audit = nullptr);
 
+	/**
+	 * Coerce common model mistakes for material_instance_set_parameter before JSON-schema validation:
+	 * RGB objects/arrays under `value` -> `value_kind: vector` + `linear_color[]`; alias param keys.
+	 */
+	void RepairMaterialInstanceSetParameterArgs(
+		const TSharedPtr<FJsonObject>& Args,
+		const TSharedPtr<FJsonObject>& Audit = nullptr);
+
 	static bool TryGetStringFieldCanonical(
 		const TSharedPtr<FJsonObject>& Args,
 		const TCHAR* CanonicalKey,

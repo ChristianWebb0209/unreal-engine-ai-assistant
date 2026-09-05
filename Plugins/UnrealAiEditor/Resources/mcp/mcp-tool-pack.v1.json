@@ -1,0 +1,75 @@
+{
+  "pack_version": "1.0.0",
+  "catalog_version_pin": "1.1.0",
+  "description": "Curated MCP tool allowlist. Only these tool_id values may be invoked via the localhost bridge. Schemas come from the merged tools.main.json + tool_catalog_fragments catalog.",
+  "mcp_exclude_notes": [
+    "console_command",
+    "actor_destroy",
+    "asset_delete",
+    "cpp_project_compile",
+    "environment builder tools (pcg_generate, foliage_paint_instances, etc.)",
+    "full catalog (~84 tools) — not exposed over MCP v1"
+  ],
+  "tools": [
+    {
+      "tool_id": "editor_get_selection",
+      "permission": "read"
+    },
+    {
+      "tool_id": "editor_state_snapshot_read",
+      "permission": "read"
+    },
+    {
+      "tool_id": "scene_fuzzy_search",
+      "permission": "read"
+    },
+    {
+      "tool_id": "asset_index_fuzzy_search",
+      "permission": "read"
+    },
+    {
+      "tool_id": "content_browser_sync_asset",
+      "permission": "read"
+    },
+    {
+      "tool_id": "asset_open_editor",
+      "permission": "read"
+    },
+    {
+      "tool_id": "blueprint_get_graph_summary",
+      "permission": "read"
+    },
+    {
+      "tool_id": "blueprint_graph_introspect",
+      "permission": "read"
+    },
+    {
+      "tool_id": "blueprint_graph_list_pins",
+      "permission": "read"
+    },
+    {
+      "tool_id": "blueprint_graph_patch",
+      "permission": "write"
+    },
+    {
+      "tool_id": "blueprint_compile",
+      "permission": "write"
+    },
+    {
+      "tool_id": "blueprint_verify_graph",
+      "permission": "read"
+    },
+    {
+      "tool_id": "engine_message_log_read",
+      "permission": "read"
+    },
+    {
+      "tool_id": "pie_start",
+      "permission": "write"
+    },
+    {
+      "tool_id": "pie_status",
+      "permission": "read"
+    }
+  ]
+}

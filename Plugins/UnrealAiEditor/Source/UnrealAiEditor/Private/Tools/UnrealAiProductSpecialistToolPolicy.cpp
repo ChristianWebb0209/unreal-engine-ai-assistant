@@ -20,6 +20,14 @@ static bool SceneSpecialistAllows(const FString& ToolId, const FJsonObject& Tool
 	{
 		return true;
 	}
+	if (ToolId == TEXT("viewport_list_visible_actors"))
+	{
+		return true;
+	}
+	if (ToolId == TEXT("actor_get_material_slots"))
+	{
+		return true;
+	}
 	if (ToolId.StartsWith(TEXT("entity_")))
 	{
 		return true;
@@ -64,7 +72,7 @@ static bool ViewportSpecialistAllows(const FString& ToolId, const FJsonObject& T
 		return ToolId == TEXT("viewport_frame") || ToolId == TEXT("editor_get_selection") || ToolId == TEXT("editor_set_selection");
 	}
 	if (ToolId == TEXT("viewport_capture") || ToolId == TEXT("viewport_camera_control") || ToolId == TEXT("viewport_get_view_mode")
-		|| ToolId == TEXT("viewport_set_view_mode") || ToolId == TEXT("viewport_frame"))
+		|| ToolId == TEXT("viewport_set_view_mode") || ToolId == TEXT("viewport_frame") || ToolId == TEXT("viewport_list_visible_actors"))
 	{
 		return true;
 	}
@@ -121,16 +129,24 @@ static bool SettingsSpecialistAllows(const FString& ToolId, const FJsonObject& T
 
 static bool MaterialsSpecialistAllows(const FString& ToolId, const FJsonObject& ToolDef)
 {
-	if (GetCategory(ToolDef) != TEXT("materials_rendering"))
+	const FString Category = GetCategory(ToolDef);
+	if (Category == TEXT("materials_rendering"))
 	{
-		return false;
+		if (ToolId.StartsWith(TEXT("material_graph_")))
+		{
+			return false;
+		}
+		return true;
 	}
-	// Base Material expression graphs: use `<unreal_ai_build_blueprint>` with `target_kind: material_graph`.
-	if (ToolId.StartsWith(TEXT("material_graph_")))
+	if (ToolId == TEXT("editor_get_selection") || ToolId == TEXT("actor_get_material_slots"))
 	{
-		return false;
+		return true;
 	}
-	return true;
+	if (ToolId == TEXT("asset_index_fuzzy_search"))
+	{
+		return true;
+	}
+	return false;
 }
 
 bool UnrealAiProductSpecialistToolPolicy::PassesSpecialistToolFilter(

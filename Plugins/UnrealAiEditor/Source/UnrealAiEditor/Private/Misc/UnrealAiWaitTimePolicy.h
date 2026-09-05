@@ -110,9 +110,15 @@ namespace UnrealAiWaitTime
 
 	/**
 	 * Plan-node agent threads: max automatic DispatchLlm(true) retries per LLM round when the stream Error matches
-	 * ShouldRetryTransientTransportError (timeouts, cancellation). Generic Agent turns keep 0.
+	 * ShouldRetryTransientTransportError (timeouts, cancellation).
 	 */
 	inline constexpr int32 PlanNodeTransientHttpMaxRetries = 1;
+
+	/**
+	 * Live editor Agent turns (non-plan-node): same transient HTTP retry budget as plan nodes so a superseded
+	 * in-flight request (e.g. post-tool continuation) does not fail the whole run on Failed (Cancelled).
+	 */
+	inline constexpr int32 AgentTransientHttpMaxRetries = 1;
 
 	/**
 	 * Headed `RunAgentTurnSync` agent turns (non-plan-node): max `DispatchLlm(true)` retries per LLM round when HTTP

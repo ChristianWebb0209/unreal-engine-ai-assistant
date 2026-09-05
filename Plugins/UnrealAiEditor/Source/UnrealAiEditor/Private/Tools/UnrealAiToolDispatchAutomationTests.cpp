@@ -24,6 +24,7 @@
 #include "Tools/UnrealAiToolSurfacePipeline.h"
 #include "UnrealAiProductSpecialistId.h"
 #include "Tools/UnrealAiToolSurfaceCompatibility.h"
+#include "Tools/UnrealAiBuildBlueprintTag.h"
 #include "EdGraphSchema_K2.h"
 #include "GraphBuilder/UnrealAiGraphEditDomain.h"
 #include "Harness/UnrealAiAgentTypes.h"
@@ -133,6 +134,28 @@ bool FUnrealAiToolDispatchEditorSmokeTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("editor_get_selection: has labels"), O->HasField(TEXT("labels")));
 	}
 
+	// Implemented tool: viewport_list_visible_actors -> active viewport frustum (may be empty)
+	{
+		const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+			TEXT("viewport_list_visible_actors"),
+			MakeShared<FJsonObject>(),
+			nullptr,
+			nullptr,
+			FString(),
+			FString());
+
+		TestTrue(TEXT("viewport_list_visible_actors: bOk"), R.bOk);
+
+		TSharedPtr<FJsonObject> O;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(R.ContentForModel);
+		TestTrue(TEXT("viewport_list_visible_actors: JSON parse"), FJsonSerializer::Deserialize(Reader, O) && O.IsValid());
+
+		TestTrue(TEXT("viewport_list_visible_actors: ok field"), O->GetBoolField(TEXT("ok")));
+		TestTrue(TEXT("viewport_list_visible_actors: has count"), O->HasField(TEXT("count")));
+		TestTrue(TEXT("viewport_list_visible_actors: has matches"), O->HasField(TEXT("matches")));
+		TestTrue(TEXT("viewport_list_visible_actors: listing_mode"), O->GetStringField(TEXT("listing_mode")) == TEXT("viewport_frustum_bounds"));
+	}
+
 	return true;
 }
 
@@ -220,6 +243,26 @@ bool FUnrealAiToolResolverCompositeRoutingTest::RunTest(const FString& Parameter
 		Args->SetArrayField(TEXT("linear_color"), LinearColor);
 		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("material_instance_set_parameter"), Args);
 		TestFalse(TEXT("material_instance_set_parameter missing value_kind fails"), Resolved.bResolved);
+	}
+
+	{
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("value_kind"), TEXT("scalar"));
+		Args->SetStringField(TEXT("material_path"), TEXT("/Game/MI_Test.MI_Test"));
+		Args->SetStringField(TEXT("parameter_name"), TEXT("Color"));
+		TSharedPtr<FJsonObject> ColorObj = MakeShared<FJsonObject>();
+		ColorObj->SetNumberField(TEXT("r"), 0.0);
+		ColorObj->SetNumberField(TEXT("g"), 0.0);
+		ColorObj->SetNumberField(TEXT("b"), 1.0);
+		ColorObj->SetNumberField(TEXT("a"), 1.0);
+		Args->SetObjectField(TEXT("value"), ColorObj);
+		const FUnrealAiResolvedToolInvocation Resolved = Resolver.Resolve(TEXT("material_instance_set_parameter"), Args);
+		TestTrue(TEXT("material_instance_set_parameter coerces color object to vector"), Resolved.bResolved);
+		FString ValueKind;
+		TestTrue(TEXT("coerced value_kind"), Resolved.ResolvedArguments->TryGetStringField(TEXT("value_kind"), ValueKind));
+		TestEqual(TEXT("coerced value_kind vector"), ValueKind, FString(TEXT("vector")));
+		const TArray<TSharedPtr<FJsonValue>>* Linear = nullptr;
+		TestTrue(TEXT("coerced linear_color"), Resolved.ResolvedArguments->TryGetArrayField(TEXT("linear_color"), Linear) && Linear && Linear->Num() >= 3);
 	}
 
 	{
@@ -1614,6 +1657,17 @@ bool FUnrealAiRemovedCatalogToolsDispatchContractTest::RunTest(const FString& Pa
 	ExpectNotImplemented(TEXT("agent_emit_todo_plan"), TEXT("agent_emit_todo_plan"));
 	ExpectNotImplemented(TEXT("settings_get"), TEXT("settings_get"));
 	ExpectNotImplemented(TEXT("viewport_camera_dolly"), TEXT("viewport_camera_dolly"));
+	ExpectNotImplemented(TEXT("actor_spawn_from_class"), TEXT("actor_spawn_from_class"));
+	ExpectNotImplemented(TEXT("actor_destroy"), TEXT("actor_destroy"));
+	ExpectNotImplemented(TEXT("actor_set_transform"), TEXT("actor_set_transform"));
+	ExpectNotImplemented(TEXT("actor_attach_to"), TEXT("actor_attach_to"));
+	ExpectNotImplemented(TEXT("actor_set_visibility"), TEXT("actor_set_visibility"));
+	ExpectNotImplemented(TEXT("actor_blueprint_toggle_visibility"), TEXT("actor_blueprint_toggle_visibility"));
+	ExpectNotImplemented(TEXT("outliner_folder_move"), TEXT("outliner_folder_move"));
+	ExpectNotImplemented(TEXT("physics_impulse_actor"), TEXT("physics_impulse_actor"));
+	ExpectNotImplemented(TEXT("pcg_generate"), TEXT("pcg_generate"));
+	ExpectNotImplemented(TEXT("foliage_paint_instances"), TEXT("foliage_paint_instances"));
+	ExpectNotImplemented(TEXT("landscape_import_heightmap"), TEXT("landscape_import_heightmap"));
 
 	return true;
 }
@@ -2648,17 +2702,6 @@ bool FUnrealAiToolSurfaceCompatibilityTest::RunTest(const FString& Parameters)
 			UnrealAiToolSurfaceCompatibility::ToolAllowedOnSurface(BuilderOnly, false, EUnrealAiToolSurfaceKind::BlueprintBuilder));
 	}
 
-	{
-		TSet<FString> EnvOnly;
-		EnvOnly.Add(UnrealAiToolSurfaceCompatibility::GAgentSurfaceToken_EnvironmentBuilder);
-		TestFalse(
-			TEXT("environment_builder-only on main agent"),
-			UnrealAiToolSurfaceCompatibility::ToolAllowedOnSurface(EnvOnly, false, EUnrealAiToolSurfaceKind::MainAgent));
-		TestTrue(
-			TEXT("environment_builder-only on environment builder"),
-			UnrealAiToolSurfaceCompatibility::ToolAllowedOnSurface(EnvOnly, false, EUnrealAiToolSurfaceKind::EnvironmentBuilder));
-	}
-
 	return true;
 }
 
@@ -2702,10 +2745,10 @@ bool FUnrealAiAgentToolGateSurfaceTest::RunTest(const FString& Parameters)
 	Req.bBlueprintBuilderTurn = false;
 	Req.ActiveProductSpecialistId = EUnrealAiProductSpecialistId::None;
 	TestTrue(
-		TEXT("orchestrator lane: snapshot tool"),
+		TEXT("main agent: snapshot tool"),
 		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("editor_state_snapshot_read"), &Catalog));
-	TestFalse(
-		TEXT("orchestrator lane: scene tool blocked"),
+	TestTrue(
+		TEXT("main agent: scene tool allowed"),
 		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("editor_get_selection"), &Catalog));
 	Req.ActiveProductSpecialistId = EUnrealAiProductSpecialistId::Scene;
 	TestTrue(
@@ -2719,8 +2762,8 @@ bool FUnrealAiAgentToolGateSurfaceTest::RunTest(const FString& Parameters)
 		TEXT("assets specialist: level_sequence_create_asset blocked (animation_sequencer)"),
 		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("level_sequence_create_asset"), &Catalog));
 	TestFalse(
-		TEXT("assets specialist: actor_spawn blocked"),
-		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("actor_spawn_from_class"), &Catalog));
+		TEXT("scene specialist: removed actor_spawn not in catalog"),
+		Catalog.FindToolDefinition(TEXT("actor_spawn_from_class")).IsValid());
 	Req.ActiveProductSpecialistId = EUnrealAiProductSpecialistId::Animation;
 	TestTrue(
 		TEXT("animation specialist: level_sequence_create_asset"),
@@ -2741,7 +2784,6 @@ bool FUnrealAiAgentToolGateSurfaceTest::RunTest(const FString& Parameters)
 
 	Req.bOmitMainAgentBlueprintMutationTools = true;
 	Req.bBlueprintBuilderTurn = false;
-	Req.bEnvironmentBuilderTurn = false;
 	TestFalse(
 		TEXT("material_graph_patch blocked on orchestrator"),
 		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("material_graph_patch"), &Catalog));
@@ -2756,12 +2798,8 @@ bool FUnrealAiAgentToolGateSurfaceTest::RunTest(const FString& Parameters)
 	Req.bBlueprintBuilderTurn = false;
 	Req.bOmitMainAgentBlueprintMutationTools = true;
 	TestFalse(
-		TEXT("pcg_generate blocked on main agent"),
-		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("pcg_generate"), &Catalog));
-	Req.bEnvironmentBuilderTurn = true;
-	TestTrue(
-		TEXT("pcg_generate allowed on environment builder turn"),
-		UnrealAiAgentToolGate::PassesToolSurfaceFilter(Req, TEXT("pcg_generate"), &Catalog));
+		TEXT("removed pcg_generate not in catalog"),
+		Catalog.FindToolDefinition(TEXT("pcg_generate")).IsValid());
 
 	return true;
 }
@@ -2795,9 +2833,7 @@ bool FUnrealAiSpecialistToolSurfaceAllowListTest::RunTest(const FString& Paramet
 		nullptr,
 		true,
 		Md,
-		Tel,
-		0,
-		0);
+		Tel);
 	TestTrue(TEXT("tiered surface builds for animation specialist"), bOk);
 	TestEqual(TEXT("allow list telemetry mode"), Tel.ToolSurfaceMode, FString(TEXT("product_specialist_allow_list")));
 	TestTrue(TEXT("appendix lists level_sequence_create_asset"), Md.Contains(TEXT("level_sequence_create_asset")));
@@ -2817,9 +2853,7 @@ bool FUnrealAiSpecialistToolSurfaceAllowListTest::RunTest(const FString& Paramet
 			nullptr,
 			true,
 			MdRound2,
-			TelRound2,
-			0,
-			0));
+			TelRound2));
 	TestEqual(TEXT("specialist round 2 mode"), TelRound2.ToolSurfaceMode, FString(TEXT("product_specialist_allow_list")));
 
 	return true;
@@ -2855,9 +2889,7 @@ bool FUnrealAiOrchestratorToolSurfaceAllowListTest::RunTest(const FString& Param
 		nullptr,
 		true,
 		Md,
-		Tel,
-		0,
-		0);
+		Tel);
 	TestTrue(TEXT("tiered surface builds for orchestrator"), bOk);
 	TestEqual(TEXT("orchestrator telemetry mode"), Tel.ToolSurfaceMode, FString(TEXT("orchestrator_allow_list")));
 	TestEqual(TEXT("orchestrator roster size"), Tel.EligibleCount, 2);
@@ -2877,9 +2909,7 @@ bool FUnrealAiOrchestratorToolSurfaceAllowListTest::RunTest(const FString& Param
 			nullptr,
 			true,
 			MdRound2,
-			TelRound2,
-			0,
-			0));
+			TelRound2));
 	TestEqual(TEXT("round 2 telemetry mode"), TelRound2.ToolSurfaceMode, FString(TEXT("orchestrator_allow_list")));
 
 	return true;
@@ -2968,6 +2998,164 @@ bool FUnrealAiMaterialGraphToolsTest::RunTest(const FString& Parameters)
 		V->SetStringField(TEXT("material_path"), MatPath);
 		const FUnrealAiToolInvocationResult RV = UnrealAiDispatch_MaterialGraphValidate(V);
 		TestTrue(TEXT("material_graph_validate.bOk"), RV.bOk);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiBuildBlueprintTagStrictContractTest,
+	"UnrealAiEditor.Tools.BuildBlueprintTagStrictContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiBuildBlueprintTagStrictContractTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	{
+		const FString Content =
+			TEXT("<unreal_ai_build_blueprint>\n---\n")
+			TEXT("target_kind: anim_blueprint\n---\n- Goal: test\n</unreal_ai_build_blueprint>");
+		FString Inner;
+		FString Visible;
+		TestTrue(TEXT("canonical build-blueprint tag parses"), UnrealAiBuildBlueprintTag::TryConsume(Content, Inner, Visible));
+		EUnrealAiBlueprintBuilderTargetKind Kind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+		bool bValid = true;
+		UnrealAiBuildBlueprintTag::ParseAndStripHandoffMetadata(Inner, Kind, &bValid);
+		TestTrue(TEXT("anim target_kind parses as valid"), bValid);
+		TestEqual(TEXT("anim target_kind roundtrips"), Kind, EUnrealAiBlueprintBuilderTargetKind::AnimBlueprint);
+	}
+
+	{
+		const FString Misnamed =
+			TEXT("<custom_wrapper>\n---\n")
+			TEXT("target_kind: anim_blueprint\n---\n- Goal: test\n</custom_wrapper>");
+		FString Inner;
+		FString Visible;
+		TestFalse(TEXT("misnamed wrapper rejected"), UnrealAiBuildBlueprintTag::TryConsume(Misnamed, Inner, Visible));
+	}
+
+	{
+		FString Inner = TEXT("---\ntarget_kind: not_a_real_kind\n---\n- Goal: test");
+		EUnrealAiBlueprintBuilderTargetKind Kind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+		bool bValid = true;
+		UnrealAiBuildBlueprintTag::ParseAndStripHandoffMetadata(Inner, Kind, &bValid);
+		TestFalse(TEXT("invalid target_kind flagged"), bValid);
+		TestEqual(TEXT("invalid target_kind fallback kind"), Kind, EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiMaterialInstanceCompositeDispatchTest,
+	"UnrealAiEditor.Tools.MaterialInstanceCompositeDispatch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiMaterialInstanceCompositeDispatchTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+	Args->SetStringField(TEXT("value_kind"), TEXT("scalar"));
+	Args->SetStringField(TEXT("material_path"), TEXT("/Game/Nope/DoesNotExist.DoesNotExist"));
+	Args->SetStringField(TEXT("parameter_name"), TEXT("Speed"));
+	Args->SetNumberField(TEXT("value"), 1.25);
+
+	const FUnrealAiToolInvocationResult R = UnrealAiDispatchTool(
+		TEXT("material_instance_set_parameter"),
+		Args,
+		nullptr,
+		nullptr,
+		FString(),
+		FString());
+
+	TestFalse(TEXT("invalid path fails"), R.bOk);
+	TestFalse(TEXT("composite call does not report not_implemented status"), R.ContentForModel.Contains(TEXT("\"status\":\"not_implemented\"")));
+	TestFalse(TEXT("composite call does not report not implemented error"), R.ErrorMessage.Contains(TEXT("not implemented")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealAiAnimBlueprintBuilderCoreSurfaceTest,
+	"UnrealAiEditor.Tools.AnimBlueprintBuilderCoreSurface",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealAiAnimBlueprintBuilderCoreSurfaceTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	FUnrealAiToolCatalog Catalog;
+	TestTrue(TEXT("catalog loads"), Catalog.LoadFromPlugin());
+	TestTrue(TEXT("catalog reports loaded"), Catalog.IsLoaded());
+
+	FUnrealAiAgentTurnRequest Req;
+	Req.Mode = EUnrealAiAgentMode::Agent;
+	Req.bOmitMainAgentBlueprintMutationTools = true;
+	Req.bBlueprintBuilderTurn = true;
+	Req.BlueprintBuilderTargetKind = EUnrealAiBlueprintBuilderTargetKind::AnimBlueprint;
+
+	FUnrealAiModelCapabilities Caps;
+	FString OutMd;
+	FUnrealAiToolSurfaceTelemetry Tel;
+	const bool bOk = UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
+		Req,
+		1,
+		nullptr,
+		&Catalog,
+		Caps,
+		nullptr,
+		true,
+		OutMd,
+		Tel,
+		120000);
+	TestTrue(TEXT("anim builder tiered surface builds"), bOk);
+
+	TSet<FString> RankedIds;
+	for (const FUnrealAiToolSurfaceRankedEntry& Entry : Tel.RankedTools)
+	{
+		RankedIds.Add(Entry.ToolId);
+	}
+	TestTrue(TEXT("anim builder includes blueprint_graph_patch"), RankedIds.Contains(TEXT("blueprint_graph_patch")));
+	TestTrue(TEXT("anim builder includes blueprint_compile"), RankedIds.Contains(TEXT("blueprint_compile")));
+	TestTrue(TEXT("anim builder includes blueprint_graph_introspect"), RankedIds.Contains(TEXT("blueprint_graph_introspect")));
+
+	{
+		FUnrealAiAgentTurnRequest MainReq;
+		MainReq.Mode = EUnrealAiAgentMode::Agent;
+		MainReq.bOmitMainAgentBlueprintMutationTools = true;
+		MainReq.bBlueprintBuilderTurn = false;
+
+		FString MainOutMd;
+		FUnrealAiToolSurfaceTelemetry MainTel;
+		const bool bMainOk = UnrealAiToolSurfacePipeline::TryBuildTieredToolSurface(
+			MainReq,
+			1,
+			nullptr,
+			&Catalog,
+			Caps,
+			nullptr,
+			true,
+			MainOutMd,
+			MainTel,
+			120000);
+		TestTrue(TEXT("main-agent tiered surface builds"), bMainOk);
+		TSet<FString> MainRankedIds;
+		for (const FUnrealAiToolSurfaceRankedEntry& Entry : MainTel.RankedTools)
+		{
+			MainRankedIds.Add(Entry.ToolId);
+		}
+		TestFalse(TEXT("main-agent surface excludes blueprint_graph_patch"), MainRankedIds.Contains(TEXT("blueprint_graph_patch")));
+		TestFalse(TEXT("main-agent surface excludes blueprint_compile"), MainRankedIds.Contains(TEXT("blueprint_compile")));
+	}
+
+	const TSharedPtr<FJsonObject> AnimSummaryDef = Catalog.FindToolDefinition(TEXT("animation_blueprint_get_graph_summary"));
+	TestTrue(TEXT("animation summary tool exists"), AnimSummaryDef.IsValid());
+	if (AnimSummaryDef.IsValid())
+	{
+		FString Status;
+		TestTrue(TEXT("animation summary has status"), AnimSummaryDef->TryGetStringField(TEXT("status"), Status));
+		TestEqual(TEXT("animation summary status implemented"), Status, FString(TEXT("implemented")));
 	}
 
 	return true;

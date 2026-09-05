@@ -1,36 +1,52 @@
 #include "UnrealAiBlueprintBuilderTargetKind.h"
 
-EUnrealAiBlueprintBuilderTargetKind UnrealAiBlueprintBuilderTargetKind::ParseFromString(const FString& In)
+bool UnrealAiBlueprintBuilderTargetKind::TryParseFromString(const FString& In, EUnrealAiBlueprintBuilderTargetKind& OutKind)
 {
 	FString S = In;
 	S.TrimStartAndEndInline();
 	if (S.IsEmpty())
 	{
-		return EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+		return false;
 	}
 	if (S.Equals(TEXT("script_blueprint"), ESearchCase::IgnoreCase))
 	{
-		return EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+		OutKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+		return true;
 	}
 	if (S.Equals(TEXT("anim_blueprint"), ESearchCase::IgnoreCase))
 	{
-		return EUnrealAiBlueprintBuilderTargetKind::AnimBlueprint;
+		OutKind = EUnrealAiBlueprintBuilderTargetKind::AnimBlueprint;
+		return true;
 	}
 	if (S.Equals(TEXT("material_instance"), ESearchCase::IgnoreCase))
 	{
-		return EUnrealAiBlueprintBuilderTargetKind::MaterialInstance;
+		OutKind = EUnrealAiBlueprintBuilderTargetKind::MaterialInstance;
+		return true;
 	}
 	if (S.Equals(TEXT("material_graph"), ESearchCase::IgnoreCase))
 	{
-		return EUnrealAiBlueprintBuilderTargetKind::MaterialGraph;
+		OutKind = EUnrealAiBlueprintBuilderTargetKind::MaterialGraph;
+		return true;
 	}
 	if (S.Equals(TEXT("niagara"), ESearchCase::IgnoreCase))
 	{
-		return EUnrealAiBlueprintBuilderTargetKind::Niagara;
+		OutKind = EUnrealAiBlueprintBuilderTargetKind::Niagara;
+		return true;
 	}
 	if (S.Equals(TEXT("widget_blueprint"), ESearchCase::IgnoreCase))
 	{
-		return EUnrealAiBlueprintBuilderTargetKind::WidgetBlueprint;
+		OutKind = EUnrealAiBlueprintBuilderTargetKind::WidgetBlueprint;
+		return true;
+	}
+	return false;
+}
+
+EUnrealAiBlueprintBuilderTargetKind UnrealAiBlueprintBuilderTargetKind::ParseFromString(const FString& In)
+{
+	EUnrealAiBlueprintBuilderTargetKind Kind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+	if (TryParseFromString(In, Kind))
+	{
+		return Kind;
 	}
 	return EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
 }

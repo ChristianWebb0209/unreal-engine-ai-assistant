@@ -14,6 +14,7 @@ public:
 	SLATE_ARGUMENT(TSharedPtr<FUnrealAiChatUiSession>, Session)
 	SLATE_EVENT(FSimpleDelegate, OnOpenSettings)
 	SLATE_EVENT(FSimpleDelegate, OnNewChat)
+	SLATE_EVENT(FSimpleDelegate, OnCloseChat)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -21,6 +22,7 @@ public:
 
 private:
 	FReply OnNewChatPressed();
+	FReply OnCloseChatPressed();
 	FText GetChatTitleText() const;
 	void OnChatNameChanged();
 
@@ -28,4 +30,5 @@ private:
 	TSharedPtr<FUnrealAiChatUiSession> Session;
 	FSimpleDelegate OnOpenSettings;
 	FSimpleDelegate OnNewChatDelegate;
+	FSimpleDelegate OnCloseChatDelegate;
 };

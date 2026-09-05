@@ -45,6 +45,15 @@ Aligned with the MVP architecture, local-first mandate, and persistence model.
 | **Data** | Chats, settings, logs: **local disk** under the user profile (see PRD Â§2.5). |
 | **Future** | A **product** cloud backend (sync, team features, hosted retrieval) is **out of scope for MVP** and would be explicitly versioned and opt-in. Optional **local-only** vector stores remain consistent with â€œno backendâ€ as long as they stay on disk inside the pluginâ€™s data root. |
 
+### 1.6 Out of scope: world and level placement
+
+| Topic | Detail |
+|-------|--------|
+| **World / level placement** | The assistant does **not** place, move, spawn, or delete actors in loaded Unreal Editor worlds/levels. Procedural environment building (PCG, landscape, foliage) and automated scene composition are **not** supported — too complex and brittle for reliable agent workflows. |
+| **In scope instead** | Assets, Blueprint graphs, materials, editor UI, and **read-only** inspection of the open level (`scene_fuzzy_search`, `actor_get_transform`, etc.). Level layout and world building remain manual in the Unreal Editor. |
+
+See repo [README.md](../../README.md) **Scope** and [Plugins/UnrealAiEditor/README.md](../../Plugins/UnrealAiEditor/README.md).
+
 ### 1.5 v1 differentiation: advanced tasks via structured planning
 
 - **Competitive aim:** v1 should be **stronger than typical editor copilots on large, ambiguous, multi-step tasks**â€”a category where many products still **one-shot** or lightly tool-loop and appear â€œfinishedâ€ before dependencies and acceptance criteria are handled.

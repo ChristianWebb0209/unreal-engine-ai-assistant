@@ -10,7 +10,7 @@ Include: goal, known paths, constraints, and what “done” means.
 
 | `specialist` value | Use for |
 |--------------------|--------|
-| `scene` | Level actors, transforms, scene search, outliner, entity properties |
+| `scene` | **Read-only** level inspection: scene search, actor paths, transforms, selection (no spawn/move/delete) |
 | `assets` | Asset registry, CRUD, Content Browser, `/Game` property apply/export, level sequence asset create |
 | `viewport` | Camera, framing, view modes, viewport capture |
 | `diagnostics` | Message log, editor snapshot, tool audit |
@@ -24,10 +24,6 @@ Include: goal, known paths, constraints, and what “done” means.
 ## Blueprint graph builder
 
 `<unreal_ai_build_blueprint>` with `target_kind` in the inner YAML — see `blueprint-builder/08-delegation-from-main-agent.md` (includes `material_graph`, K2, etc.).
-
-## Environment / PCG builder
-
-`<unreal_ai_build_environment>` — see `environment-builder/07-delegation-from-main-agent.md`.
 
 ## Ordering
 

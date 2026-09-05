@@ -37,6 +37,14 @@ target_kind: script_blueprint
 - Use **`niagara`** as a roadmap marker for Niagara-heavy tasks; tooling is not K2-parity yet.
 - Use **`widget_blueprint`** for **Widget Blueprint** script graph work; Designer layout remains special-cased.
 
+## `target_kind` selection checklist (required on main-agent handoff)
+
+- If discovery (`asset_index_fuzzy_search` / `asset_registry_query`) returns class path **`/Script/Engine.AnimBlueprint`**, set `target_kind: anim_blueprint`.
+- If the chosen path is an AnimBP by naming or location convention (for example `ABP_*`, `/Anims/`, or known AnimBlueprint asset), set `target_kind: anim_blueprint` unless discovery proves otherwise.
+- If the asset is a normal gameplay Blueprint (Actor/Component/Pawn/Character), set `target_kind: script_blueprint`.
+- If you receive a builder/domain mismatch saying the asset is animation logic while target kind is script, immediately retry with **the same resolved asset path** and `target_kind: anim_blueprint`.
+- Never ask the user for a discoverable kind/path if tool results already contain enough evidence.
+
 ## Handoff tag shape
 
 ```text

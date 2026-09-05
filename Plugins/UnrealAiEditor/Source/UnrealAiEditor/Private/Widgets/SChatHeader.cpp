@@ -14,6 +14,7 @@ void SChatHeader::Construct(const FArguments& InArgs)
 {
 	OnOpenSettings = InArgs._OnOpenSettings;
 	OnNewChatDelegate = InArgs._OnNewChat;
+	OnCloseChatDelegate = InArgs._OnCloseChat;
 	BackendRegistry = InArgs._BackendRegistry;
 	Session = InArgs._Session;
 	if (Session.IsValid())
@@ -35,6 +36,19 @@ void SChatHeader::Construct(const FArguments& InArgs)
 							.Text(this, &SChatHeader::GetChatTitleText)
 							.Font(FUnrealAiEditorStyle::FontComposerBadge())
 							.AutoWrapText(true)
+					]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))
+					[
+						SNew(SButton)
+							.ButtonStyle(FCoreStyle::Get(), "NoBorder")
+							.Cursor(EMouseCursor::Hand)
+							.ToolTipText(LOCTEXT("CloseChatBtnTip", "Close this chat tab"))
+							.OnClicked(this, &SChatHeader::OnCloseChatPressed)
+							[
+								SNew(STextBlock)
+									.Font(FUnrealAiEditorStyle::FontBodySmall())
+									.Text(LOCTEXT("CloseChatBtn", "×"))
+							]
 					]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(4.f, 0.f))
 					[
@@ -90,6 +104,15 @@ FReply SChatHeader::OnNewChatPressed()
 	if (OnNewChatDelegate.IsBound())
 	{
 		OnNewChatDelegate.Execute();
+	}
+	return FReply::Handled();
+}
+
+FReply SChatHeader::OnCloseChatPressed()
+{
+	if (OnCloseChatDelegate.IsBound())
+	{
+		OnCloseChatDelegate.Execute();
 	}
 	return FReply::Handled();
 }

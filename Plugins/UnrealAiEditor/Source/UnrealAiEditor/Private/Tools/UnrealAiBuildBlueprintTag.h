@@ -15,9 +15,13 @@ namespace UnrealAiBuildBlueprintTag
 
 	/**
 	 * Reads optional YAML frontmatter (`---` ... `---`) with `target_kind: <domain>` or a leading `target_kind:` line.
-	 * Strips that metadata from InOutInner. Defaults to ScriptBlueprint when absent or unparsable.
+	 * Strips that metadata from InOutInner. Defaults to ScriptBlueprint when absent.
+	 * When target_kind is present but unknown, sets OutTargetKindValid=false.
 	 */
-	void ParseAndStripHandoffMetadata(FString& InOutInner, EUnrealAiBlueprintBuilderTargetKind& OutKind);
+	void ParseAndStripHandoffMetadata(
+		FString& InOutInner,
+		EUnrealAiBlueprintBuilderTargetKind& OutKind,
+		bool* OutTargetKindValid = nullptr);
 
 	/**
 	 * Removes harness protocol tag literals from user-visible text (case-insensitive).

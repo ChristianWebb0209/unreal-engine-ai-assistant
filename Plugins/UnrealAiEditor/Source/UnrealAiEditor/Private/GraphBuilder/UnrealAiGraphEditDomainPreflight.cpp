@@ -3,6 +3,7 @@
 #include "Harness/IToolExecutionHost.h"
 #include "Harness/UnrealAiAgentTypes.h"
 
+#include "Animation/AnimBlueprint.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -83,6 +84,24 @@ bool UnrealAiGraphEditDomainPreflight_ShouldBlockInvocation(
 	if (!TryExtractPrimaryAssetPath(Request.BlueprintBuilderTargetKind, Args, Path))
 	{
 		return false;
+	}
+
+	// Deterministic recovery hint: script_blueprint handoff pointed at an AnimBlueprint asset.
+	if (Request.BlueprintBuilderTargetKind == EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint)
+	{
+		if (UAnimBlueprint* AB = LoadObject<UAnimBlueprint>(nullptr, *Path))
+		{
+			(void)AB;
+			const FString Correction = FString::Printf(
+				TEXT("[Harness][reason=blueprint_builder_target_kind_mismatch] ")
+				TEXT("Path '%s' resolves to /Script/Engine.AnimBlueprint, but this builder sub-turn is using target_kind: script_blueprint. ")
+				TEXT("Re-emit a single `<unreal_ai_build_blueprint>` handoff with the same path and `target_kind: anim_blueprint`; do not retry script_blueprint mutators first."),
+				*Path);
+			OutBlock.bOk = false;
+			OutBlock.ErrorMessage = Correction;
+			OutBlock.ContentForModel = Correction;
+			return true;
+		}
 	}
 
 	const FGraphEditDomainValidationResult VR = Domain->ValidateAssetPathForDomain(Path);

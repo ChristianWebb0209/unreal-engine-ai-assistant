@@ -1,106 +1,22 @@
 #include "Tools/UnrealAiBuildBlueprintTag.h"
 #include "UnrealAiBlueprintBuilderTargetKind.h"
 
-namespace UnrealAiBuildBlueprintTagPriv
-{
-	static bool IsAllowedMisnamedHandoffWrapperTag(const FString& TagLower)
-	{
-		if (TagLower.Len() < 1 || TagLower.Len() > 48)
-		{
-			return false;
-		}
-		if (!FChar::IsLower(TagLower[0]))
-		{
-			return false;
-		}
-		if (TagLower.StartsWith(TEXT("unreal_ai_")))
-		{
-			return false;
-		}
-		for (int32 i = 0; i < TagLower.Len(); ++i)
-		{
-			const TCHAR C = TagLower[i];
-			if (!FChar::IsLower(C) && !FChar::IsDigit(C) && C != TEXT('_'))
-			{
-				return false;
-			}
-		}
-		return true;
-	}
-
-	static bool InnerLooksLikeBuilderHandoffSpec(const FString& Inner)
-	{
-		const FString T = Inner.TrimStartAndEnd();
-		if (T.StartsWith(TEXT("---")))
-		{
-			return true;
-		}
-		return T.Contains(TEXT("target_kind:"), ESearchCase::IgnoreCase);
-	}
-
-	/**
-	 * Models sometimes copy the inner YAML/spec but wrap it in a mistaken custom tag instead of <unreal_ai_build_blueprint>.
-	 * If the inner payload matches a real handoff body, treat it like <unreal_ai_build_blueprint>.
-	 */
-	static bool TryConsumeMisnamedWrapper(const FString& Content, FString& OutInnerSpec, FString& OutVisibleWithoutTags)
-	{
-		const int32 OpenAngle = Content.Find(TEXT("<"), ESearchCase::CaseSensitive);
-		if (OpenAngle == INDEX_NONE)
-		{
-			return false;
-		}
-		const int32 AfterOpen = OpenAngle + 1;
-		const int32 CloseAngle = Content.Find(TEXT(">"), ESearchCase::CaseSensitive, ESearchDir::FromStart, AfterOpen);
-		if (CloseAngle == INDEX_NONE || CloseAngle <= AfterOpen)
-		{
-			return false;
-		}
-		const FString TagName = Content.Mid(AfterOpen, CloseAngle - AfterOpen).TrimStartAndEnd();
-		if (TagName.IsEmpty())
-		{
-			return false;
-		}
-		if (TagName.Equals(TEXT("unreal_ai_build_blueprint"), ESearchCase::IgnoreCase))
-		{
-			return false;
-		}
-		if (!IsAllowedMisnamedHandoffWrapperTag(TagName.ToLower()))
-		{
-			return false;
-		}
-		const FString CloseTag = FString::Printf(TEXT("</%s>"), *TagName);
-		const int32 InnerStart = CloseAngle + 1;
-		const int32 CloseIdx = Content.Find(CloseTag, ESearchCase::IgnoreCase, ESearchDir::FromStart, InnerStart);
-		if (CloseIdx == INDEX_NONE)
-		{
-			return false;
-		}
-		const FString Inner = Content.Mid(InnerStart, CloseIdx - InnerStart).TrimStartAndEnd();
-		if (!InnerLooksLikeBuilderHandoffSpec(Inner))
-		{
-			return false;
-		}
-		OutInnerSpec = Inner;
-		const FString Before = Content.Left(OpenAngle);
-		const FString After = Content.Mid(CloseIdx + CloseTag.Len());
-		OutVisibleWithoutTags = (Before + After).TrimStartAndEnd();
-		UE_LOG(
-			LogTemp,
-			Display,
-			TEXT("UnrealAiBuildBlueprintTag: recovered Blueprint Builder handoff from misnamed wrapper <%s>...</>"),
-			*TagName);
-		return true;
-	}
-}
-
-void UnrealAiBuildBlueprintTag::ParseAndStripHandoffMetadata(FString& InOutInner, EUnrealAiBlueprintBuilderTargetKind& OutKind)
+void UnrealAiBuildBlueprintTag::ParseAndStripHandoffMetadata(
+	FString& InOutInner,
+	EUnrealAiBlueprintBuilderTargetKind& OutKind,
+	bool* OutTargetKindValid)
 {
 	OutKind = EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+	bool bTargetKindValid = true;
 	FString S = InOutInner;
 	S.TrimStartAndEndInline();
 	if (S.IsEmpty())
 	{
 		InOutInner.Reset();
+		if (OutTargetKindValid)
+		{
+			*OutTargetKindValid = bTargetKindValid;
+		}
 		return;
 	}
 
@@ -120,11 +36,15 @@ void UnrealAiBuildBlueprintTag::ParseAndStripHandoffMetadata(FString& InOutInner
 				if (L.StartsWith(TEXT("target_kind:"), ESearchCase::IgnoreCase))
 				{
 					const FString Val = L.Mid(12).TrimStartAndEnd();
-					OutKind = UnrealAiBlueprintBuilderTargetKind::ParseFromString(Val);
+					bTargetKindValid = UnrealAiBlueprintBuilderTargetKind::TryParseFromString(Val, OutKind);
 					break;
 				}
 			}
 			InOutInner = Rest;
+			if (OutTargetKindValid)
+			{
+				*OutTargetKindValid = bTargetKindValid;
+			}
 			return;
 		}
 	}
@@ -138,14 +58,22 @@ void UnrealAiBuildBlueprintTag::ParseAndStripHandoffMetadata(FString& InOutInner
 		if (L0.StartsWith(TEXT("target_kind:"), ESearchCase::IgnoreCase))
 		{
 			const FString Val = L0.Mid(12).TrimStartAndEnd();
-			OutKind = UnrealAiBlueprintBuilderTargetKind::ParseFromString(Val);
+			bTargetKindValid = UnrealAiBlueprintBuilderTargetKind::TryParseFromString(Val, OutKind);
 			Lines.RemoveAt(0, 1, EAllowShrinking::No);
 			InOutInner = FString::Join(Lines, TEXT("\n")).TrimStartAndEnd();
+			if (OutTargetKindValid)
+			{
+				*OutTargetKindValid = bTargetKindValid;
+			}
 			return;
 		}
 	}
 
 	InOutInner = S;
+	if (OutTargetKindValid)
+	{
+		*OutTargetKindValid = bTargetKindValid;
+	}
 }
 
 bool UnrealAiBuildBlueprintTag::TryConsume(const FString& Content, FString& OutInnerSpec, FString& OutVisibleWithoutTags)
@@ -165,11 +93,6 @@ bool UnrealAiBuildBlueprintTag::TryConsume(const FString& Content, FString& OutI
 		const FString Before = Content.Left(B);
 		const FString After = Content.Mid(E + End.Len());
 		OutVisibleWithoutTags = (Before + After).TrimStartAndEnd();
-		return true;
-	}
-
-	if (UnrealAiBuildBlueprintTagPriv::TryConsumeMisnamedWrapper(Content, OutInnerSpec, OutVisibleWithoutTags))
-	{
 		return true;
 	}
 

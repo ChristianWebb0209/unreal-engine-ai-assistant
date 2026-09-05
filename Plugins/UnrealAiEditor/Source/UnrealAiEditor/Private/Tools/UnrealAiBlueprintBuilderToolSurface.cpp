@@ -26,8 +26,10 @@ namespace UnrealAiBlueprintBuilderToolSurfacePriv
 			}
 			return false;
 		}
-		// Legacy catalog entries: no builder_domains => script_blueprint (K2 stack) only.
-		return Kind == EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint;
+		// Legacy K2 entries without builder_domains apply to all Blueprint script-graph domains.
+		return Kind == EUnrealAiBlueprintBuilderTargetKind::ScriptBlueprint
+			|| Kind == EUnrealAiBlueprintBuilderTargetKind::AnimBlueprint
+			|| Kind == EUnrealAiBlueprintBuilderTargetKind::WidgetBlueprint;
 	}
 } // namespace UnrealAiBlueprintBuilderToolSurfacePriv
 

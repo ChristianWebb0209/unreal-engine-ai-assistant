@@ -41,20 +41,14 @@ void UnrealAiProductSpecialistCoreTools::MergeCoreToolsAfterGuardrails(
 	{
 		static const TCHAR* const GIds[] = {
 			TEXT("scene_fuzzy_search"),
+			TEXT("viewport_list_visible_actors"),
 			TEXT("actor_find_by_label"),
 			TEXT("editor_get_selection"),
 			TEXT("editor_set_selection"),
-			TEXT("actor_spawn_from_class"),
-			TEXT("actor_destroy"),
-			TEXT("actor_set_transform"),
+			TEXT("actor_get_material_slots"),
 			TEXT("actor_get_transform"),
-			TEXT("actor_attach_to"),
-			TEXT("actor_set_visibility"),
 			TEXT("actor_get_visibility"),
-			TEXT("actor_blueprint_toggle_visibility"),
-			TEXT("outliner_folder_move"),
 			TEXT("entity_get_property"),
-			TEXT("entity_set_property"),
 		};
 		UnrealAiProductSpecialistCoreToolsPriv::MergeIds(GIds, UE_ARRAY_COUNT(GIds), ToolFilter, InOutOrdered);
 		break;
@@ -83,6 +77,7 @@ void UnrealAiProductSpecialistCoreTools::MergeCoreToolsAfterGuardrails(
 	case EUnrealAiProductSpecialistId::Viewport:
 	{
 		static const TCHAR* const GIds[] = {
+			TEXT("viewport_list_visible_actors"),
 			TEXT("viewport_camera_control"),
 			TEXT("viewport_get_view_mode"),
 			TEXT("viewport_set_view_mode"),
@@ -159,6 +154,8 @@ void UnrealAiProductSpecialistCoreTools::MergeCoreToolsAfterGuardrails(
 	case EUnrealAiProductSpecialistId::Materials:
 	{
 		static const TCHAR* const GIds[] = {
+			TEXT("editor_get_selection"),
+			TEXT("actor_get_material_slots"),
 			TEXT("material_instance_set_parameter"),
 			TEXT("material_instance_get_scalar_parameter"),
 			TEXT("material_instance_get_vector_parameter"),

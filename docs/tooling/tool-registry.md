@@ -3,7 +3,7 @@
 **Version:** 1.2  
 **Target engine:** Unreal Engine 5.5+ (minor API names may drift — confirm against your installed `Engine/Source` before implementation.)  
 
-**Canonical machine-readable catalog:** The editor plugin loads [`Plugins/UnrealAiEditor/Resources/tools.main.json`](../../Plugins/UnrealAiEditor/Resources/tools.main.json) (`meta` + main roster `tools[]`) and merges [`tools.blueprint.json`](../../Plugins/UnrealAiEditor/Resources/tools.blueprint.json) and [`tools.environment.json`](../../Plugins/UnrealAiEditor/Resources/tools.environment.json) (`FUnrealAiToolCatalog::LoadFromPlugin`). Runtime execution: `FUnrealAiToolExecutionHost` + `UnrealAiToolDispatch.cpp` in `Private/Tools/`. Extend handlers there and keep this document in sync for narrative/Epic links.
+**Canonical machine-readable catalog:** The editor plugin loads [`Plugins/UnrealAiEditor/Resources/tools.main.json`](../../Plugins/UnrealAiEditor/Resources/tools.main.json) (`meta` + main roster `tools[]`) and merges [`tools.blueprint.json`](../../Plugins/UnrealAiEditor/Resources/tools.blueprint.json) (`FUnrealAiToolCatalog::LoadFromPlugin`). Runtime execution: `FUnrealAiToolExecutionHost` + `UnrealAiToolDispatch.cpp` in `Private/Tools/`. Extend handlers there and keep this document in sync for narrative/Epic links.
 
 **This Markdown file** remains the **human-readable** narrative, Epic links, and engineering notes.
 
@@ -37,7 +37,7 @@ When **`FUnrealAiAgentTurnRequest::IsOrchestratorAgentToolSurface()`** is true (
 
 Design reference: [`tooling-subagent-delegation.md`](../planning/tooling-subagent-delegation.md).
 
-Implementation (delegation + surfaces): **`UnrealAiAgentToolGate.cpp`**, **`UnrealAiToolSurfaceCompatibility.cpp`**, **`UnrealAiOrchestratorToolPolicy.*`**, **`UnrealAiProductSpecialistToolPolicy.*`**, **`UnrealAiProductSpecialistCoreTools.*`**, **`UnrealAiToolSurfacePipeline.cpp`**, **`FUnrealAiAgentHarness.cpp`**, **`UnrealAiPromptAssemblyStrategy.cpp`**, **`UnrealAiDelegateSpecialistTag.*`**, **`UnrealAiProductSpecialistHandoff.*`**, prompts **`chunks/orchestrator/`**, **`chunks/specialists/`**, plus shared **`chunks/common/`** (especially **`04`**, **`10`**, **`07`**, **`08`**). Subagent catalog fragments (merged at load): **`Plugins/UnrealAiEditor/Resources/tools.blueprint.json`**, **`Plugins/UnrealAiEditor/Resources/tools.environment.json`**, **`Plugins/UnrealAiEditor/Resources/tools.main.json`** (`retrieval_bundle`: blueprint_builder, environment_builder, main_agent).
+Implementation (delegation + surfaces): **`UnrealAiAgentToolGate.cpp`**, **`UnrealAiToolSurfaceCompatibility.cpp`**, **`UnrealAiOrchestratorToolPolicy.*`**, **`UnrealAiProductSpecialistToolPolicy.*`**, **`UnrealAiProductSpecialistCoreTools.*`**, **`UnrealAiToolSurfacePipeline.cpp`**, **`FUnrealAiAgentHarness.cpp`**, **`UnrealAiPromptAssemblyStrategy.cpp`**, **`UnrealAiDelegateSpecialistTag.*`**, **`UnrealAiProductSpecialistHandoff.*`**, prompts **`chunks/orchestrator/`**, **`chunks/specialists/`**, plus shared **`chunks/common/`** (especially **`04`**, **`10`**, **`07`**, **`08`**). Subagent catalog fragments (merged at load): **`Plugins/UnrealAiEditor/Resources/tools.blueprint.json`**, **`Plugins/UnrealAiEditor/Resources/tools.main.json`** (`retrieval_bundle`: blueprint_builder, main_agent). World placement and environment/PCG tools were removed from the catalog.
 
 ---
 

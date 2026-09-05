@@ -2,7 +2,6 @@
 
 #include "Misc/UnrealAiWaitTimePolicy.h"
 #include "Planning/UnrealAiPlanDag.h"
-#include "Widgets/Plan/SPlanDagWaveList.h"
 #include "Widgets/Plan/SPlanJsonValidationBanner.h"
 #include "Widgets/UnrealAiChatTranscript.h"
 #include "Backend/UnrealAiBackendRegistry.h"
@@ -12,11 +11,9 @@
 #include "Widgets/UnrealAiChatUiSession.h"
 #include "Widgets/UnrealAiPlanDraftPersist.h"
 #include "Widgets/Input/SButton.h"
-#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
@@ -44,22 +41,10 @@ void SPlanDraftBuildPanel::Construct(const FArguments& InArgs)
 						SNew(STextBlock)
 							.Text(LOCTEXT(
 								"PlanDraftHint",
-								"Review the structured plan, edit JSON if needed, then Build. Edits save per thread."))
+								"Review the resolved plan JSON below, edit if needed, then click Build."))
 							.Font(FUnrealAiEditorStyle::FontRegular10())
 							.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
 							.AutoWrapText(true)
-					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 8.f)
-					[
-						SNew(SBox)
-							.MaxDesiredHeight(280.f)
-							[
-								SNew(SScrollBox)
-								+ SScrollBox::Slot().Padding(0.f)
-								[
-									SAssignNew(PreviewHost, SBox)
-								]
-							]
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 8.f)
 					[
@@ -67,26 +52,11 @@ void SPlanDraftBuildPanel::Construct(const FArguments& InArgs)
 							.Message(FString())
 							.bIsError(true)
 					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 6.f)
-					[
-						SAssignNew(ShowJsonCheck, SCheckBox)
-							.Style(&FUnrealAiEditorStyle::GetCheckboxStyle())
-							.IsChecked(bShowJsonEditor ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
-							.OnCheckStateChanged(this, &SPlanDraftBuildPanel::OnShowJsonToggled)
-							[
-								SNew(STextBlock)
-									.Font(FUnrealAiEditorStyle::FontBodySmall())
-									.Text(LOCTEXT("PlanDraftShowJson", "Show JSON editor"))
-							]
-					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 8.f)
 					[
 						SNew(SBox)
-							.Visibility_Lambda([this]()
-							{
-								return bShowJsonEditor ? EVisibility::Visible : EVisibility::Collapsed;
-							})
-							.MinDesiredHeight(140.f)
+							.MinDesiredHeight(200.f)
+							.MaxDesiredHeight(360.f)
 							[
 								SAssignNew(DraftEdit, SMultiLineEditableTextBox)
 									.Text(FText::FromString(DraftText))
@@ -115,7 +85,7 @@ void SPlanDraftBuildPanel::Construct(const FArguments& InArgs)
 
 void SPlanDraftBuildPanel::RefreshPlanUi()
 {
-	if (!PreviewHost.IsValid() || !ValidationBanner.IsValid())
+	if (!ValidationBanner.IsValid())
 	{
 		return;
 	}
@@ -129,12 +99,6 @@ void SPlanDraftBuildPanel::RefreshPlanUi()
 				? FString(TEXT("Enter valid unreal_ai.plan_dag JSON (non-empty nodes[])."))
 				: ParseErr,
 			true);
-		PreviewHost->SetContent(
-			SNew(STextBlock)
-				.AutoWrapText(true)
-				.Font(FUnrealAiEditorStyle::FontRegular10())
-				.ColorAndOpacity(FUnrealAiEditorStyle::ColorTextMuted())
-				.Text(LOCTEXT("PlanDraftNoPreview", "Fix JSON to show structured preview.")));
 		return;
 	}
 
@@ -143,29 +107,11 @@ void SPlanDraftBuildPanel::RefreshPlanUi()
 	{
 		bDraftValid = false;
 		ValidationBanner->SetMessage(ValErr, true);
-		PreviewHost->SetContent(
-			SNew(STextBlock)
-				.AutoWrapText(true)
-				.Font(FUnrealAiEditorStyle::FontRegular10())
-				.ColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.55f, 0.45f, 1.f)))
-				.Text(FText::FromString(FString::Printf(TEXT("DAG invalid: %s"), *ValErr))));
 		return;
 	}
 
 	bDraftValid = true;
 	ValidationBanner->SetMessage(FString(), false);
-	PreviewHost->SetContent(
-		SNew(SPlanDagWaveList)
-			.Dag(Dag)
-			.NodeStatusById(FUnrealAiPlanNodeStatusMap())
-			.bShowWaveHeaders(true)
-			.bNodesInitiallyCollapsed(false));
-}
-
-void SPlanDraftBuildPanel::OnShowJsonToggled(const ECheckBoxState State)
-{
-	bShowJsonEditor = (State == ECheckBoxState::Checked);
-	Invalidate(EInvalidateWidgetReason::Layout);
 }
 
 void SPlanDraftBuildPanel::OnDraftTextChanged(const FText& NewText)

@@ -6,9 +6,6 @@ public class UnrealAiEditor : ModuleRules
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		// PCG headers can trip -Wshadow via PCGPreconfiguration.h in some engine versions.
-		CppCompileWarningSettings.ShadowVariableWarningLevel = WarningLevel.Off;
-
 		// SDockingTabStack (OpenTab with insert index) — not exposed under Slate/Public.
 		PrivateIncludePaths.Add(System.IO.Path.Combine(EngineDirectory, "Source", "Runtime", "Slate", "Private"));
 
@@ -42,6 +39,7 @@ public class UnrealAiEditor : ModuleRules
 				"PropertyEditor",
 				"Json",
 				"HTTP",
+				"HTTPServer",
 				"AssetRegistry",
 				"SourceCodeAccess",
 				"ContentBrowser",
@@ -59,11 +57,6 @@ public class UnrealAiEditor : ModuleRules
 				"KismetWidgets",
 				"GraphEditor",
 				"MaterialEditor",
-				"PCG",
-				"Landscape",
-				"LandscapeEditor",
-				"Foliage",
-				"FoliageEdit",
 				"JsonUtilities",
 			});
 	}

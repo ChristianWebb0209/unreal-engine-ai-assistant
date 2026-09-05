@@ -307,6 +307,7 @@ void SUnrealAiEditorChatTab::Construct(const FArguments& InArgs)
 					.Session(Session)
 					.OnOpenSettings(FSimpleDelegate::CreateSP(this, &SUnrealAiEditorChatTab::OpenSettingsTab))
 					.OnNewChat(FSimpleDelegate::CreateSP(this, &SUnrealAiEditorChatTab::OnUnifiedNewChat))
+					.OnCloseChat(FSimpleDelegate::CreateSP(this, &SUnrealAiEditorChatTab::OnCloseChatTab))
 			]
 			+ SVerticalBox::Slot().FillHeight(1.f)
 			[
@@ -409,6 +410,23 @@ FReply SUnrealAiEditorChatTab::OnDrop(const FGeometry& MyGeometry, const FDragDr
 void SUnrealAiEditorChatTab::OnUnifiedNewChat()
 {
 	FUnrealAiEditorModule::OpenNewAgentChatTabBeside(AsShared());
+}
+
+void SUnrealAiEditorChatTab::OnCloseChatTab()
+{
+	TSharedPtr<SDockTab> DockTab = HostDockTab.Pin();
+	if (!DockTab.IsValid())
+	{
+		DockTab = UnrealAiChatTabChrome::FindParentDockTab(StaticCastSharedRef<const SWidget>(AsShared()));
+	}
+	if (DockTab.IsValid())
+	{
+		if (!DockTab->RequestCloseTab())
+		{
+			// Nomad spawner tabs share MainNonCloseableTabID and reject RequestCloseTab; force-remove.
+			DockTab->RemoveTabFromParent();
+		}
+	}
 }
 
 void SUnrealAiEditorChatTab::OpenSettingsTab() const

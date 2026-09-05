@@ -9,7 +9,57 @@
 
 namespace UnrealAiConversationJson
 {
-	static TSharedPtr<FJsonObject> MessageToJsonObject(const FUnrealAiConversationMessage& M)
+	static void SetMessageContentField(TSharedPtr<FJsonObject>& O, const FUnrealAiConversationMessage& M, const bool bForHttpApi)
+	{
+		const bool bUseVision = bForHttpApi && M.VisionImageDataUrls.Num() > 0;
+		if (!bUseVision)
+		{
+			O->SetStringField(TEXT("content"), M.Content);
+			return;
+		}
+		TArray<TSharedPtr<FJsonValue>> Parts;
+		if (!M.Content.IsEmpty())
+		{
+			TSharedPtr<FJsonObject> TextPart = MakeShared<FJsonObject>();
+			TextPart->SetStringField(TEXT("type"), TEXT("text"));
+			TextPart->SetStringField(TEXT("text"), M.Content);
+			Parts.Add(MakeShared<FJsonValueObject>(TextPart.ToSharedRef()));
+		}
+		for (const FString& DataUrl : M.VisionImageDataUrls)
+		{
+			if (DataUrl.IsEmpty())
+			{
+				continue;
+			}
+			TSharedPtr<FJsonObject> ImgPart = MakeShared<FJsonObject>();
+			ImgPart->SetStringField(TEXT("type"), TEXT("image_url"));
+			TSharedPtr<FJsonObject> UrlObj = MakeShared<FJsonObject>();
+			UrlObj->SetStringField(TEXT("url"), DataUrl);
+			ImgPart->SetObjectField(TEXT("image_url"), UrlObj);
+			Parts.Add(MakeShared<FJsonValueObject>(ImgPart.ToSharedRef()));
+		}
+		if (Parts.Num() == 0)
+		{
+			O->SetStringField(TEXT("content"), M.Content);
+			return;
+		}
+		if (Parts.Num() == 1)
+		{
+			const TSharedPtr<FJsonObject>* PartObj = nullptr;
+			if (Parts[0].IsValid() && Parts[0]->TryGetObject(PartObj) && PartObj && (*PartObj).IsValid())
+			{
+				FString PartType;
+				if ((*PartObj)->TryGetStringField(TEXT("type"), PartType) && PartType == TEXT("text"))
+				{
+					O->SetStringField(TEXT("content"), M.Content);
+					return;
+				}
+			}
+		}
+		O->SetArrayField(TEXT("content"), Parts);
+	}
+
+	static TSharedPtr<FJsonObject> MessageToJsonObject(const FUnrealAiConversationMessage& M, const bool bForHttpApi)
 	{
 		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 		O->SetStringField(TEXT("role"), M.Role);
@@ -41,7 +91,7 @@ namespace UnrealAiConversationJson
 			{
 				if (!M.Content.IsEmpty())
 				{
-					O->SetStringField(TEXT("content"), M.Content);
+					SetMessageContentField(O, M, bForHttpApi);
 				}
 				else
 				{
@@ -51,19 +101,19 @@ namespace UnrealAiConversationJson
 			}
 			else
 			{
-				O->SetStringField(TEXT("content"), M.Content);
+				SetMessageContentField(O, M, bForHttpApi);
 			}
 		}
 		else
 		{
-			O->SetStringField(TEXT("content"), M.Content);
+			SetMessageContentField(O, M, bForHttpApi);
 		}
 		return O;
 	}
 
 	static TSharedPtr<FJsonObject> MessageToPersistedJsonObject(const FUnrealAiConversationMessage& M)
 	{
-		TSharedPtr<FJsonObject> O = MessageToJsonObject(M);
+		TSharedPtr<FJsonObject> O = MessageToJsonObject(M, false);
 		if (M.Role == TEXT("user") && M.bHasUserAgentMode)
 		{
 			const TCHAR* S = TEXT("agent");
@@ -258,7 +308,7 @@ namespace UnrealAiConversationJson
 		TArray<TSharedPtr<FJsonValue>> Arr;
 		for (const FUnrealAiConversationMessage& M : Sanitized)
 		{
-			Arr.Add(MakeShared<FJsonValueObject>(MessageToJsonObject(M).ToSharedRef()));
+			Arr.Add(MakeShared<FJsonValueObject>(MessageToJsonObject(M, true).ToSharedRef()));
 		}
 		FString Out;
 		TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&Out);
